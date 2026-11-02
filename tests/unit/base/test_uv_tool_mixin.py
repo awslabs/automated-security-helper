@@ -96,6 +96,17 @@ class TestGetUvToolVersion:
 
         plugin = FakePlugin(use_uv_tool=True)
         runner = UVToolRunner()
+        # The unit guard stubs every runner's ``uv_availability`` to
+        # (False, None) for this module (tests/utils/tool_guard.py; only the
+        # runner's own module is a probe subject), so the probe whose refusal
+        # arm would record the scope's refusal never runs here, and the stub
+        # stands: a probe that spawns is what the guard keeps out of the unit
+        # tier. What the arm records is seeded in its place -- the refusal's
+        # text on this thread's check state -- and the stubbed answer stays
+        # "not available", the state the product reads: unavailable_reason
+        # names the recorded refusal, and the mixin words it over the bare
+        # answer.
+        runner._check_state().refusal = "firejail is not installed"
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
@@ -524,8 +535,14 @@ class TestTryUvToolExecution:
     @pytest.mark.parametrize(
         "raised,marker",
         [
+            # An ImportError raised with no module name is not the runner's
+            # own import failing, so the arm words it as an import that failed
+            # while preparing the run (the runner wording is reserved for an
+            # ImportError whose name is the runner module).
             pytest.param(
-                ImportError, "UV tool runner module not available", id="import-error"
+                ImportError,
+                "Import failed while preparing the uv run",
+                id="import-error",
             ),
             pytest.param(
                 RuntimeError,
@@ -857,17 +874,23 @@ class TestValidateToolAvailabilityWithPreInstalled:
     def test_returns_available_with_pre_installed(self):
         plugin = FakePlugin(command="bandit")
 
-        with patch.object(
-            plugin,
-            "_get_tool_installation_info",
-            return_value={
-                "available": True,
-                "preferred_source": "pre_installed",
-                "pre_installed_version": "1.6.0",
-                "pre_installed_path": "/usr/bin/bandit",
-                "is_uv_installed": False,
-                "is_pre_installed": True,
-            },
+        # The decision how the copy runs is _select_tool_execution's (it
+        # verifies the copy against the requirement); here it keeps uv, so the
+        # unverified copy is reported with a warning.
+        with (
+            patch.object(
+                plugin,
+                "_get_tool_installation_info",
+                return_value={
+                    "available": True,
+                    "preferred_source": "pre_installed",
+                    "pre_installed_version": "1.6.0",
+                    "pre_installed_path": "/usr/bin/bandit",
+                    "is_uv_installed": False,
+                    "is_pre_installed": True,
+                },
+            ),
+            patch.object(plugin, "_select_tool_execution", return_value=True),
         ):
             result = plugin._validate_tool_availability_with_pre_installed()
             assert result["available"] is True
@@ -1418,7 +1441,10 @@ class TestIsUvToolInstalled:
             assert plugin._is_uv_tool_installed() is False
 
     @pytest.mark.unit
-    def test_falls_back_to_version_check_on_list_error(self):
+    def test_a_list_error_answers_not_installed_without_running_the_tool(self):
+        """The listing is the question; a `uv tool run --version` fallback
+        succeeded for a tool uv could resolve on the spot, so an uninstalled
+        tool read as installed whenever the listing failed."""
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
         with patch(
@@ -1433,7 +1459,8 @@ class TestIsUvToolInstalled:
             mock_runner.get_tool_version.return_value = "1.7.0"
             mock_get_runner.return_value = mock_runner
 
-            assert plugin._is_uv_tool_installed() is True
+            assert plugin._is_uv_tool_installed() is False
+            assert mock_runner.get_tool_version.call_count == 0
 
 
 class TestGetToolInstallationInfo:
@@ -1473,9 +1500,17 @@ class TestGetToolInstallationInfo:
     def test_returns_error_info_on_exception(self):
         plugin = FakePlugin(command="bandit")
 
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
-            side_effect=RuntimeError("broken"),
+        # The uv side raised; the PATH side is read on its own, so the test
+        # pins what PATH answers rather than reading the host's.
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                side_effect=RuntimeError("broken"),
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value=None,
+            ),
         ):
             info = plugin._get_tool_installation_info()
             assert info["available"] is False
@@ -1509,14 +1544,16 @@ class TestShouldInstallTool:
             assert plugin._should_install_tool() is True
 
     @pytest.mark.unit
-    def test_returns_false_on_exception(self):
+    def test_an_answer_that_cannot_be_read_means_install(self):
+        """The caller asks only once the tool was found unavailable, so a False
+        here read as "already installed" and no install was tried."""
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
         with patch(
             "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
             side_effect=RuntimeError("broken"),
         ):
-            assert plugin._should_install_tool() is False
+            assert plugin._should_install_tool() is True
 
 
 class TestSetupUvToolInstallCommands:
@@ -1848,9 +1885,11 @@ class TestProbeSharesTheScansEnvironment:
 
             plugin._get_uv_tool_version("bandit")
 
-            mock_runner.get_tool_version.assert_called_once_with(
-                "bandit", "bandit[sarif,toml]>=1.7.0,<2.0.0", values=()
-            )
+            # The spec is the positional pair; the plugin's offline mode and
+            # package ride as keywords beside the values (checked apart).
+            args, kwargs = mock_runner.get_tool_version.call_args
+            assert args == ("bandit", "bandit[sarif,toml]>=1.7.0,<2.0.0")
+            assert kwargs["values"] == ()
 
     @pytest.mark.unit
     def test_an_explicit_package_name_still_wins(self):
@@ -1868,9 +1907,9 @@ class TestProbeSharesTheScansEnvironment:
 
             plugin._get_uv_tool_version("jupyter-nbconvert", "nbconvert")
 
-            mock_runner.get_tool_version.assert_called_once_with(
-                "jupyter-nbconvert", "nbconvert", values=()
-            )
+            args, kwargs = mock_runner.get_tool_version.call_args
+            assert args == ("jupyter-nbconvert", "nbconvert")
+            assert kwargs["values"] == ()
 
 
 class TestOfflineResolveMessageIsRedacted:

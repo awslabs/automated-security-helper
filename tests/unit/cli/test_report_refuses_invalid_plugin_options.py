@@ -22,6 +22,13 @@ pydantic text and nothing on stdout, and never builds a boto3 session. A control
 reports with the same plugin module loaded and a valid option, and gets past the
 check. AWS is unreachable throughout: fake credentials, no metadata service, no
 config files, and ``boto3.Session`` replaced by a stub that fails the test.
+
+An off-host reporter's destination and retry options are the operator's
+(``config/reporter_trust.py``): ``ash report`` takes them from the defaults and
+``--config-overrides`` and ignores a config file's, since stored results do not
+say which tree was scanned. So a wrong-typed retry option is given through
+``--config-overrides`` here, which is where the check reads it; an unknown key is
+no such option and is read from the file.
 """
 
 from __future__ import annotations
@@ -93,41 +100,49 @@ def _project(tmp_path: Path, options: str) -> Path:
     return output
 
 
-def _report(tmp_path: Path, output: Path, fmt: str):
+def _report(tmp_path: Path, output: Path, fmt: str, *overrides: str):
     session = MagicMock(side_effect=AssertionError("AWS was contacted"))
+    arguments = [
+        "report",
+        "--format",
+        fmt,
+        "--output-dir",
+        str(output),
+        "--config",
+        str(tmp_path / "ash.yaml"),
+        "--no-color",
+    ]
+    for override in overrides:
+        arguments += ["--config-overrides", override]
     with patch(f"{AWS_PLUGINS}.security_hub_reporter.boto3.Session", session):
-        result = CliRunner().invoke(
-            app,
-            [
-                "report",
-                "--format",
-                fmt,
-                "--output-dir",
-                str(output),
-                "--config",
-                str(tmp_path / "ash.yaml"),
-                "--no-color",
-            ],
-            env={"COLUMNS": "300"},
-        )
+        result = CliRunner().invoke(app, arguments, env={"COLUMNS": "300"})
     session.assert_not_called()
     return result
 
 
 @pytest.mark.parametrize(
-    "options, named",
+    "file_options, overrides, named",
     [
-        ("      max_retries: three\n", "max_retries"),
-        ("      max_retires: 3\n", "max_retires"),
+        # The retry options of an off-host reporter are the operator's
+        # (config/reporter_trust.py REPORTER_DESTINATION_OPTIONS): ash report
+        # ignores a config file's value for them, so a wrong type is given the
+        # operator's way, through --config-overrides, where the check sees it.
+        (
+            "",
+            ("reporters.aws-security-hub.options.max_retries=three",),
+            "max_retries",
+        ),
+        # An unknown key is not an operator's option, so the file's own is read.
+        ("      max_retires: 3\n", (), "max_retires"),
     ],
     ids=["wrong-type", "unknown-key"],
 )
 def test_an_invalid_option_of_a_loaded_plugin_is_an_invalid_configuration(
-    tmp_path, options, named
+    tmp_path, file_options, overrides, named
 ):
-    output = _project(tmp_path, options)
+    output = _project(tmp_path, file_options)
 
-    result = _report(tmp_path, output, "aws-security-hub")
+    result = _report(tmp_path, output, "aws-security-hub", *overrides)
 
     assert result.exit_code == 3, result.output
     assert result.stdout == "", result.stdout
@@ -158,10 +173,21 @@ def test_an_unknown_key_holding_markup_is_named_as_given(tmp_path):
 
 
 def test_the_check_is_made_whatever_format_is_asked_for(tmp_path):
-    """A scan refuses the config whichever reporters it runs, so report does too."""
-    output = _project(tmp_path, "      max_retries: three\n")
+    """A scan refuses the config whichever reporters it runs, so report does too.
 
-    result = _report(tmp_path, output, "markdown")
+    The wrong-typed retry option is given through ``--config-overrides``, where
+    ``ash report`` reads an off-host reporter's retry options (a config file's
+    value for them is ignored, as the module docstring says), and the format
+    asked for is one whose reporter has no such option.
+    """
+    output = _project(tmp_path, "")
+
+    result = _report(
+        tmp_path,
+        output,
+        "markdown",
+        "reporters.aws-security-hub.options.max_retries=three",
+    )
 
     assert result.exit_code == 3, result.output
     assert "reporters.aws-security-hub.options.max_retries" in result.stderr

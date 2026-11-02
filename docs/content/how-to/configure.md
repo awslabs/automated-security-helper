@@ -30,7 +30,7 @@ A config file inside the repository you scan, including the `.ashrc.yaml` that A
 
 ## Where ASH looks for its config {#discovery}
 
-`ash scan` looks in its source directory (`--source-dir`, by default the current directory), and so do `ash config get`, `ash config validate`, `ash config lint`, and `ash config validate-plugin-dependencies`, which take `--source-dir` too. `ash config init`, `ash config update`, and `ash config wizard` look in the current directory. ASH uses the first source it finds, in this order:
+`ash scan` looks in its source directory (`--source-dir`, by default the current directory), and so do `ash config get`, `ash config validate`, `ash config lint`, `ash config validate-plugin-dependencies`, `ash config update`, and `ash config wizard`, which take `--source-dir` too. `ash config init` writes in the current directory. ASH uses the first source it finds, in this order:
 
 1. `.ash.yml`, `.ash.yaml`, `.ash.json`, `ash.yml`, `ash.yaml`, `ash.json`. ASH tries each name in the directory and then in its `.ash/` subdirectory before it moves to the next name, so `.ash/.ash.yml` wins over `.ash.yaml`.
 2. `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`, `.ashrc.json`, `ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json`, in the directory only.
@@ -97,7 +97,7 @@ patch:
       reason: Fixture value, not a real password
 ```
 
-ASH merges the bases in order and then the file itself. Mappings merge key by key; a list or a single value from the later file replaces the base's. To add to a base's list instead of replacing it, use `patch`, a list of JSON Patch operations (`add`, `remove`, `replace`, and `test`) applied after the merge.
+ASH merges the bases in order and then the file itself. Mappings merge key by key; a list or a single value from the later file replaces the base's. To add to a base's list instead of replacing it, use `patch`, a list of JSON Patch operations (`add`, `remove`, `replace`, and `test`) applied after the merge. A config file that an MCP client chose (a file inside delivered source, or one named as `config_path`) may not use `test`: every `test` operation in such a file is refused before any operation applies, because a `test` against a base the operator owns would reveal, through whether the file loads, a value the client may not read ([What a delivered config cannot set](mcp-server.md#what-a-delivered-config-cannot-set)); the operator's own files keep theirs.
 
 A plugin's section is found by the plugin's name with case, punctuation, and the words Scanner, Reporter, and Converter ignored, so `CSV`, `CsvReporter`, and `csv` name one reporter, and `DetectSecretsScanner` names `detect-secrets`. A child's spelling of a section the base writes another way is that section: the merged config holds it under a built-in plugin's own name (`csv`), and otherwise under the child's spelling. A file that writes two such spellings, such as `detect-secrets` and `DETECT_SECRETS`, is refused with exit 3 by a scan and by `ash config validate`, which name both spellings and none of their values. A config that a results file recorded is read, not refused, by `ash report` and `ash merge`: of two such spellings in it, they read the one that the scan which recorded it read, and when the spelling not read sets a value the read one does not, a warning names the spellings and the one read, never a value.
 

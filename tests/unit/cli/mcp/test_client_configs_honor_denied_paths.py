@@ -130,6 +130,7 @@ def _scan_resolution(target: Path, config_path: str | None) -> Any:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config import resolve_config as rc
     from automated_security_helper.core import orchestrator
+    from automated_security_helper.core.resource_management import scan_management
     from automated_security_helper.core.resource_management.scan_registry import (
         ScanRegistry,
     )
@@ -147,14 +148,22 @@ def _scan_resolution(target: Path, config_path: str | None) -> Any:
 
     output = target / ".ash" / "ash_output"
     output.mkdir(parents=True, exist_ok=True)
+    # Registered as the SESSION's scan, on the one registry every reader of
+    # this run sees: the scan's own snapshot of the bound profile is the
+    # server's only when "the scan id is one this session's registry holds"
+    # (cli/mcp/sandbox._is_a_live_scan_copy_of_this_sessions_file, which asks
+    # scan_management.session_holds_scan). A scan registered without the
+    # session, or on a registry only mcp_tools reads, makes the snapshot read
+    # as client-delivered and the trusted base collapse to the defaults.
     registry = ScanRegistry()
     scan_id = registry.register_scan(
-        directory_path=str(target), output_directory=str(output)
+        directory_path=str(target), output_directory=str(output), session_id=SESSION
     )
     with (
         patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
         patch.object(orchestrator, "resolve_config", recording),
         patch.object(mcp_tools, "get_scan_registry", return_value=registry),
+        patch.object(scan_management, "get_scan_registry", return_value=registry),
     ):
         asyncio.run(
             mcp_tools._run_scan_async(
@@ -905,7 +914,13 @@ def test_an_upload_without_the_section_keeps_the_servers_reporter_options(
 def test_a_delivered_tree_cannot_turn_on_a_reporter_the_server_turned_off(
     _server,
 ) -> None:
-    """Left out, the section would return the reporter to its default, which is on."""
+    """The server's ``enabled: false`` holds when the delivered tree leaves the section out.
+
+    Every off-host reporter is off by default (``REPORTER_ENABLED_DEFAULTS``), so
+    the operator's setting and the default agree here; what this pins is that a
+    delivered tree with no reporters section does not change the server's
+    answer, read as the scan reads it.
+    """
     operator = _server["tmp"] / "operator" / "ash.yaml"
     operator.write_text(
         "project_name: operator\nreporters:\n  s3:\n    enabled: false\n",
@@ -1072,6 +1087,7 @@ def test_the_check_reads_what_resolution_parsed_not_the_file_again(_server) -> N
     source = _upload({"ash.yaml": BEDROCK_REGION})
     upload = source / "ash.yaml"
     real = rc.resolve_config_document
+    swapped: List[Path] = []
 
     def read_then_swap(path: Any, *args: Any, **kwargs: Any) -> Any:
         document = real(path, *args, **kwargs)
@@ -1079,6 +1095,7 @@ def test_the_check_reads_what_resolution_parsed_not_the_file_again(_server) -> N
         # ASH_CONFIG too, and may read it first.
         if Path(path).resolve() == upload.resolve():
             upload.write_text("project_name: benign\n", encoding="utf-8")
+            swapped.append(Path(path))
         return document
 
     with patch.object(rc, "resolve_config_document", read_then_swap):
@@ -1088,6 +1105,10 @@ def test_the_check_reads_what_resolution_parsed_not_the_file_again(_server) -> N
                 source_dir=_server["target"],
                 untrusted_config=True,
             )
+    # The premise: the swap ran, once, after the upload was read. Without it the
+    # refusal above is the plain read's, and the test proves nothing about a
+    # file that changes under the check.
+    assert len(swapped) == 1, swapped
 
 
 def test_delivery_is_refused_while_a_scan_of_the_session_runs(_server) -> None:
@@ -1204,10 +1225,24 @@ def test_the_run_ash_scan_tool_keeps_the_refusals_error_type(_server) -> None:
 def test_validate_config_on_stdio_does_not_flag_the_callers_own_content(
     _server,
 ) -> None:
+    """On stdio the content is the caller's own, so the session's policy denies
+    nothing in it: valid, no error, and no line names DENIED_KEY as denied. The
+    one warning is the check's ignored-value note on the off-host reporter's
+    region: client content is checked as a repository file (untrusted_config),
+    and a scan of such a file takes the region from the trusted base."""
     from automated_security_helper.cli.mcp_tools import mcp_validate_config
 
     result = mcp_validate_config(config_content=BEDROCK_REGION, session_id=None)
-    assert result == {"valid": True, "errors": [], "warnings": []}, result
+    ignored = (
+        f"{DENIED_KEY} is set in a config file inside the scanned tree, and a "
+        "scan ignores that value: only --config-overrides or a config file "
+        "outside the tree set it."
+    )
+    assert result["valid"] is True, result
+    assert result["errors"] == [], result
+    assert result["warnings"] == [
+        {"field": "", "message": ignored, "type": "validation_error"},
+    ], result
 
 
 def test_validate_config_checks_a_delivered_base_too(_server) -> None:

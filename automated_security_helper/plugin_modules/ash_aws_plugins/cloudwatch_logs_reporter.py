@@ -4,21 +4,24 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import boto3
 import botocore.exceptions
 
-from typing import Annotated, Literal, TYPE_CHECKING
+from typing import Annotated, Any, Literal, TYPE_CHECKING
 
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    AWS_REGION_PATTERN,
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
+    blank_is_unset,
     check_retry_delays,
-    report_missing_setting,
     reporter_client_config,
     retry_with_backoff,
+    settings_missing,
+    stripped_or_none,
 )
 
 
@@ -32,23 +35,40 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
+# PutLogEvents caps a request at 1,048,576 bytes, counted as the UTF-8 size of
+# every event message plus 26 bytes for each event (the API reference page the
+# class docstring links). This reporter sends one event per request, so the
+# event's message plus its overhead has to fit; one that does not is refused
+# here, with the reason, instead of being sent to fail as a parameter error.
+MAX_PUT_LOG_EVENTS_BYTES = 1_048_576
+LOG_EVENT_OVERHEAD_BYTES = 26
+
 
 class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
-            default_factory=lambda: os.environ.get(
-                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
+            # An empty or blank value is unset: AWS_REGION="" or " " does not
+            # hide AWS_DEFAULT_REGION, and an empty region is named as the
+            # missing setting rather than refused by the pattern or sent to AWS.
+            default_factory=lambda: (
+                stripped_or_none(os.environ.get("AWS_REGION"))
+                or stripped_or_none(os.environ.get("AWS_DEFAULT_REGION"))
             ),
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
+            # The three AWS reporters share one pattern (aws_utils), so a
+            # region one of them accepts is never a configuration error for
+            # another; its wording of the list is kept there.
+            pattern=AWS_REGION_PATTERN,
             description="AWS region for CloudWatch Logs",
         ),
     ]
     log_group_name: Annotated[
         str | None,
         Field(
-            default_factory=lambda: os.environ.get(
-                "ASH_CLOUDWATCH_LOG_GROUP_NAME", None
+            # An empty or blank value is unset, so it is named as missing
+            # instead of reaching CreateLogStream as an empty group name.
+            default_factory=lambda: stripped_or_none(
+                os.environ.get("ASH_CLOUDWATCH_LOG_GROUP_NAME")
             ),
             description="CloudWatch Logs group name to publish results to",
         ),
@@ -85,6 +105,12 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
+
+    @field_validator("aws_region", "log_group_name", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: Any) -> Any:
+        """A blank region or group name is no value (``blank_is_unset``)."""
+        return blank_is_unset(value)
 
     @model_validator(mode="after")
     def _retry_delays_are_bounded(self):
@@ -152,8 +178,13 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     (https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutLogEvents.html).
     It is worth naming because it forecloses the obvious alternative -- publishing
     the merged findings instead of the summary -- which would exceed it for any
-    workspace of consequence, and this reporter's error path returns the exception
-    text as its report rather than failing the run.
+    workspace of consequence.
+
+    A publish that fails after the retries returns None, which ``ReportPhase``
+    reports as a reporter that produced nothing. It used to return the exception
+    text, which the phase wrote to ``ash.cwlog.json`` as a successful report and
+    ``ash report --format cloudwatch-logs`` printed with exit 0 (or failed to
+    pretty-print, with a JSON parse error in place of the reason).
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
@@ -177,18 +208,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
-        missing = False
-        if self.config.options.aws_region is None:
-            report_missing_setting(
-                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
-            )
-            missing = True
-        if self.config.options.log_group_name is None:
-            report_missing_setting(
-                self.config.name, "log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)
-            )
-            missing = True
-        if missing:
+        if self._settings_missing():
             return self.dependencies_satisfied
         try:
             sts_client = boto3.client("sts", region_name=self.config.options.aws_region)
@@ -197,16 +217,61 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         except Exception as e:
             # error_text with the config's environment values: botocore's
             # exceptions name the region, group or stream they were given.
+            # At ERROR, like report_missing_setting: the report phase leaves
+            # the reporter out on False, so under --quiet a WARNING was the
+            # only word of why an enabled publish did not happen, and --quiet
+            # hid it.
             self._plugin_log(
                 f"Error when calling STS: {error_text(e, self._environment_values())}",
-                level=logging.WARNING,
+                level=logging.ERROR,
                 target_type="source",
                 append_to_stream="stderr",
             )
         return self.dependencies_satisfied
 
-    def report(self, model: "AshAggregatedResults") -> str:
-        """Publishes AshAggregatedResults as a CloudWatchLogs event"""
+    def _settings_missing(self) -> bool:
+        """Name each required setting that is unset or empty; True when one is.
+
+        The options model maps a blank value to None (``_blank_is_unset``), from
+        the environment or a config file alike; ``not`` rather than ``is None``
+        keeps an empty name out of CreateLogStream should one ever get through.
+        """
+        return settings_missing(
+            self.config.name,
+            self.config.options,
+            (
+                ("aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")),
+                ("log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)),
+            ),
+        )
+
+    def report(self, model: "AshAggregatedResults") -> str | None:
+        """Publishes AshAggregatedResults as a CloudWatchLogs event.
+
+        Returns the JSON receipt, or None when a required setting is unset or
+        the publish failed. ``ash report`` never calls
+        ``validate_plugin_dependencies``, so the settings are checked here too:
+        an unset log group used to reach PutLogEvents and come back as a
+        botocore parameter error.
+        """
+        if isinstance(self.config, dict):
+            self.config = CloudWatchLogsReporterConfig.model_validate(self.config)
+        if self._settings_missing():
+            return None
+        if isinstance(getattr(model, "workspace", None), BaseModel):
+            # A workspace's unified results: each project's own scan already
+            # published its event (the class docstring says why the rollup is
+            # not published), and `ash report` on the workspace output
+            # directory is the one path that reaches here with them.
+            self._plugin_log(
+                "cloudwatch-logs publishes one project's results at a time, and "
+                "these are a workspace's unified results, which each project's "
+                "own scan already published. Run ash report with --output-dir "
+                "set to a project's directory under the workspace output.",
+                level=logging.ERROR,
+                append_to_stream="stderr",
+            )
+            return None
         timestamp = int(
             (
                 datetime.now(timezone.utc)
@@ -216,8 +281,18 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         )
         output_dict = model.to_simple_dict()
         output = json.dumps(output_dict, default=str)
-        if isinstance(self.config, dict):
-            self.config = CloudWatchLogsReporterConfig.model_validate(self.config)
+        event_bytes = len(output.encode("utf-8")) + LOG_EVENT_OVERHEAD_BYTES
+        if event_bytes > MAX_PUT_LOG_EVENTS_BYTES:
+            # metadata.inputs_not_scanned and the scanner records have no bound,
+            # so a large scan can outgrow the one event this reporter sends.
+            self._plugin_log(
+                "The results are too large for one CloudWatch Logs event: "
+                f"{event_bytes} bytes with the event overhead, where PutLogEvents "
+                f"takes at most {MAX_PUT_LOG_EVENTS_BYTES}; nothing was published",
+                level=logging.ERROR,
+                append_to_stream="stderr",
+            )
+            return None
 
         # Create CloudWatch Logs client. The calls below repeat a failure
         # themselves (retry_with_backoff), so the client makes one attempt per
@@ -256,18 +331,36 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
                 logStreamName=self.config.options.log_stream_name,
                 logEvents=[log_event],
             )
+            # PutLogEvents answers 200 and lists an event it would not keep
+            # (too old, too new, or past the group's retention) in
+            # rejectedLogEventsInfo; such an answer is not a publish.
+            rejected = (
+                resp.get("rejectedLogEventsInfo") if isinstance(resp, dict) else None
+            )
+            if rejected:
+                self._plugin_log(
+                    "CloudWatch Logs accepted the request but rejected the event "
+                    f"({', '.join(sorted(rejected))}), so the results were not "
+                    "published",
+                    level=logging.ERROR,
+                    append_to_stream="stderr",
+                )
+                return None
             return json.dumps({"message": output_dict, "response": resp}, default=str)
         except Exception as e:
-            # Redacted once, for the line and for the text returned as the
-            # report, which ReportPhase writes to a file.
+            # Redacted: the line names the group, stream or region it was given.
             described = error_text(e, self._environment_values())
             self._plugin_log(
                 "Error when publishing results to CloudWatch Logs after retries: "
                 f"{described}",
-                level=logging.WARNING,
+                level=logging.ERROR,
                 append_to_stream="stderr",
             )
-            return described
+            # None, not the message: ReportPhase reports a None result as a
+            # reporter that produced nothing and writes no ash.cwlog.json.
+            # Returning the message wrote it into that file as if it were a
+            # report, and `ash report` printed it with exit 0.
+            return None
 
     def _create_log_stream_with_retry(self, cwlogs_client):
         """Create log stream with retry logic."""

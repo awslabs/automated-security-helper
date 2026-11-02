@@ -80,6 +80,7 @@ import argparse
 import asyncio
 import difflib
 import inspect
+import re
 import sys
 from pathlib import Path
 
@@ -254,9 +255,18 @@ TOOL_NOTES: dict[str, dict] = {
                 "another session's scan holds the directory and the server does not name "
                 "it: wait and retry, or scan another directory. After a `cancel_scan` of "
                 "that directory the refusal repeats until the scan has stopped (see "
-                "`cancel_scan`): retry after a few seconds. Any other reason the scan "
-                "could not be started returns `error_type: scan_start_failure`, and an "
-                "unexpected error returns the exception's class name. Branch on "
+                "`cancel_scan`): retry after a few seconds. Four more refusals carry "
+                "their own `error_type`: `committed_output_files` (a file git tracks "
+                "in `.ash/ash_output` where the scan writes, or that check could not "
+                "finish), `session_identity_required` (the caller has no session the "
+                "server issued, so a scan it could neither follow nor stop is not "
+                "started), `session_scan_limit` (this session is already running "
+                "`max_concurrent_scans_per_session` scans: retry once one has "
+                "finished, or `cancel_scan` one) and `source_delivery_busy` (the "
+                "session's delivered source is being changed: retry after the change "
+                "finishes). Any other reason the scan could not be started returns "
+                "`error_type: scan_start_failure`, and an unexpected error returns "
+                "the exception's class name. Branch on "
                 "`error_type` and `error_category`, never on the text of `error`."
             ),
         ],
@@ -269,6 +279,7 @@ TOOL_NOTES: dict[str, dict] = {
         ),
         "params": {"scan_id": {"notes": "From `run_ash_scan`"}},
         "returns": """{
+  "success": true,
   "scan_id": "...",
   "directory_path": "/path/to/scanned/project",
   "output_directory": "/path/to/.ash/ash_output",
@@ -276,12 +287,17 @@ TOOL_NOTES: dict[str, dict] = {
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
   "severity_threshold": "<the threshold the scan was judged by; null until it finishes when none was named>",
+  "requested_severity_threshold": "<the threshold the request named | null>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
+  "exit_code": "<int | null>",
+  "exit_code_meaning": "<str | null>",
   "is_complete": bool,
   "results_available": bool,
   "output_holds_previous_results": bool,
+  "output_superseded": bool,
+  "superseded_by": ["<scan_id>"],
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
@@ -290,17 +306,22 @@ TOOL_NOTES: dict[str, dict] = {
   "incomplete_converters": [{ "converter": "...", "reason": "...", "failed_input_kinds": ["..."] }],
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
+  "could_not_stop": [{ "scanner": "...", "reason": "..." }],
   "completed_scanners": int,
   "finished_scanners": int,
   "total_scanners": int,
   "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
+  "scanner_statuses": { "<scanner_name>": { "status": "PASSED | FAILED | ERROR | MISSING | SKIPPED", "excluded": bool, "dependencies_satisfied": bool } },
+  "skipped_scanners": [{ "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies | excluded_by_configuration | skipped" }],
   "total_findings": int,
-  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
+  "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int, "unknown": int },
   "scanners": {
     "<scanner_name>": {
       "<target_type>": { ... per-scanner-target progress ... }
     }
-  }
+  },
+  "timestamp": "<iso8601>",
+  "operation": "get_scan_progress"
 }""",
         # A caveat is a string, or a dict that is printed only when the server
         # returns what it describes: "needs" are response keys, "needs_types"
@@ -328,16 +349,32 @@ TOOL_NOTES: dict[str, dict] = {
                     'Show "initializing" or 0% when `total_scanners` is zero.'
                 ),
             },
-            (
-                "There is no top-level `duration` field; derive elapsed time from "
-                "`start_time` and `end_time` (or from current time while running)."
-            ),
+            {
+                "needs": ["start_time", "end_time"],
+                "text": (
+                    "There is no top-level `duration` field; derive elapsed time from "
+                    "`start_time` and `end_time` (or from current time while running)."
+                ),
+            },
             (
                 "**`is_complete` is `true` once the scan has ended**, whatever the ending: "
                 "`completed`, `incomplete`, `failed` or `cancelled`. It is decided by the "
                 "scan's state alone, never by a results file on disk, which can be a previous "
                 "scan's. `results_available` is `true` for `completed` and `incomplete`, the "
-                "scans whose results `get_scan_results` can read."
+                "scans whose results `get_scan_results` can read, and `false` for one of "
+                "them whose results file cannot be read (the scan ended without writing "
+                "its final results, or the file is not valid JSON): `error_message` then "
+                "names the file and `coverage_complete` is `null`."
+            ),
+            (
+                "**A later scan can take the output tree over.** `output_superseded` is "
+                "`true` once a later scan of the same directory has written "
+                "`output_directory`; `superseded_by` lists those scans' ids, oldest first, "
+                "and is empty otherwise. Nothing below is read from the files then: this "
+                "scan's results are gone, and `get_scan_results` on that directory reads "
+                "the newest scan's. `exit_code` and `exit_code_meaning` are the ASH exit "
+                "code of a run that ended with one and its documented meaning, `null` for "
+                "every other ending and while the scan runs."
             ),
             (
                 "**A failed or cancelled scan leaves the previous scan's results in place.** "
@@ -346,28 +383,48 @@ TOOL_NOTES: dict[str, dict] = {
                 "this scan's. `get_scan_results` on that directory reads the previous scan's "
                 "results."
             ),
-            (
-                "**`incomplete` is terminal, with partial coverage.** The run finished and its "
-                "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
-                "targets), no scanner reached a verdict, a converter did not run or could "
-                "not convert some of its inputs, a rule "
-                "could not be evaluated, or a content database was past its declared age "
-                "bound. `incomplete_scanners` names each scanner and why, and "
-                "`stale_content_databases` each stale database. The "
-                "findings are real but partial, so read them, and do not report the target as "
-                "clean. `failed` means the run crashed, left no readable results, or "
-                "ran past the server's `scan_timeout_seconds`. "
-                "`coverage_complete` is `null` while running and for `failed` or `cancelled`; "
-                "with `fail_on_incomplete_scanners: false` a scan is `completed` with "
-                "`coverage_complete: false` when scanners did not run."
-            ),
+            {
+                # Printed while the response carries the keys the paragraph names;
+                # without one of them the status explanation is kept, with the
+                # key-naming sentences left out, so the warning never disappears.
+                "needs": [
+                    "incomplete_scanners",
+                    "stale_content_databases",
+                    "coverage_complete",
+                ],
+                "otherwise": (
+                    "**`incomplete` is terminal, with partial coverage.** The run finished and its "
+                    "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
+                    "targets), no scanner reached a verdict, a converter did not run or could "
+                    "not convert some of its inputs, a rule "
+                    "could not be evaluated, or a content database was past its declared age "
+                    "bound. The findings are real but partial, so read them, and do not report "
+                    "the target as clean. `failed` means the run crashed, left no readable "
+                    "results, or ran past the server's `scan_timeout_seconds`."
+                ),
+                "text": (
+                    "**`incomplete` is terminal, with partial coverage.** The run finished and its "
+                    "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
+                    "targets), no scanner reached a verdict, a converter did not run or could "
+                    "not convert some of its inputs, a rule "
+                    "could not be evaluated, or a content database was past its declared age "
+                    "bound. `incomplete_scanners` names each scanner and why, and "
+                    "`stale_content_databases` each stale database. The "
+                    "findings are real but partial, so read them, and do not report the target as "
+                    "clean. `failed` means the run crashed, left no readable results, or "
+                    "ran past the server's `scan_timeout_seconds`. "
+                    "`coverage_complete` is `null` while running and for `failed` or `cancelled`; "
+                    "with `fail_on_incomplete_scanners: false` a scan is `completed` with "
+                    "`coverage_complete: false` when scanners did not run."
+                ),
+            },
             (
                 "**Status enum:** the documented values are "
-                "`pending | running | completed | incomplete | failed | cancelled`. The registry uses "
-                "`pending` briefly while a scan is queued, transitions to `running` once "
-                "execution begins, and may also expose the legacy `in_progress` string from "
-                "older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` "
-                'as equivalent "not done yet" states.'
+                "`pending | running | completed | incomplete | failed | cancelled`, the "
+                "registry entry's own state and nothing else. The registry uses "
+                "`pending` briefly while a scan is queued and `running` once execution "
+                'begins; treat both as "not done yet", and read `is_complete` rather than '
+                "comparing the string."
             ),
         ],
     },
@@ -433,10 +490,25 @@ TOOL_NOTES: dict[str, dict] = {
             "SARIF, CSV, or markdown directly with file tools instead of pulling JSON over MCP."
         ),
         "params": {"output_dir": {"notes": "Absolute path"}},
-        "caveats": ["Returns a dict mapping format names to absolute paths."],
+        "caveats": [
+            (
+                "Returns `output_dir`, `reports_dir` and `files`, a dict keyed by "
+                "format name (`sarif`, `flat_json`, `html`, `csv`, `markdown`, "
+                "`text`, `ocsf`, `cyclonedx`, `junit_xml`, `gitlab_sast`, "
+                "`aggregated_results`) whose values are objects with the absolute "
+                "`path`, whether the file `exists`, and its `size_bytes`; a report "
+                "the scan did not write is listed with `exists: false`. When the "
+                "output directory holds a `scanners/` tree, `scanners_dir` and "
+                "`scanner_results` (per scanner, per target) are added."
+            )
+        ],
     },
     "list_active_scans": {
-        "intro": "All scans the server tracks (active + recently completed).",
+        "intro": (
+            "This session's scans, active and recently completed. Only scans this "
+            "session started are listed; another session's scans are not visible, "
+            "and the statistics count only this session's."
+        ),
         "no_params_sentence": "No parameters. Returns a list of scan summaries.",
     },
     "cancel_scan": {
@@ -453,8 +525,8 @@ TOOL_NOTES: dict[str, dict] = {
             "log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it "
             "was. With no previous results, what the scan wrote before it stopped "
             "stays, except that a cancel during the report phase removes the reports "
-            "that phase wrote. `reports/ash.unused-suppressions.md`, which its "
-            "reporter writes on its own, stays even then."
+            "that phase wrote and every other file a reporter wrote beside them, "
+            "`reports/ash.unused-suppressions.md` included."
         ),
         "params": {"scan_id": {"notes": "The scan to cancel"}},
         "caveats": [
@@ -703,22 +775,66 @@ TOOL_NOTES: dict[str, dict] = {
 }
 
 
-def _type_name(schema: dict) -> str:
+def _cell(text: str) -> str:
+    """``text`` with every bare pipe escaped, so it stays in one markdown table column."""
+    return text.replace(r"\|", "|").replace("|", r"\|")
+
+
+def _resolve_ref(ref: str, root: dict | None) -> dict | None:
+    """The schema a local ``$ref`` (``#/$defs/Name``) points at in ``root``."""
+    if root is None or not ref.startswith("#/"):
+        return None
+    node: object = root
+    for part in ref[2:].split("/"):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node if isinstance(node, dict) else None
+
+
+def _enum_type_name(values: list) -> str:
+    """The type of an enum by its declared type or, failing that, its values.
+
+    Every enum used to render as ``string``, which mislabelled an integer or a
+    boolean enum.
+    """
+    kinds = {type(v) for v in values if v is not None}
+    if kinds == {bool}:
+        return "boolean"
+    if kinds == {int}:
+        return "integer"
+    if kinds <= {int, float} and kinds:
+        return "number"
+    return "string"
+
+
+def _type_name(schema: dict, root: dict | None = None) -> str:
     """Render a JSON-schema fragment the way this document spells types.
 
     Unions are written `string \\| null` with an escaped pipe, because the value
     lands in a markdown table cell where a bare pipe would end the column.
+    ``root`` is the tool's whole input schema, so a ``$ref`` into its ``$defs``
+    (an Enum or model parameter) is rendered by what it points at rather than
+    as ``any``.
     """
-    if "anyOf" in schema:
-        parts = [_type_name(s) for s in schema["anyOf"]]
-        seen: list[str] = []
-        for part in parts:
-            if part not in seen:
-                seen.append(part)
-        return r" \| ".join(seen)
-    if "enum" in schema:
-        return "string"
+    if "$ref" in schema:
+        target = _resolve_ref(str(schema["$ref"]), root)
+        if target is not None:
+            return _type_name(target, root)
+        return "object"
+    for union_key in ("anyOf", "oneOf", "allOf"):
+        if union_key in schema:
+            parts = [_type_name(s, root) for s in schema[union_key]]
+            seen: list[str] = []
+            for part in parts:
+                if part not in seen:
+                    seen.append(part)
+            return r" \| ".join(seen)
     declared = schema.get("type")
+    if "enum" in schema:
+        if isinstance(declared, str):
+            return declared
+        return _enum_type_name(list(schema["enum"]))
     if isinstance(declared, list):
         return r" \| ".join(str(d) for d in declared)
     if declared == "array":
@@ -727,7 +843,11 @@ def _type_name(schema: dict) -> str:
 
 
 def _default_display(schema: dict, required: bool) -> str:
-    """The schema's default as the docs checks read it: a phrase or one JSON span."""
+    """The schema's default as the docs checks read it: a phrase or one JSON span.
+
+    A pipe inside the JSON is escaped, as the type names are: the span lands in
+    a table column.
+    """
     import json
 
     if required:
@@ -737,7 +857,12 @@ def _default_display(schema: dict, required: bool) -> str:
     value = schema["default"]
     if value is None:
         return "not set"
-    return f"`{json.dumps(value)}`"
+    return _cell(f"`{json.dumps(value)}`")
+
+
+def _plural(count: int, noun: str) -> str:
+    """``one tool``, ``two tools``: the spelled count with the noun agreeing."""
+    return f"{_spell(count)} {noun}{'' if count == 1 else 's'}"
 
 
 #: The docs checks compare each tool's parameter table with the tool's input schema.
@@ -745,43 +870,75 @@ def _options_marker(tool: str) -> str:
     return f"<!-- doctest: options of=mcp.{tool} -->"
 
 
-def _docstring_arg_notes(func) -> dict[str, str]:
+#: A Google-style section header on its own line (``Returns:``, ``Note:``).
+_SECTION_HEADER = re.compile(
+    r"^\s*(?:Returns?|Raises?|Yields?|Examples?|Notes?|Attributes|See Also|"
+    r"Warnings?|Todo)\s*:\s*$"
+)
+#: A parameter head: an identifier, an optional ``(type)``, a colon.
+_PARAM_HEAD = re.compile(
+    r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*:\s*(?P<tail>.*)$"
+)
+
+
+def parse_arg_notes(doc: str) -> dict[str, str]:
     """Per-parameter descriptions parsed out of a Google-style ``Args:`` block.
 
-    Used as the fallback for the Notes column so a tool with no ``TOOL_NOTES``
-    entry still gets populated cells rather than blank ones. Continuation lines
-    are folded into the preceding parameter, because several of these docstrings
-    wrap a long description over two or three lines.
+    The block is the lines after ``Args:`` up to the next section header on a
+    line of its own, or the first dedented line (a paragraph after the block). A
+    parameter head is an identifier, with an optional ``(type)``, and a colon, at
+    the block's parameter indentation; a line indented deeper is a continuation
+    of the parameter above it, whatever words or colons it holds.
+
+    The old parser cut the block at the first ``Note:`` or ``Example:`` anywhere
+    in the text, so one such word inside a description blanked every later
+    parameter's note; it read any ``Word:`` line as a new parameter, so a wrapped
+    line that began that way became a phantom parameter; it did not recognize a
+    ``name (type):`` head, so such a parameter's text was appended to the one
+    before it; and it folded every paragraph between the block and ``Returns:``
+    into the last parameter.
     """
-    doc = inspect.getdoc(func) or ""
-    if "Args:" not in doc:
+    lines = doc.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == "Args:")
+    except StopIteration:
         return {}
-    section = doc.split("Args:", 1)[1]
-    for terminator in ("Returns:", "Raises:", "Example:", "Examples:", "Note:"):
-        if terminator in section:
-            section = section.split(terminator)[0]
 
     found: dict[str, str] = {}
     current: str | None = None
-    for raw in section.splitlines():
-        line = raw.strip()
-        if not line:
+    param_indent: int | None = None
+    for raw in lines[start + 1 :]:
+        if not raw.strip():
+            # A blank line ends the block unless more parameter lines follow at
+            # the parameter indentation; decided by the next non-blank line.
             continue
-        head, sep, tail = line.partition(":")
-        candidate = head.strip()
-        if (
-            sep
-            and candidate
-            and candidate.replace("_", "").isalnum()
-            and " " not in candidate
-        ):
-            current = candidate
-            found[current] = tail.strip()
-        elif current:
-            found[current] = f"{found[current]} {line}".strip()
+        if _SECTION_HEADER.match(raw):
+            break
+        indent = len(raw) - len(raw.lstrip())
+        if param_indent is None:
+            param_indent = indent
+        if indent < param_indent:
+            break
+        if indent == param_indent:
+            head = _PARAM_HEAD.match(raw.strip())
+            if head is None:
+                # Prose at the parameter indentation after the block: the
+                # block is over.
+                break
+            current = head.group("name")
+            found[current] = head.group("tail").strip()
+        elif current is not None:
+            found[current] = f"{found[current]} {raw.strip()}".strip()
 
     # A pipe would end the markdown table column early.
-    return {k: v.replace("|", r"\|") for k, v in found.items()}
+    return {k: _cell(v) for k, v in found.items()}
+
+
+def _docstring_arg_notes(func) -> dict[str, str]:
+    """``parse_arg_notes`` of ``func``'s docstring; empty when there is none."""
+    if func is None:
+        return {}
+    return parse_arg_notes(inspect.getdoc(func) or "")
 
 
 def _response_keys(contract, wanted: set[str]) -> set[str]:
@@ -815,7 +972,9 @@ def _conditional_caveat(
     * ``needs_types``: error types; all must be among the tool's, else nothing.
     * ``error_types``: (type, note) pairs, a paragraph naming those the tool
       returns, each followed by its note in parentheses; ``untyped`` is added after
-      it while none of ``untyped_unless`` is returned.
+      it while none of ``untyped_unless`` is returned. Without a contract every
+      type counts as returned, as every key does in ``_response_keys``, so the
+      paragraph never names a type and then calls it untyped.
     """
     if not all(key in have for key in caveat.get("needs", [])):
         return caveat.get("otherwise")
@@ -834,7 +993,8 @@ def _conditional_caveat(
         else:
             listed = named[0]
         text = f"{caveat['lead']} {listed}."
-        absent = types is None or not set(caveat.get("untyped_unless", [])) & types
+        unless = set(caveat.get("untyped_unless", []))
+        absent = not unless if types is None else not unless & types
         if caveat.get("untyped") and absent:
             text = f"{text} {caveat['untyped']}"
         return text
@@ -850,13 +1010,25 @@ def _render_tool(
 
     intro = notes.get("intro")
     if not intro:
-        doc = inspect.getdoc(func) or description or ""
+        # A tool registered under a name that is not a module attribute has no
+        # function to read; its registered description stands in.
+        doc = (inspect.getdoc(func) if func is not None else None) or description or ""
         intro = " ".join(doc.split("\n\n")[0].split()).strip()
     lines += [intro, ""]
 
     properties: dict = schema.get("properties", {})
     required = set(schema.get("required", []))
     param_notes: dict = notes.get("params", {})
+
+    # A TOOL_NOTES note for a parameter the tool no longer has is as stale as a
+    # note for a tool that is gone, which _render_parts refuses; a renamed
+    # parameter used to drop its note silently.
+    stale_params = sorted(set(param_notes) - set(properties))
+    if stale_params:
+        raise SystemExit(
+            f"ERROR: TOOL_NOTES[{name!r}]['params'] names parameters the tool does "
+            f"not have: {stale_params}. Rename them or remove them."
+        )
 
     if not properties:
         lines += [notes.get("no_params_sentence", "No parameters."), ""]
@@ -881,13 +1053,16 @@ def _render_tool(
         else:
             lines += ["| Param | Type | Notes |", "|-------|------|-------|"]
         for key, spec in properties.items():
-            note = param_notes.get(key, {}).get("notes") or doc_notes.get(key, "")
+            # Editorial notes go through the same pipe escaping as the
+            # docstring notes; only the latter were escaped before.
+            note = _cell(
+                param_notes.get(key, {}).get("notes") or doc_notes.get(key, "")
+            )
+            type_name = _type_name(spec, schema)
             if show_default:
-                lines.append(
-                    f"| `{key}` | {_type_name(spec)} | {defaults[key]} | {note} |"
-                )
+                lines.append(f"| `{key}` | {type_name} | {defaults[key]} | {note} |")
             else:
-                lines.append(f"| `{key}` | {_type_name(spec)} | {note} |")
+                lines.append(f"| `{key}` | {type_name} | {note} |")
         lines.append("")
 
     if notes.get("pre_returns"):
@@ -1086,11 +1261,27 @@ def _adapt_markdown(lines: list[str], strip_bold: bool) -> list[str]:
     return out
 
 
+def _resource_uri(resource) -> str:
+    """A resource's URI, or a template resource's URI template, as text."""
+    uri = getattr(resource, "uri", None)
+    if uri is None:
+        uri = getattr(resource, "uriTemplate", None) or getattr(
+            resource, "uri_template", ""
+        )
+    return str(uri)
+
+
 def _render_parts() -> tuple[list[str], list[str]]:
     from automated_security_helper.cli import mcp_server
 
     tools = asyncio.run(mcp_server.mcp.list_tools())
-    resources = asyncio.run(mcp_server.mcp.list_resources())
+    resources = list(asyncio.run(mcp_server.mcp.list_resources()))
+    # list_resources() returns the fixed-URI resources only; a resource
+    # registered with a URI template is listed by list_resource_templates(), so
+    # without this call the count and the Resources section left those out.
+    list_templates = getattr(mcp_server.mcp, "list_resource_templates", None)
+    if list_templates is not None:
+        resources += list(asyncio.run(list_templates()))
 
     contracts = _tool_contracts(tools)
     stale_notes = sorted(set(TOOL_NOTES) - {t.name for t in tools})
@@ -1130,8 +1321,8 @@ def _render_parts() -> tuple[list[str], list[str]]:
     header_length = len(lines)
     lines += [
         (
-            f"The ASH MCP server exposes {_spell(len(tools))} tools and "
-            f"{_spell(len(resources))} resources."
+            f"The ASH MCP server exposes {_plural(len(tools), 'tool')} and "
+            f"{_plural(len(resources), 'resource')}."
         ),
         "",
     ]
@@ -1141,15 +1332,17 @@ def _render_parts() -> tuple[list[str], list[str]]:
             tool.name,
             tool.description or "",
             tool.input_schema or {},
-            getattr(mcp_server, tool.name),
+            # None for a tool registered under a custom name: _render_tool then
+            # reads the registered description instead of a function docstring.
+            getattr(mcp_server, tool.name, None),
             contracts[tool.name],
         )
 
     lines += ["## Resources", ""]
-    for resource in sorted(resources, key=lambda r: str(r.uri)):
+    for resource in sorted(resources, key=_resource_uri):
         summary = " ".join((resource.description or "").split())
         summary = summary.rstrip(".")
-        lines.append(f"- `{resource.uri}` — {summary}")
+        lines.append(f"- `{_resource_uri(resource)}` — {summary}")
     lines += [
         "",
         "Read these via the standard MCP resource read mechanism for context-free help.",

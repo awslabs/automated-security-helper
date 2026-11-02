@@ -24,6 +24,9 @@ could not see without reading the command it built:
 * With no runner it called ``exit 1``, which ends the caller's PowerShell session.
 * It passed ``--source-dir /src --output-dir /out`` before the caller's arguments,
   so ``-AshArgs 'report'`` put options in front of a subcommand.
+* Its default output directory was ``.ash/ash_output`` under the working directory,
+  where ``./ash`` and ``ash scan`` default it inside the scanned directory, so
+  ``-SourceDir sub`` from a checkout root wrote the reports beside the checkout.
 
 The tests stand in a PowerShell function for each of finch, docker, nerdctl,
 and podman. ``Get-Command`` finds a function before any program on PATH, so a stand-in
@@ -70,8 +73,21 @@ _DEFAULTED_BY_ASH = {
 }
 
 
+#: Tests in this module that only read text and never start pwsh. The pwsh gate below
+#: is not for them: under CI=1 on a runner with no pwsh it would fail a test that
+#: needs none.
+_WITHOUT_PWSH = frozenset(
+    {
+        "test_the_help_gives_the_wrapped_form",
+        "test_the_tests_that_need_no_pwsh_are_in_this_module",
+    }
+)
+
+
 @pytest.fixture(autouse=True)
-def _require_pwsh(in_ci: bool):
+def _require_pwsh(in_ci: bool, request: pytest.FixtureRequest):
+    if request.node.name in _WITHOUT_PWSH:
+        return
     if PWSH is None:
         if in_ci:
             pytest.fail("pwsh is not on PATH; CI runners must run these tests")
@@ -491,7 +507,7 @@ def test_windows_powershell_refuses_what_its_quoting_would_break(
 def test_windows_powershell_takes_the_default_output_directory(tmp_path):
     # The default was `Join-Path <cwd> '.ash' 'ash_output'`, and Join-Path takes a
     # third path only from PowerShell 6, so on 5.1 every call without -OutputDir
-    # failed to bind.
+    # failed to bind. The default is inside -SourceDir now, built the same way.
     windows_powershell = shutil.which("powershell.exe")
     if windows_powershell is None:
         pytest.skip("powershell.exe is not on PATH")
@@ -501,8 +517,30 @@ def test_windows_powershell_takes_the_default_output_directory(tmp_path):
         interpreter=windows_powershell,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / ".ash" / "ash_output").is_dir()
+    assert (tmp_path / "src" / ".ash" / "ash_output").is_dir()
     assert _run_call(result, calls)
+
+
+@pytest.mark.integration
+def test_the_default_output_directory_is_inside_the_source_directory(tmp_path):
+    """Without -OutputDir the reports land in ``.ash/ash_output`` inside -SourceDir.
+
+    The default was ``.ash/ash_output`` under the working directory, where ``./ash``
+    and ``ash scan`` default it inside the scanned directory
+    (tests/unit/test_ash_bash_entrypoint_output_paths.py pins the launcher's rule).
+    Run from a checkout root with ``-SourceDir sub``, the wrapper wrote its reports
+    beside the working directory, and a ``.ash`` link the repository commits at that
+    root took them wherever it pointed. The directory the container is given, the
+    one it mounts at /out, and the one made on disk are all the source's own.
+    """
+    result, calls = _invoke(tmp_path, "Invoke-ASH -NoBuild -SourceDir src")
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    expected = tmp_path / "src" / ".ash" / "ash_output"
+    assert _run_env(run)["ASH_ACTUAL_OUTPUT_DIR"] == str(expected), run
+    assert f"type=bind,source={expected},destination=/out" in run, run
+    assert expected.is_dir()
+    assert not (tmp_path / ".ash").exists()
 
 
 @pytest.mark.integration
@@ -659,17 +697,18 @@ def test_the_old_ash_oci_runner_still_works_and_says_it_is_deprecated(tmp_path):
 def test_an_explicit_empty_oci_runner_is_refused_and_ash_oci_runner_is_not_used(
     tmp_path,
 ):
-    # An -OCIRunner given an empty value is refused with exit 3, as ./ash refuses
-    # `--oci-runner ''`; it does not ask for discovery. OCI_RUNNER applies only when
-    # the caller named no runner at all, so it is not used here either. An
-    # -OCIRunner left to default from an empty OCI_RUNNER discovers a runner
-    # (test_every_invoke_ash_refusal_exits_with_its_code's accepted cell).
+    # An -OCIRunner given an empty value is refused with exit 5, the usage-error code,
+    # as ./ash refuses `--oci-runner ''` and the CLI refuses an option given no
+    # argument; it does not ask for discovery. OCI_RUNNER applies only when the
+    # caller named no runner at all, so it is not used here either. An -OCIRunner
+    # left to default from an empty OCI_RUNNER discovers a runner
+    # (test_every_invoke_ash_refusal_exits_with_its_code's accepted case).
     result, calls = _run_script(
         tmp_path,
         _wrapped("Invoke-ASH -NoBuild -SourceDir src -OutputDir out -OCIRunner ''"),
         ASH_OCI_RUNNER="podman",
     )
-    assert result.returncode == REFUSAL_EXIT, result.stdout + result.stderr
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert "-OCIRunnerneedsavalue" in _unwrapped(result.stderr), result.stderr
     assert "ASH_OCI_RUNNER" not in result.stdout + result.stderr
     assert calls == []
@@ -921,7 +960,7 @@ def test_a_script_that_wraps_invoke_ash_as_the_help_shows_exits_with_its_code(
     [
         # PowerShell's own binding errors, raised before Invoke-ASH runs. A -SourceDir
         # that does not exist is not one of them: Invoke-ASH checks it itself, and it
-        # is a refusal (exit 3) in the per-site table below.
+        # is a usage error (exit 5) in the per-site table below.
         pytest.param(
             "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out -Con x",
             "Parametercannotbeprocessedbecausetheparametername'Con'isambiguous",
@@ -944,15 +983,17 @@ def test_the_wrapped_form_does_not_exit_0_for_an_error_raised_before_invoke_ash_
     assert calls == []
 
 
-# Every refusal of Invoke-ASH, with the code it leaves: 3, the code ASH uses for input
-# it refuses, for every one but an explicit --sandbox that is not off, which ASH in a
-# container refuses as a usage error with 5. Run as a script runs it, `pwsh -File`
-# with the catch form the help gives, so the process exits with that code. Each cell:
+# Every refusal of Invoke-ASH, with the code it leaves. The rule: a usage error, the
+# input `ash` itself refuses with 5, exits 5 with `ash`'s text (a -SourceDir that
+# names no directory to scan, an -OutputDir that is a file or cannot be made, a path
+# outside the file system, a parameter given an empty or blank value, an explicit
+# --sandbox that is not off); every other refusal exits 3, the code ASH uses for input
+# it refuses. Run as a script runs it, `pwsh -File`
+# with the catch form the help gives, so the process exits with that code. Each case:
 # the call, what the test directory needs first, the environment, the code, and text
 # found only in the message.
 _INVOKE = "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out"
 _RUN = "Invoke-ASH -NoBuild -SourceDir src -OutputDir out"
-_SANDBOX_EXIT = 5
 _EMPTY_VALUE_PARAMETERS = (
     "Config",
     "OCIRunner",
@@ -991,7 +1032,7 @@ _INVOKE_ASH_SITES = {
         f"{_INVOKE} -AshArgs '--sandbox bwrap'",
         {},
         {},
-        _SANDBOX_EXIT,
+        USAGE_ERROR_EXIT,
         "--sandboxbwrapcannotbeused",
     ),
     "image-name-dash": (
@@ -1008,7 +1049,7 @@ _INVOKE_ASH_SITES = {
         REFUSAL_EXIT,
         "Theimagename'myimage:tag'",
     ),
-    # The inputs ./ash's image-name cells use; a control character is shown as \xHH.
+    # The inputs ./ash's image-name cases use; a control character is shown as \xHH.
     "image-name-leading-space": (
         f"{_INVOKE} -AshImageName ' ash:ci'",
         {},
@@ -1141,18 +1182,43 @@ _INVOKE_ASH_SITES = {
         REFUSAL_EXIT,
         "-OutputDir'Env:/x'isinPowerShell'sEnvironmentprovider,notinthefilesystem",
     ),
+    # A parameter given an empty or blank value is a usage error, 5, as ./ash refuses
+    # an option given no value and the CLI an option that requires an argument.
     "source-dir-empty": (
         _INVOKE.replace("-SourceDir src", "-SourceDir ''"),
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-SourceDirneedsavalue",
+    ),
+    # The same two -SourceDir refusals with -OutputDir left to its default. The
+    # default was worked out while the parameters bound, from -SourceDir, and
+    # Join-Path failed there on an empty -SourceDir ("Cannot bind argument to
+    # parameter 'Path'"), ahead of the refusal: the call ended with 1 and the
+    # binding error, not with 5 and "-SourceDir needs a value".
+    "source-dir-empty-default-output": (
+        _INVOKE.replace("-SourceDir src", "-SourceDir ''").replace(
+            " -OutputDir out", ""
+        ),
+        {},
+        {},
+        USAGE_ERROR_EXIT,
+        "-SourceDirneedsavalue",
+    ),
+    "source-dir-missing-default-output": (
+        _INVOKE.replace("-SourceDir src", "-SourceDir not-there").replace(
+            " -OutputDir out", ""
+        ),
+        {},
+        {},
+        USAGE_ERROR_EXIT,
+        "Sourcedirectorydoesnotexist",
     ),
     "output-dir-blank": (
         _INVOKE.replace("-OutputDir out", "-OutputDir '  '"),
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-OutputDirneedsavalue",
     ),
     **{
@@ -1160,7 +1226,7 @@ _INVOKE_ASH_SITES = {
             f"{_INVOKE} -{name} ''",
             {},
             {},
-            REFUSAL_EXIT,
+            USAGE_ERROR_EXIT,
             f"-{name}needsavalue",
         )
         for name in _EMPTY_VALUE_PARAMETERS
@@ -1169,21 +1235,21 @@ _INVOKE_ASH_SITES = {
         f"{_INVOKE} -OCIRunner '  '",
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-OCIRunnerneedsavalue",
     ),
     "Scanners-empty-element": (
         f"{_INVOKE} -Scanners ''",
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-Scannersneedsavalue",
     ),
     "ExcludeScanners-empty-element": (
         f"{_INVOKE} -ExcludeScanners bandit,''",
         {},
         {},
-        REFUSAL_EXIT,
+        USAGE_ERROR_EXIT,
         "-ExcludeScannersneedsavalue",
     ),
     "build-target-not-a-stage": (
@@ -1302,7 +1368,7 @@ def test_every_invoke_ash_refusal_exits_with_its_code(tmp_path, site):
 #: A-Z, a-z, 0-9 and . _ : / @ -, not starting with '-', and refuses anything else
 #: with 3: whitespace of any kind (U+00A0, U+0085 and U+2028, which bash's
 #: [[:space:]] and .NET's \s can disagree on), a non-ASCII letter, and the Kelvin
-#: sign, which a case-insensitive [A-Za-z] would take as K. Each cell: the name and
+#: sign, which a case-insensitive [A-Za-z] would take as K. Each case: the name and
 #: the code every run gives (0: the name was taken).
 _IMAGE_NAMES = {
     "no-break-space": (f"ash{chr(0x00A0)}name:ci", REFUSAL_EXIT),
@@ -1438,7 +1504,7 @@ def test_the_wrappers_agree_on_a_base_image_override(tmp_path, name):
 
 #: Characters a refusal must not print as they are: each would move the cursor or
 #: change colors (ESC), reverse the text after it (U+202E), hide in it (U+200B), or
-#: break the line (U+2028). Each cell: the character and how Invoke-ASH writes it.
+#: break the line (U+2028). Each case: the character and how Invoke-ASH writes it.
 _HIDDEN_CHARACTERS = {
     "escape": (chr(0x1B), "\\x1B"),
     "right-to-left-override": (chr(0x202E), "\\u202E"),
@@ -1682,7 +1748,7 @@ def test_the_wrappers_show_a_refused_value_alike(tmp_path, where, character):
 #: --workspace and an explicit --sandbox other than off, together, in either order,
 #: given as separate arguments or as one quoted argument. The sandbox is the usage
 #: error ASH itself gives, so both wrappers refuse it with 5 whatever its place; the
-#: workspace pass runs after it. Each cell: ./ash's arguments and Invoke-ASH's.
+#: workspace pass runs after it. Each case: ./ash's arguments and Invoke-ASH's.
 _WORKSPACE_AND_SANDBOX = {
     "separate-workspace-first": (
         ["--workspace", "w.code-workspace", "--sandbox", "bwrap"],
@@ -1708,9 +1774,9 @@ _WORKSPACE_AND_SANDBOX = {
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
 )
-@pytest.mark.parametrize("cell", sorted(_WORKSPACE_AND_SANDBOX))
-def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, cell):
-    ash_args, invocation = _WORKSPACE_AND_SANDBOX[cell]
+@pytest.mark.parametrize("case", sorted(_WORKSPACE_AND_SANDBOX))
+def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, case):
+    ash_args, invocation = _WORKSPACE_AND_SANDBOX[case]
     (tmp_path / "src").mkdir()
     runner = _native_runner(tmp_path)
     proc = subprocess.run(  # nosec B603 - fixed interpreter and script, list args
@@ -1738,7 +1804,7 @@ def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, cell)
     (tmp_path / "invoke-ash").mkdir()
     result, calls = _run_script(tmp_path / "invoke-ash", _wrapped(invocation))
 
-    assert [proc.returncode, result.returncode] == [_SANDBOX_EXIT] * 2, (
+    assert [proc.returncode, result.returncode] == [USAGE_ERROR_EXIT] * 2, (
         proc.stderr + result.stderr
     )
     assert "--sandbox bwrap cannot be used" in proc.stderr, proc.stderr
@@ -1863,7 +1929,7 @@ def test_the_wrappers_show_ash_config_in_their_warning_alike(tmp_path, character
 #: A build target or a --sandbox mode with a control or format character after it.
 #: PowerShell's -eq, -in and -notin compare with the culture, which ignores those
 #: characters, so 'ci' + ESC was taken as ci and 'off' + U+200B as off, where ./ash
-#: refuses both. Each cell: ./ash's arguments, the variable Invoke-ASH reads the value
+#: refuses both. Each case: ./ash's arguments, the variable Invoke-ASH reads the value
 #: from, the value, and the code both give (0: taken).
 _TARGET_AND_MODE_LOOKALIKES = {
     **{
@@ -1878,7 +1944,7 @@ _TARGET_AND_MODE_LOOKALIKES = {
         )
     },
     **{
-        f"sandbox-{name}": ("--sandbox", f"off{chr(code)}", _SANDBOX_EXIT)
+        f"sandbox-{name}": ("--sandbox", f"off{chr(code)}", USAGE_ERROR_EXIT)
         for name, code in (
             ("escape", 0x1B),
             ("zero-width-space", 0x200B),
@@ -1896,9 +1962,9 @@ _TARGET_AND_MODE_LOOKALIKES = {
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
 )
-@pytest.mark.parametrize("cell", sorted(_TARGET_AND_MODE_LOOKALIKES))
-def test_the_wrappers_agree_on_a_lookalike_target_or_mode(tmp_path, cell):
-    option, value, code = _TARGET_AND_MODE_LOOKALIKES[cell]
+@pytest.mark.parametrize("case", sorted(_TARGET_AND_MODE_LOOKALIKES))
+def test_the_wrappers_agree_on_a_lookalike_target_or_mode(tmp_path, case):
+    option, value, code = _TARGET_AND_MODE_LOOKALIKES[case]
     (tmp_path / "src").mkdir()
     runner = _native_runner(tmp_path)
     proc = subprocess.run(  # nosec B603 - fixed interpreter and script, list args
@@ -2039,7 +2105,10 @@ def test_every_refusal_that_shows_a_value_escapes_its_hidden_characters(tmp_path
 #: ``$envConfigHeld`` is one of four phrases the helper picks for the character a
 #: --mount cannot take in the ASH_CONFIG path. Both are allowed by the extent the walk
 #: reaches on its way up from the variable, so ``$id`` on its own stays unlisted: the
-#: value, ``$id[1]``, goes through Format-AshShownValue.
+#: value, ``$id[1]``, goes through Format-AshShownValue. ``$outputHint`` is empty or
+#: one fixed sentence the helper picks, naming -OutputDir as the way to write
+#: elsewhere after a refusal of the default output directory: text the helper chose,
+#: so Format-AshShownValue, which is for caller values, would only alter it.
 _INTERPOLATED_AS_IS = {
     "$createReason",
     "$writeReason",
@@ -2063,6 +2132,8 @@ _INTERPOLATED_AS_IS = {
     "$envConfigHeld",  # a newline, a carriage return, a comma or a double quote
     "$runnerRefusal",  # the OCI_RUNNER refusal, built from $tried
     "$mountRefusal",  # the --mount refusal, built from shown paths and a held phrase
+    "$wrapperRefusal",  # the OCI_RUNNER_WRAPPER refusal, built from the shown wrapper word
+    "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
 }
 
 
@@ -2136,7 +2207,7 @@ def _unshown_values(tmp_path: Path, source: Path) -> tuple[int, list[str]]:
 def test_every_value_a_message_interpolates_is_shown(tmp_path):
     """A value in a throw or a Write-* call goes through Format-AshShownValue.
 
-    The cells above reach the sites an input can reach. This reads the source with
+    The cases above reach the sites an input can reach. This reads the source with
     PowerShell's parser, so it holds a site no input reaches (the -AshArgs parse
     error) to the same rule, whatever form the message takes: a throw on one line
     with its if, a concatenation, a -f format, Write-Error, Write-Verbose or
@@ -2230,6 +2301,16 @@ def test_the_help_gives_the_wrapped_form():
     description = help_text.split(".DESCRIPTION")[1].split(".PARAMETER")[0]
     form = "try { Invoke-ASH ... } catch { " + "; ".join(_WRAPPED_CATCH) + " }"
     assert _unwrapped(form) in _unwrapped(description), description
+
+
+@pytest.mark.unit
+def test_the_tests_that_need_no_pwsh_are_in_this_module():
+    """The names the pwsh gate lets through are tests that exist here, so a rename
+    cannot quietly put a text-only test back behind a gate it does not need."""
+    missing = sorted(
+        name for name in _WITHOUT_PWSH if not callable(globals().get(name))
+    )
+    assert missing == [], missing
 
 
 @pytest.mark.integration
@@ -2595,7 +2676,8 @@ def test_quiet_and_no_color_are_dropped_without_a_warning(tmp_path):
 # .ash/ash_output, or .ash, as a link would get the scan's output, and the
 # in-container cleanup of the previous run's analysis, reports, scanners, and
 # converted directories, sent wherever the link points. Since the image is built for
-# the caller's IDs those writes succeed.
+# the caller's IDs those writes succeed. The default output directory is inside
+# -SourceDir, so the committed links below sit in the scanned directory, src.
 
 
 def _refused(tmp_path, invocation: str):
@@ -2641,16 +2723,16 @@ def test_an_output_directory_reached_through_a_link_is_refused(tmp_path, linked)
     (tmp_path / "src").mkdir()
     output = ".ash/ash_output"
     if linked == ".ash/ash_output":
-        (tmp_path / ".ash").mkdir()
-        _link_dir(tmp_path / ".ash" / "ash_output", target)
-        component = tmp_path / ".ash" / "ash_output"
+        (tmp_path / "src" / ".ash").mkdir()
+        _link_dir(tmp_path / "src" / ".ash" / "ash_output", target)
+        component = tmp_path / "src" / ".ash" / "ash_output"
     elif linked == ".ash":
-        _link_dir(tmp_path / ".ash", target)
-        component = tmp_path / ".ash"
+        _link_dir(tmp_path / "src" / ".ash", target)
+        component = tmp_path / "src" / ".ash"
     elif linked == ".ash/ash_output (dangling)":
-        (tmp_path / ".ash").mkdir()
-        _link_dir(tmp_path / ".ash" / "ash_output", target / "not-yet")
-        component = tmp_path / ".ash" / "ash_output"
+        (tmp_path / "src" / ".ash").mkdir()
+        _link_dir(tmp_path / "src" / ".ash" / "ash_output", target / "not-yet")
+        component = tmp_path / "src" / ".ash" / "ash_output"
     elif linked == "src/out":
         _link_dir(tmp_path / "src" / "out", target)
         output = "src/out"
@@ -2666,6 +2748,10 @@ def test_an_output_directory_reached_through_a_link_is_refused(tmp_path, linked)
     # The refusal names the linked component, and says to pass the resolved path.
     assert _unwrapped(f"('{component}')") in _unwrapped(result.stdout), result.stdout
     assert "resolved path" in result.stdout, result.stdout
+    # A refusal of the default output directory names -OutputDir as the way to
+    # write elsewhere, as ./ash names --output-dir; one of a given -OutputDir does not.
+    hinted = "pass -OutputDir to write elsewhere" in " ".join(result.stdout.split())
+    assert hinted == (explicit == ""), result.stdout
     assert result.returncode == REFUSAL_EXIT, result.stdout + result.stderr
     assert calls == []
     assert list(target.iterdir()) == [], list(target.iterdir())
@@ -2722,7 +2808,7 @@ def test_a_link_is_found_when_the_output_directory_is_typed_in_another_case(tmp_
 def test_an_output_directory_without_links_is_created(tmp_path):
     result, calls = _invoke(tmp_path, "Invoke-ASH -NoBuild -SourceDir src")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / ".ash" / "ash_output").is_dir()
+    assert (tmp_path / "src" / ".ash" / "ash_output").is_dir()
     assert _run_call(result, calls)
 
 

@@ -171,16 +171,24 @@ class TestDiscoveryChecksEachCandidateBeforeOpeningIt:
         assert "Errno" not in str(excinfo.value)
         assert str(outside) not in str(excinfo.value)
 
-    def test_on_windows_a_linked_candidate_is_refused_unresolved(
+    def test_on_windows_a_candidate_linked_to_a_share_is_refused_unresolved(
         self, tree, monkeypatch
     ):
         """Resolving a link on Windows can open a connection to the host a UNC
-        target names, so under a permit a linked source is refused, not resolved,
-        as an extends base outside the root is."""
+        target names, so under a permit a source linked to a share is refused,
+        not resolved, as an extends base outside the root is."""
         inside = tree.scan / "real.toml"
         inside.write_text('[tool.ash]\nproject_name = "x"\n', encoding="utf-8")
         (tree.scan / "pyproject.toml").symlink_to(inside)
         monkeypatch.setattr(config_sources, "_on_windows", lambda: True)
+        real_readlink = os.readlink
+
+        def readlink(path, *args, **kwargs):
+            if Path(os.fspath(path)) == tree.scan / "pyproject.toml":
+                return "\\\\server\\share\\pyproject.toml"
+            return real_readlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "readlink", readlink)
         resolved = []
         real_realpath = os.path.realpath
 
@@ -201,6 +209,21 @@ class TestDiscoveryChecksEachCandidateBeforeOpeningIt:
         (tree.scan / "pyproject.toml").write_text(
             '[tool.ash]\nproject_name = "x"\n', encoding="utf-8"
         )
+        monkeypatch.setattr(config_sources, "_on_windows", lambda: True)
+
+        discovery = config_sources.discover_config_source(tree.scan, permit=_gate())
+
+        assert discovery.selected.path == tree.scan / "pyproject.toml"
+
+    def test_on_windows_a_candidate_linked_to_a_local_file_inside_the_grant_is_used(
+        self, tree, monkeypatch
+    ):
+        """A link whose chain stays on local names is resolved and judged by the
+        permit as the file it names, so one that stays inside the grant is
+        discovered."""
+        inside = tree.scan / "real.toml"
+        inside.write_text('[tool.ash]\nproject_name = "x"\n', encoding="utf-8")
+        (tree.scan / "pyproject.toml").symlink_to(inside)
         monkeypatch.setattr(config_sources, "_on_windows", lambda: True)
 
         discovery = config_sources.discover_config_source(tree.scan, permit=_gate())

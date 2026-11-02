@@ -45,7 +45,10 @@ from automated_security_helper.config.config_linter import (
     LintCategory,
     LintSeverity,
 )
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.resolve_config import (
+    ConfigFileRefused,
+    resolve_config,
+)
 from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models import asharp_model
@@ -369,14 +372,18 @@ class TestMalformedExpiration:
     def test_config_file_with_a_malformed_date_is_refused(self, tmp_path):
         """The scanned repository's own config is refused whole, never applied in part.
 
-        A discovered in-tree config is advisory, so its invalidity does not veto
-        the operator's scan: resolve_config refuses the FILE, warns, and
-        resolves on the operator and default chain as if it were absent
-        (config/resolve_config.py, the ConfigFileRefused containment). What
-        this pins is that the entry is not applied: the resolution carries no
-        ignore path from the refused file, and the warning names the date rule.
-        A config the operator NAMED with the same date still raises; that is
-        TestWorkspacePolicy's subject.
+        A discovered in-tree config with a malformed date is refused as a
+        named one is: resolve_config re-raises the file's refusal
+        (config/resolve_config.py, the ConfigFileRefused arm: "refused, never
+        replaced by the default config, for a discovered file as for a named
+        one"), so the scan exits 3 instead of running with the file's ignore
+        paths and suppressions switched off, and the refusal names the date
+        rule. This test pins that refusal: it asserts ``resolve_config`` raises,
+        so a change that contains such a file instead (warns about it and
+        resolves without it) turns it red on purpose. Which of the two a scan
+        should do is a question of contract, not of this test; the pin is here
+        so that the change is made knowingly. A config the operator NAMED with the same date raises the same way;
+        the workspace policy's own refusal is TestWorkspacePolicy's subject.
         """
         source = tmp_path / "src"
         source.mkdir()
@@ -389,18 +396,9 @@ class TestMalformedExpiration:
             "      expiration: '2026/06/30'\n",
             encoding="utf-8",
         )
-        with patch(
-            "automated_security_helper.config.resolve_config.ASH_LOGGER"
-        ) as logger:
-            config = resolve_config(source_dir=source)
-        warned = [str(c.args[0]) for c in logger.warning.call_args_list]
-        assert any("contributes nothing" in w and "YYYY-MM-DD" in w for w in warned), (
-            warned
-        )
-        assert config is not None
-        assert not any(
-            entry.path == "vendor/**" for entry in config.global_settings.ignore_paths
-        ), config.global_settings.ignore_paths
+        with pytest.raises(ConfigFileRefused) as excinfo:
+            resolve_config(source_dir=source)
+        assert "YYYY-MM-DD" in str(excinfo.value)
 
     def test_unvalidated_malformed_entry_is_not_applied(self, tmp_path):
         """An entry built without validation fails toward scanning, with a warning.
@@ -496,8 +494,19 @@ class TestExpiryWarning:
         )
         assert any("suppressions will expire within 30 days" in w for w in warnings)
 
-    def test_ignore_paths_are_warned_about_under_ignore_suppressions(self, tmp_path):
-        """--ignore-suppressions skips the SARIF step, not the scanners' pre-filter."""
+    def test_nothing_expiring_is_warned_about_under_ignore_suppressions(self, tmp_path):
+        """--ignore-suppressions lifts the suppressions and the global ignore paths.
+
+        ``models.core.ignore_paths_that_skip_scanning`` hands the scanners and
+        converters no global ignore path under the flag and the SARIF step
+        applies none (docs/content/concepts/suppressions.md), so a global ignore
+        path's expiry changes nothing about the run either, and the checker names
+        neither kind. A scanner's own option list (bandit ``excluded_paths``,
+        checkov ``skip_path``, syft ``exclude``) is not lifted and is still
+        checked (TestExpiryWarningsCoverScannerOptionLists). This test used to
+        expect the ignore path to be warned about on the reading that the flag
+        turned off suppressions only.
+        """
         config = _config(
             ignore_paths=[
                 IgnorePathWithReason(
@@ -518,13 +527,7 @@ class TestExpiryWarning:
         ) as logger:
             assert handle_suppression_expiration_check(plugin_context=context)
         warnings = [str(c.args[0]) for c in logger.warning.call_args_list]
-        assert any(IGNORE_PATTERN in w and "2026-07-01" in w for w in warnings), (
-            warnings
-        )
-        assert not any("B101" in w for w in warnings), (
-            "suppressions are not applied under --ignore-suppressions, so their "
-            "expiry is not news"
-        )
+        assert warnings == [], warnings
 
     def test_an_entry_expiring_today_is_not_called_one_that_will_expire(self, tmp_path):
         """On its expiration date an entry has already stopped applying."""
@@ -596,13 +599,18 @@ class TestExpiredEntriesWarning:
         assert "B101" in message and "tests/a.py" in message and "2026-06-15" in message
         assert "build/**" not in message and "B602" not in message
 
-    def test_suppressions_are_left_out_under_ignore_suppressions(self, tmp_path):
+    def test_nothing_is_reported_expired_under_ignore_suppressions(self, tmp_path):
+        """Under the flag no suppression and no global ignore path applies, the
+        expired ones included, so an expired one changes nothing about the scan and
+        no message names one (a scanner's own option list is not lifted, and its
+        expired entries are named: TestExpiryWarningsCoverScannerOptionLists).
+        This test used to expect the expired ignore path to be named, on the
+        reading that the flag turned off suppressions only."""
         warnings = self._warnings(
             tmp_path, self._expired_config(), ignore_suppressions=True
         )
-        (message,) = [w for w in warnings if "have expired" in w]
-        assert IGNORE_PATTERN in message
-        assert "B101" not in message
+        assert [w for w in warnings if "have expired" in w] == [], warnings
+        assert warnings == [], warnings
 
     def test_nothing_expired_means_no_message(self, tmp_path):
         config = _config(
@@ -805,6 +813,117 @@ class TestExpiryWarningsCoverScannerOptionLists:
         expiring = "\n".join(w for w in warnings if "have expired" not in w)
         assert f"{subject} 'soon' expires on 2026-07-01" in expiring, warnings
         assert "'later'" not in expiring and "'old'" not in expiring
+
+    @pytest.mark.parametrize(
+        "scanner,field,subject",
+        [
+            ("bandit", "excluded_paths", "Bandit excluded path"),
+            ("checkov", "skip_path", "Checkov skip path"),
+            ("syft", "exclude", "Syft exclude entry"),
+        ],
+    )
+    def test_an_expired_entry_is_still_named_under_ignore_suppressions(
+        self, tmp_path, scanner, field, subject
+    ):
+        """Red at the base: the handler returned before it looked at any list.
+        The flag lifts suppressions and global ignore paths; a scanner's option
+        list is handed to the tool as its own argument either way, so an
+        expired entry there still changes what the tool scans. The global
+        ignore path that expired too is not named, as before."""
+        config = AshConfig(
+            project_name="test-project",
+            global_settings={
+                "ignore_paths": [
+                    {"path": "vendor/**", "reason": "r", "expiration": "2026-06-01"}
+                ]
+            },
+            scanners={
+                scanner: {
+                    "options": {
+                        field: [
+                            {"path": "old", "reason": "r", "expiration": "2026-06-01"}
+                        ]
+                    }
+                }
+            },
+        )
+        context = _context(tmp_path, config)
+        context.ignore_suppressions = True
+
+        warnings = self._warnings_for(context)
+
+        (expired,) = [w for w in warnings if "have expired" in w]
+        assert f"{subject} 'old' expired on 2026-06-01" in expired, expired
+        # In no warning at all, not only the one about expired entries.
+        assert not any("vendor" in w for w in warnings), warnings
+
+    @pytest.mark.parametrize(
+        "scanner,field,subject",
+        [
+            ("bandit", "excluded_paths", "Bandit excluded path"),
+            ("checkov", "skip_path", "Checkov skip path"),
+            ("syft", "exclude", "Syft exclude entry"),
+        ],
+    )
+    def test_an_expiring_entry_is_still_named_under_ignore_suppressions(
+        self, tmp_path, scanner, field, subject
+    ):
+        """An entry that will expire within 30 days is named for the same reason
+        an expired one is (the test above): the tool is handed the list under
+        the flag. Deleting the handler's expiring-entries call for the scanner
+        lists leaves every other test green; this one goes red. The global
+        ignore path that is about to expire too is not named."""
+        config = AshConfig(
+            project_name="test-project",
+            global_settings={
+                "ignore_paths": [
+                    {"path": "vendor/**", "reason": "r", "expiration": "2026-07-01"}
+                ]
+            },
+            scanners={
+                scanner: {
+                    "options": {
+                        field: [
+                            {
+                                "path": "soon",
+                                "reason": "r",
+                                "expiration": "2026-07-01",
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+        context = _context(tmp_path, config)
+        context.ignore_suppressions = True
+
+        warnings = self._warnings_for(context)
+
+        assert "The following ignore paths will expire within 30 days:" in warnings
+        named = "\n".join(warnings)
+        assert f"{subject} 'soon' expires on 2026-07-01" in named, warnings
+        assert "vendor" not in named, warnings
+
+    def test_the_lists_the_flag_lifts_are_recorded_not_guessed(self):
+        """Red at the base: there was no such record, and the handler took a
+        list for a scanner's own because its first key was ``scanners``. The
+        record names the global ignore paths and nothing else, every name in it
+        is a list the expiry check reads, and the rest are the scanner lists."""
+        lifted = models_core.IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS
+        listed = [keys for keys, _subject in models_core.IGNORE_PATH_LISTS]
+
+        assert lifted == {("global_settings", "ignore_paths")}
+        assert lifted <= set(listed)
+        assert {keys[0] for keys in listed if keys not in lifted} == {"scanners"}
+
+    @staticmethod
+    def _warnings_for(context) -> list[str]:
+        with patch(
+            "automated_security_helper.plugin_modules.ash_builtin.event_handlers."
+            "suppression_expiration_checker.ASH_LOGGER"
+        ) as logger:
+            assert handle_suppression_expiration_check(plugin_context=context)
+        return [str(c.args[0]) for c in logger.warning.call_args_list]
 
 
 @pytest.mark.usefixtures("fixed_clock")
@@ -1463,6 +1582,10 @@ class TestEveryReaderFiltersExpiredEntries:
         # Workspace policy: copied into each project's global_settings.ignore_paths.
         ("config/ash_workspace_config.py", "ignore_paths"): "feeds-global",
         ("workspace/plan.py", "policy_ignore_paths"): "feeds-global",
+        # What one push-down of the policy's entries made for a project
+        # (_PushedDown in workspace/policy.py): the entries are then resolved into
+        # the project's policy, whose ignore paths feed plan.policy_ignore_paths.
+        ("workspace/policy.py", "entries"): "feeds-global",
         # Scanner options, turned into tool arguments in their own module.
         (
             "plugin_modules/ash_builtin/scanners/bandit_scanner.py",
@@ -1476,6 +1599,13 @@ class TestEveryReaderFiltersExpiredEntries:
             "plugin_modules/ash_builtin/scanners/syft_scanner.py",
             "exclude",
         ): "scanner-option",
+        # The list scan() was handed, kept so nothing_to_scan_reason answers from
+        # the same package selection; _package_manifests filters it through
+        # active_ignore_paths() at the read, so no entry is applied unfiltered.
+        (
+            "plugin_modules/ash_builtin/scanners/npm_audit_scanner.py",
+            "_handed_ignore_paths",
+        ): "filtered-at-read",
     }
     # Readers of a scanner option list that do not turn it into arguments.
     # None: bandit's _execute_scan does not save and restore the list.
@@ -1507,6 +1637,135 @@ class TestEveryReaderFiltersExpiredEntries:
             "a field typed with IgnorePathWithReason was added or removed; say in "
             "ENTRY_FIELDS how its expiration is enforced: "
             f"{sorted(found ^ set(self.ENTRY_FIELDS))}"
+        )
+
+    def test_filtered_at_read_fields_are_handed_only_to_a_filtering_function(self):
+        """The ``filtered-at-read`` label is a claim about the code, so it is
+        checked like the other two kinds: every read of the field is an
+        argument of a call to a function in the same module, and that function
+        passes the parameter receiving it through ``active_ignore_paths``. A
+        read anywhere else, or a callee that stopped filtering, fails here."""
+        offenders = []
+        checked = 0
+        for (rel, field_name), kind in sorted(self.ENTRY_FIELDS.items()):
+            if kind != "filtered-at-read":
+                continue
+            tree = ast.parse((self.PACKAGE / rel).read_text(encoding="utf-8"))
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+            functions = {
+                node.name: node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            reads = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute)
+                and node.attr == field_name
+                and isinstance(node.ctx, ast.Load)
+            ]
+            assert reads, f"no read of {field_name} found in {rel}"
+            for node in reads:
+                call = parents.get(node)
+                where = f"{rel}:{node.lineno} {field_name}"
+                if not isinstance(call, ast.Call) or node not in call.args:
+                    offenders.append(f"{where} is read outside a call's arguments")
+                    continue
+                callee = functions.get(self._called_name(call) or "")
+                if callee is None:
+                    offenders.append(f"{where} is handed to a function not in {rel}")
+                    continue
+                names = [arg.arg for arg in callee.args.args]
+                if names and names[0] in ("self", "cls"):
+                    names = names[1:]
+                position = call.args.index(node)
+                if position >= len(names):
+                    offenders.append(f"{where} lands in no named parameter")
+                    continue
+                parameter = names[position]
+                filtered = any(
+                    isinstance(inner, ast.Call)
+                    and self._called_name(inner) == "active_ignore_paths"
+                    and any(
+                        isinstance(name, ast.Name) and name.id == parameter
+                        for argument in inner.args
+                        for name in ast.walk(argument)
+                    )
+                    for inner in ast.walk(callee)
+                )
+                if not filtered:
+                    offenders.append(
+                        f"{where}: {callee.name} does not pass {parameter} "
+                        "through active_ignore_paths()"
+                    )
+                checked += 1
+        assert checked, "no filtered-at-read field was checked"
+        assert offenders == [], "\n".join(offenders)
+
+    def test_a_field_classified_filtered_at_read_is_filtered_where_it_is_read(self):
+        """``filtered-at-read`` is a claim about the code: every read of the field
+        is either inside an ``active_ignore_paths(...)`` call, or is an argument
+        of a call to a function of the same module whose body calls it somewhere.
+        Without this the classification in ENTRY_FIELDS is a comment, and a new
+        read that applies the stored list as it is would pass.
+
+        This is the coarse check, and says so: it does not ask whether that
+        function filters the argument it was handed (the sibling test above does,
+        by the parameter that receives it), and a function is found by its bare
+        name across the module, so a same-named method of another class counts.
+        It stays as the check that also covers a read inside a nested call."""
+        claimed = [
+            (rel, name)
+            for (rel, name), how in sorted(self.ENTRY_FIELDS.items())
+            if how == "filtered-at-read"
+        ]
+        # The control: the table holds a claim to check, and each field is read.
+        assert claimed
+        offenders = []
+        for rel, name in claimed:
+            tree = ast.parse((self.PACKAGE / rel).read_text(encoding="utf-8"))
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+            functions = {
+                node.name: node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            reads = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute)
+                and node.attr == name
+                and isinstance(node.ctx, ast.Load)
+            ]
+            assert reads, f"{rel} never reads {name}"
+            for node in reads:
+                filtered = False
+                ancestor = parents.get(node)
+                while ancestor is not None and not filtered:
+                    if isinstance(ancestor, ast.Call):
+                        called = self._called_name(ancestor)
+                        filtered = called == "active_ignore_paths" or (
+                            called in functions
+                            and any(
+                                isinstance(inner, ast.Call)
+                                and self._called_name(inner) == "active_ignore_paths"
+                                for inner in ast.walk(functions[called])
+                            )
+                        )
+                    ancestor = parents.get(ancestor)
+                if not filtered:
+                    offenders.append(f"{rel}:{node.lineno} ({name})")
+        assert offenders == [], (
+            "these reads of a field classified filtered-at-read do not reach "
+            "active_ignore_paths():\n" + "\n".join(offenders)
         )
 
     def test_scanner_option_lists_are_read_through_active_ignore_paths(self):

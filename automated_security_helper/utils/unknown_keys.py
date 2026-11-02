@@ -42,7 +42,7 @@ from typing import (
     Tuple,
 )
 
-from pydantic import BaseModel, ValidationInfo
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationInfo
 
 #: Validation-context key. Bound to a list, it makes the checks that honor it
 #: record a note there and keep the data rather than refuse it. Passed only by
@@ -112,15 +112,49 @@ def tolerated_notes(info: Optional[ValidationInfo]) -> Optional[List[str]]:
 
 
 def known_keys(model_cls: type[BaseModel]) -> Set[str]:
-    """Every key ``model_cls`` accepts: field names and their aliases."""
+    """Every key ``model_cls`` accepts: field names and their aliases.
+
+    A validation alias can be one name, an ``AliasChoices`` of several, or an
+    ``AliasPath`` into a nested value; pydantic accepts a key by each choice and
+    by a path's first segment, so each of those is a key here too, and
+    ``refuse_unknown_keys`` does not refuse a key the model would take.
+
+    A field's own name is a key only when pydantic reads it: always for a field
+    with no alias, and for an aliased field only when the model validates by
+    name too (``populate_by_name`` or ``validate_by_name``) or not by alias at
+    all. Counted whatever the model did, a key written by field name for an
+    alias-only field passed this check and was kept as an extra the model never
+    read, where a misspelled alias is refused with its "did you mean".
+    """
+    config = model_cls.model_config
+    by_name = bool(
+        config.get("validate_by_name", config.get("populate_by_name", False))
+    )
+    by_alias = config.get("validate_by_alias", True)
     keys: Set[str] = set()
     for name, field in model_cls.model_fields.items():
-        keys.add(name)
+        aliased = field.alias is not None or field.validation_alias is not None
+        if not aliased or by_name or not by_alias:
+            keys.add(name)
         if field.alias:
             keys.add(field.alias)
-        if isinstance(field.validation_alias, str):
-            keys.add(field.validation_alias)
+        keys.update(_alias_keys(field.validation_alias))
     return keys
+
+
+def _alias_keys(alias: Any) -> Set[str]:
+    """The top-level keys a field's validation alias accepts."""
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasChoices):
+        keys: Set[str] = set()
+        for choice in alias.choices:
+            keys.update(_alias_keys(choice))
+        return keys
+    if isinstance(alias, AliasPath):
+        first = alias.path[0] if alias.path else None
+        return {first} if isinstance(first, str) else set()
+    return set()
 
 
 def _folded(key: str) -> str:

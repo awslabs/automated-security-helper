@@ -62,13 +62,17 @@ Each of these takes a command name or an absolute path, and so does the `oci_run
 `OCI_RUNNER_WRAPPER` that applies to the first word. A `$` in the document's value is
 not expanded, so `$HOME/bin/docker` there is a relative path. With no usable home
 directory (`HOME` empty or relative, or unset with no absolute home in the passwd entry),
-a value that starts with `~/` is not used: ASH logs a warning about `HOME` and picks a
-runtime as if none were named, or, for the wrapper, starts the runtime without one. A
-relative path with a directory part, such as `bin/docker`, is read against the directory
-you run ASH in when you pass it to `--oci-runner` or give it in the document. In
-`OCI_RUNNER` it is not run: ASH logs a warning and picks a runtime as if none were named.
-As the first word of `OCI_RUNNER_WRAPPER` it is not used either, and the runtime starts
-without a wrapper, with a warning.
+a value that starts with `~/` is refused: ASH exits with code 3 and a message that names
+the variable, and it neither picks another runtime nor starts the runtime without the
+wrapper. A relative path with a directory part, such as `bin/docker`, is read against the
+directory you run ASH in when you pass it to `--oci-runner` or give it in the document. In
+`OCI_RUNNER` it is refused the same way, and so it is as the first word of
+`OCI_RUNNER_WRAPPER`: it names a file under the directory you run ASH from, usually the
+repository being scanned, so ASH does not run it. `./ash` refuses a relative `OCI_RUNNER`
+and `OCI_RUNNER_WRAPPER` the same way, and `Invoke-ASH` a relative `OCI_RUNNER_WRAPPER`.
+Neither script expands a leading `~`, so there a value that starts with `~/` is refused
+as a relative path: your shell expands it when you write `export OCI_RUNNER=~/bin/docker`,
+or you can spell the path out. A scan in local mode reads neither variable.
 
 ## Root and non-root images {#build-target}
 

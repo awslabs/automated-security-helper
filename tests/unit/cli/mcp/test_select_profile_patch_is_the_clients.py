@@ -45,6 +45,7 @@ from automated_security_helper.cli.mcp.sandbox import (
     session_sandbox,
 )
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.sandbox.policy import DEFAULT_ENVIRONMENT
 
 pytestmark = pytest.mark.unit
 
@@ -158,6 +159,9 @@ def _scan_outcome(target: Path, session: str) -> Any:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config import resolve_config as rc
     from automated_security_helper.core import orchestrator
+    from automated_security_helper.core.resource_management import (
+        scan_management as management,
+    )
     from automated_security_helper.core.resource_management.scan_registry import (
         ScanRegistry,
     )
@@ -178,13 +182,29 @@ def _scan_outcome(target: Path, session: str) -> Any:
     output = target / ".ash" / "ash_output"
     output.mkdir(parents=True, exist_ok=True)
     registry = ScanRegistry()
+    # Registered for the session, as mcp_scan_directory registers a scan
+    # (session_id=_scan_owner(session_id)). The exemption for the scan's own copy
+    # of the session's profile asks the registry whether THIS session holds the
+    # scan (scan_management.session_holds_scan: another session's scan answers as
+    # an id never issued). A scan registered with no owner belongs to the stdio
+    # session, so the copy the scan loads read as the client's and the
+    # registered profile's grants were dropped.
     scan_id = registry.register_scan(
-        directory_path=str(target), output_directory=str(output)
+        directory_path=str(target),
+        output_directory=str(output),
+        session_id=session,
     )
     with (
         patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
         patch.object(orchestrator, "resolve_config", recording),
         patch.object(mcp_tools, "get_scan_registry", return_value=registry),
+        # The scan's exemption for its own copy of the session's profile
+        # (sandbox._is_a_live_scan_copy_of_this_sessions_file, through
+        # scan_management.session_holds_scan) reads the registry through
+        # scan_management, not through mcp_tools' handle. With only the
+        # handle patched, the scan registered in a registry the exemption
+        # never saw. Both handles are needed, and so is the owner above.
+        patch.object(management, "get_scan_registry", return_value=registry),
     ):
         asyncio.run(
             mcp_tools._run_scan_async(
@@ -721,12 +741,13 @@ def test_get_config_shows_a_patched_profile_with_the_registered_grants(
     shown = mcp_get_config(config_path=bound, session_id=SESSION)
 
     assert shown["project_name"] == "x"
-    # The full dump also shows the two scanner grants the profile leaves at
-    # their defaults.
+    # The full dump also shows the two scanner grants and the environment list
+    # the profile leaves at their defaults.
     assert shown["sandbox"] == {
         **_GRANTS,
         "read_path_scanners": [],
         "env_scanners": [],
+        "environment": list(DEFAULT_ENVIRONMENT),
     }
 
 

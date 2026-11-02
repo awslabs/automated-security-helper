@@ -30,10 +30,12 @@ tool.
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -44,7 +46,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
-from automated_security_helper.utils.package_manager_child import NO_YARNRC
+from automated_security_helper.utils import package_manager_child
+from automated_security_helper.utils.package_manager_child import (
+    NO_YARNRC_PREFIX,
+    is_no_yarnrc_name,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 from tests.utils.aws_isolation import isolate_from_aws
 from tests.utils.env_assertions import differing_names
@@ -110,16 +116,40 @@ def online(monkeypatch, tmp_path):
     isolate_from_aws(monkeypatch, tmp_path)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     # An inherited value would satisfy the cells that expect ASH to set these.
-    for name in ("YARN_IGNORE_PATH", "YARN_RC_FILENAME"):
+    for name in ("YARN_IGNORE_PATH", "YARN_RC_FILENAME", "XDG_RUNTIME_DIR"):
         monkeypatch.delenv(name, raising=False)
+    # tmp_path (and the test's HOME) sit under the system temporary directory,
+    # whose ancestors every account can write, so yarn's copy placement would
+    # pass over every directory this module offers it. The tests here are about
+    # which directory is chosen for which reason, not about that check, which
+    # tests/unit/utils/test_package_manager_child.py reads on its own.
+    system_tmp = tmp_path / "system-tmp"
+    system_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(system_tmp))
+    monkeypatch.setattr(package_manager_child, "_untrusted_ancestor", lambda path: None)
+    # The settings-file check is stood down too: a .npmrc, .yarnrc or
+    # .yarnrc.yml in any directory above pytest's basetemp (a checkout holding
+    # one, a TMPDIR under a real home) would pass every candidate over and
+    # fail the placement tests for a reason that has nothing to do with them.
+    monkeypatch.setattr(
+        package_manager_child, "_settings_file_ancestor", lambda path: None
+    )
     return monkeypatch
 
 
-def _scanner(tmp_path: Path, *, ignore_suppressions: bool = False) -> NpmAuditScanner:
+def _scanner(
+    tmp_path: Path,
+    *,
+    ignore_suppressions: bool = False,
+    output_dir: Path | None = None,
+) -> NpmAuditScanner:
+    """A scanner over tmp_path/repo; its output beside the repository unless
+    ``output_dir`` says otherwise (the default output directory is inside it)."""
+    output = output_dir if output_dir is not None else tmp_path / "out"
     context = PluginContext(
         source_dir=tmp_path / "repo",
-        output_dir=tmp_path / "out",
-        work_dir=tmp_path / "out" / "converted",
+        output_dir=output,
+        work_dir=output / "converted",
         config=get_default_config(),
         ignore_suppressions=ignore_suppressions,
     )
@@ -214,7 +244,14 @@ def test_npm_and_pnpm_run_from_a_copy_without_the_repository_s_files(
     (audit,) = _audits(spawns)
     assert audit["command"][0] == binary
     assert audit["cwd"] != package
-    assert sorted(audit["files"]) == sorted(["package.json", lockfile])
+    files = dict(audit["files"])
+    if binary == "pnpm":
+        # The copy is its own pnpm workspace root, with the package alone and
+        # none of the repository's file (its registry marker stays out).
+        workspace = files.pop("pnpm-workspace.yaml")
+        assert yaml.safe_load(workspace) == {"packages": ["."]}
+        assert REPOSITORY_REGISTRY not in workspace
+    assert sorted(files) == sorted(["package.json", lockfile])
     _assert_operator_settings_untouched(audit["env"])
 
 
@@ -257,8 +294,8 @@ def test_unsandboxed_yarn_runs_from_a_copy_outside_the_scanned_tree(online, tmp_
         ("1.22.22", ["yarn", "--no-default-rc", "audit", "--json"], False),
         # yarn 3 and 4 share the >=2 handling (YARN_RC_FILENAME, no leading
         # args); their stand-in answers differ, the document against nothing.
-        ("3.8.7", ["yarn", "npm", "audit", "--json", "--recursive"], True),
-        ("4.5.0", ["yarn", "npm", "audit", "--json", "--recursive"], True),
+        ("3.8.7", ["yarn", "npm", "audit", "--json", "--all", "--recursive"], True),
+        ("4.5.0", ["yarn", "npm", "audit", "--json", "--all", "--recursive"], True),
     ],
 )
 def test_sandboxed_yarn_reads_no_settings_file(
@@ -282,7 +319,10 @@ def test_sandboxed_yarn_reads_no_settings_file(
     ignore_path = audit["env"].get("YARN_IGNORE_PATH")
     rc_value = audit["env"].get("YARN_RC_FILENAME")
     assert ignore_path == "1"
-    assert rc_value == (NO_YARNRC if rc_filename else None)
+    if rc_filename:
+        assert is_no_yarnrc_name(rc_value), rc_value
+    else:
+        assert rc_value is None
 
 
 def _probes(spawns) -> List[Dict[str, Any]]:
@@ -296,7 +336,7 @@ def _assert_probe_reads_no_settings(probe: Dict[str, Any]) -> None:
     ignore_path = probe["env"].get("YARN_IGNORE_PATH")
     rc_value = probe["env"].get("YARN_RC_FILENAME")
     assert ignore_path == "1"
-    assert rc_value == NO_YARNRC
+    assert is_no_yarnrc_name(rc_value), rc_value
 
 
 @pytest.mark.parametrize("version", ["1.22.22", "3.8.7"])
@@ -329,29 +369,27 @@ def test_sandboxed_version_probe_reads_no_settings_file(online, tmp_path, versio
 
 
 @pytest.mark.parametrize(
-    ("version", "expected_command", "rc_value"),
+    ("version", "expected_command", "rc_filename"),
     [
-        ("1.22.22", ["yarn", "--no-default-rc", "audit", "--json"], None),
+        ("1.22.22", ["yarn", "--no-default-rc", "audit", "--json"], False),
         (
             "3.8.7",
-            ["yarn", "npm", "audit", "--json", "--recursive"],
-            NO_YARNRC,
+            ["yarn", "npm", "audit", "--json", "--all", "--recursive"],
+            True,
         ),
     ],
 )
-def test_yarn_runs_in_place_when_the_system_tmpdir_is_inside_the_scanned_tree(
-    online, tmp_path, version, expected_command, rc_value
+def test_yarn_runs_in_place_when_no_directory_outside_the_tree_can_hold_the_copy(
+    online, tmp_path, version, expected_command, rc_filename
 ):
-    """No copy can be made outside the tree, so the probe and the audit run in the
-    package directory with the repository's settings files dropped."""
-    import tempfile
-
+    """The output directory and the operator's cache directory are both inside the
+    scanned tree, so no copy can be made outside it: the probe and the audit run
+    in the package directory with the repository's settings files dropped."""
     spawns = _record(online, yarn_version=version)
-    scanner = _scanner(tmp_path)
+    repo = tmp_path / "repo"
+    scanner = _scanner(tmp_path, output_dir=repo / ".ash" / "ash_output")
     package = _repository(scanner.context.source_dir, "yarn.lock")
-    inside = scanner.context.source_dir / ".tmp-inside"
-    inside.mkdir()
-    online.setattr(tempfile, "gettempdir", lambda: str(inside))
+    online.setenv("XDG_CACHE_HOME", str(repo / ".cache-inside"))
 
     scanner.scan(target=scanner.context.source_dir, target_type="source")
 
@@ -364,7 +402,115 @@ def test_yarn_runs_in_place_when_the_system_tmpdir_is_inside_the_scanned_tree(
     ignore_path = audit["env"].get("YARN_IGNORE_PATH")
     audit_rc = audit["env"].get("YARN_RC_FILENAME")
     assert ignore_path == "1"
-    assert audit_rc == rc_value
+    if rc_filename:
+        assert is_no_yarnrc_name(audit_rc), audit_rc
+    else:
+        assert audit_rc is None
+
+
+def test_unsandboxed_yarn_copy_is_made_under_the_scan_s_output_directory(
+    online, tmp_path
+):
+    """yarn reads .yarnrc, .npmrc and .yarnrc.yml from its directory and every
+    parent. The copy used to be made under the system temporary directory, whose
+    ancestors on a shared host (/tmp) every user can write to, so a settings file
+    planted there would have redirected the audit. With the output directory
+    outside the scanned tree the copy goes there, as npm's and pnpm's do, and the
+    temporary directory is not on yarn's path. The ``online`` fixture is what
+    points the temporary directory at ``system-tmp``."""
+    spawns = _record(online, yarn_version="1.22.22")
+    scanner = _scanner(tmp_path)
+    _repository(scanner.context.source_dir, "yarn.lock")
+    system_tmp = tmp_path / "system-tmp"
+
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    for spawn in _probes(spawns) + _audits(spawns):
+        cwd = spawn["cwd"]
+        assert cwd.is_relative_to(scanner.context.output_dir), cwd
+        assert not cwd.is_relative_to(system_tmp), cwd
+        assert not cwd.is_relative_to(scanner.context.source_dir), cwd
+    (audit,) = _audits(spawns)
+    assert audit["command"] == ["yarn", "audit", "--json"]
+    assert "YARN_RC_FILENAME" not in audit["env"]
+    _assert_operator_settings_untouched(audit["env"])
+
+
+def test_unsandboxed_yarn_copy_uses_the_operator_s_cache_when_the_output_is_inside(
+    online, tmp_path
+):
+    """The default output directory is inside the scanned tree, where a copy would
+    put the repository's own settings files on yarn's path. The copy then goes
+    under the operator's cache directory ($XDG_CACHE_HOME/ash), whose ancestors
+    are the operator's own, not under the system temporary directory, and yarn
+    still reads the operator's settings (no --no-default-rc, no YARN_RC_FILENAME
+    on the audit). The ``online`` fixture is what points the temporary directory
+    at ``system-tmp``."""
+    spawns = _record(online, yarn_version="1.22.22")
+    repo = tmp_path / "repo"
+    scanner = _scanner(tmp_path, output_dir=repo / ".ash" / "ash_output")
+    _repository(scanner.context.source_dir, "yarn.lock")
+    cache_home = tmp_path / "cache-home"
+    online.setenv("XDG_CACHE_HOME", str(cache_home))
+    system_tmp = tmp_path / "system-tmp"
+
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    for spawn in _probes(spawns) + _audits(spawns):
+        cwd = spawn["cwd"]
+        assert cwd.is_relative_to(cache_home / "ash"), cwd
+        assert not cwd.is_relative_to(system_tmp), cwd
+        assert not cwd.is_relative_to(repo), cwd
+    (audit,) = _audits(spawns)
+    assert audit["command"] == ["yarn", "audit", "--json"]
+    assert "YARN_RC_FILENAME" not in audit["env"]
+    assert sorted(audit["files"]) == ["package.json", "yarn.lock"]
+    # The copy is removed when the child's block ends: the directories the
+    # tool ran in no longer exist. A glob on the copy's name prefix passed
+    # with nothing matched when the prefix differed, and said nothing.
+    for spawn in _probes(spawns) + _audits(spawns):
+        assert not spawn["cwd"].exists(), spawn["cwd"]
+
+
+def test_the_settings_file_yarn_is_told_to_read_is_never_one_the_package_holds(
+    online, tmp_path
+):
+    """In-place yarn 2+ runs in the package directory and is told the settings
+    file name to look for. With a fixed, published name, a package that holds a
+    file of that name would have yarn read it as its settings, yarnPath and
+    registry included. What this pins: the name is of the published random
+    shape, it is not the former fixed name (planted here) nor the bare prefix
+    (planted too), no file in the package matches it, and the probe's and the
+    audit's names differ. It does NOT pin collision handling: a planted name
+    with a guessed token matches a fresh 128-bit token with probability about
+    2^-128, so such a plant tells nothing and none is made."""
+    from automated_security_helper.utils import package_manager_child as child_module
+
+    online.setattr(child_module, "_sandboxed", lambda: True)
+    spawns = _record(online, yarn_version="3.8.7")
+    scanner = _scanner(tmp_path)
+    package = _repository(scanner.context.source_dir, "yarn.lock")
+    # The former fixed name and the bare published prefix: the two names a
+    # regression to a fixed or an empty token would produce.
+    for planted in (
+        ".ash-no-yarnrc.yml",
+        f"{NO_YARNRC_PREFIX}.yml",
+    ):
+        (package / planted).write_text(
+            f'yarnPath: ./marker.js\nnpmRegistryServer: "{REPOSITORY_REGISTRY}"\n',
+            encoding="utf-8",
+        )
+
+    scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    (probe,) = _probes(spawns)
+    (audit,) = _audits(spawns)
+    names = [probe["env"]["YARN_RC_FILENAME"], audit["env"]["YARN_RC_FILENAME"]]
+    for name in names:
+        assert is_no_yarnrc_name(name), name
+        assert not (package / name).exists(), name
+        assert not (package / name).is_symlink(), name
+    assert names[0] != names[1], names
 
 
 @pytest.mark.parametrize("ignore_suppressions", [False, True])
@@ -448,7 +594,10 @@ def test_a_yarn_3_advisory_reaches_the_report_through_the_isolation(online, tmp_
     report = scanner.scan(target=scanner.context.source_dir, target_type="source")
 
     (audit,) = _audits(spawns)
-    assert audit["command"] == capture["command"]
+    # The capture was produced without --all, which widens the workspaces
+    # audited and changes nothing in the document's format.
+    assert [p for p in audit["command"] if p != "--all"] == capture["command"]
+    assert "--all" in audit["command"], audit["command"]
     document = json.loads(capture["stdout"])
     expected = sorted(
         {

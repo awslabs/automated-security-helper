@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -113,11 +114,12 @@ def test_a_file_on_the_way_is_refused_before_the_scan_is_registered(
         response, f"Output directory cannot be created: {output} (Not a directory)"
     )
     assert blocker.read_text(encoding="utf-8") == CONTENT
-    assert registry.list_scans() == []
+    # Finished ones too: refused before registering, not registered and given back.
+    assert registry.list_scans(active_only=False) == []
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, create a directory in one without write permission",
 )
 @TOOLS
@@ -143,7 +145,7 @@ def test_one_that_fails_when_it_is_made_is_refused_and_given_back(
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, write into a directory without write permission",
 )
 @TOOLS

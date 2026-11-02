@@ -222,6 +222,7 @@ def test_nix_mode_judges_the_config_the_same_way(
         raise AssertionError("the nix launcher was invoked")
 
     monkeypatch.setattr(ras, "run_ash_nix", never)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     with pytest.raises(SystemExit) as refusal:
         ras.run_ash_scan(
             source_dir=str(src),
@@ -1352,6 +1353,7 @@ def test_nix_mode_refuses_an_unparsable_config_before_clearing_output(
 
     launcher = MagicMock(return_value=SimpleNamespace(returncode=0))
     monkeypatch.setattr(ras, "run_ash_nix", launcher)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     with pytest.raises(SystemExit) as finished:
         ras.run_ash_scan(
             source_dir=str(opts.source_dir),
@@ -2845,7 +2847,10 @@ def test_each_outer_mode_hands_the_gates_answer_to_the_record_repair(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     runner = ras._run_container_mode if mode == "container" else ras._run_nix_mode
     target = "run_ash_container" if mode == "container" else "run_ash_nix"
-    with patch.object(ras, target, side_effect=inner):
+    with (
+        patch.object(ras, target, side_effect=inner),
+        patch.object(ras, "nix_preflight", lambda: None),
+    ):
         runner(opts, MagicMock(), image_may_differ=answer)
     assert seen == [{"image_may_differ": answer}]
 
@@ -3024,6 +3029,7 @@ def _scan_through_the_gate(
     previous.write_text('{"runs": []}\n', encoding="utf-8")
     launcher = MagicMock(return_value=SimpleNamespace(returncode=0))
     monkeypatch.setattr(ras, "run_ash_nix", launcher)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     options = (
         {"mode": RunMode.nix}
         if mode == "nix"

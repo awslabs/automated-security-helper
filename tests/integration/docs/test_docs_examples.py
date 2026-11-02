@@ -26,10 +26,20 @@ that tree's interpreter and name the docs tree (conftest.py adds the option):
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+pytestmark = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="the docs runner is documented POSIX-only (docs_runner.py:41-47):"
+        " bash shell blocks, os.killpg, POSIX session PATH; its tests skip on"
+        " Windows",
+    ),
+]
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]

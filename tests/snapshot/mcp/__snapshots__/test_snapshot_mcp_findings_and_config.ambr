@@ -835,6 +835,7 @@
           'extension': 'ghas.sarif',
           'name': 'github-ghas',
           'options': dict({
+            'emit_automation_details': False,
             'exclude_suppressed': True,
           }),
         }),
@@ -938,6 +939,21 @@
       'sandbox': dict({
         'env_scanners': list([
         ]),
+        'environment': list([
+          'ALL_PROXY',
+          'HTTPS_PROXY',
+          'HTTP_PROXY',
+          'NO_PROXY',
+          'all_proxy',
+          'http_proxy',
+          'https_proxy',
+          'no_proxy',
+          'SSL_CERT_FILE',
+          'REQUESTS_CA_BUNDLE',
+          'CURL_CA_BUNDLE',
+          'NODE_EXTRA_CA_CERTS',
+          'SSL_CERT_DIR',
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
@@ -973,7 +989,7 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
-            'tool_version': '>=1.7.0,<2.0.0',
+            'tool_version': '>=1.7.8,<2.0.0',
           }),
         }),
         'cdk_nag': dict({
@@ -1424,6 +1440,7 @@
           'extension': 'ghas.sarif',
           'name': 'github-ghas',
           'options': dict({
+            'emit_automation_details': False,
             'exclude_suppressed': True,
           }),
         }),
@@ -1527,6 +1544,21 @@
       'sandbox': dict({
         'env_scanners': list([
         ]),
+        'environment': list([
+          'ALL_PROXY',
+          'HTTPS_PROXY',
+          'HTTP_PROXY',
+          'NO_PROXY',
+          'all_proxy',
+          'http_proxy',
+          'https_proxy',
+          'no_proxy',
+          'SSL_CERT_FILE',
+          'REQUESTS_CA_BUNDLE',
+          'CURL_CA_BUNDLE',
+          'NODE_EXTRA_CA_CERTS',
+          'SSL_CERT_DIR',
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
@@ -1562,7 +1594,7 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
-            'tool_version': '>=1.7.0,<2.0.0',
+            'tool_version': '>=1.7.8,<2.0.0',
           }),
         }),
         'cdk_nag': dict({

@@ -36,6 +36,7 @@ Nothing here reaches the network: bytes are served through a patched ``urlopen``
 
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import re
@@ -104,6 +105,9 @@ class _FakeResponse:
     def __init__(self, payload: bytes):
         self._payload = payload
         self._read = False
+        # The body copy checks the copied bytes against Content-Length
+        # (_copy_whole_body), so the stand-in declares its own length.
+        self.headers = {"Content-Length": str(len(payload))}
 
     def read(self, *_args):
         if self._read:
@@ -295,7 +299,9 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert argv[5] == "a" * 64
         assert argv[6] == "opengrep"
 
-    @pytest.mark.unit
+    # integration although urlopen is patched: a finished install ends, on macOS, by
+    # unquarantining the file with a child xattr process, a path this test takes there.
+    @pytest.mark.integration
     def test_a_matching_custom_digest_installs(self, test_plugin_context, tmp_path):
         digest = hashlib.sha256(PAYLOAD).hexdigest()
         scanner = _custom_scanner(test_plugin_context, {"linux/amd64": digest})
@@ -349,8 +355,8 @@ class TestACustomVersionNeedsItsOwnDigest:
         assert "0" * 64 not in argv
 
 
-@pytest.mark.unit
 class TestTheDigestCheckCanFail:
+    @pytest.mark.unit
     def test_a_mismatched_digest_installs_nothing(self, tmp_path):
         filename = _ASSET_TABLES["opengrep"][("linux", "amd64")]
         bin_dir = tmp_path / "bin"
@@ -364,6 +370,7 @@ class TestTheDigestCheckCanFail:
         assert list(bin_dir.iterdir()) == [], "a refused download left a file behind"
         assert read_receipt(bin_dir, "opengrep") is None
 
+    @pytest.mark.unit
     def test_the_real_pin_refuses_bytes_that_are_not_the_release(self, tmp_path):
         """Unpatched table: the committed digest itself is what refuses."""
         bin_dir = tmp_path / "bin"
@@ -374,6 +381,9 @@ class TestTheDigestCheckCanFail:
             install_pinned_tool("opengrep", "linux", "arm64", bin_dir)
         assert not (bin_dir / "opengrep").exists()
 
+    # integration although urlopen is patched: a finished install ends, on macOS, by
+    # unquarantining the file with a child xattr process, a path this test takes there.
+    @pytest.mark.integration
     def test_positive_control_matching_digest_installs_the_bytes(self, tmp_path):
         filename = _ASSET_TABLES["opengrep"][("linux", "amd64")]
         digest = hashlib.sha256(PAYLOAD).hexdigest()
@@ -388,6 +398,7 @@ class TestTheDigestCheckCanFail:
         assert receipt["installed_sha256"] == digest
         assert receipt["version"] == TOOL_VERSIONS["opengrep"]
 
+    @pytest.mark.unit
     def test_a_half_applied_version_bump_is_refused_by_name(self):
         with (
             patch.dict(tool_downloads.TOOL_VERSIONS, {"opengrep": "v9.9.9"}),
@@ -423,7 +434,9 @@ class TestNixPinsTheSameBytes:
         assert f"v{match.group(1)}" == TOOL_VERSIONS["opengrep"]
 
 
-@pytest.mark.unit
+# integration although urlopen is patched: both tests finish an install, which ends, on
+# macOS, by unquarantining the file with a child xattr process, a path they take there.
+@pytest.mark.integration
 class TestTheReleaseAssetCacheCoversOpengrep:
     """ASH_TOOL_DOWNLOAD_CACHE wraps the bare-executable path too, not only archives.
 
@@ -485,3 +498,97 @@ class TestTheReleaseAssetCacheCoversOpengrep:
         assert installed.read_bytes() == PAYLOAD
         # The cache now holds the verified download, not the tampered file.
         assert (cache_dir / filename).read_bytes() == PAYLOAD
+
+
+_TIERS = ("unit", "integration", "e2e")
+
+
+def _tiers_written_on(node: ast.AST) -> set[str]:
+    """The tier markers a function or class carries as decorators."""
+    found: set[str] = set()
+    for decorator in getattr(node, "decorator_list", []):
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if (
+            isinstance(target, ast.Attribute)
+            and target.attr in _TIERS
+            and isinstance(target.value, ast.Attribute)
+            and target.value.attr == "mark"
+        ):
+            found.add(target.attr)
+    return found
+
+
+def _finishes_an_install(function: ast.FunctionDef) -> bool:
+    """Whether the test runs an install that is not expected to be refused.
+
+    A call of ``install_pinned_tool`` or ``_run_inline`` with no ``pytest.raises``
+    around it ends in ``write_receipt``, after the macOS unquarantine step.
+    """
+    installs = False
+    refuses = False
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id in (
+            "install_pinned_tool",
+            "_run_inline",
+        ):
+            installs = True
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "raises":
+            refuses = True
+    return installs and not refuses
+
+
+@pytest.mark.unit
+def test_a_test_that_finishes_an_install_is_integration():
+    """A finished install takes the macOS xattr child path, so it is not a unit test.
+
+    ``install_pinned_tool`` and ``install_binary_from_url`` end, on Darwin, by
+    ``unquarantine_macos_binary``, which runs ``xattr`` as a child process. The tier
+    is read on every path a test can take (tests/NAMING_CONVENTIONS.md), and the
+    unit job runs on a macOS runner, so each test here that finishes an install is
+    integration, as the sibling that installs through ``install_binary_from_url`` is
+    in test_download_utils.py. A refusal raises before that step and stays unit.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    tests: dict[str, tuple[ast.FunctionDef, set[str]]] = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+            tests[node.name] = (node, _tiers_written_on(node))
+        elif isinstance(node, ast.ClassDef):
+            from_the_class = _tiers_written_on(node)
+            for member in node.body:
+                if isinstance(member, ast.FunctionDef) and member.name.startswith(
+                    "test_"
+                ):
+                    tests[f"{node.name}::{member.name}"] = (
+                        member,
+                        from_the_class | _tiers_written_on(member),
+                    )
+
+    finishing = {
+        name: tiers for name, (fn, tiers) in tests.items() if _finishes_an_install(fn)
+    }
+
+    # Positive control: the finder has to see the installs this file is known to finish.
+    assert {
+        "TestACustomVersionNeedsItsOwnDigest::test_a_matching_custom_digest_installs",
+        "TestTheDigestCheckCanFail::test_positive_control_matching_digest_installs_the_bytes",
+        "TestTheReleaseAssetCacheCoversOpengrep::test_a_download_is_stored_and_a_verified_copy_is_reused",
+        "TestTheReleaseAssetCacheCoversOpengrep::test_a_tampered_cached_asset_is_discarded_and_redownloaded",
+    } <= set(finishing)
+
+    not_integration = {
+        name: sorted(tiers)
+        for name, tiers in finishing.items()
+        if tiers != {"integration"}
+    }
+    assert not_integration == {}, (
+        "these tests finish an install, which starts xattr on macOS, and are not "
+        f"integration: {not_integration}"
+    )
+
+    # Negative control: a refusal is not counted as finishing, and it stays unit.
+    refusal = "TestTheDigestCheckCanFail::test_a_mismatched_digest_installs_nothing"
+    assert refusal not in finishing
+    assert tests[refusal][1] == {"unit"}

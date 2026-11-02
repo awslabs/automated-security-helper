@@ -57,6 +57,25 @@ def snapshot_environ() -> Dict[str, str]:
         return dict(os.environ)
 
 
+#: The environment as this module was first imported: the operator's own
+#: variables, before any scanner ran (every plugin imports this module through
+#: plugin_base before a scanner instance exists).
+_STARTUP_ENVIRON: Dict[str, str] = snapshot_environ()
+
+
+def startup_environ() -> Dict[str, str]:
+    """A copy of the environment as it was when ASH started.
+
+    For a reader that must take only the operator's own value of a variable
+    and never one a scanner thread set, or set for a moment, while others
+    spawn (the sandbox-exec backend grants a read of the operator's
+    SSL_CERT_FILE, and must not grant one for a value a scanner put there).
+    ``snapshot_environ`` answers what a child would inherit now; this answers
+    what the operator started ASH with.
+    """
+    return dict(_STARTUP_ENVIRON)
+
+
 #: The variables that set how a child lays text out and colors it for a terminal.
 #: uv wraps its messages at the caller's COLUMNS and colors them under FORCE_COLOR
 #: or CLICOLOR_FORCE even into a pipe (measured with uv 0.13), so text ASH parses
@@ -95,14 +114,25 @@ def apply_environ_overrides(
     Hand the return value to :func:`restore_environ` to undo the change. For
     call sites that need the change to span a ``try``/``finally`` they already
     have; everything else should use :func:`environ_overrides`.
+
+    All or nothing: when an assignment raises (a value that is not a str, a
+    name the platform refuses), the variables set before it are put back
+    before the error is raised, since the caller never receives the previous
+    values to put them back itself.
     """
     with ENVIRON_LOCK:
         previous = {key: os.environ.get(key) for key in overrides}
-        for key, value in overrides.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        done: Dict[str, Optional[str]] = {}
+        try:
+            for key, value in overrides.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+                done[key] = previous[key]
+        except BaseException:
+            restore_environ(done)
+            raise
         return previous
 
 
@@ -164,15 +194,19 @@ def hold_environ(key: str, value: str) -> None:
     """
     with ENVIRON_LOCK:
         held = _HELD.get(key)
-        if held is None:
-            _HELD[key] = _Hold(value=value, holders=1, original=os.environ.get(key))
-        elif held.value != value:
+        if held is not None and held.value != value:
             raise ValueError(
                 f"{key} is held at {held.value!r}; it cannot also be held at {value!r}"
             )
+        # The variable is set before the hold is recorded: a set that raises (a
+        # value that is not a str) leaves no hold behind that no caller would
+        # release.
+        original = os.environ.get(key)
+        os.environ[key] = value
+        if held is None:
+            _HELD[key] = _Hold(value=value, holders=1, original=original)
         else:
             held.holders += 1
-        os.environ[key] = value
 
 
 def release_environ(key: str) -> None:

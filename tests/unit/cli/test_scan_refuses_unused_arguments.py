@@ -284,7 +284,8 @@ class TestOptionsBeforeASubcommand:
             pytest.param(["--scanners", "bandit", "config", "get"], "--scanners"),
             pytest.param(["--version", "merge"], "--version"),
             pytest.param(
-                ["-f", "sarif", "build-image", "--no-run"], "does not take -f,"
+                ["-f", "sarif", "build-image", "--no-run"],
+                "takes -f as --force",
             ),
         ],
         ids=[
@@ -298,6 +299,9 @@ class TestOptionsBeforeASubcommand:
     def test_are_refused_when_the_subcommand_does_not_take_them(
         self, in_tmp, args, flag
     ):
+        """A short alias the subcommand spells differently (`-f` is --force on
+        build-image, a flag, where the root's -f takes a value) is refused as
+        taken differently, not as not taken: the subcommand does take `-f`."""
         with patch("automated_security_helper.cli.image.run_ash_scan") as run:
             result = _invoke(args)
 
@@ -308,17 +312,43 @@ class TestOptionsBeforeASubcommand:
     @pytest.mark.parametrize(
         "args, typed",
         [
-            pytest.param(["--format", "text", "report"], "--format", id="long-alias"),
-            pytest.param(["-f", "text", "report"], "-f", id="short-alias"),
-            pytest.param(["--formats=text", "report"], "--formats", id="equals-form"),
+            pytest.param(["--scanners", "bandit", "report"], "--scanners", id="long"),
+            pytest.param(["--scanners=bandit", "report"], "--scanners", id="equals"),
+            pytest.param(
+                ["--scanners", "--offline", "report"], "--scanners", id="value-token"
+            ),
         ],
     )
     def test_the_refusal_names_the_spelling_that_was_typed(self, in_tmp, args, typed):
-        """`--format` before `report` is scan's output formats, not report's --format."""
+        """A token that is the option's VALUE ("--offline" after --scanners) is
+        not a spelling, so it is not the one named."""
         result = _invoke(args)
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert f"'ash report' does not take {typed}," in _plain(result.output)
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            pytest.param(["--format", "text", "report"], id="long-alias"),
+            pytest.param(["-f", "text", "report"], id="short-alias"),
+            pytest.param(["--formats=text", "report"], id="equals-form"),
+        ],
+    )
+    def test_a_root_option_reaches_the_subcommand_option_spelled_the_same(
+        self, in_tmp, args
+    ):
+        """The root's `--format` is output_formats and report's is report_format:
+        matched by name alone, `ash --format text report` was refused as an
+        option report does not take, although `ash report --help` lists it."""
+        _write_results(in_tmp / ".ash" / "ash_output")
+
+        result = _invoke(args)
+
+        assert result.exit_code == 0, result.output
+        assert "does not take" not in _plain(result.output)
+        # The text reporter's output, not the default markdown report.
+        assert "ASH SECURITY SCAN REPORT" in result.stdout, result.stdout[:400]
 
     def test_the_subcommands_help_is_shown(self, in_tmp):
         result = _invoke(["--source-dir", "src", "report", "--help"])

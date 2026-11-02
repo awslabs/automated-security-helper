@@ -71,15 +71,25 @@ real file: ``/ws/api/src/app.py`` became ``api/ws/api/src/app.py``, naming
 nothing, and without being counted as a failure.
 
 So every URI passes through :func:`project_relative_uri` first, which reduces an
-absolute path to its remainder inside the project or refuses it. checkov's shape
-makes this more than a leading-separator test: it emits
-``ws/api/src/insecure_bucket.tf``, absolute with the separator already stripped
-upstream, so an unrooted URI is also tried with a separator restored.
+absolute path to its remainder inside the project or refuses it. The leading
+character decides: rooted text is absolute, and an unrooted URI is the
+project-relative path it is. checkov's separator-stripped absolute shape
+(``ws/api/src/insecure_bucket.tf``) is not tried as absolute: in workspace mode
+the project is scanned with its own path as ``source_dir`` and the URI reaches
+the aggregator already relativized, while a src-layout project's ordinary
+relative URI spells its own absolute path and was being relocated.
 
-These shapes are the default in workspace mode rather than an edge case.
-``scripts/verify_external_target_scan.py`` records three of them from one healthy
-run, and they appear whenever the process working directory differs from
-``source_dir`` -- which in workspace mode it must, for all but one project.
+An absolute URI is the ordinary shape in workspace mode, not an edge case:
+``scripts/verify_external_target_scan.py`` records it from one healthy run, and
+it appears whenever the process working directory differs from ``source_dir``,
+which in workspace mode it must for all but one project. The separator-stripped
+shape is NOT tried as absolute (above), and the cost of that choice is named
+here: an unrooted URI that does spell an absolute path with its separator gone
+is read as project-relative, placed at ``<project>/<uri>``, and not counted as a
+failure. That shape does not reach the aggregator from the scans ASH runs
+(``sanitize_sarif_paths`` relativizes it against the project's own
+``source_dir`` first); a reader that meets it in a results file fed from
+elsewhere sees a workspace_uri that names nothing, with no count beside it.
 
 An unconvertible path is counted, never dropped
 -----------------------------------------------
@@ -126,7 +136,8 @@ import re
 import shutil
 import stat
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from urllib.parse import quote, unquote
 
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
 from automated_security_helper.core.exceptions import WorkspacePatternError
@@ -134,29 +145,45 @@ from automated_security_helper.models.asharp_model import new_report_id
 from automated_security_helper.models.core import merged_honoring
 from automated_security_helper.models.workspace import (
     SCANNER_EXIT_CODE_UNRECORDED,
+    ProjectConverterRefusal,
     ProjectInputNotScanned,
     WorkspaceProjectResult,
     WorkspaceResults,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.policy_origin import (
+    POLICY_ORIGIN as POLICY_ORIGIN,
+    is_policy_origin as _properties_are_policy_origin,
+)
 from automated_security_helper.utils.uri_separators import (
     root_text,
     sanitized_uri_text,
 )
 from automated_security_helper.utils.severity_ladder import (
-    SEVERITIES,
+    ScannerThresholdResolver,
+    result_fails_scanner_threshold,
+    result_scanner_name,
     result_severity,
-    sarif_level_fails_threshold,
-    severity_fails_threshold,
 )
-from automated_security_helper.utils.workspace_paths import to_workspace_pattern
+from automated_security_helper.utils.workspace_paths import (
+    drive_anchor,
+    to_workspace_pattern,
+)
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
 #: The ``originalUriBaseIds`` key each project's run declares for its own root.
 #: Spelled the SARIF way (no separator, uppercase) so it reads like the
 #: conventional SRCROOT rather than like an ASH-specific identifier.
 PROJECT_ROOT_URI_BASE_ID = "PROJECTROOT"
+
+#: The result property that carries a rebased location's path as plain text
+#: when its ``uri`` was written percent-encoded. A SARIF ``uri`` is a URI
+#: reference, so it is written encoded, while the flattened finding reads a
+#: relative ``uri`` as a literal path; the property is how the two agree.
+#: Spelled as ``flat_vulnerability.ARTIFACT_PATH_PROPERTY`` spells it (a test
+#: compares the two), because that module cannot be imported from here.
+ARTIFACT_PATH_PROPERTY = "workspace_artifact_path"
 
 #: Where per-project runs are spooled while the workspace runs. Under the
 #: workspace output directory rather than the work directory, because the work
@@ -177,6 +204,21 @@ _STAMP_READ_LIMIT = 1 << 20
 #: text rather than via ``PureWindowsPath.drive``, whose value for unusual inputs
 #: changed between 3.11 and 3.12 and this project supports 3.10 through 3.14.
 _DRIVE_ANCHOR = re.compile(r"^[A-Za-z]:[/\\]")
+
+
+# POLICY_ORIGIN (imported above) marks a finding that came from a scanner only
+# ``workspace.additional_scanners`` asked for, rather than one the project
+# enables itself. Written to ``properties.origin`` on the SARIF result and added
+# to ``properties.tags`` by the executor; the project's outcome and the rollup
+# exclude such findings unless the policy gate is on. The spelling is the one the CLI
+# reference and ``AshWorkspaceConfig.json`` document. One home:
+# ``utils.policy_origin`` holds the constant and the question of a property bag,
+# which the reports ask the same way; ``execution`` imports both from here (a
+# second copy let the two drift with no test failing on the drift).
+def is_policy_origin(result: Mapping[str, Any]) -> bool:
+    """Whether this SARIF result came from a scanner only the policy added."""
+    return _properties_are_policy_origin(result.get("properties"))
+
 
 #: Stands in for a backslash that is part of a file name while a URI passes
 #: through the pattern converter (see to_workspace_uri).
@@ -227,6 +269,21 @@ def project_root_uri(project_path: str) -> str:
     return uri if uri.endswith("/") else uri + "/"
 
 
+def _slash_before_a_drive(text: str) -> bool:
+    """Whether *text* is ``/C:/...`` or ``/C:``: a drive letter behind one separator.
+
+    ``file:///C:/x`` reduces to ``/C:/x``, and that leading separator is dropped so
+    a drive is spelled one way. The test is a drive's shape, never only the colon
+    at [2]: ``/x:legacy/src/x.py`` is a rooted POSIX path whose first component
+    holds a colon, and dropping its separator made it ``x:legacy/src/x.py``, which
+    nothing read as a drive, so it was rebased under the project as if relative.
+    This is the one place the leading separator is judged; what counts as a drive
+    is ``utils.workspace_paths.drive_anchor``'s rule, the one the pattern
+    converters read, so a letter-colon name is a name on both sides.
+    """
+    return text.startswith("/") and bool(drive_anchor(text[1:]))
+
+
 def _strip_file_scheme(uri: str) -> str:
     """Reduce a possibly ``file://``-schemed URI to a bare path.
 
@@ -239,7 +296,7 @@ def _strip_file_scheme(uri: str) -> str:
         text = text[len("file://") :]
         # file:///C:/x -> /C:/x. Drop the separator before a drive letter, which
         # to_workspace_pattern would otherwise read as a rooted path.
-        if len(text) > 2 and text[0] == "/" and text[2] == ":":
+        if _slash_before_a_drive(text):
             text = text[1:]
     return text
 
@@ -259,12 +316,34 @@ def _posix_text(uri: str, project_path: Optional[str] = None) -> str:
     loses it, so a drive is always spelled the same way before anything
     compares paths. Any other backslash is part of a POSIX file name and is
     kept: the project's scan sanitized the URI, which wrote ``/`` for its
-    separators (``utils/uri_separators.py``).
+    separators (``utils/uri_separators.py``). A ``file:``-schemed URI is
+    percent-decoded first (``Path.as_uri`` writes ``My%20Repo`` for ``My Repo``,
+    and the project's path is never encoded), as :func:`_absolute_base` decodes a
+    declared base; a scheme-less name keeps its ``%``, which is part of it.
     """
-    text = sanitized_uri_text(_strip_file_scheme(uri), project_path)
-    if len(text) > 2 and text[0] == "/" and text[2] == ":":
+    text = uri.strip()
+    if text.lower().startswith("file:"):
+        text = unquote(text)
+    text = sanitized_uri_text(_strip_file_scheme(text), project_path)
+    if _slash_before_a_drive(text):
         text = text[1:]
     return text
+
+
+def _rooted(text: str) -> bool:
+    """Whether recorded path text is absolute on either platform's spelling.
+
+    A leading ``/`` (POSIX, or a Windows path written with ``/``), a UNC path's
+    ``\\\\server\\share``, or a drive anchor (``C:\\`` or ``C:/``).
+    ``PurePosixPath(text).is_absolute()`` reads a Windows absolute path as
+    relative, so a converter's or scanner's ``C:\\ws\\api\\nb.ipynb`` was shown
+    as ``api/C:\\ws\\api\\nb.ipynb``, against the fields' contract that an
+    absolute recorded path is kept as recorded. A single leading backslash is
+    not a root: ``uri_separators`` classes it as a file-name character on a
+    POSIX project (only a drive or a UNC spelling is Windows-only), and a
+    Windows project's separators are already ``/`` when the text reaches here.
+    """
+    return text.startswith(("/", "\\\\")) or bool(_DRIVE_ANCHOR.match(text))
 
 
 def project_relative_uri(uri: str, project_path: str) -> Any:
@@ -286,20 +365,28 @@ def project_relative_uri(uri: str, project_path: str) -> Any:
     ``source_dir`` is ``<workspace>/<project>``, so the working directory cannot
     coincide with more than one of them.
 
-    The separator-stripped shape, and why a leading-separator test is not enough
-    ---------------------------------------------------------------------------
-    checkov emits ``ws/api/src/insecure_bucket.tf`` -- absolute, with the leading
-    separator already gone upstream. No test on the leading character can catch
-    it. So an unrooted URI is also tried with a separator restored, and is read
-    as absolute only when that lands inside the project.
-
-    The residual ambiguity is a project that contains a directory tree mirroring
-    its own absolute path -- project ``/ws/api`` holding ``ws/api/src/`` -- where
-    a genuinely project-relative ``ws/api/src/x.py`` would be misread as
-    absolute. Resolved textually and in favour of the absolute reading, because
-    that nesting is pathological while the checkov shape is routine. Deliberately
-    no filesystem check: aggregation would then depend on the tree still being
-    present, and reading the same SARIF twice could give two answers.
+    An unrooted URI is project-relative, and is never tried as an absolute path
+    ------------------------------------------------------------------------
+    An earlier form also tried an unrooted URI with a separator restored, and
+    read it as absolute when that landed inside the project, for a shape checkov
+    emits when the process working directory differs from ``source_dir``:
+    ``ws/api/src/insecure_bucket.tf``, absolute with the leading separator
+    already gone. That reading relocated routine findings. In workspace mode a
+    project is scanned with its own path as ``source_dir``, so
+    ``sanitize_sarif_paths`` has already relativized checkov's URI before the
+    aggregator sees it (measured; ``scripts/verify_multi_project_attribution.py``
+    records that both scanners hand over ``src/...``), and the separator-stripped
+    shape does not reach this function. What does reach it is the ordinary
+    project-relative URI of a project whose own files spell its absolute path:
+    the container mounts the workspace at ``/src``, so a Python src-layout
+    project at ``/src/api`` holds ``src/api/__init__.py``, and a Next.js project
+    at ``/src/app`` holds ``src/app/page.tsx``. Restoring a separator read those
+    as ``/src/api/__init__.py`` and relocated the finding to ``__init__.py`` at
+    the project root -- a different, existing file, silently. So the leading
+    character decides: rooted text (a leading separator or a drive anchor) is
+    absolute, and anything else is read as the project-relative path it is.
+    Deliberately no filesystem check: aggregation would then depend on the tree
+    still being present, and reading the same SARIF twice could give two answers.
 
     Args:
         uri: A SARIF artifact URI as a scanner emitted it.
@@ -308,34 +395,45 @@ def project_relative_uri(uri: str, project_path: str) -> Any:
     Returns:
         The project-relative path when the URI is absolute and inside the
         project; ``None`` when it is absolute and outside; :data:`NOT_ABSOLUTE`
-        when it does not look like an absolute path at all.
+        when it is not rooted, which is to say project-relative.
     """
     text = _posix_text(uri, project_path)
     if not text:
         return None
 
+    if not _rooted(text):
+        return NOT_ABSOLUTE
+
+    # ".." would make relative_to lie about containment, and Phase 0 rejects it
+    # anyway; leave those to the pattern converter, which returns None.
+    if _PARENT_COMPONENT in PurePosixPath(text).parts:
+        return None
     root = PurePosixPath(root_text(project_path))
-    rooted = text.startswith("/") or bool(_DRIVE_ANCHOR.match(text))
-
-    candidates = [text] if rooted else [text, "/" + text]
-    for candidate in candidates:
-        # ".." would make relative_to lie about containment, and Phase 0 rejects
-        # it anyway; leave those to the pattern converter, which returns None.
-        if _PARENT_COMPONENT in PurePosixPath(candidate).parts:
-            continue
-        try:
-            remainder = PurePosixPath(candidate).relative_to(root)
-        except ValueError:
-            continue
-        # relative_to succeeds for the root itself, whose remainder is "."; that
-        # names a directory, not a finding location.
-        return remainder.as_posix() if remainder.parts else None
-
-    if rooted:
+    try:
+        remainder = PurePosixPath(text).relative_to(root)
+    except ValueError:
         # Absolute, and not inside this project. Counted, never prefixed: a
         # prefix would invent a path that names nothing.
         return None
-    return NOT_ABSOLUTE
+    # relative_to succeeds for the root itself, whose remainder is "."; that
+    # names a directory, not a finding location.
+    return remainder.as_posix() if remainder.parts else None
+
+
+def _artifact_uri_text(reduced: str, source_uri: str) -> str:
+    """The text to write into ``artifactLocation.uri`` for a reduced path.
+
+    *reduced* is the project-relative path with a ``file:`` URI's percent-escapes
+    already decoded, which is the form every comparison here needs. A SARIF
+    ``uri`` is a URI reference, so a reader decodes it again: written back
+    decoded, ``x%2541.py`` became ``x%41.py`` and was read as ``xA.py``, and
+    ``a%23b.py`` became ``a#b.py``, whose ``#`` starts a fragment. A source that
+    was a ``file:`` URI is therefore written re-encoded. A source with no scheme
+    was a bare path, whose ``%`` is part of the name, and is written as it is.
+    """
+    if source_uri.strip().lower().startswith("file:"):
+        return quote(reduced, safe="/")
+    return reduced
 
 
 def to_workspace_uri(
@@ -354,8 +452,9 @@ def to_workspace_uri(
 
     Args:
         uri: A SARIF artifact URI as a scanner emitted it. May carry a
-            ``file://`` scheme, may use backslashes, may be rooted, may be
-            absolute with its leading separator already stripped.
+            ``file://`` scheme, may use backslashes, may be rooted. An unrooted
+            URI is read as project-relative, never as an absolute path with its
+            leading separator stripped (see :func:`project_relative_uri`).
         project_relative_path: The project's path below the workspace root.
         project_path: The project's absolute path. Optional only so that callers
             with no absolute path can still convert an already-relative URI;
@@ -377,7 +476,7 @@ def to_workspace_uri(
             return None
         if reduced is not NOT_ABSOLUTE:
             text = reduced
-    elif text.startswith("/") or _DRIVE_ANCHOR.match(text):
+    elif _rooted(text):
         # No project path to relativize against, so an absolute URI cannot be
         # placed. Refusing beats prefixing it into a path that names nothing.
         return None
@@ -406,6 +505,131 @@ def _artifact_location(location: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(artifact, dict):
         return None
     return artifact
+
+
+#: Answered by :func:`_declared_base` for a base the run anchors to a chain of
+#: other bases it cannot resolve (an undeclared parent, a relative root, a cycle,
+#: a chain deeper than ``_BASE_CHAIN_LIMIT``): the file the location names is
+#: unknown, so the location is counted as unconvertible, and is NOT read as
+#: project-relative, which placed it at the project root under the wrong name.
+UNRESOLVED_BASE = object()
+
+#: How many bases a chain may name, the location's own included: the walk gives
+#: up once it has seen this many, so seven ``uriBaseId`` hops resolve and an
+#: eighth is counted. SARIF puts no bound on chaining; one real-world chain is
+#: two deep (``SRCROOT`` under ``REPOROOT``).
+_BASE_CHAIN_LIMIT = 8
+
+
+def _join_under_base(base_uri: str, uri: str) -> str:
+    """*uri* placed under *base_uri* as a SARIF consumer joins them.
+
+    3.4.4: a base ends with its separator. Not ``rstrip("/")`` on the base: that
+    ate the scheme's own slashes of a filesystem-root base, ``file:///`` ->
+    ``file:``, and the joined text then read as unrooted, so the uri was placed at
+    the project root as if it had no base at all.
+    """
+    return (base_uri if base_uri.endswith("/") else base_uri + "/") + uri.lstrip("/")
+
+
+def _absolute_base(uri: str) -> Optional[str]:
+    """*uri* as an absolute base, its percent-escapes decoded, or None.
+
+    A ``file:`` base is a URI, and ``Path.as_uri()`` (which ``project_root_uri``
+    and the scanners' own writers use) percent-encodes it: a project at
+    ``/Users/me/My Repo/api`` declares ``file:///Users/me/My%20Repo/api/``.
+    Joined undecoded, the text ``/Users/me/My%20Repo/api/src/app.py`` is not
+    under ``/Users/me/My Repo/api`` and the finding was counted unconvertible,
+    where the project-relative reading before the base was honoured had placed
+    it. Decoded here, once, before anything compares paths, and returned as a
+    bare rooted path with the scheme stripped: a ``file:`` text handed on would
+    be decoded a second time by :func:`_posix_text` when the joined location is
+    read, which mis-read a directory named with a literal ``%xx`` and decoded a
+    relative artifact's own ``%20`` that the same artifact keeps when it has no
+    base. A base with no scheme is a path as written and is not decoded (a ``%``
+    in a file name stays).
+    """
+    if uri.lower().startswith("file:"):
+        decoded = _strip_file_scheme(unquote(uri))
+    else:
+        decoded = uri
+    if not _rooted(_posix_text(decoded)):
+        return None
+    return decoded
+
+
+def _declared_base(table: Mapping[str, Any], base_id: Any) -> Any:
+    """The absolute ``uri`` *table* declares for *base_id*, None, or UNRESOLVED_BASE.
+
+    None for the project root (the ordinary anchor, which the project-relative
+    reading already assumes), for an id the run does not declare, and for an
+    unanchored base whose own ``uri`` is relative: only an absolute base places a
+    relative uri on disk. A base anchored to another (``uriBaseId`` on the base
+    entry: ``SRCROOT`` -> ``{"uri": "src/", "uriBaseId": "REPOROOT"}``) is followed
+    to its root and the chain joined, so the location is placed where a SARIF
+    consumer places it; before this the chained base answered None and the
+    location was placed at the project root, dropping the ``src/`` and naming
+    another file. A chain this function cannot follow answers
+    :data:`UNRESOLVED_BASE`, which the caller counts instead of placing.
+    """
+    if not base_id or base_id == PROJECT_ROOT_URI_BASE_ID:
+        return None
+    entry = table.get(str(base_id))
+    if not isinstance(entry, Mapping):
+        return None
+    uri = entry.get("uri")
+    if not isinstance(uri, str) or not uri:
+        return None
+    parent_id = entry.get("uriBaseId")
+    if not parent_id:
+        return _absolute_base(uri)
+
+    segments = [uri]
+    seen = {str(base_id)}
+    while parent_id:
+        key = str(parent_id)
+        if key in seen or len(seen) >= _BASE_CHAIN_LIMIT:
+            return UNRESOLVED_BASE
+        seen.add(key)
+        parent = table.get(key)
+        if not isinstance(parent, Mapping):
+            return UNRESOLVED_BASE
+        parent_uri = parent.get("uri")
+        if not isinstance(parent_uri, str) or not parent_uri:
+            return UNRESOLVED_BASE
+        segments.append(parent_uri)
+        parent_id = parent.get("uriBaseId")
+    root = _absolute_base(segments[-1])
+    if root is None:
+        return UNRESOLVED_BASE
+    joined = root
+    for segment in reversed(segments[:-1]):
+        joined = _join_under_base(joined, segment)
+    return joined
+
+
+def _relative_base(table: Mapping[str, Any], base_id: Any) -> Optional[str]:
+    """The directory *table* declares for *base_id* under the project root, or None.
+
+    Only a base with a relative ``uri`` and no ``uriBaseId`` of its own is one:
+    an absolute base is :func:`_declared_base`'s, a chained one is followed there,
+    and the project root and an id the run does not declare are the root itself.
+    A leading ``./`` and trailing separators are dropped, so ``./`` and ``.`` (the
+    root written out) answer None and ``src/`` answers ``src``.
+    """
+    if not base_id or base_id == PROJECT_ROOT_URI_BASE_ID:
+        return None
+    entry = table.get(str(base_id))
+    if not isinstance(entry, Mapping) or entry.get("uriBaseId"):
+        return None
+    uri = entry.get("uri")
+    if not isinstance(uri, str) or _absolute_base(uri) is not None:
+        return None
+    text = uri.strip()
+    while text.startswith("./"):
+        text = text[2:]
+    text = text.strip("/")
+    return None if text in ("", ".") else text
 
 
 def rebase_run_for_project(
@@ -437,9 +661,14 @@ def rebase_run_for_project(
     """
     rebased: Dict[str, Any] = copy.deepcopy(dict(run))
 
-    rebased["originalUriBaseIds"] = {
-        PROJECT_ROOT_URI_BASE_ID: {"uri": project_root_uri(project.path)}
-    }
+    # The project root joins the run's base-id table rather than replacing it. A
+    # scanner that anchored its own locations (`uriBaseId: "%SRCROOT%"`) declared
+    # that id here; dropping the table left those references dangling, and a
+    # consumer resolving them found no base at all.
+    base_ids = rebased.get("originalUriBaseIds")
+    table: Dict[str, Any] = dict(base_ids) if isinstance(base_ids, Mapping) else {}
+    table[PROJECT_ROOT_URI_BASE_ID] = {"uri": project_root_uri(project.path)}
+    rebased["originalUriBaseIds"] = table
 
     run_properties = rebased.get("properties")
     if not isinstance(run_properties, dict):
@@ -464,7 +693,8 @@ def rebase_run_for_project(
 
         workspace_uri: Optional[str] = None
         had_locatable_uri = False
-        for location in result.get("locations") or []:
+        literal_path: Optional[str] = None
+        for index, location in enumerate(result.get("locations") or []):
             artifact = _artifact_location(location)
             if artifact is None:
                 continue
@@ -474,8 +704,39 @@ def rebase_run_for_project(
             had_locatable_uri = True
 
             reduced = project_relative_uri(str(uri), project.path)
+            rewritten = False
             if reduced is NOT_ABSOLUTE:
                 placed: Optional[str] = str(uri)
+                base_uri = _declared_base(table, artifact.get("uriBaseId"))
+                if base_uri is UNRESOLVED_BASE:
+                    # Anchored to a chain of bases the run does not resolve: the
+                    # file it names is unknown. Counted below, and not read as
+                    # project-relative, which named another file.
+                    placed = None
+                elif base_uri is not None:
+                    # The scanner anchored this relative uri to a base of its
+                    # own, which need not be the project root, and the file it
+                    # names is base + uri. workspace_uri has to come from that
+                    # path read back through the project, or the two
+                    # coordinates name two files. The artifact itself stays as
+                    # the scanner wrote it: its uri and its uriBaseId agree.
+                    # Joined as a SARIF consumer joins them (_join_under_base).
+                    joined = _join_under_base(base_uri, str(uri))
+                    anchored = project_relative_uri(joined, project.path)
+                    if anchored is None:
+                        # Inside the base, outside this project: counted, and
+                        # not placed in the workspace.
+                        placed = None
+                    elif anchored is not NOT_ABSOLUTE:
+                        placed = anchored
+                else:
+                    # A base the run declares with a relative uri and no parent
+                    # of its own is a directory under the project root, and the
+                    # file is that directory plus the uri; read as the root
+                    # itself, the directory was dropped from the path.
+                    relative_base = _relative_base(table, artifact.get("uriBaseId"))
+                    if relative_base is not None:
+                        placed = _join_under_base(relative_base, str(uri))
             elif reduced is None:
                 # Absolute and outside the project. Left exactly as the scanner
                 # wrote it, and deliberately NOT anchored: an artifactLocation
@@ -484,17 +745,41 @@ def rebase_run_for_project(
                 placed = None
             else:
                 placed = reduced
-                artifact["uri"] = reduced
+                written = _artifact_uri_text(reduced, str(uri))
+                artifact["uri"] = written
+                rewritten = True
+                if index == 0 and written != reduced:
+                    # The flattened finding reads this location's uri as a
+                    # literal path, so it carries the path the uri names.
+                    literal_path = reduced
 
-            if placed is not None:
+            if placed is None:
+                continue
+            converted = to_workspace_uri(placed, project.relative_path, project.path)
+            if converted is None:
+                # Relative, and still not placeable inside the project (a ".."
+                # component, a shape the pattern converter refuses). Keeps its
+                # text, gets no uriBaseId, and is counted below: anchoring it to
+                # the project root would assert a location inside the project
+                # for a path that escapes it.
+                continue
+            if rewritten:
+                # The uri is now in the project root's coordinates, whatever
+                # base the scanner wrote for the absolute form it replaced.
+                artifact["uriBaseId"] = PROJECT_ROOT_URI_BASE_ID
+            else:
                 # Anchor to the project root so the run stays coherent with
                 # exactly one root. A scanner that already anchored its own
-                # output knows something we do not, so leave that alone.
+                # relative output knows something we do not, so leave that alone.
                 artifact.setdefault("uriBaseId", PROJECT_ROOT_URI_BASE_ID)
-                if workspace_uri is None:
-                    workspace_uri = to_workspace_uri(
-                        placed, project.relative_path, project.path
-                    )
+            if workspace_uri is None:
+                workspace_uri = converted
+
+        # Always set from this run's own reading, so a value a scanner wrote
+        # under the same name is never taken for it.
+        properties.pop(ARTIFACT_PATH_PROPERTY, None)
+        if literal_path is not None:
+            properties[ARTIFACT_PATH_PROPERTY] = literal_path
 
         if workspace_uri is not None:
             properties["workspace_uri"] = workspace_uri
@@ -507,53 +792,169 @@ def rebase_run_for_project(
     return rebased, unconvertible
 
 
-def count_actionable_results(
-    results: Iterable[Mapping[str, Any]], threshold: Optional[str]
-) -> int:
-    """Count findings at or above *threshold*, the way ``_compute_exit_code`` does.
+#: Resolves a scanner's OWN threshold (its ``options.severity_threshold``) from
+#: the scanner's name as ``properties.scanner_name`` records it (``None`` for a
+#: finding that names none). An answer of ``None`` means "no own threshold: the
+#: project-wide one governs".
+#:
+#: The same call shape as ``severity_ladder.ScannerThresholdResolver`` with the
+#: opposite meaning for ``None``: there an answer of ``None`` or empty text turns
+#: the gate OFF for that scanner. Python's structural typing cannot tell the two apart, so
+#: the names do: a value of this type is never handed to the ladder's
+#: ``result_fails_scanner_threshold`` as it is; :func:`effective_threshold_resolver`
+#: is the one conversion, filling the project-wide threshold in for ``None`` and
+#: returning a ``ScannerThresholdResolver``, and that resolver is the one the
+#: counters below pass down.
+OwnThresholdResolver = Callable[[Optional[str]], Optional[str]]
 
-    Mirrors ``run_ash_scan._compute_exit_code``'s SARIF pass exactly:
-    ``properties.issue_severity`` decides when it names a severity ASH knows,
-    otherwise the SARIF ``level`` does, and a suppressed finding never counts.
-    Both arms go through Phase 0's severity ladder, which was verified to gate
-    identically to the inline tables in ``_compute_exit_code`` for all five real
-    threshold values.
+#: The scanner a finding with no ``properties.scanner_name`` is credited to, in
+#: the per-scanner counts and in the rollup alike.
+UNATTRIBUTED_SCANNER = "unattributed"
+
+
+def result_is_suppressed(result: Mapping[str, Any]) -> bool:
+    """Whether *result* carries a suppression that is in effect.
+
+    The one reading every consumer makes (``utils.sarif_utils.suppressions_in_effect``):
+    a suppression whose ``state`` is ``rejected`` or ``underReview`` has not taken
+    effect (SARIF 3.35.4) and hides nothing; one whose state is ``accepted``, or
+    that states none, does. Read as any-suppression, a finding whose only
+    suppression awaited review was left out of a project's finding and actionable
+    counts while the flat finding, the OCSF record and the per-scanner counts kept
+    it. The answer is ``sarif_utils.is_result_suppressed``'s, the one the exit
+    code, the ``--min-severity`` gate, the statistics calculator, the result
+    filters and the JUnit reporter read too. Imported inside the function because
+    ``sarif_utils`` imports the results model this module also imports, and the
+    module-level order is not fixed.
+    """
+    from automated_security_helper.utils.sarif_utils import is_result_suppressed
+
+    return is_result_suppressed(result)
+
+
+def effective_threshold_resolver(
+    threshold: Optional[str],
+    threshold_for: Optional[OwnThresholdResolver] = None,
+) -> ScannerThresholdResolver:
+    """The threshold each scanner's findings are graded against, memoised.
+
+    *threshold_for* answers a scanner's own ``options.severity_threshold`` (``None``
+    for a scanner with none, and for a finding that names no scanner); the
+    project-wide *threshold* governs those. Every answer is upper-cased, because
+    ``_compute_exit_code`` upper-cases the configured value and the ladder is
+    case-sensitive. One resolver for the actionable count and the
+    ``--min-severity`` gate, so the two cannot grade one finding against two
+    thresholds. The result is the ladder's type: it answers ``None`` only when the
+    project-wide threshold is itself unset, which is the one case the gate is
+    meant to be off.
+    """
+    resolved: Dict[Optional[str], Optional[str]] = {}
+
+    def effective(scanner: Optional[str]) -> Optional[str]:
+        if scanner not in resolved:
+            own = threshold_for(scanner) if threshold_for is not None else None
+            value = own or threshold
+            resolved[scanner] = value.upper() if value else None
+        return resolved[scanner]
+
+    return effective
+
+
+def actionable_results_by_scanner(
+    results: Iterable[Mapping[str, Any]],
+    threshold: Optional[str],
+    *,
+    threshold_for: Optional[OwnThresholdResolver] = None,
+) -> Dict[str, int]:
+    """Per scanner, the findings at or above that scanner's own threshold.
+
+    Mirrors ``run_ash_scan._compute_exit_code``'s SARIF pass: the threshold is
+    resolved per result from its scanner (``properties.scanner_name``), the
+    project-wide *threshold* governing a scanner that has no setting of its own
+    and a finding that names no scanner; ``properties.issue_severity`` decides
+    when it names a severity ASH knows, otherwise the SARIF ``level`` does; and a
+    suppressed finding never counts. Both arms go through Phase 0's severity
+    ladder, which was verified to gate identically to the inline tables in
+    ``_compute_exit_code`` for all five real threshold values.
+
+    Every scanner that produced a result is a key, counted or not, so a caller
+    can tell "no actionable findings" from "no findings".
 
     Args:
         results: The SARIF results of one run.
-        threshold: A configured severity threshold. Upper-cased here because
-            ``_compute_exit_code`` upper-cases the configured value and the
-            ladder is case-sensitive; without this a lowercase threshold would
-            gate like CRITICAL in one path and MEDIUM in the other.
+        threshold: The project-wide threshold. Upper-cased here, as every
+            resolved value is, because ``_compute_exit_code`` upper-cases the
+            configured value and the ladder is case-sensitive; without this a
+            lowercase threshold would gate like CRITICAL in one path and MEDIUM
+            in the other.
+        threshold_for: Resolves a scanner's own threshold from its name; ``None``
+            (the default, and the resolver's answer for a scanner with no setting
+            of its own) falls back to *threshold*. Without one, every finding is
+            judged against *threshold*, which is what the single-scan code did
+            before it honoured per-scanner ``options.severity_threshold`` and what
+            left a project's workspace verdict disagreeing with its own.
 
     Returns:
-        The number of actionable findings. Zero when *threshold* is falsy, which
-        is how an operator turns the gate off.
-    """
-    if not threshold:
-        return 0
-    normalized = threshold.upper()
+        Scanner name to actionable count. An effective threshold of ``None`` or
+        empty text counts nothing for that scanner, which is how an operator
+        turns the gate off.
 
-    actionable = 0
+    One predicate with the ``--min-severity`` gate below:
+    ``severity_ladder.result_fails_scanner_threshold`` grades the result, and
+    ``result_scanner_name`` names its scanner, for both. This counter kept its
+    own reading (``issue_severity`` upper-cased but not stripped, ``str()`` of a
+    scanner name that is not a string, the level graded through its own table),
+    so a result with ``issue_severity: " high "`` was graded by its level here and
+    as HIGH by the gate: counted on one side and qualifying on the other, which is
+    the split sharing one resolver was meant to close.
+    """
+    effective = effective_threshold_resolver(threshold, threshold_for)
+
+    counts: Dict[str, int] = {}
     for result in results:
         if not isinstance(result, Mapping):
             continue
-        if result.get("suppressions"):
+        scanner = result_scanner_name(result)
+        name = scanner or UNATTRIBUTED_SCANNER
+        counts.setdefault(name, 0)
+        if result_is_suppressed(result):
             continue
-        properties = result.get("properties")
-        issue_severity = ""
-        if isinstance(properties, Mapping):
-            issue_severity = str(properties.get("issue_severity") or "").upper()
-        if issue_severity in SEVERITIES:
-            if severity_fails_threshold(issue_severity, normalized):
-                actionable += 1
-        elif sarif_level_fails_threshold(result.get("level"), normalized):
-            actionable += 1
-    return actionable
+        # An effective threshold of None or empty text fails nothing
+        # (severity_fails_threshold), which is the gate turned off for that
+        # scanner.
+        if result_fails_scanner_threshold(result, effective):
+            counts[name] += 1
+    return counts
+
+
+def count_actionable_results(
+    results: Iterable[Mapping[str, Any]],
+    threshold: Optional[str],
+    *,
+    threshold_for: Optional[OwnThresholdResolver] = None,
+) -> int:
+    """Count findings at or above their scanner's threshold, as ``_compute_exit_code`` does.
+
+    The sum of :func:`actionable_results_by_scanner`; see it for the rules.
+
+    Returns:
+        The number of actionable findings. Zero when *threshold* is ``None`` or
+        empty text and no resolver names a threshold, which is how an operator
+        turns the gate off.
+    """
+    return sum(
+        actionable_results_by_scanner(
+            results, threshold, threshold_for=threshold_for
+        ).values()
+    )
 
 
 def has_finding_at_min_severity(
-    results: Iterable[Mapping[str, Any]], min_severity: str
+    results: Iterable[Mapping[str, Any]],
+    min_severity: str,
+    threshold: Optional[str] = None,
+    *,
+    threshold_for: Optional[OwnThresholdResolver] = None,
 ) -> bool:
     """Whether any finding meets ``--min-severity``, the way ``_compute_exit_code`` does.
 
@@ -562,6 +963,17 @@ def has_finding_at_min_severity(
     folded into ``count_actionable_results`` because that is how the shipped
     behaviour works -- ``--min-severity`` is a whole-scan switch, not a per-
     finding filter that changes the count.
+
+    A qualifying finding is an ACTIONABLE one at or above the minimum. Given the
+    gate (*threshold*, the project-wide one, and *threshold_for*, each scanner's
+    own; the same two :func:`actionable_results_by_scanner` takes), a finding its
+    scanner's threshold made non-actionable does not qualify: it was not counted,
+    so it cannot be the finding that keeps the count standing
+    (``severity_ladder.result_fails_scanner_threshold``, the check the single scan
+    makes). Without the gate, severity alone decides, which is what read a
+    bandit MEDIUM under bandit's own CRITICAL as the finding that kept a semgrep
+    LOW actionable: the same project exited 0 as ``ash --source-dir P`` and 2
+    inside a workspace.
 
     Note that this scale is not the severity ladder's. It has no ``info``, and it
     treats ``critical`` and ``high`` as equal because SARIF's ``error`` covers
@@ -577,17 +989,22 @@ def has_finding_at_min_severity(
         )
     if min_rank <= 0:
         return True
+    gated = threshold is not None or threshold_for is not None
+    effective = effective_threshold_resolver(threshold, threshold_for)
     for result in results:
         if not isinstance(result, Mapping):
             continue
-        if result.get("suppressions"):
+        if result_is_suppressed(result):
             continue
         # The resolver run_ash_scan._severity_filters_finding uses: the
         # declared issue_severity first, a missing level as
         # MISSING_SARIF_LEVEL, and INFO (absent from the scale) as low. This
         # read the level alone, with a missing one as note.
-        if _MIN_SEVERITY_RANK.get(result_severity(result).lower(), 1) >= min_rank:
-            return True
+        if _MIN_SEVERITY_RANK.get(result_severity(result).lower(), 1) < min_rank:
+            continue
+        if gated and not result_fails_scanner_threshold(result, effective):
+            continue
+        return True
     return False
 
 
@@ -753,16 +1170,69 @@ def inputs_not_scanned_for_project(
         return []
     entries = []
     for scanner, path, reason in inputs_not_scanned(results):
-        recorded = PurePosixPath(path)
         shown = (
             path
-            if recorded.is_absolute()
-            else (PurePosixPath(relative_path) / recorded).as_posix()
+            if _rooted(path)
+            else (PurePosixPath(relative_path) / PurePosixPath(path)).as_posix()
         )
         entries.append(
             ProjectInputNotScanned(scanner=scanner, path=shown, reason=reason)
         )
     return entries
+
+
+def converter_refusals_for_project(
+    results: Any, relative_path: str
+) -> List[ProjectConverterRefusal]:
+    """This project's refused and failed converter inputs, workspace-relative.
+
+    Read through ``utils.converter_refusals.converter_refusals``, the reader the
+    single-directory summaries, the flat JSON report and the SARIF invocations
+    use, so a workspace lists the same records a single scan does. The path is
+    rebased as :func:`inputs_not_scanned_for_project` rebases a scanner's: a path
+    recorded relative to the project gets the project's ``relative_path`` in
+    front, one recorded absolute is kept as it is. ``incomplete_converters``
+    carries the converter-level verdict; this carries the inputs behind it.
+
+    Imported inside the function because ``converter_refusals`` imports the
+    results model, which imports this package's models.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+        relative_path: The project's workspace-relative path.
+
+    Returns:
+        The records, in the reader's order (those leaving the scan incomplete
+        first); empty for ``None`` and for a project whose converters refused
+        nothing.
+    """
+    from automated_security_helper.utils.converter_refusals import (
+        converter_refusals,
+    )
+
+    if results is None:
+        return []
+    records = []
+    for refusal in converter_refusals(results):
+        shown = (
+            refusal.path
+            if not refusal.path or _rooted(refusal.path)
+            else (PurePosixPath(relative_path) / PurePosixPath(refusal.path)).as_posix()
+        )
+        records.append(
+            ProjectConverterRefusal(
+                converter=refusal.converter,
+                path=shown,
+                member=refusal.member,
+                reason=refusal.reason,
+                limit=refusal.limit,
+                failed=refusal.failed,
+                accepted=refusal.accepted,
+                scan_incomplete=refusal.scan_incomplete,
+                unlisted_members=refusal.unlisted_members,
+            )
+        )
+    return records
 
 
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
@@ -822,6 +1292,17 @@ def workspace_ignore_file_exclusions(
     return aggregate
 
 
+def _fold_scanner_name(name: str) -> str:
+    """The form two spellings of one scanner name are compared in.
+
+    ``cli/merge`` documents that one results file records "Bandit" where another
+    records "bandit", and compares every scanner name stripped and lowered for that
+    reason. The rollup joins projects' rows by the same fold, so one scanner is
+    one row however each project's config spelled it.
+    """
+    return name.strip().lower()
+
+
 def _larger_code(first: Optional[int], second: Optional[int]) -> Optional[int]:
     """The larger of two rolled-up codes, where null (no code) is below any code."""
     if first is None:
@@ -856,10 +1337,24 @@ class WorkspaceAggregator:
         self.spool_dir = self.output_dir / SPOOL_DIR_NAME
         self._outcomes: Dict[str, WorkspaceProjectResult] = {}
         self._spooled: Dict[str, Path] = {}
+        # Every per-scanner map below is keyed by the folded name (_rollup_key):
+        # cli/merge documents that one shard records "Bandit" where another
+        # records "bandit", and a project's config is written by the same hands.
+        # Keyed by the raw name, one scanner split into two rows. The published
+        # row is named by the first spelling in WORKSPACE-FILE order
+        # (_display_names, read when the payload is built); this map remembers
+        # the first spelling add() saw, which is completion order and is the
+        # fallback for a scanner known only from its findings.
+        self._scanner_display: Dict[str, str] = {}
         self._scanner_findings: Dict[str, int] = {}
         self._scanner_actionable: Dict[str, int] = {}
         self._scanner_status: Dict[str, Optional[str]] = {}
         self._scanner_exit_code: Dict[str, Optional[int]] = {}
+        # The rollup's two flags, from the rows that carried them: excluded only
+        # when every project that recorded the scanner excluded it, and
+        # dependencies satisfied only when every one of them had its tool.
+        self._scanner_excluded: Dict[str, bool] = {}
+        self._scanner_dependencies: Dict[str, bool] = {}
         self._unconvertible = 0
 
     def add(
@@ -883,9 +1378,11 @@ class WorkspaceAggregator:
         """
         self._outcomes[outcome.project] = outcome
 
-        for scanner, status in (outcome.scanners or {}).items():
+        flags = outcome.carried_scanner_flags
+        for raw_name, status in (outcome.scanners or {}).items():
+            scanner = self._rollup_key(raw_name)
             code = outcome.carried_scanner_exit_codes.get(
-                scanner, SCANNER_EXIT_CODE_UNRECORDED
+                raw_name, SCANNER_EXIT_CODE_UNRECORDED
             )
             held = self._scanner_status.get(scanner)
             worse = _worse_status(held, status)
@@ -902,6 +1399,14 @@ class WorkspaceAggregator:
             self._scanner_status[scanner] = worse
             self._scanner_findings.setdefault(scanner, 0)
             self._scanner_actionable.setdefault(scanner, 0)
+            if raw_name in flags:
+                excluded, satisfied = flags[raw_name]
+                self._scanner_excluded[scanner] = (
+                    self._scanner_excluded.get(scanner, True) and excluded
+                )
+                self._scanner_dependencies[scanner] = (
+                    self._scanner_dependencies.get(scanner, True) and satisfied
+                )
 
         if run is None:
             return
@@ -915,45 +1420,80 @@ class WorkspaceAggregator:
         for result in rebased.get("results") or []:
             if not isinstance(result, Mapping):
                 continue
-            properties = result.get("properties")
-            scanner = None
-            if isinstance(properties, Mapping):
-                scanner = properties.get("scanner_name")
-            name = str(scanner) if scanner else "unattributed"
+            # Named as the project's per-scanner split names it
+            # (result_scanner_name): a name that is not a string is the
+            # unattributed scanner there, and was a row of its own here, so one
+            # scanner's findings and its actionable count sat under two rows.
+            scanner = result_scanner_name(result)
+            name = self._rollup_key(scanner or UNATTRIBUTED_SCANNER)
             by_scanner.setdefault(name, []).append(result)
             self._scanner_status.setdefault(name, None)
-            if result.get("suppressions"):
+            if result_is_suppressed(result):
                 continue
             self._scanner_findings[name] = self._scanner_findings.get(name, 0) + 1
 
-        # Actionable counts, per scanner, against THIS project's own threshold.
+        # Actionable counts, per scanner: the split the project's own verdict
+        # carried, when it carried one. The verdict graded each finding against
+        # its scanner's own threshold and saw only the findings it is allowed to
+        # (a policy scanner's findings decide nothing unless policy_scanners_gate
+        # is set), so summing the split here is the one derivation. Re-deriving it
+        # from the run against one project-wide threshold made the two
+        # derivations of one number disagree the moment a scanner had a threshold
+        # of its own, and counted policy-origin findings the project's own total
+        # excluded, so the rollup exceeded the per-project totals it claims to sum.
         #
-        # Derived here rather than carried on the outcome, because the outcome
-        # holds one number for the whole project and the rollup needs it split.
-        # Zeroed wholesale when the project's own actionable count is zero: that
-        # is how the --min-severity gate reaches this layer, since it is a
-        # whole-scan switch in _compute_exit_code rather than a per-finding
-        # filter, and a per-scanner sum that ignored it would exceed the
-        # project's own total.
-        if outcome.actionable_finding_count:
+        # Zeroed wholesale when the project's own actionable count is zero, which
+        # the carried split already is: that is how the --min-severity gate reaches
+        # this layer, since it is a whole-scan switch in _compute_exit_code rather
+        # than a per-finding filter.
+        for name in by_scanner:
+            self._scanner_actionable.setdefault(name, 0)
+        carried = outcome.carried_scanner_actionable_counts
+        if carried is not None:
+            if outcome.actionable_finding_count:
+                for raw_name, actionable in carried.items():
+                    name = self._rollup_key(raw_name)
+                    self._scanner_actionable[name] = (
+                        self._scanner_actionable.get(name, 0) + actionable
+                    )
+        elif outcome.actionable_finding_count:
+            # An outcome built without the split (a results file read back, a
+            # caller that assembled it by hand): derived from the run the way the
+            # verdict derived it. Each scanner's own threshold where the outcome
+            # recorded one (threshold_for_scanner, the contract every regrading
+            # reader follows), the project's gate_threshold otherwise, so a
+            # workspace ceiling that tightened the project is honoured here too;
+            # and a finding from a scanner only the policy added is left out
+            # when the outcome says the policy gate was off, as the verdict left
+            # it out. Without both, this path again exceeded the project's own
+            # actionable_finding_count the comment above says the split fixed.
+            gate_off = outcome.policy_scanners_gate is False
             for name, results in by_scanner.items():
-                # gate_threshold, matching what the project's own verdict was
-                # computed from. Using severity_threshold here made the two
-                # derivations of one number disagree the moment a workspace
-                # ceiling tightened anything: the project reported 1 actionable
-                # and this split summed to 0, with no rule for which to trust.
-                actionable = count_actionable_results(results, project.gate_threshold)
+                counted = [
+                    result
+                    for result in results
+                    if not (gate_off and is_policy_origin(result))
+                ]
+                actionable = count_actionable_results(
+                    counted,
+                    project.gate_threshold,
+                    threshold_for=outcome.threshold_for_scanner,
+                )
                 self._scanner_actionable[name] = (
                     self._scanner_actionable.get(name, 0) + actionable
                 )
-        else:
-            for name in by_scanner:
-                self._scanner_actionable.setdefault(name, 0)
 
         self._make_spool_dir()
         # The project key is a path-derived value with separators already
-        # replaced by dashes, so it is safe as a filename by construction.
-        spool_path = self.spool_dir / f"{outcome.project}.run.json"
+        # replaced by dashes, so it is safe as a filename by construction. Two
+        # keys that differ only in letter case are two projects on the filesystem
+        # the workspace was read from, but one file name on a case-insensitive
+        # output volume, where the second spool replaced the first project's run.
+        # An ordinal prefix keeps the names apart; write() reads the paths it
+        # recorded, never the names.
+        spool_path = (
+            self.spool_dir / f"{len(self._spooled):04d}-{outcome.project}.run.json"
+        )
         from automated_security_helper.utils.sandbox.fs_guard import (
             open_for_atomic_write,
         )
@@ -965,6 +1505,12 @@ class WorkspaceAggregator:
         with open_for_atomic_write(spool_path, root=self.output_dir) as handle:
             json.dump(rebased, handle)
         self._spooled[outcome.project] = spool_path
+
+    def _rollup_key(self, name: str) -> str:
+        """The key *name*'s rows roll up under, remembering its first spelling."""
+        key = _fold_scanner_name(name)
+        self._scanner_display.setdefault(key, name)
+        return key
 
     def _make_spool_dir(self) -> None:
         """Create the spool directory, replacing anything else at its name.
@@ -1036,6 +1582,7 @@ class WorkspaceAggregator:
         scanner has this one; it stays on that project's own entry.
         """
         outcomes = self._ordered_outcomes()
+        display = self._display_names(outcomes)
         payload: Dict[str, Dict[str, Any]] = {}
         for scanner in sorted(set(self._scanner_status) | set(self._scanner_findings)):
             status = self._scanner_status.get(scanner) or "PASSED"
@@ -1043,26 +1590,57 @@ class WorkspaceAggregator:
                 "status": status,
                 "finding_count": self._scanner_findings.get(scanner, 0),
                 "actionable_finding_count": self._scanner_actionable.get(scanner, 0),
-                "dependencies_satisfied": status != "MISSING",
-                "excluded": status == "SKIPPED",
+                # From the rows that carried the flags; a scanner known only from
+                # its findings (no row recorded it) keeps the status-derived answer.
+                "dependencies_satisfied": self._scanner_dependencies.get(
+                    scanner, status != "MISSING"
+                ),
+                "excluded": self._scanner_excluded.get(scanner, status == "SKIPPED"),
                 "exit_code": self._scanner_exit_code.get(
                     scanner, SCANNER_EXIT_CODE_UNRECORDED
                 ),
             }
             if status in ("SKIPPED", "MISSING"):
-                named = [
-                    f"{outcome.project}: {outcome.scanner_reasons[scanner]}"
-                    for outcome in outcomes
-                    if (outcome.scanners or {}).get(scanner) == status
-                    and (outcome.scanner_reasons or {}).get(scanner)
-                ]
+                named = []
+                for outcome in outcomes:
+                    for raw_name, raw_status in (outcome.scanners or {}).items():
+                        if _fold_scanner_name(raw_name) != scanner:
+                            continue
+                        if raw_status != status:
+                            continue
+                        reason = (outcome.scanner_reasons or {}).get(raw_name)
+                        if reason:
+                            named.append(f"{outcome.project}: {reason}")
                 if named:
                     field = (
                         "skipped_reason" if status == "SKIPPED" else "missing_reason"
                     )
                     row[field] = "; ".join(named)
-            payload[scanner] = row
+            payload[display.get(scanner, scanner)] = row
         return payload
+
+    def _display_names(
+        self, outcomes: Sequence[WorkspaceProjectResult]
+    ) -> Dict[str, str]:
+        """The published spelling of each folded scanner name, by plan order.
+
+        ``add()`` runs in completion order, which a parallel run does not
+        reproduce, so a row named by the first spelling it saw (``Bandit`` from
+        one project, ``bandit`` from another) could change its key between two
+        runs of the same workspace, and a reader looking the row up by a
+        project's own ``scanner_name`` found it one run and not the next. The
+        name is the first spelling in workspace-file order (*outcomes* is
+        ``_ordered_outcomes()``), read from each project's own rows; a scanner
+        no row recorded (known from its findings alone) keeps the first spelling
+        ``add()`` saw.
+        """
+        display: Dict[str, str] = {}
+        for outcome in outcomes:
+            for raw_name in outcome.scanners or {}:
+                display.setdefault(_fold_scanner_name(raw_name), raw_name)
+        for key, name in self._scanner_display.items():
+            display.setdefault(key, name)
+        return display
 
     def results_payload(
         self,

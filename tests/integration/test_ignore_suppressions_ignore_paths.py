@@ -96,7 +96,17 @@ def _scan(
         command += ["--scanners", scanner]
     if ignore_suppressions:
         command.append("--ignore-suppressions")
-    proc = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    proc = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        # ASH writes UTF-8 to a pipe on Windows (utils/log.py). A parent that decodes
+        # it with the ANSI code page loses stdout and stderr to None when one byte has
+        # no mapping there, so the log below raised TypeError whatever the scan did.
+        encoding="utf-8",
+        errors="replace",
+        timeout=600,
+    )
     log = (
         f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\n"
         f"STDERR:\n{proc.stderr[-4000:]}"

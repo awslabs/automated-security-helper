@@ -4,15 +4,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "actionlint",
+          "anyOf": [
+            {
+              "const": "actionlint",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "actionlint",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ActionlintScannerConfigOptions",
@@ -47,10 +65,19 @@
           "title": "Config File"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "pyflakes": {
           "anyOf": [
@@ -72,6 +99,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -89,6 +121,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -121,15 +158,33 @@
       "description": "Archive (ZIP/TAR/GZIP/etc) converter configuration.",
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "archive",
+          "anyOf": [
+            {
+              "const": "archive",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "archive",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ArchiveConverterConfigOptions",
@@ -150,32 +205,68 @@
       "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
       "properties": {
         "max_compression_ratio": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 100,
           "description": "The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted. Checked only once the members declare more than 512 KiB in all.",
-          "exclusiveMinimum": 0,
-          "title": "Max Compression Ratio",
-          "type": "integer"
+          "title": "Max Compression Ratio"
         },
         "max_member_bytes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 268435456,
           "description": "The largest size in bytes one member of an archive may declare. An archive with a larger member is not extracted. Default 256 MiB.",
-          "exclusiveMinimum": 0,
-          "title": "Max Member Bytes",
-          "type": "integer"
+          "title": "Max Member Bytes"
         },
         "max_members": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 100000,
           "description": "The most members an archive may have, directories included. An archive with more is not extracted. All the archives one scan extracts may hold four times this many together.",
-          "exclusiveMinimum": 0,
-          "title": "Max Members",
-          "type": "integer"
+          "title": "Max Members"
         },
         "max_total_bytes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 1073741824,
           "description": "The most bytes an archive's members may declare added up, each counted as at least 512. An archive whose members declare more is not extracted. All the archives one scan extracts may declare four times this together. Default 1 GiB.",
-          "exclusiveMinimum": 0,
-          "title": "Max Total Bytes",
-          "type": "integer"
+          "title": "Max Total Bytes"
         }
       },
       "title": "ArchiveConverterConfigOptions",
@@ -206,20 +297,38 @@
           "description": "Build-time configuration settings"
         },
         "content_db_staleness": {
+          "anyOf": [
+            {
+              "enum": [
+                "fail",
+                "warn"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "fail",
           "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.",
-          "enum": [
-            "fail",
-            "warn"
-          ],
-          "title": "Content Db Staleness",
-          "type": "string"
+          "title": "Content Db Staleness"
         },
         "content_db_staleness_offline_image_default": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather than to content_db_staleness: fail. Such an image carries the trivy database it was built with, and trivy's own bound would fail every scan in it from a day after the build; with this, those scans pass and every report records the stale database. Only trivy-db: grype-db and the offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES in ASH's environment, which the image sets from its OFFLINE build argument, turns it on; without that variable this does nothing, whatever it says. Set false to hold trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides entry for trivy-db outranks it, and either form of --allow-stale-content-db sets this to false for that scan.",
-          "title": "Content Db Staleness Offline Image Default",
-          "type": "boolean"
+          "title": "Content Db Staleness Offline Image Default"
         },
         "content_db_staleness_overrides": {
           "default": [],
@@ -283,16 +392,34 @@
           "type": "array"
         },
         "fail_on_findings": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Whether to exit with non-zero code if findings are detected",
-          "title": "Fail On Findings",
-          "type": "boolean"
+          "title": "Fail On Findings"
         },
         "fail_on_incomplete_scanners": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. One ending overrides this setting: a run where ASH could not stop a scanner's tool exits 1 either way, because the tool may still be running and writing into the output directory.",
-          "title": "Fail On Incomplete Scanners",
-          "type": "boolean"
+          "title": "Fail On Incomplete Scanners"
         },
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
@@ -416,10 +543,19 @@
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         },
         "honor_ignore_files": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.",
-          "title": "Honor Ignore Files",
-          "type": "boolean"
+          "title": "Honor Ignore Files"
         },
         "mcp-resource-management": {
           "$ref": "#/$defs/MCPResourceManagementConfig",
@@ -516,6 +652,7 @@
               "extension": "ghas.sarif",
               "name": "github-ghas",
               "options": {
+                "emit_automation_details": false,
                 "exclude_suppressed": true
               }
             },
@@ -617,6 +754,21 @@
           "$ref": "#/$defs/SandboxConfig",
           "default": {
             "env_scanners": [],
+            "environment": [
+              "ALL_PROXY",
+              "HTTPS_PROXY",
+              "HTTP_PROXY",
+              "NO_PROXY",
+              "all_proxy",
+              "http_proxy",
+              "https_proxy",
+              "no_proxy",
+              "SSL_CERT_FILE",
+              "REQUESTS_CA_BUNDLE",
+              "CURL_CA_BUNDLE",
+              "NODE_EXTRA_CA_CERTS",
+              "SSL_CERT_DIR"
+            ],
             "extra_read_paths": [],
             "mode": "off",
             "network_scanners": null,
@@ -652,7 +804,7 @@
                 "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null,
-                "tool_version": ">=1.7.0,<2.0.0"
+                "tool_version": ">=1.7.8,<2.0.0"
               }
             },
             "cdk-nag": {
@@ -1012,17 +1164,26 @@
           "description": "MCP-server-specific configuration (runtime override allowlist, etc.)."
         },
         "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "MEDIUM",
           "description": "Global minimum severity level to consider findings as failures across all scanners",
-          "enum": [
-            "ALL",
-            "LOW",
-            "MEDIUM",
-            "HIGH",
-            "CRITICAL"
-          ],
-          "title": "Severity Threshold",
-          "type": "string"
+          "title": "Severity Threshold"
         },
         "suppressions": {
           "default": [],
@@ -1164,10 +1325,19 @@
       "description": "Represents a finding suppression rule.",
       "properties": {
         "client_supplied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
-          "title": "Client Supplied",
-          "type": "boolean"
+          "title": "Client Supplied"
         },
         "expiration": {
           "anyOf": [
@@ -1188,6 +1358,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1199,6 +1374,11 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -1296,15 +1476,33 @@
       "description": "Bandit scanner configuration.",
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "bandit",
+          "anyOf": [
+            {
+              "const": "bandit",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "bandit",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/BanditScannerConfigOptions",
@@ -1318,7 +1516,7 @@
             "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null,
-            "tool_version": ">=1.7.0,<2.0.0"
+            "tool_version": ">=1.7.8,<2.0.0"
           },
           "description": "Configure Bandit scanner"
         }
@@ -1331,7 +1529,7 @@
       "properties": {
         "additional_formats": {
           "default": [],
-          "description": "Additional output formats to generate (e.g., html, csv, xml)",
+          "description": "Additional output formats (e.g., html, csv, xml). bandit writes one format per run through a single --format option, and ASH needs that run's output to be SARIF, so these formats are not produced: a value here is accepted and logged as a warning. Convert the SARIF results with ASH's reporters instead.",
           "items": {
             "type": "string"
           },
@@ -1339,11 +1537,20 @@
           "type": "array"
         },
         "confidence_level": {
+          "anyOf": [
+            {
+              "pattern": "^(all|low|medium|high)$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "all",
           "description": "Confidence level for bandit scan (all, low, medium, high)",
-          "pattern": "^(all|low|medium|high)$",
-          "title": "Confidence Level",
-          "type": "string"
+          "title": "Confidence Level"
         },
         "config_file": {
           "anyOf": [
@@ -1372,28 +1579,60 @@
           "type": "array"
         },
         "ignore_nosec": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Whether to ignore #nosec comments in the code",
-          "title": "Ignore Nosec",
-          "type": "boolean"
+          "title": "Ignore Nosec"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation (default: 300)",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -1413,6 +1652,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -1432,8 +1676,8 @@
               "type": "null"
             }
           ],
-          "default": ">=1.7.0,<2.0.0",
-          "description": "Version constraint for bandit tool installation (e.g., '>=1.7.0'). If not specified, uses '>=1.7.0,<2.0.0' for stability.",
+          "default": ">=1.7.8,<2.0.0",
+          "description": "Version constraint for bandit tool installation (e.g., '>=1.7.8'). If not specified, uses '>=1.7.8,<2.0.0' for stability.",
           "title": "Tool Version"
         }
       },
@@ -1445,14 +1689,23 @@
       "description": "Configuration model for build-time settings.",
       "properties": {
         "build_mode": {
-          "default": "ONLINE",
-          "description": "Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning.",
-          "enum": [
-            "ONLINE",
-            "OFFLINE"
+          "anyOf": [
+            {
+              "enum": [
+                "ONLINE",
+                "OFFLINE"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
           ],
-          "title": "Build Mode",
-          "type": "string"
+          "default": "ONLINE",
+          "description": "Not used: nothing reads this setting, so it changes neither the container image build nor the scan. To scan offline, pass --offline or set ASH_OFFLINE.",
+          "title": "Build Mode"
         },
         "custom_scanners": {
           "default": [],
@@ -1472,7 +1725,7 @@
             "type": "array"
           },
           "default": {},
-          "description": "Map of tool names to their installation scripts",
+          "description": "Not used: nothing reads this setting, so no script listed here runs. Map of tool names to their installation scripts.",
           "title": "Tool Install Scripts",
           "type": "object"
         }
@@ -1484,9 +1737,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "csv",
@@ -1494,10 +1756,19 @@
           "type": "string"
         },
         "name": {
-          "const": "csv",
+          "anyOf": [
+            {
+              "const": "csv",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "csv",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CSVReporterConfigOptions",
@@ -1517,34 +1788,79 @@
       "additionalProperties": true,
       "properties": {
         "AwsSolutionsChecks": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Runs the AwsSolutionsChecks NagPack included with CDK Nag.",
-          "title": "Awssolutionschecks",
-          "type": "boolean"
+          "title": "Awssolutionschecks"
         },
         "HIPAASecurityChecks": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Runs the HIPAASecurityChecks NagPack included with CDK Nag.",
-          "title": "Hipaasecuritychecks",
-          "type": "boolean"
+          "title": "Hipaasecuritychecks"
         },
         "NIST80053R4Checks": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Runs the NIST80053R4Checks NagPack included with CDK Nag.",
-          "title": "Nist80053R4Checks",
-          "type": "boolean"
+          "title": "Nist80053R4Checks"
         },
         "NIST80053R5Checks": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Runs the NIST80053R5Checks NagPack included with CDK Nag.",
-          "title": "Nist80053R5Checks",
-          "type": "boolean"
+          "title": "Nist80053R5Checks"
         },
         "PCIDSS321Checks": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Runs the PCIDSS321Checks NagPack included with CDK Nag.",
-          "title": "Pcidss321Checks",
-          "type": "boolean"
+          "title": "Pcidss321Checks"
         }
       },
       "title": "CdkNagPacks",
@@ -1554,15 +1870,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "cdk-nag",
+          "anyOf": [
+            {
+              "const": "cdk-nag",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "cdk-nag",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CdkNagScannerConfigOptions",
@@ -1579,7 +1913,7 @@
             "scan_timeout": 1800,
             "severity_threshold": null
           },
-          "description": "Configure Bandit scanner"
+          "description": "Configure CDK Nag scanner"
         }
       },
       "title": "CdkNagScannerConfig",
@@ -1590,10 +1924,19 @@
       "description": "CDK Nag IAC SAST scanner options.",
       "properties": {
         "include_compliant_checks": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "description": "Include INFO-level findings for compliant resources in the report.",
-          "title": "Include Compliant Checks",
-          "type": "boolean"
+          "description": "Kept for configuration compatibility; it changes nothing. cdk-nag 3 reports violations only, so there is no compliant-resource finding for this option to include, and a scan with it set says so.",
+          "title": "Include Compliant Checks"
         },
         "nag_packs": {
           "$ref": "#/$defs/CdkNagPacks",
@@ -1607,16 +1950,30 @@
           "description": "CDK Nag packs to enable"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -1639,6 +1996,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1654,15 +2016,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "cfn-guard",
+          "anyOf": [
+            {
+              "const": "cfn-guard",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "cfn-guard",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CfnGuardScannerConfigOptions",
@@ -1685,10 +2065,19 @@
       "additionalProperties": false,
       "properties": {
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "rule_sets": {
           "default": [
@@ -1717,6 +2106,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1737,6 +2131,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1752,15 +2151,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "cfn-lint",
+          "anyOf": [
+            {
+              "const": "cfn-lint",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "cfn-lint",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CfnLintScannerConfigOptions",
@@ -1803,10 +2220,19 @@
           "title": "Config File"
         },
         "honor_inline_ignores": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Honor the ignore_checks and configure_rules a template sets for itself in `Metadata: cfn-lint: config` (ignore_checks also at the resource level). Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, and the config_file's configure_rules are passed on the command line, which cfn-lint takes instead of a template's, so a template cannot hide its own findings or the next template's parse errors, which reach ASH, where suppressions are reported and counted. A config_file setting the command line cannot carry (a list of more than one item, or a value with a comma, colon or equals sign) is then left out with a warning, and a config_file that sets merge_configs fails the scan. On, each template is linted by a cfn-lint run of its own, so its settings reach no other template; that adds a cfn-lint start-up per template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
-          "title": "Honor Inline Ignores",
-          "type": "boolean"
+          "title": "Honor Inline Ignores"
         },
         "ignore_checks": {
           "default": [],
@@ -1827,20 +2253,38 @@
           "type": "array"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "regions": {
           "default": [],
-          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read.",
+          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "items": {
             "type": "string"
           },
@@ -1852,6 +2296,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -1871,6 +2320,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -1902,15 +2356,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "cfn-nag",
+          "anyOf": [
+            {
+              "const": "cfn-nag",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "cfn-nag",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CfnNagScannerConfigOptions",
@@ -1929,16 +2401,30 @@
       "additionalProperties": false,
       "properties": {
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -1961,6 +2447,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1976,15 +2467,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "checkov",
+          "anyOf": [
+            {
+              "const": "checkov",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "checkov",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CheckovScannerConfigOptions",
@@ -2020,19 +2529,28 @@
           ],
           "description": "List of additional formats to output. Defaults to including CycloneDX JSON",
           "items": {
-            "enum": [
-              "cli",
-              "csv",
-              "cyclonedx",
-              "cyclonedx_json",
-              "json",
-              "junitxml",
-              "github_failed_only",
-              "gitlab_sast",
-              "sarif",
-              "spdx"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "cli",
+                  "csv",
+                  "cyclonedx",
+                  "cyclonedx_json",
+                  "json",
+                  "junitxml",
+                  "github_failed_only",
+                  "gitlab_sast",
+                  "sarif",
+                  "spdx"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Additional Formats",
           "type": "array"
@@ -2051,7 +2569,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+          "description": "Path to a Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Only a file the operator names and that lies outside the scanned tree is passed to Checkov; a `.checkov.yaml` or `.checkov.yml` found in the scanned tree is not read, and the scan tells Checkov to read none from its working directory either, because such a file can change what is reported.",
           "title": "Config File"
         },
         "frameworks": {
@@ -2060,66 +2578,98 @@
           ],
           "description": "Specific frameworks to include with Checkov. Defaults to `all`.",
           "items": {
-            "enum": [
-              "all",
-              "ansible",
-              "argo_workflows",
-              "arm",
-              "azure_pipelines",
-              "bicep",
-              "bitbucket_pipelines",
-              "cdk",
-              "circleci_pipelines",
-              "cloudformation",
-              "dockerfile",
-              "github_configuration",
-              "github_actions",
-              "gitlab_configuration",
-              "gitlab_ci",
-              "bitbucket_configuration",
-              "helm",
-              "json",
-              "yaml",
-              "kubernetes",
-              "kustomize",
-              "openapi",
-              "sca_package",
-              "sca_image",
-              "secrets",
-              "serverless",
-              "terraform",
-              "terraform_json",
-              "terraform_plan",
-              "sast",
-              "sast_python",
-              "sast_java",
-              "sast_javascript",
-              "sast_typescript",
-              "sast_golang",
-              "3d_policy"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "ansible",
+                  "argo_workflows",
+                  "arm",
+                  "azure_pipelines",
+                  "bicep",
+                  "bitbucket_pipelines",
+                  "cdk",
+                  "circleci_pipelines",
+                  "cloudformation",
+                  "dockerfile",
+                  "github_configuration",
+                  "github_actions",
+                  "gitlab_configuration",
+                  "gitlab_ci",
+                  "bitbucket_configuration",
+                  "helm",
+                  "json",
+                  "yaml",
+                  "kubernetes",
+                  "kustomize",
+                  "openapi",
+                  "sca_package",
+                  "sca_image",
+                  "secrets",
+                  "serverless",
+                  "terraform",
+                  "terraform_json",
+                  "terraform_plan",
+                  "sast",
+                  "sast_python",
+                  "sast_java",
+                  "sast_javascript",
+                  "sast_typescript",
+                  "sast_golang",
+                  "3d_policy"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Frameworks",
           "type": "array"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run in offline mode, disabling policy downloads. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -2142,6 +2692,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -2150,61 +2705,79 @@
           "title": "Severity Threshold"
         },
         "skip_ash_output_dir": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Tell Checkov to skip ASH's own output directories inside the scanned directory (this run's output directory and .ash/ash_output), so it does not parse ASH's previous reports. Defaults to true; set to false to let Checkov read them. Either way ASH drops the findings located there after the scan. Has no effect on Windows, where Checkov's --skip-path matching is unreliable.",
-          "title": "Skip Ash Output Dir",
-          "type": "boolean"
+          "title": "Skip Ash Output Dir"
         },
         "skip_frameworks": {
           "default": [],
           "description": "Specific frameworks to exclude with Checkov. Defaults to none.",
           "items": {
-            "enum": [
-              "all",
-              "ansible",
-              "argo_workflows",
-              "arm",
-              "azure_pipelines",
-              "bicep",
-              "bitbucket_pipelines",
-              "cdk",
-              "circleci_pipelines",
-              "cloudformation",
-              "dockerfile",
-              "github_configuration",
-              "github_actions",
-              "gitlab_configuration",
-              "gitlab_ci",
-              "bitbucket_configuration",
-              "helm",
-              "json",
-              "yaml",
-              "kubernetes",
-              "kustomize",
-              "openapi",
-              "sca_package",
-              "sca_image",
-              "secrets",
-              "serverless",
-              "terraform",
-              "terraform_json",
-              "terraform_plan",
-              "sast",
-              "sast_python",
-              "sast_java",
-              "sast_javascript",
-              "sast_typescript",
-              "sast_golang",
-              "3d_policy"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "ansible",
+                  "argo_workflows",
+                  "arm",
+                  "azure_pipelines",
+                  "bicep",
+                  "bitbucket_pipelines",
+                  "cdk",
+                  "circleci_pipelines",
+                  "cloudformation",
+                  "dockerfile",
+                  "github_configuration",
+                  "github_actions",
+                  "gitlab_configuration",
+                  "gitlab_ci",
+                  "bitbucket_configuration",
+                  "helm",
+                  "json",
+                  "yaml",
+                  "kubernetes",
+                  "kustomize",
+                  "openapi",
+                  "sca_package",
+                  "sca_image",
+                  "secrets",
+                  "serverless",
+                  "terraform",
+                  "terraform_json",
+                  "terraform_plan",
+                  "sast",
+                  "sast_python",
+                  "sast_java",
+                  "sast_javascript",
+                  "sast_typescript",
+                  "sast_golang",
+                  "3d_policy"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Skip Frameworks",
           "type": "array"
         },
         "skip_path": {
           "default": [],
-          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "description": "Path (file or directory) to skip, as a regular expression Checkov searches for in each path it walks, and also as a substring of that path. The paths Checkov walks start with the absolute path of the scanned directory. Word boundaries are not implicit: \"dir1\" skips any directory or subdirectory whose path holds \"dir1\". An entry whose path is empty is ignored (it would skip every file). Can be specified multiple times.",
           "items": {
             "$ref": "#/$defs/IgnorePathWithReason"
           },
@@ -2243,19 +2816,37 @@
           "type": "string"
         },
         "policy": {
-          "description": "The policy this database is held to while the entry is in effect.",
-          "enum": [
-            "fail",
-            "warn"
+          "anyOf": [
+            {
+              "enum": [
+                "fail",
+                "warn"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
           ],
-          "title": "Policy",
-          "type": "string"
+          "description": "The policy this database is held to while the entry is in effect.",
+          "title": "Policy"
         },
         "reason": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "description": "Required. Why this database is held differently.",
-          "minLength": 1,
-          "title": "Reason",
-          "type": "string"
+          "title": "Reason"
         }
       },
       "required": [
@@ -2318,18 +2909,36 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Whether the component is enabled",
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-zA-Z][\\w-]+$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": null,
           "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ConverterOptionsBase",
@@ -2341,6 +2950,7 @@
       "type": "object"
     },
     "CustomCommand": {
+      "description": "An install command a plugin declares, with its argv and a shell flag.\n\n``get_installation_commands`` returns a custom command as this object, so\nthe installer reads ``shell`` beside the argv. A reader that indexes,\nslices, iterates or searches the entry reads its ``args``, as it read the\nbare argv list the method used to return in its place; the flag rides\nbeside and is read by name.\n\n``shell=False`` (the default): ``args`` is the argv handed to the program\nunchanged, no shell in between. ``shell=True``: the installer joins the\nwords with single spaces into ONE command line and hands that line to the\nshell as written, so each word carries its own quoting, and shell syntax in\nit (a ``$VARIABLE``, a redirection, a pipe) is expanded and interpreted by\nthe shell. Declare ``shell=True`` only when that expansion is the point; a\ncommand that already names its program and arguments is an argv and stays\n``shell=False``.",
       "properties": {
         "args": {
           "items": {
@@ -2350,9 +2960,18 @@
           "type": "array"
         },
         "shell": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Shell",
-          "type": "boolean"
+          "title": "Shell"
         }
       },
       "required": [
@@ -2365,9 +2984,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "cdx.json",
@@ -2375,10 +3003,19 @@
           "type": "string"
         },
         "name": {
-          "const": "cyclonedx",
+          "anyOf": [
+            {
+              "const": "cyclonedx",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "cyclonedx",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/CycloneDXReporterConfigOptions",
@@ -2466,6 +3103,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -2509,6 +3151,11 @@
               "type": "number"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -2544,15 +3191,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "detect-secrets",
+          "anyOf": [
+            {
+              "const": "detect-secrets",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "detect-secrets",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
@@ -2598,18 +3263,36 @@
           "title": "Baseline File"
         },
         "max_worker_output_mib": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 4096,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 256,
           "description": "The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Honored only from --config-overrides or a config file outside the scanned tree.",
-          "exclusiveMinimum": 0,
-          "maximum": 4096,
-          "title": "Max Worker Output Mib",
-          "type": "integer"
+          "title": "Max Worker Output Mib"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_settings": {
           "$ref": "#/$defs/DetectSecretsScanSettings",
@@ -2627,6 +3310,11 @@
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -2649,6 +3337,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -2657,53 +3350,82 @@
           "title": "Severity Threshold"
         },
         "skip_generated_lockfiles": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Skip machine-generated dependency lockfiles (package-lock.json, yarn.lock, poetry.lock, and similar) before scanning. These are dense with integrity hashes and are regenerated rather than hand-edited, so findings in them are usually noise. Hand-authored dependency declarations such as requirements.txt, Pipfile and environment.yml are always scanned and are not affected by this option. Set to false to scan generated lockfiles as well.",
-          "title": "Skip Generated Lockfiles",
-          "type": "boolean"
+          "title": "Skip Generated Lockfiles"
         }
       },
       "title": "DetectSecretsScannerConfigOptions",
       "type": "object"
     },
     "ExportFormat": {
-      "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
-      "enum": [
-        "aggregated",
-        "text",
-        "flat-json",
-        "yaml",
-        "csv",
-        "html",
-        "dict",
-        "junitxml",
-        "markdown",
-        "sarif",
-        "asff",
-        "ocsf",
-        "cyclonedx",
-        "spdx",
-        "custom",
-        "github-ghas",
-        "gitlab-sast",
-        "gitlab-cyclonedx",
-        "unused-suppressions",
-        "aws-security-hub",
-        "bedrock-summary-reporter",
-        "cloudwatch-logs",
-        "s3"
+      "anyOf": [
+        {
+          "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
+          "enum": [
+            "aggregated",
+            "text",
+            "flat-json",
+            "yaml",
+            "csv",
+            "html",
+            "dict",
+            "junitxml",
+            "markdown",
+            "sarif",
+            "asff",
+            "ocsf",
+            "cyclonedx",
+            "spdx",
+            "custom",
+            "github-ghas",
+            "gitlab-sast",
+            "gitlab-cyclonedx",
+            "unused-suppressions",
+            "aws-security-hub",
+            "bedrock-summary-reporter",
+            "cloudwatch-logs",
+            "s3"
+          ],
+          "title": "ExportFormat",
+          "type": "string"
+        },
+        {
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+          "type": "string"
+        }
       ],
-      "title": "ExportFormat",
-      "type": "string"
+      "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
+      "title": "ExportFormat"
     },
     "FlatJSONReporterConfig": {
       "additionalProperties": false,
       "description": "Configuration for the Flat JSON reporter.",
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "flat.json",
@@ -2711,10 +3433,19 @@
           "type": "string"
         },
         "name": {
-          "const": "flat-json",
+          "anyOf": [
+            {
+              "const": "flat-json",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "flat-json",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/FlatJSONReporterConfigOptions",
@@ -2733,19 +3464,46 @@
       "description": "Configuration options for the Flat JSON reporter.",
       "properties": {
         "include_metadata": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Include Metadata",
-          "type": "boolean"
+          "title": "Include Metadata"
         },
         "include_scanner_metrics": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Include Scanner Metrics",
-          "type": "boolean"
+          "title": "Include Scanner Metrics"
         },
         "include_summary_metrics": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Include Summary Metrics",
-          "type": "boolean"
+          "title": "Include Summary Metrics"
         }
       },
       "title": "FlatJSONReporterConfigOptions",
@@ -2755,9 +3513,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "ghas.sarif",
@@ -2765,14 +3532,24 @@
           "type": "string"
         },
         "name": {
-          "const": "github-ghas",
+          "anyOf": [
+            {
+              "const": "github-ghas",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "github-ghas",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GHASReporterConfigOptions",
           "default": {
+            "emit_automation_details": false,
             "exclude_suppressed": true
           }
         }
@@ -2783,11 +3560,35 @@
     "GHASReporterConfigOptions": {
       "additionalProperties": false,
       "properties": {
+        "emit_automation_details": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": false,
+          "description": "When true, a workspace project's own report carries runAutomationDetails.id ash/<project key>/, the category GitHub files the upload under, so the per-project reports of one repository are kept apart. Off by default: an id in the file takes precedence over the category the upload-sarif action is given, so an upload that already names its category would be moved to a new one, leaving the old analysis's alerts open.",
+          "title": "Emit Automation Details"
+        },
         "exclude_suppressed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "When true (default), suppressed findings are excluded from the GHAS report. GitHub has its own dismissal workflow so suppressed findings are typically not needed.",
-          "title": "Exclude Suppressed",
-          "type": "boolean"
+          "title": "Exclude Suppressed"
         }
       },
       "title": "GHASReporterConfigOptions",
@@ -2797,9 +3598,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "gl-dependency-scanning-report.cdx.json",
@@ -2807,10 +3617,19 @@
           "type": "string"
         },
         "name": {
-          "const": "gitlab-cyclonedx",
+          "anyOf": [
+            {
+              "const": "gitlab-cyclonedx",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "gitlab-cyclonedx",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GitLabCycloneDXReporterConfigOptions",
@@ -2882,9 +3701,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "gl-sast-report.json",
@@ -2892,10 +3720,19 @@
           "type": "string"
         },
         "name": {
-          "const": "gitlab-sast",
+          "anyOf": [
+            {
+              "const": "gitlab-sast",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "gitlab-sast",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GitLabSASTReporterConfigOptions",
@@ -2911,10 +3748,19 @@
       "additionalProperties": false,
       "properties": {
         "exclude_suppressed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "When true, suppressed findings are excluded entirely from the GitLab SAST report. When false (default), suppressed findings are included with Info severity and the suppression reason in the solution field.",
-          "title": "Exclude Suppressed",
-          "type": "boolean"
+          "title": "Exclude Suppressed"
         }
       },
       "title": "GitLabSASTReporterConfigOptions",
@@ -2924,15 +3770,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "gitleaks",
+          "anyOf": [
+            {
+              "const": "gitleaks",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "gitleaks",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GitleaksScannerConfigOptions",
@@ -2989,16 +3853,30 @@
           "title": "Config File"
         },
         "honor_inline_ignores": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
-          "title": "Honor Inline Ignores",
-          "type": "boolean"
+          "title": "Honor Inline Ignores"
         },
         "max_target_megabytes": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3009,16 +3887,30 @@
           "title": "Max Target Megabytes"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3041,6 +3933,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3056,15 +3953,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "grype",
+          "anyOf": [
+            {
+              "const": "grype",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "grype",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/GrypeScannerConfigOptions",
@@ -3101,16 +4016,30 @@
           "title": "Config File"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run in offline mode, disabling database updates and validation. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3133,6 +4062,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3147,9 +4081,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "html",
@@ -3157,10 +4100,19 @@
           "type": "string"
         },
         "name": {
-          "const": "html",
+          "anyOf": [
+            {
+              "const": "html",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "html",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/HTMLReporterConfigOptions",
@@ -3181,10 +4133,19 @@
       "description": "Represents a path exclusion entry.",
       "properties": {
         "client_supplied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
-          "title": "Client Supplied",
-          "type": "boolean"
+          "title": "Client Supplied"
         },
         "expiration": {
           "anyOf": [
@@ -3221,9 +4182,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "junit.xml",
@@ -3231,10 +4201,19 @@
           "type": "string"
         },
         "name": {
-          "const": "junitxml",
+          "anyOf": [
+            {
+              "const": "junitxml",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "junitxml",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/JUnitXMLReporterConfigOptions",
@@ -3250,9 +4229,18 @@
       "additionalProperties": false,
       "properties": {
         "respect_severity_threshold": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Respect Severity Threshold",
-          "type": "boolean"
+          "title": "Respect Severity Threshold"
         }
       },
       "title": "JUnitXMLReporterConfigOptions",
@@ -3263,15 +4251,33 @@
       "description": "Jupyter Notebook (.ipynb) to Python converter configuration.",
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "jupyter",
+          "anyOf": [
+            {
+              "const": "jupyter",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "jupyter",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/JupyterConverterConfigOptions",
@@ -3289,10 +4295,19 @@
       "additionalProperties": false,
       "properties": {
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation (default: 300)",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "tool_version": {
           "anyOf": [
@@ -3316,30 +4331,66 @@
       "description": "Configuration model for MCP resource management settings.\n\nThe MCP server enforces two of these: ``max_concurrent_scans`` and\n``scan_timeout_seconds``. It reads them from the operator's config (the file\n``ASH_CONFIG`` names, else these defaults), never from the config of a scan,\nwhich can be the scanned repository's own or a client's. The other fields are\naccepted so that existing configs keep validating, and nothing reads them.\nNothing ever read this section: the resource manager that had limits of the\nsame names took them from its constructor's defaults, and was later removed\nas dead code.",
       "properties": {
         "enable_health_checks": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Not enforced: nothing reads this setting. Enable periodic health checks and resource monitoring",
-          "title": "Enable Health Checks",
-          "type": "boolean"
+          "title": "Enable Health Checks"
         },
         "enable_resource_logging": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Not enforced: nothing reads this setting. Enable detailed resource management logging",
-          "title": "Enable Resource Logging",
-          "type": "boolean"
+          "title": "Enable Resource Logging"
         },
         "health_check_interval_seconds": {
+          "anyOf": [
+            {
+              "maximum": 300,
+              "minimum": 10,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 60,
           "description": "Not enforced: nothing reads this setting. Interval between health checks in seconds",
-          "maximum": 300,
-          "minimum": 10,
-          "title": "Health Check Interval Seconds",
-          "type": "integer"
+          "title": "Health Check Interval Seconds"
         },
         "log_resource_operations": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Not enforced: nothing reads this setting. Log individual resource operations for debugging",
-          "title": "Log Resource Operations",
-          "type": "boolean"
+          "title": "Log Resource Operations"
         },
         "max_concurrent_scans": {
           "anyOf": [
@@ -3347,6 +4398,11 @@
               "maximum": 100,
               "minimum": 0,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3357,68 +4413,140 @@
           "title": "Max Concurrent Scans"
         },
         "max_concurrent_scans_per_session": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 2,
           "description": "Maximum number of scans one session of a network transport (streamable-http, sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts once. Read from the operator's config (ASH_CONFIG) only, never from a scanned or delivered one. stdio's single session is not limited.",
-          "maximum": 100,
-          "minimum": 0,
-          "title": "Max Concurrent Scans Per Session",
-          "type": "integer"
+          "title": "Max Concurrent Scans Per Session"
         },
         "max_concurrent_tasks": {
+          "anyOf": [
+            {
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
           "description": "Not enforced: nothing reads this setting. Maximum number of concurrent async tasks allowed",
-          "maximum": 50,
-          "minimum": 1,
-          "title": "Max Concurrent Tasks",
-          "type": "integer"
+          "title": "Max Concurrent Tasks"
         },
         "max_directory_size_mb": {
+          "anyOf": [
+            {
+              "maximum": 10240,
+              "minimum": 10,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 1000,
           "description": "Not enforced: nothing reads this setting. Maximum directory size in MB that can be scanned",
-          "maximum": 10240,
-          "minimum": 10,
-          "title": "Max Directory Size Mb",
-          "type": "integer"
+          "title": "Max Directory Size Mb"
         },
         "max_message_size_bytes": {
+          "anyOf": [
+            {
+              "maximum": 104857600,
+              "minimum": 1024,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 10485760,
           "description": "Not enforced: nothing reads this setting. Maximum size of MCP messages in bytes",
-          "maximum": 104857600,
-          "minimum": 1024,
-          "title": "Max Message Size Bytes",
-          "type": "integer"
+          "title": "Max Message Size Bytes"
         },
         "max_path_length": {
+          "anyOf": [
+            {
+              "maximum": 8192,
+              "minimum": 256,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 4096,
           "description": "Not enforced: nothing reads this setting. Maximum allowed path length for security validation",
-          "maximum": 8192,
-          "minimum": 256,
-          "title": "Max Path Length",
-          "type": "integer"
+          "title": "Max Path Length"
         },
         "memory_critical_threshold_mb": {
+          "anyOf": [
+            {
+              "maximum": 16384,
+              "minimum": 200,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 2048,
           "description": "Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers protective actions",
-          "maximum": 16384,
-          "minimum": 200,
-          "title": "Memory Critical Threshold Mb",
-          "type": "integer"
+          "title": "Memory Critical Threshold Mb"
         },
         "memory_warning_threshold_mb": {
+          "anyOf": [
+            {
+              "maximum": 8192,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 1024,
           "description": "Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers warnings",
-          "maximum": 8192,
-          "minimum": 100,
-          "title": "Memory Warning Threshold Mb",
-          "type": "integer"
+          "title": "Memory Warning Threshold Mb"
         },
         "operation_timeout_seconds": {
+          "anyOf": [
+            {
+              "maximum": 600,
+              "minimum": 30,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 180,
           "description": "Not enforced: nothing reads this setting. Default timeout for general operations in seconds",
-          "maximum": 600,
-          "minimum": 30,
-          "title": "Operation Timeout Seconds",
-          "type": "integer"
+          "title": "Operation Timeout Seconds"
         },
         "scan_timeout_seconds": {
           "anyOf": [
@@ -3426,6 +4554,11 @@
               "maximum": 86400,
               "minimum": 0,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3436,28 +4569,55 @@
           "title": "Scan Timeout Seconds"
         },
         "shutdown_timeout_seconds": {
+          "anyOf": [
+            {
+              "maximum": 300,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 30,
           "description": "Not enforced: nothing reads this setting. Maximum time to wait for graceful shutdown in seconds",
-          "maximum": 300,
-          "minimum": 5,
-          "title": "Shutdown Timeout Seconds",
-          "type": "integer"
+          "title": "Shutdown Timeout Seconds"
         },
         "task_count_warning_threshold": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 15,
           "description": "Not enforced: nothing reads this setting. Active task count that triggers warnings",
-          "maximum": 100,
-          "minimum": 5,
-          "title": "Task Count Warning Threshold",
-          "type": "integer"
+          "title": "Task Count Warning Threshold"
         },
         "thread_pool_max_workers": {
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 4,
           "description": "Not enforced: nothing reads this setting. Maximum number of worker threads in the shared thread pool",
-          "maximum": 20,
-          "minimum": 1,
-          "title": "Thread Pool Max Workers",
-          "type": "integer"
+          "title": "Thread Pool Max Workers"
         }
       },
       "title": "MCPResourceManagementConfig",
@@ -3467,9 +4627,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "summary.md",
@@ -3477,10 +4646,19 @@
           "type": "string"
         },
         "name": {
-          "const": "markdown",
+          "anyOf": [
+            {
+              "const": "markdown",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "markdown",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/MarkdownReporterConfigOptions",
@@ -3503,39 +4681,102 @@
       "description": "Configuration options for the Markdown reporter.",
       "properties": {
         "compact": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Compact",
-          "type": "boolean"
+          "title": "Compact"
         },
         "include_detailed_findings": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Include Detailed Findings",
-          "type": "boolean"
+          "title": "Include Detailed Findings"
         },
         "include_findings_table": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Include Findings Table",
-          "type": "boolean"
+          "title": "Include Findings Table"
         },
         "include_summary": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Include Summary",
-          "type": "boolean"
+          "title": "Include Summary"
         },
         "max_detailed_findings": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
-          "title": "Max Detailed Findings",
-          "type": "integer"
+          "title": "Max Detailed Findings"
         },
         "top_hotspots_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 10,
-          "title": "Top Hotspots Limit",
-          "type": "integer"
+          "title": "Top Hotspots Limit"
         },
         "use_collapsible_details": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Use Collapsible Details",
-          "type": "boolean"
+          "title": "Use Collapsible Details"
         }
       },
       "title": "MarkdownReporterConfigOptions",
@@ -3545,15 +4786,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "npm-audit",
+          "anyOf": [
+            {
+              "const": "npm-audit",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "npm-audit",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/NpmAuditScannerConfigOptions",
@@ -3572,16 +4831,30 @@
       "additionalProperties": false,
       "properties": {
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Treat this scanner as offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, with a lockfile the scanner is reported MISSING, and with none it is SKIPPED. When true, this scanner is offline even if ASH is not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -3604,6 +4877,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3619,9 +4897,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "ocsf.json",
@@ -3629,10 +4916,19 @@
           "type": "string"
         },
         "name": {
-          "const": "ocsf",
+          "anyOf": [
+            {
+              "const": "ocsf",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "ocsf",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/OCSFReporterConfigOptions",
@@ -3652,15 +4948,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "opengrep",
+          "anyOf": [
+            {
+              "const": "opengrep",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "opengrep",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/OpengrepScannerConfigOptions",
@@ -3717,21 +5031,39 @@
           "type": "array"
         },
         "metrics": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "auto",
           "description": "Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is >= 1.7.0.",
-          "enum": [
-            "auto",
-            "on",
-            "off"
-          ],
-          "title": "Metrics",
-          "type": "string"
+          "title": "Metrics"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "patterns": {
           "default": [],
@@ -3749,6 +5081,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3760,12 +5097,21 @@
           "default": [],
           "description": "Report findings only from rules matching the supplied severity level.",
           "items": {
-            "enum": [
-              "INFO",
-              "WARNING",
-              "ERROR"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "INFO",
+                  "WARNING",
+                  "ERROR"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Severity",
           "type": "array"
@@ -3783,6 +5129,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -3792,18 +5143,37 @@
         },
         "sha256": {
           "additionalProperties": {
-            "pattern": "^[0-9a-fA-F]{64}$",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "default": {},
           "description": "SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset.",
           "propertyNames": {
-            "enum": [
-              "linux/amd64",
-              "linux/arm64",
-              "darwin/amd64",
-              "darwin/arm64",
-              "windows/amd64"
+            "anyOf": [
+              {
+                "enum": [
+                  "linux/amd64",
+                  "linux/arm64",
+                  "darwin/amd64",
+                  "darwin/arm64",
+                  "windows/amd64"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
             ]
           },
           "title": "Sha256",
@@ -3820,20 +5190,30 @@
       "type": "object"
     },
     "PackageManager": {
-      "enum": [
-        "apt",
-        "pip",
-        "uv",
-        "conda",
-        "npm",
-        "brew",
-        "yum",
-        "choco",
-        "custom",
-        "url"
+      "anyOf": [
+        {
+          "enum": [
+            "apt",
+            "pip",
+            "uv",
+            "conda",
+            "npm",
+            "brew",
+            "yum",
+            "choco",
+            "custom",
+            "url"
+          ],
+          "title": "PackageManager",
+          "type": "string"
+        },
+        {
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+          "type": "string"
+        }
       ],
-      "title": "PackageManager",
-      "type": "string"
+      "title": "PackageManager"
     },
     "PluginContext": {
       "additionalProperties": true,
@@ -3845,10 +5225,19 @@
           "description": "ASH configuration"
         },
         "ignore_suppressions": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Ignore all suppression rules",
-          "title": "Ignore Suppressions",
-          "type": "boolean"
+          "title": "Ignore Suppressions"
         },
         "output_dir": {
           "description": "Primary output directory for all ASH results",
@@ -3977,6 +5366,7 @@
             "extension": "ghas.sarif",
             "name": "github-ghas",
             "options": {
+              "emit_automation_details": false,
               "exclude_suppressed": true
             }
           },
@@ -4132,10 +5522,19 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Whether the component is enabled",
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "anyOf": [
@@ -4150,12 +5549,21 @@
           "title": "Extension"
         },
         "name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-zA-Z][\\w-]+$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": null,
           "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ReporterOptionsBase",
@@ -4284,7 +5692,7 @@
             "/converters/archive/options/max_total_bytes",
             "/converters/archive/options/max_compression_ratio"
           ],
-          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code and trivy-repo scanners) are added to it.",
+          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners) are added to it.",
           "items": {
             "type": "string"
           },
@@ -4301,16 +5709,34 @@
           "type": "object"
         },
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Master switch \u2014 runtime patches are rejected unless True.",
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "replace_default_denied_paths": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "When true, denied_paths is used as written instead of being added to ASH's default list, and each default entry it leaves out is named in a warning. When false (the default), the entries listed are denied as well as the defaults. Either way, an unset list, or one equal to a default ASH has shipped, gets the current default list.",
-          "title": "Replace Default Denied Paths",
-          "type": "boolean"
+          "title": "Replace Default Denied Paths"
         }
       },
       "title": "RuntimeOverridesConfig",
@@ -4320,9 +5746,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "sarif",
@@ -4330,10 +5765,19 @@
           "type": "string"
         },
         "name": {
-          "const": "sarif",
+          "anyOf": [
+            {
+              "const": "sarif",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "sarif",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SARIFReporterConfigOptions",
@@ -4353,9 +5797,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "spdx.json",
@@ -4363,10 +5816,19 @@
           "type": "string"
         },
         "name": {
-          "const": "spdx",
+          "anyOf": [
+            {
+              "const": "spdx",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "spdx",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SPDXReporterConfigOptions",
@@ -4395,6 +5857,29 @@
           "title": "Env Scanners",
           "type": "array"
         },
+        "environment": {
+          "default": [
+            "ALL_PROXY",
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+            "NO_PROXY",
+            "all_proxy",
+            "http_proxy",
+            "https_proxy",
+            "no_proxy",
+            "SSL_CERT_FILE",
+            "REQUESTS_CA_BUNDLE",
+            "CURL_CA_BUNDLE",
+            "NODE_EXTRA_CA_CERTS",
+            "SSL_CERT_DIR"
+          ],
+          "description": "The environment variables every sandboxed scanner is passed besides its fixed baseline (PATH, locale and terminal settings, a few tool homes such as JAVA_HOME and VIRTUAL_ENV, and the ASH_, UV_, LC_ and PYTHON families), written as a docker-compose 'environment' list: NAME passes the value ASH has, NAME=value sets one, and a name listed twice takes its last entry. The default list is the proxy variables (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY and their lower-case spellings), which a scanner is passed only when it has a network, and the CA-bundle variables (SSL_CERT_FILE, SSL_CERT_DIR, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, NODE_EXTRA_CA_CERTS), whose files the sandbox also lets a scanner with a network read. A list here REPLACES the default, as a compose list replaces an image's: [MY_VAR] alone drops the proxy and CA variables, so list them too. A name that marks a credential (TOKEN, PASSWORD, SECRET and the like), TMPDIR, TEMP, TMP, HOME and ASH's own run id are refused with the name; a scanner that needs a credential is granted it with env_scanners. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "array"
+        },
         "extra_read_paths": {
           "default": [],
           "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
@@ -4405,18 +5890,27 @@
           "type": "array"
         },
         "mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "auto",
+                "bwrap",
+                "firejail",
+                "landlock",
+                "sandbox-exec"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "off",
           "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
-          "enum": [
-            "off",
-            "auto",
-            "bwrap",
-            "firejail",
-            "landlock",
-            "sandbox-exec"
-          ],
-          "title": "Mode",
-          "type": "string"
+          "title": "Mode"
         },
         "network_scanners": {
           "anyOf": [
@@ -4488,7 +5982,7 @@
               "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null,
-              "tool_version": ">=1.7.0,<2.0.0"
+              "tool_version": ">=1.7.8,<2.0.0"
             }
           },
           "description": "Configure the options for Bandit"
@@ -4771,16 +6265,30 @@
       "description": "Base class for scanner options.",
       "properties": {
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -4800,6 +6308,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -4896,9 +6409,18 @@
           "type": "object"
         },
         "dependencies_satisfied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Dependencies Satisfied",
-          "type": "boolean"
+          "title": "Dependencies Satisfied"
         },
         "dependency_unavailable_reason": {
           "anyOf": [
@@ -4938,6 +6460,11 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -5032,10 +6559,19 @@
           "title": "Tool Version"
         },
         "use_uv_tool": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Flag to indicate whether this scanner should use UV tool execution instead of direct command execution",
-          "title": "Use Uv Tool",
-          "type": "boolean"
+          "title": "Use Uv Tool"
         },
         "uv_tool_install_commands": {
           "default": [],
@@ -5066,18 +6602,36 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Whether the component is enabled",
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-zA-Z][\\w-]+$",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": null,
           "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
@@ -5093,34 +6647,63 @@
       "type": "object"
     },
     "ScannerToolType": {
-      "description": "Type of scanner tool.",
-      "enum": [
-        "SAST",
-        "DAST",
-        "SCA",
-        "IAC",
-        "SECRETS",
-        "CONTAINER",
-        "SBOM",
-        "CUSTOM",
-        "UNKNOWN"
+      "anyOf": [
+        {
+          "description": "Type of scanner tool.",
+          "enum": [
+            "SAST",
+            "DAST",
+            "SCA",
+            "IAC",
+            "SECRETS",
+            "CONTAINER",
+            "SBOM",
+            "CUSTOM",
+            "UNKNOWN"
+          ],
+          "title": "ScannerToolType",
+          "type": "string"
+        },
+        {
+          "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+          "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+          "type": "string"
+        }
       ],
-      "title": "ScannerToolType",
-      "type": "string"
+      "description": "Type of scanner tool.",
+      "title": "ScannerToolType"
     },
     "SemgrepScannerConfig": {
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "semgrep",
+          "anyOf": [
+            {
+              "const": "semgrep",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "semgrep",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SemgrepScannerConfigOptions",
@@ -5176,33 +6759,65 @@
           "type": "array"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "metrics": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "auto",
           "description": "Configures how usage metrics are sent to the Semgrep server.",
-          "enum": [
-            "auto",
-            "on",
-            "off"
-          ],
-          "title": "Metrics",
-          "type": "string"
+          "title": "Metrics"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -5216,12 +6831,21 @@
           "default": [],
           "description": "Report findings only from rules matching the supplied severity level.",
           "items": {
-            "enum": [
-              "INFO",
-              "WARNING",
-              "ERROR"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "INFO",
+                  "WARNING",
+                  "ERROR"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Severity",
           "type": "array"
@@ -5236,6 +6860,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {
@@ -5267,15 +6896,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "syft",
+          "anyOf": [
+            {
+              "const": "syft",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "syft",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/SyftScannerConfigOptions",
@@ -5304,17 +6951,26 @@
           ],
           "description": "List of additional formats to output. Defaults to syft-table.",
           "items": {
-            "enum": [
-              "cyclonedx-json",
-              "cyclonedx-xml",
-              "github-json",
-              "spdx-json",
-              "spdx-tag-value",
-              "syft-json",
-              "syft-table",
-              "syft-text"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "cyclonedx-json",
+                  "cyclonedx-xml",
+                  "github-json",
+                  "spdx-json",
+                  "spdx-tag-value",
+                  "syft-json",
+                  "syft-table",
+                  "syft-text"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "title": "Additional Outputs",
           "type": "array"
@@ -5346,16 +7002,30 @@
           "type": "array"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run in offline mode, disabling update checks. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -5378,6 +7048,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -5394,9 +7069,18 @@
       "description": "Configuration for the Text reporter.",
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "summary.txt",
@@ -5404,10 +7088,19 @@
           "type": "string"
         },
         "name": {
-          "const": "text",
+          "anyOf": [
+            {
+              "const": "text",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "text",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/TextReporterConfigOptions",
@@ -5428,29 +7121,74 @@
       "description": "Configuration options for the Text reporter.",
       "properties": {
         "include_detailed_findings": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Include Detailed Findings",
-          "type": "boolean"
+          "title": "Include Detailed Findings"
         },
         "include_findings_table": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Include Findings Table",
-          "type": "boolean"
+          "title": "Include Findings Table"
         },
         "include_summary": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Include Summary",
-          "type": "boolean"
+          "title": "Include Summary"
         },
         "max_detailed_findings": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
-          "title": "Max Detailed Findings",
-          "type": "integer"
+          "title": "Max Detailed Findings"
         },
         "top_hotspots_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 20,
-          "title": "Top Hotspots Limit",
-          "type": "integer"
+          "title": "Top Hotspots Limit"
         }
       },
       "title": "TextReporterConfigOptions",
@@ -5536,6 +7274,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "number"
             },
             {
@@ -5559,15 +7302,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "trivy",
+          "anyOf": [
+            {
+              "const": "trivy",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "trivy",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/TrivyScannerConfigOptions",
@@ -5612,10 +7373,19 @@
           "title": "Config File"
         },
         "disable_telemetry": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
           "description": "Disable sending anonymous usage data to Aqua (--disable-telemetry). Only the operator sets it to false, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, may set it to true but not to false. Offline, trivy sends none whatever this says. As for trivy-repo.",
-          "title": "Disable Telemetry",
-          "type": "boolean"
+          "title": "Disable Telemetry"
         },
         "ignore_file": {
           "anyOf": [
@@ -5635,28 +7405,60 @@
           "title": "Ignore File"
         },
         "ignore_unfixed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Report only vulnerabilities that have a fixed version (trivy --ignore-unfixed). Off by default: an unfixed vulnerability is still one, and turning this on withholds it from the report.",
-          "title": "Ignore Unfixed",
-          "type": "boolean"
+          "title": "Ignore Unfixed"
         },
         "license_full": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Look for licenses in source file headers and license files too (trivy --license-full). Only used when scanners includes license.",
-          "title": "License Full",
-          "type": "boolean"
+          "title": "License Full"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run in offline mode: skip database and check updates and use the vulnerability database already in trivy's cache. ASH still fails the scan when that database is past its 24h bound. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -5672,13 +7474,22 @@
           ],
           "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, any set but the default is ignored with a warning.",
           "items": {
-            "enum": [
-              "vuln",
-              "misconfig",
-              "secret",
-              "license"
-            ],
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "vuln",
+                  "misconfig",
+                  "secret",
+                  "license"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+                "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+                "type": "string"
+              }
+            ]
           },
           "minItems": 1,
           "title": "Scanners",
@@ -5714,6 +7525,11 @@
               "type": "string"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -5730,9 +7546,18 @@
       "description": "Configuration for the Unused Suppressions reporter.",
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "unused-suppressions.json",
@@ -5740,10 +7565,19 @@
           "type": "string"
         },
         "name": {
-          "const": "unused-suppressions",
+          "anyOf": [
+            {
+              "const": "unused-suppressions",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "unused-suppressions",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/UnusedSuppressionsReporterConfigOptions",
@@ -5780,6 +7614,11 @@
               "type": "integer"
             },
             {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
@@ -5792,6 +7631,11 @@
             {
               "exclusiveMinimum": 0,
               "type": "number"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -5809,9 +7653,18 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "extension": {
           "default": "yaml",
@@ -5819,10 +7672,19 @@
           "type": "string"
         },
         "name": {
-          "const": "yaml",
+          "anyOf": [
+            {
+              "const": "yaml",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "yaml",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/YAMLReporterConfigOptions",
@@ -5842,15 +7704,33 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": true,
-          "title": "Enabled",
-          "type": "boolean"
+          "title": "Enabled"
         },
         "name": {
-          "const": "zizmor",
+          "anyOf": [
+            {
+              "const": "zizmor",
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "zizmor",
-          "title": "Name",
-          "type": "string"
+          "title": "Name"
         },
         "options": {
           "$ref": "#/$defs/ZizmorScannerConfigOptions",
@@ -5892,45 +7772,95 @@
           "title": "Config File"
         },
         "honor_inline_ignores": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
-          "title": "Honor Inline Ignores",
-          "type": "boolean"
+          "title": "Honor Inline Ignores"
         },
         "install_timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": 300,
           "description": "Timeout in seconds for tool installation",
-          "title": "Install Timeout",
-          "type": "integer"
+          "title": "Install Timeout"
         },
         "offline": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
           "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
-          "title": "Offline",
-          "type": "boolean"
+          "title": "Offline"
         },
         "online_audits": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": false,
-          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode.",
-          "title": "Online Audits",
-          "type": "boolean"
+          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode or this scanner's own `offline` option is true.",
+          "title": "Online Audits"
         },
         "persona": {
+          "anyOf": [
+            {
+              "enum": [
+                "regular",
+                "pedantic",
+                "auditor"
+              ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
           "default": "regular",
           "description": "zizmor persona. `regular` reports the fewest false positives; `pedantic` adds code-smell findings; `auditor` reports everything, false positives included.",
-          "enum": [
-            "regular",
-            "pedantic",
-            "auditor"
-          ],
-          "title": "Persona",
-          "type": "string"
+          "title": "Persona"
         },
         "scan_timeout": {
           "anyOf": [
             {
               "minimum": 1,
               "type": "integer"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
             },
             {
               "type": "null"
@@ -5950,6 +7880,11 @@
                 "HIGH",
                 "CRITICAL"
               ],
+              "type": "string"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
               "type": "string"
             },
             {

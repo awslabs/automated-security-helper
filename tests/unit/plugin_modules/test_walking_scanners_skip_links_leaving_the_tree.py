@@ -741,8 +741,19 @@ def grep_scanner_class(request):
 
 
 def _added_excludes(scanner, source: Path) -> list[str]:
-    """The ``--exclude`` values the scan adds to the scanner's configured ones."""
-    configured = [a.value for a in scanner.args.extra_args if a.key == "--exclude"]
+    """The ``--exclude`` values the scan adds to the scanner's configured ones.
+
+    The configured ones take both forms: the tools' default ignore list as a split
+    ``--exclude <pattern>`` pair, and the operator's patterns joined as
+    ``--exclude=<pattern>`` (the key carries the value).
+    """
+    prefix = "--exclude="
+    configured = []
+    for arg in scanner.args.extra_args:
+        if arg.key == "--exclude":
+            configured.append(arg.value)
+        elif str(arg.key).startswith(prefix):
+            configured.append(str(arg.key)[len(prefix) :])
     argv, _, _ = scanner._execute_scan(source, "source", [])
     added = list(_values(argv, "--exclude"))
     for value in configured:

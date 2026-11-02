@@ -251,7 +251,7 @@ async def test_concurrent_checks_do_not_run_their_probes_at_once(monkeypatch):
     active = {"now": 0, "most": 0}
     lock = threading.Lock()
 
-    def describe(provider, concurrent):
+    def describe(provider, concurrent, config=None):
         with lock:
             active["now"] += 1
             active["most"] = max(active["most"], active["now"])

@@ -29,6 +29,9 @@ import pytest
 from automated_security_helper.plugin_modules.ash_builtin.converters import (
     archive_converter,
 )
+from automated_security_helper.utils.scan_output_dirs import (
+    CONVERTED_SOURCES_FILE_NAME,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -80,12 +83,16 @@ def _convert(test_plugin_context, monkeypatch, name: str, content: bytes):
 
 
 def _extracted(converter) -> List[str]:
-    """The member files the converter wrote, relative to its archive's directory."""
+    """The member files the converter wrote, relative to its archive's directory.
+
+    The converter's own record of what it extracted (converted-sources.json, at the
+    top of the results directory) is not a member and is left out.
+    """
     results = Path(converter.results_dir)
     return sorted(
         p.relative_to(results).as_posix().split("/", 1)[1]
         for p in results.rglob("*")
-        if p.is_file()
+        if p.is_file() and p != results / CONVERTED_SOURCES_FILE_NAME
     )
 
 

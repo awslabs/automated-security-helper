@@ -280,6 +280,38 @@ def test_a_disabled_plugin_that_raises_does_not_fail_it(project, monkeypatch):
     assert run.exit_code == 0, out
 
 
+def test_a_requested_plugin_that_is_disabled_and_will_not_build_fails_the_run(
+    project, monkeypatch
+):
+    """--tool names it, so its failure is this run's whatever its section says.
+
+    A plugin that fails to construct is named by its class, and the tally
+    matched requested names against declared ones, so the failure was listed as
+    disabled and not counted and the run exited 0, "Installation Complete".
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
+        CfnNagScanner,
+    )
+
+    def _boom(self, context):
+        raise RuntimeError("cfn-nag stand-in cannot be built")
+
+    monkeypatch.setattr(CfnNagScanner, "model_post_init", _boom)
+    run, out = _run(
+        monkeypatch,
+        LINUX_AMD64,
+        Scenario(),
+        "--tool",
+        "cfn-nag",
+        "--config-overrides",
+        "scanners.cfn-nag.enabled=false",
+    )
+    assert "cfn-nag stand-in cannot be built" in out, out
+    assert "plugin error(s): CfnNagScanner" in out, out
+    assert "not counted" not in out, out
+    assert run.exit_code == 1, out
+
+
 def test_a_platform_hook_that_raises_is_named_and_the_install_still_runs(
     project, monkeypatch
 ):

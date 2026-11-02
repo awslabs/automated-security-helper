@@ -39,6 +39,7 @@ import re
 import secrets
 import stat
 import sys
+import tempfile
 import time
 from pathlib import Path
 from subprocess import SubprocessError
@@ -68,18 +69,93 @@ _REMOVE_TIMEOUT_SECONDS = 60
 #: long gone) would be tried at every start. A week is far longer than any scan.
 RECORD_MAX_AGE_SECONDS = 7 * 24 * 3600
 
+#: The name a record is written under before its rename into place. A run killed
+#: between the create and the rename strands one; a write takes milliseconds, so
+#: one older than this bound belongs to no live writer and the next start removes
+#: it. Nothing is read from it.
+_TEMPORARY_RECORD_PREFIX = ".record-"
+_TEMPORARY_RECORD_MAX_AGE_SECONDS = 3600
+
+
+def _docker_current_context() -> Optional[str]:
+    """The context ``docker`` selects from its config file, or None.
+
+    Without DOCKER_HOST or DOCKER_CONTEXT the client reads ``currentContext``
+    from ``config.json`` under ``DOCKER_CONFIG`` (``~/.docker`` by default), so a
+    run under another context talks to another daemon with no variable changed.
+    Best effort: a file that cannot be read or parsed is None, as an unset
+    variable is.
+    """
+    directory = os.environ.get("DOCKER_CONFIG") or os.path.join(
+        os.path.expanduser("~"), ".docker"
+    )
+    try:
+        with open(os.path.join(directory, "config.json"), encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, ValueError):
+        return None
+    context = document.get("currentContext") if isinstance(document, dict) else None
+    return context if isinstance(context, str) and context else None
+
+
+def _podman_default_connection() -> Optional[str]:
+    """The connection ``podman`` selects when no variable names one, or None.
+
+    ``podman system connection default NAME`` writes it to
+    ``podman-connections.json`` under the containers config directory (older
+    podman: ``active_service`` in ``containers.conf``), so a run after the switch
+    talks to another machine's daemon with no variable changed, as a docker
+    context switch does. Best effort: a file that cannot be read or parsed is
+    None, as an unset variable is.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config"
+    )
+    directory = os.path.join(base, "containers")
+    try:
+        with open(
+            os.path.join(directory, "podman-connections.json"), encoding="utf-8"
+        ) as stream:
+            document = json.load(stream)
+    except (OSError, ValueError):
+        document = None
+    connection = document.get("Connection") if isinstance(document, dict) else None
+    default = connection.get("Default") if isinstance(connection, dict) else None
+    if isinstance(default, str) and default:
+        return default
+    try:
+        with open(
+            os.path.join(directory, "containers.conf"), encoding="utf-8"
+        ) as stream:
+            text = stream.read()
+    except (OSError, ValueError):
+        return None
+    found = re.search(r'^\s*active_service\s*=\s*"([^"\n]+)"', text, re.MULTILINE)
+    return found.group(1) if found else None
+
 
 def _daemon_environment() -> Dict[str, Optional[str]]:
     """The environment a container runtime client picks its daemon from.
 
     A record keeps what these were when the container was started, so a later
     start talks to the same daemon or leaves the record alone. An unset variable
-    is None.
+    is None. Beside docker's host and context variables: the docker config
+    directory and the context its file selects, podman's connection and the
+    default connection its config selects, and containerd's address and
+    namespace (nerdctl), each of which selects a daemon on its own; a sweep that
+    recorded only the first three asked the wrong daemon under a changed one of
+    these, heard "no such container" and dropped the record of a live container.
     """
     return {
         "DOCKER_HOST": os.environ.get("DOCKER_HOST"),
         "DOCKER_CONTEXT": os.environ.get("DOCKER_CONTEXT"),
+        "DOCKER_CONFIG": os.environ.get("DOCKER_CONFIG"),
+        "docker_config_current_context": _docker_current_context(),
         "CONTAINER_HOST": os.environ.get("CONTAINER_HOST"),
+        "CONTAINER_CONNECTION": os.environ.get("CONTAINER_CONNECTION"),
+        "podman_default_connection": _podman_default_connection(),
+        "CONTAINERD_ADDRESS": os.environ.get("CONTAINERD_ADDRESS"),
+        "CONTAINERD_NAMESPACE": os.environ.get("CONTAINERD_NAMESPACE"),
     }
 
 
@@ -105,9 +181,14 @@ _KIND_ENV_DIR = "env-dir"
 #: covers both kinds of directory.
 _ENV_DIR_PREFIXES = ("ash-container-env-", "ash-container-docker-")
 
-#: Where such a directory can be, after ``$TMPDIR``. Each prefix is looked for
+#: Where such a directory can be, after the temporary directory the environment
+#: names (``TMPDIR``, ``TEMP`` and ``TMP``, the three ``tempfile`` honors, in its
+#: order) and the one ``tempfile`` itself settles on. Each prefix is looked for
 #: under every one.
 _ENV_DIR_PARENTS = ("/dev/shm", "/var/tmp", "/tmp")  # nosec B108 - a search list
+
+#: The variables ``tempfile.gettempdir`` reads, in the order it reads them.
+_TEMP_DIR_VARIABLES = ("TMPDIR", "TEMP", "TMP")
 
 #: A private directory's own name: a prefix and the random suffix ``mkdtemp`` adds.
 _ENV_DIR_NAME = re.compile(
@@ -122,18 +203,38 @@ def _now() -> float:
     return time.time()
 
 
+#: Whether this process has said that the named state directory is relative.
+_RELATIVE_STATE_DIR_WARNED = False
+
+
 def state_dir() -> Optional[Path]:
     """The directory the records live in, or None when there is none.
 
     There is none where the platform has no directory descriptors (Windows) and
     where there is no home. Both callers return at once on None, before any
     directory is made or any log line written.
+
+    A named directory has ``~`` expanded, as a shell expands it. A relative one is
+    kept as given, which keys the records to the working directory of each run,
+    usually the repository being scanned, so a run started elsewhere never finds
+    them: that is said once, at warning, so the operator can name an absolute
+    directory.
     """
+    global _RELATIVE_STATE_DIR_WARNED
     if sys.platform == "win32":
         return None
     named = os.environ.get(STATE_DIR_ENV, "").strip()
     if named:
-        return Path(named)
+        expanded = os.path.expanduser(named)
+        if not os.path.isabs(expanded) and not _RELATIVE_STATE_DIR_WARNED:
+            _RELATIVE_STATE_DIR_WARNED = True
+            ASH_LOGGER.warning(
+                f"{STATE_DIR_ENV} names a relative directory, which is resolved "
+                "against the working directory of each run, so the records of "
+                "containers left behind are found only by runs started from the "
+                "same directory. Name an absolute directory."
+            )
+        return Path(expanded)
     try:
         return Path.home() / ".ash" / "state" / "containers"
     except RuntimeError:
@@ -142,6 +243,7 @@ def state_dir() -> Optional[Path]:
 
 _BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 _PID_NAMESPACE_LINK = "/proc/self/ns/pid"
+_PROC_SELF_LINK = "/proc/self"
 
 
 def _linux_scope() -> Optional[str]:
@@ -151,8 +253,9 @@ def _linux_scope() -> Optional[str]:
     process that is gone. The PID namespace (the link ``/proc/self/ns/pid``, whose
     inode names it; namespaces(7)) decides which pid space a creator pid belongs
     to: two containers on one kernel each count their own pids. A namespace that
-    cannot be read is written as ``-``, which matches only another unreadable one
-    on the same boot.
+    cannot be read gives no key at all, so nothing is swept on a guess: a key every
+    process with an unreadable namespace shared would match another namespace's
+    records.
     """
     try:
         boot_id = _BOOT_ID_PATH.read_text(encoding="ascii")
@@ -163,8 +266,16 @@ def _linux_scope() -> Optional[str]:
         return None
     try:
         namespace = os.readlink(_PID_NAMESPACE_LINK)
-    except OSError:
-        namespace = "-"
+        # /proc may be another PID namespace's mount: then its pids and start
+        # times, which _process_start and _creator_alive read through it, are
+        # not this namespace's, and /proc/self is not this process. No key
+        # then, as for an unreadable namespace: a key shared by every process
+        # whose namespace could not be read looked a live creator's pid up in
+        # another namespace and judged it gone. Nothing is swept on a guess.
+        if os.readlink(_PROC_SELF_LINK) != str(os.getpid()):
+            return None
+    except (OSError, ValueError):
+        return None
     return f"linux:{boot_id}:{namespace}"
 
 
@@ -275,7 +386,11 @@ def _process_start(pid: int) -> Optional[str]:
 
 def _creator_alive(pid: int, start: Optional[str]) -> bool:
     if pid == os.getpid():
-        return True
+        # This process, unless the record's start time is another's: a record
+        # left by a process that held this pid before it names a creator that
+        # is gone, however the pid reads now.
+        now = _process_start(pid)
+        return start is None or now is None or start == now
     try:
         # Signal 0 delivers nothing: it only asks whether the pid exists.
         os.kill(pid, 0)
@@ -435,11 +550,15 @@ def _removed(runner_command: Sequence[str], name: str) -> Union[bool, str]:
     except (OSError, SubprocessError) as e:
         ASH_LOGGER.warning(f"Could not remove the leftover container {name}: {e}")
         return False
-    if result.returncode == 0 and subprocess_utils.run_succeeded(result):
-        return True
+    # The wording before the exit code: docker's ``rm -f`` of a container it never
+    # had prints "No such container" and exits 0, so an exit 0 alone is not a
+    # removal, and a caller that keeps an unknown runtime's record on anything
+    # but a removal would otherwise drop it on this runtime's word.
     said = f"{result.stdout}\n{result.stderr}".lower()
     if any(phrase in said for phrase in _ALREADY_GONE):
         return _ABSENT
+    if result.returncode == 0 and subprocess_utils.run_succeeded(result):
+        return True
     ASH_LOGGER.warning(
         f"The leftover container {name} was not removed (exit {result.returncode}); "
         "it stays recorded for the next start."
@@ -466,26 +585,55 @@ def leftover_records() -> List[Tuple[str, str]]:
         os.close(fd)
 
 
+def _forget_if_aged(
+    fd: int, file_name: str, record: Optional[Dict[str, Any]] = None
+) -> bool:
+    """Drop a record file older than the age bound. Whether it was dropped.
+
+    Record only: no runtime is asked and no container is touched, whatever host
+    or runtime the record names. A file that is no record of this module's, or
+    one it cannot read, is aged by its file alone, so a file nothing can act on is
+    not re-read at every start forever.
+    """
+    age = _record_age(fd, file_name, record if record is not None else {})
+    if age > RECORD_MAX_AGE_SECONDS and _unlink_in(fd, file_name):
+        ASH_LOGGER.debug(f"Forgot {file_name}: it is older than the age bound")
+        return True
+    return False
+
+
+def _forget_stranded_temporaries(fd: int, names: Sequence[str]) -> None:
+    """Remove the temporary record files a killed run left between create and
+    rename: those older than their bound, by file age, never read."""
+    for name in names:
+        if not name.startswith(_TEMPORARY_RECORD_PREFIX):
+            continue
+        try:
+            status = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except OSError:
+            continue
+        if _now() - status.st_mtime > _TEMPORARY_RECORD_MAX_AGE_SECONDS:
+            if _unlink_in(fd, name):
+                ASH_LOGGER.debug(f"Removed the stranded temporary record {name}")
+
+
 def _records_in(fd: int) -> List[Tuple[str, str]]:
     found: List[Tuple[str, str]] = []
     here = host_key()
     try:
-        files = sorted(
-            f
-            for f in os.listdir(fd)
-            if f.startswith("ash-scan-") and f.endswith(".json")
-        )
+        names = os.listdir(fd)
     except OSError:
         return []
+    _forget_stranded_temporaries(fd, names)
+    files = sorted(
+        f for f in names if f.startswith("ash-scan-") and f.endswith(".json")
+    )
     for file_name in files:
         record = _read_record(fd, file_name)
         if record is None:
+            _forget_if_aged(fd, file_name)
             continue
-        if _record_age(fd, file_name, record) > RECORD_MAX_AGE_SECONDS:
-            # Forgotten, record only: no runtime is asked and no container is
-            # touched, whatever host or runtime the record names.
-            if _unlink_in(fd, file_name):
-                ASH_LOGGER.debug(f"Forgot {file_name}: it is older than the age bound")
+        if _forget_if_aged(fd, file_name, record):
             continue
         if here is None or record.get("host") != here:
             # Another host's creator cannot be looked up from here, and its
@@ -580,10 +728,24 @@ def _remove_in(
         outcome = _removed(runner_command, name)
         if not outcome:
             continue
-        if outcome is not True and not known:
-            # A record with no runtime fields may be another runtime's: "no such
-            # container" from this one proves nothing. Only the age bound forgets it.
-            ASH_LOGGER.debug(f"Keeping {file_name}: its runtime is unknown")
+        if outcome is not True:
+            if not known:
+                # A record with no runtime fields may be another runtime's: "no
+                # such container" from this one proves nothing. Only the age bound
+                # forgets it.
+                ASH_LOGGER.debug(f"Keeping {file_name}: its runtime is unknown")
+                continue
+            # Its own runtime never had it: reaped by --rm, or stopped on its own.
+            # The record is dropped, and nothing was removed to report.
+            if _unlink_in(fd, file_name):
+                ASH_LOGGER.debug(
+                    f"Dropped {file_name}: the runtime has no such container"
+                )
+            else:
+                ASH_LOGGER.warning(
+                    f"The runtime has no container {name} but its record "
+                    f"{file_name} could not be dropped."
+                )
             continue
         if not _unlink_in(fd, file_name):
             ASH_LOGGER.warning(
@@ -642,9 +804,34 @@ def sweep_leftover_containers(runner_command: Sequence[str]) -> List[str]:
 
 
 def _env_dir_parents() -> List[str]:
+    """The places a private directory can be, each spelled as tempfile spells it.
+
+    ``tempfile.mkdtemp`` names the directory it makes under the normalized
+    temporary directory (``os.path.normcase(os.path.abspath(...))``: a trailing
+    separator dropped, the case folded where the platform does), and that name is
+    what the record keeps. The parents are spelled the same way here, so a record
+    is matched byte for byte against them: with a ``TMPDIR`` ending in a
+    separator, the macOS default, no env-dir record matched any parent, a
+    stranded directory stayed for up to a week and its record was never dropped.
+
+    ``mkdtemp`` puts the directory where ``tempfile.gettempdir`` points: the first
+    of ``TMPDIR``, ``TEMP`` and ``TMP`` that names a usable directory, else a
+    platform default, else the working directory. All three variables are
+    searched, and so is what ``gettempdir`` answers now, so a directory made under
+    ``TEMP`` or ``TMP`` is found: one searched only under ``TMPDIR`` and the fixed
+    places outlived every sweep, and its record was never dropped.
+    """
+    named = [os.environ.get(variable) or "" for variable in _TEMP_DIR_VARIABLES]
+    try:
+        named.append(tempfile.gettempdir())
+    except OSError:
+        pass
     parents: List[str] = []
-    for parent in (os.environ.get("TMPDIR") or "", *_ENV_DIR_PARENTS):
-        if parent and os.path.isabs(parent) and parent not in parents:
+    for parent in (*named, *_ENV_DIR_PARENTS):
+        if not parent or not os.path.isabs(parent):
+            continue
+        parent = os.path.normcase(os.path.abspath(parent))
+        if parent not in parents:
             parents.append(parent)
     return parents
 
@@ -704,33 +891,50 @@ def _env_dir_records(fd: int) -> Dict[Tuple[str, str], Tuple[str, Dict[str, Any]
     the name must be one of the prefixes' own shape and the parent one of the
     places searched, or the record is ignored. The directory itself is then found
     by listing the parent, never by following the path in the record.
+
+    A record that is ignored is still subject to the age bound, by its own
+    ``created`` or its file's age: one that cannot be read, one of another shape,
+    or one whose parent is no longer searched (a ``TMPDIR`` that changed between
+    runs) was otherwise kept and re-read at every start forever.
     """
     parents = set(_env_dir_parents())
     found: Dict[Tuple[str, str], Tuple[str, Dict[str, Any]]] = {}
     try:
-        files = sorted(
-            f
-            for f in os.listdir(fd)
-            if f.startswith(_ENV_DIR_RECORD_PREFIX) and f.endswith(".json")
-        )
+        names = os.listdir(fd)
     except OSError:
         return found
+    _forget_stranded_temporaries(fd, names)
+    files = sorted(
+        f for f in names if f.startswith(_ENV_DIR_RECORD_PREFIX) and f.endswith(".json")
+    )
     for file_name in files:
         try:
             handle = os.open(file_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
             with os.fdopen(handle, encoding="utf-8") as stream:
                 record = json.load(stream)
         except (OSError, ValueError):
+            _forget_if_aged(fd, file_name)
             continue
         if not isinstance(record, dict) or record.get("kind") != _KIND_ENV_DIR:
+            _forget_if_aged(fd, file_name)
             continue
         target = record.get("dir")
         pid = record.get("creator_pid")
-        if not isinstance(target, str) or not isinstance(pid, int) or pid <= 0:
+        # A bool is an int to isinstance; _read_record refuses one the same way,
+        # and a True here would make pid 1 the liveness probe.
+        if (
+            not isinstance(target, str)
+            or not isinstance(pid, int)
+            or isinstance(pid, bool)
+            or pid <= 0
+        ):
+            _forget_if_aged(fd, file_name, record)
             continue
         parent, name = os.path.split(target)
         if parent in parents and _ENV_DIR_NAME.fullmatch(name):
             found[(parent, name)] = (file_name, record)
+        else:
+            _forget_if_aged(fd, file_name, record)
     return found
 
 
@@ -765,19 +969,28 @@ def _env_dir_sweepable(
 ) -> bool:
     """Whether a private directory, found by prefix, is one to delete.
 
-    Older than the age bound: yes, recorded or not. Recorded by a creator that is
-    gone, on this host: yes. Anything else is left: an unrecorded directory younger
-    than the bound may be a live run's, made before its record or by a writer with
-    none.
+    Recorded by this host: its creator decides. Gone: yes. Alive and confirmed
+    by its start time: no, whatever the directory's age; a run older than the
+    bound that is still alive owns its directory, and deleting it under that run
+    on its age alone broke the run. Alive by pid alone, with no start time to
+    confirm it (the record was written without one, or this host has no ``/proc``
+    or a hidden one): the age bound decides, since a later process given the same
+    pid reads as the creator there, and a directory holding the operator's values
+    must not stay until the next boot on that reading. Not recorded by this host:
+    older than the age bound, yes; anything else is left, since an unrecorded
+    directory younger than the bound may be a live run's, made before its record
+    or by a writer with none.
     """
-    if _now() - status.st_mtime > RECORD_MAX_AGE_SECONDS:
-        return True
-    if entry is None:
+    aged = _now() - status.st_mtime > RECORD_MAX_AGE_SECONDS
+    record = entry[1] if entry is not None else None
+    if record is not None and here is not None and record.get("host") == here:
+        pid, start = record["creator_pid"], record.get("creator_start")
+        if not _creator_alive(pid, start):
+            return True
+        if start is None or _process_start(pid) is None:
+            return aged
         return False
-    record = entry[1]
-    if here is None or record.get("host") != here:
-        return False
-    return not _creator_alive(record["creator_pid"], record.get("creator_start"))
+    return aged
 
 
 def sweep_env_dirs() -> List[str]:
@@ -800,6 +1013,11 @@ def sweep_env_dirs() -> List[str]:
 
 
 def _sweep_env_dirs() -> List[str]:
+    if sys.platform == "win32":
+        # No directory descriptors, so no records and no sweep (state_dir says
+        # the same): the listing below opens with O_DIRECTORY, which Windows
+        # has no name for, and that read as a failed sweep at every start.
+        return []
     state = state_dir()
     state_fd = _open_state_dir(state) if state is not None else None
     removed: List[str] = []
@@ -807,12 +1025,27 @@ def _sweep_env_dirs() -> List[str]:
         records = _env_dir_records(state_fd) if state_fd is not None else {}
         here = host_key()
         found: set[Tuple[str, str]] = set()
+        # The parents that could not be listed: a symlink (O_NOFOLLOW refuses it;
+        # macOS's /tmp, a TMPDIR naming a link), a directory gone or unreadable.
+        # A record under one says nothing about whether its directory is gone,
+        # so it is kept; dropping it as "the directory is gone" left a stranded
+        # directory with no record and no sweep.
+        unlisted: set[str] = set()
         for parent in _env_dir_parents():
+            # Listed through the parent's real path: TMPDIR naming a link, or the
+            # macOS /tmp -> /private/tmp link, is where tempfile made the
+            # directory, and O_NOFOLLOW on the spelled path refused to list it,
+            # so a directory stranded there was never swept. The real path's
+            # last component is no link, so O_NOFOLLOW still refuses a path
+            # swapped for a link between the resolution and the open; the
+            # record is matched by the spelled parent, as it was recorded.
             try:
                 parent_fd = os.open(
-                    parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                    os.path.realpath(parent),
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                 )
             except OSError:
+                unlisted.add(parent)
                 continue
             try:
                 for name in sorted(os.listdir(parent_fd)):
@@ -826,7 +1059,7 @@ def _sweep_env_dirs() -> List[str]:
                 os.close(parent_fd)
         if state_fd is not None:
             for key, (file_name, record) in records.items():
-                if key in found:
+                if key in found or key[0] in unlisted:
                     continue
                 # The directory is gone: the record has nothing left to name.
                 aged = _record_age(state_fd, file_name, record) > RECORD_MAX_AGE_SECONDS

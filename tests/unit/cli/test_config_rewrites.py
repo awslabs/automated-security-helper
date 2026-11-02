@@ -526,15 +526,21 @@ class TestSuffixCase:
 
     @pytest.mark.parametrize("flag", ["--fix", "--fix-unused"])
     def test_lint_fix_refuses_toml(self, tmp_path, flag):
+        # A bare line_start is a fix to make: --fix refuses a TOML file only
+        # when it would rewrite it; --fix-unused refuses one before the lint.
         target = tmp_path / "PyProject.Toml"
-        target.write_text(PYPROJECT_TEXT, encoding="utf-8")
+        text = PYPROJECT_TEXT + (
+            "\n[[tool.ash.global_settings.suppressions]]\n"
+            'rule_id = "B101"\npath = "app.py"\nreason = "r"\nline_start = 3\n'
+        )
+        target.write_text(text, encoding="utf-8")
 
         result = CliRunner().invoke(
             config_app, ["lint", "--config", str(target), flag, "--non-interactive"]
         )
 
         assert result.exit_code == 1, result.output
-        assert target.read_text(encoding="utf-8") == PYPROJECT_TEXT
+        assert target.read_text(encoding="utf-8") == text
 
     @pytest.mark.parametrize("method", ["fix", "fix_unused_suppressions"])
     def test_the_linter_itself_refuses_toml(self, tmp_path, method):

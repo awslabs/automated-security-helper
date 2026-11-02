@@ -336,10 +336,13 @@ class TestSeverityMapping:
         assert error is not None
         assert error.get("type") == "warning"
 
-    def test_warning_level_with_fail_kind_produces_error_type(self, tmp_path):
-        """A finding with level='warning' and kind='fail' hits the error branch."""
+    def test_warning_level_with_fail_kind_produces_warning_type(self, tmp_path):
+        """The type follows the level, whatever the kind.
+
+        The kind defaults to "fail", which used to type every finding "error",
+        so a MEDIUM (warning) finding was ranked with a HIGH (error) one.
+        """
         result = _make_result(level="warning", scanner_name="scanner1")
-        # kind defaults to "fail", so level check is bypassed
         model = _make_model(runs=[_make_run(results=[result])])
         reporter = _get_reporter(tmp_path)
         output = reporter.report(model)
@@ -348,8 +351,7 @@ class TestSeverityMapping:
         tc = root.find(".//testcase")
         error = tc.find("error")
         assert error is not None
-        # kind=="fail" hits first branch -> type_="error"
-        assert error.get("type") == "error"
+        assert error.get("type") == "warning"
 
     def test_note_level_is_skipped_below_threshold_whatever_the_kind(self, tmp_path):
         """A `note` finding is below the configured MEDIUM threshold, so it skips.
@@ -585,7 +587,11 @@ class TestSuppressedFindings:
         assert tc.find("error") is None
 
     def test_multiple_suppressions_on_one_result(self, tmp_path):
-        """Multiple suppressions on one result each produce a Skipped."""
+        """Multiple suppressions on one result are one skipped test.
+
+        JUnit counts each child as a skip, so a skipped element per suppression
+        counted one test twice. The justifications are joined into one.
+        """
         suppressions = [
             Suppression(kind=Kind1.inSource, justification="Reason A"),
             Suppression(kind=Kind1.external, justification="Reason B"),
@@ -601,9 +607,11 @@ class TestSuppressedFindings:
 
         root = _parse_xml(output)
         tc = root.find(".//testcase")
-        # junitparser handles multiple results; just verify skipped is present
         skipped_elements = tc.findall("skipped")
-        assert len(skipped_elements) >= 1
+        assert len(skipped_elements) == 1
+        message = skipped_elements[0].get("message", "")
+        assert "Reason A" in message
+        assert "Reason B" in message
 
 
 # ---------------------------------------------------------------------------

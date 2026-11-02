@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -127,20 +128,23 @@ def test_a_file_on_the_way_is_refused_before_any_project_is_registered(
     blocker = root / where
     blocker.parent.mkdir(parents=True, exist_ok=True)
     blocker.write_text(CONTENT, encoding="utf-8")
+    refused = root / FILES[where]
 
     response = _scan(workspace_file)
 
     _assert_refused(
-        response,
-        f"Output directory cannot be created: {root / FILES[where]} (Not a directory)",
+        response, f"Output directory cannot be created: {refused} (Not a directory)"
     )
     assert executions == [], "the workspace scan ran"
-    assert isolated_mcp_state.list_scans() == [], "a project was registered"
+    # Finished ones too: refused before registering, not registered and given back.
+    assert isolated_mcp_state.list_scans(active_only=False) == [], (
+        "a project was registered"
+    )
     assert blocker.read_text(encoding="utf-8") == CONTENT
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, create a directory in one without write permission",
 )
 def test_one_that_fails_when_it_is_made_is_refused_and_given_back(
@@ -164,7 +168,9 @@ def test_one_that_fails_when_it_is_made_is_refused_and_given_back(
     assert list(projects.iterdir()) == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="a symbolic link needs a privilege there")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a symbolic link needs a privilege there"
+)
 def test_an_output_dir_that_is_a_link_to_nothing_is_refused(
     tmp_path, executions, isolated_mcp_state
 ):
@@ -185,7 +191,9 @@ def test_an_output_dir_that_is_a_link_to_nothing_is_refused(
     assert output.is_symlink() and not output.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="a symbolic link needs a privilege there")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a symbolic link needs a privilege there"
+)
 def test_a_link_to_nothing_on_the_way_to_the_output_dir_is_refused(
     tmp_path, executions, isolated_mcp_state
 ):
@@ -207,7 +215,7 @@ def test_a_link_to_nothing_on_the_way_to_the_output_dir_is_refused(
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, enter a directory without search permission",
 )
 def test_an_output_dir_that_cannot_be_entered_is_refused(
@@ -230,7 +238,7 @@ def test_an_output_dir_that_cannot_be_entered_is_refused(
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, write into a directory without write permission",
 )
 def test_one_that_is_there_but_cannot_be_written_is_refused(

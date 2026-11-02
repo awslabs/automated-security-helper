@@ -2398,3 +2398,39 @@ def test_a_text_default_of_a_module_imported_during_a_test_keeps_nothing_of_it(
         assert option.default == str(_harness.REAL_ASH_BIN_PATH)
     finally:
         sys.modules.pop(name, None)
+
+
+def test_a_default_behind_functools_wraps_keeps_nothing_of_the_test(
+    char_factory, tmp_path
+):
+    """A command wrapped with ``functools.wraps`` has no defaults of its own; the
+    option default sits on the function it wraps, which ``inspect.signature`` (and
+    Typer) read through ``__wrapped__``. It is the harness home's text inside the
+    test and the product's text again after it."""
+    name = "automated_security_helper._char_wrapped_default_probe"
+    module = types.ModuleType(name)
+    harness = char_factory(tmp_path / "wrapped-leak")
+    try:
+        with harness.active():
+            sys.modules[name] = module
+            exec(
+                "import functools\n"
+                "import typer\n"
+                "from automated_security_helper.core.constants import ASH_BIN_PATH\n"
+                "def wrapping(command):\n"
+                "    @functools.wraps(command)\n"
+                "    def run(*args, **kwargs):\n"
+                "        return command(*args, **kwargs)\n"
+                "    return run\n"
+                "@wrapping\n"
+                "def command(bin_path=typer.Option(str(ASH_BIN_PATH))):\n"
+                "    return bin_path\n",
+                module.__dict__,
+            )
+            assert module.command.__defaults__ is None
+            option = inspect.signature(module.command).parameters["bin_path"].default
+            assert option.default == str(harness.ash_bin_default)
+        option = inspect.signature(module.command).parameters["bin_path"].default
+        assert option.default == str(_harness.REAL_ASH_BIN_PATH)
+    finally:
+        sys.modules.pop(name, None)

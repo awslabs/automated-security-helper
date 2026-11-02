@@ -1,364 +1,579 @@
 $ ash plugin list -c custom.yaml --include-plugin-config
-[<LOG_TIME>] INFO     Using config file specified at: custom.yaml
-             INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Using config file specified at: custom.yaml
+INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+WARNING  cfn-nag cannot be installed here: RubyGems (`gem`) is not on PATH, no C compiler (cc, gcc
+         or clang) is on PATH, and cfn-nag's `psych` dependency has to build from source. It will be
+         reported as having no install path on this machine rather than failing the install of every
+         other scanner.
 ASH Scanners
-┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Name           ┃ Enabled ┃ Class                ┃ Module                 ┃ Plugin Config         ┃
-┡━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━┩
-│ actionlint     │ True    │ ActionlintScanner    │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name":             │
-│                │         │                      │                        │ "actionlint",         │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "shellcheck":     │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "pyflakes": null  │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ bandit         │ False   │ BanditScanner        │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "bandit",   │
-│                │         │                      │                        │   "enabled": false,   │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "confidence_leve… │
-│                │         │                      │                        │ "all",                │
-│                │         │                      │                        │     "ignore_nosec":   │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │     "excluded_paths": │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │     "additional_form… │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │     "tool_version":   │
-│                │         │                      │                        │ ">=1.7.0,<2.0.0",     │
-│                │         │                      │                        │     "install_timeout… │
-│                │         │                      │                        │ 300                   │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ cdk-nag        │ True    │ CdkNagScanner        │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "cdk-nag",  │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "nag_packs": {    │
-│                │         │                      │                        │       "AwsSolutionsC… │
-│                │         │                      │                        │ true,                 │
-│                │         │                      │                        │       "HIPAASecurity… │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │       "NIST80053R4Ch… │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │       "NIST80053R5Ch… │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │       "PCIDSS321Chec… │
-│                │         │                      │                        │ false                 │
-│                │         │                      │                        │     },                │
-│                │         │                      │                        │     "include_complia… │
-│                │         │                      │                        │ false                 │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ cfn-guard      │ True    │ CfnGuardScanner      │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name":             │
-│                │         │                      │                        │ "cfn-guard",          │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "rule_sets": [    │
-│                │         │                      │                        │       "wa-Security-P… │
-│                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "rules_paths": [] │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ cfn-lint       │ True    │ CfnLintScanner       │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "cfn-lint", │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "regions": [],    │
-│                │         │                      │                        │     "ignore_checks":  │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │     "include_checks": │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │     "honor_inline_ig… │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │     "tool_version":   │
-│                │         │                      │                        │ ">=1.43.3,<2.0.0",    │
-│                │         │                      │                        │     "install_timeout… │
-│                │         │                      │                        │ 300                   │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ cfn-nag        │ True    │ CfnNagScanner        │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "cfn-nag",  │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false  │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ checkov        │ True    │ CheckovScanner       │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "checkov",  │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "skip_path": [],  │
-│                │         │                      │                        │     "additional_form… │
-│                │         │                      │                        │ [                     │
-│                │         │                      │                        │       "cyclonedx_jso… │
-│                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "frameworks": [   │
-│                │         │                      │                        │       "all"           │
-│                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "skip_frameworks… │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │     "skip_ash_output… │
-│                │         │                      │                        │ true,                 │
-│                │         │                      │                        │     "tool_version":   │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "install_timeout… │
-│                │         │                      │                        │ 300                   │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ detect-secrets │ True    │ DetectSecretsScanner │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name":             │
-│                │         │                      │                        │ "detect-secrets",     │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "baseline_file":  │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_settings":  │
-│                │         │                      │                        │ {                     │
-│                │         │                      │                        │       "version":      │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │       "generated_at": │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │       "plugins_used": │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │       "filters_used": │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │       "results": {}   │
-│                │         │                      │                        │     },                │
-│                │         │                      │                        │     "skip_generated_… │
-│                │         │                      │                        │ true,                 │
-│                │         │                      │                        │     "max_worker_outp… │
-│                │         │                      │                        │ 256                   │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ gitleaks       │ True    │ GitleaksScanner      │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "gitleaks", │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "baseline_path":  │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "honor_inline_ig… │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │     "max_target_mega… │
-│                │         │                      │                        │ null                  │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ grype          │ True    │ GrypeScanner         │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "grype",    │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null                  │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ npm-audit      │ True    │ NpmAuditScanner      │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name":             │
-│                │         │                      │                        │ "npm-audit",          │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false  │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ opengrep       │ True    │ OpengrepScanner      │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "opengrep", │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config": "p/ci", │
-│                │         │                      │                        │     "exclude": [      │
-│                │         │                      │                        │       "*-converted.p… │
-│                │         │                      │                        │       "*_report_resu… │
-│                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "exclude_rule":   │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │     "severity": [],   │
-│                │         │                      │                        │     "metrics":        │
-│                │         │                      │                        │ "auto",               │
-│                │         │                      │                        │     "patterns": [],   │
-│                │         │                      │                        │     "version":        │
-│                │         │                      │                        │ "v1.30.2",            │
-│                │         │                      │                        │     "sha256": {}      │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ semgrep        │ True    │ SemgrepScanner       │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "semgrep",  │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config": "p/ci", │
-│                │         │                      │                        │     "exclude": [      │
-│                │         │                      │                        │       "*-converted.p… │
-│                │         │                      │                        │       "*_report_resu… │
-│                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "exclude_rule":   │
-│                │         │                      │                        │ [],                   │
-│                │         │                      │                        │     "severity": [],   │
-│                │         │                      │                        │     "metrics":        │
-│                │         │                      │                        │ "auto",               │
-│                │         │                      │                        │     "tool_version":   │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "install_timeout… │
-│                │         │                      │                        │ 300                   │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ syft           │ True    │ SyftScanner          │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "syft",     │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "exclude": [],    │
-│                │         │                      │                        │     "additional_outp… │
-│                │         │                      │                        │ [                     │
-│                │         │                      │                        │       "syft-table"    │
-│                │         │                      │                        │     ]                 │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ trivy          │ True    │ TrivyScanner         │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "trivy",    │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "scanners": [     │
-│                │         │                      │                        │       "vuln"          │
-│                │         │                      │                        │     ],                │
-│                │         │                      │                        │     "license_full":   │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │     "ignore_unfixed": │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │     "disable_telemet… │
-│                │         │                      │                        │ true,                 │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "ignore_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "secret_config_f… │
-│                │         │                      │                        │ null                  │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-├────────────────┼─────────┼──────────────────────┼────────────────────────┼───────────────────────┤
-│ zizmor         │ True    │ ZizmorScanner        │ automated_security_he… │ {                     │
-│                │         │                      │                        │   "name": "zizmor",   │
-│                │         │                      │                        │   "enabled": true,    │
-│                │         │                      │                        │   "options": {        │
-│                │         │                      │                        │     "severity_thresh… │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "scan_timeout":   │
-│                │         │                      │                        │ 1800,                 │
-│                │         │                      │                        │     "offline": false, │
-│                │         │                      │                        │     "config_file":    │
-│                │         │                      │                        │ null,                 │
-│                │         │                      │                        │     "persona":        │
-│                │         │                      │                        │ "regular",            │
-│                │         │                      │                        │     "online_audits":  │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │     "honor_inline_ig… │
-│                │         │                      │                        │ false,                │
-│                │         │                      │                        │     "tool_version":   │
-│                │         │                      │                        │ ">=1.29.0,<2.0.0",    │
-│                │         │                      │                        │     "install_timeout… │
-│                │         │                      │                        │ 300                   │
-│                │         │                      │                        │   }                   │
-│                │         │                      │                        │ }                     │
-└────────────────┴─────────┴──────────────────────┴────────────────────────┴───────────────────────┘
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Name           ┃ Enabled ┃ Class                ┃ Module                ┃ Plugin Config          ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ actionlint     │ True    │ ActionlintScanner    │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name":              │
+│                │         │                      │                       │ "actionlint",          │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "shellcheck":      │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "pyflakes": null   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ bandit         │ False   │ BanditScanner        │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "bandit",    │
+│                │         │                      │                       │   "enabled": false,    │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "confidence_level… │
+│                │         │                      │                       │ "all",                 │
+│                │         │                      │                       │     "ignore_nosec":    │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "excluded_paths":  │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "additional_forma… │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ ">=1.7.8,<2.0.0",      │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ cdk-nag        │ True    │ CdkNagScanner        │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "cdk-nag",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "nag_packs": {     │
+│                │         │                      │                       │       "AwsSolutionsCh… │
+│                │         │                      │                       │ true,                  │
+│                │         │                      │                       │       "HIPAASecurityC… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │       "NIST80053R4Che… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │       "NIST80053R5Che… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │       "PCIDSS321Check… │
+│                │         │                      │                       │ false                  │
+│                │         │                      │                       │     },                 │
+│                │         │                      │                       │     "include_complian… │
+│                │         │                      │                       │ false                  │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ cfn-guard      │ True    │ CfnGuardScanner      │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "cfn-guard", │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "rule_sets": [     │
+│                │         │                      │                       │       "wa-Security-Pi… │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "rules_paths": []  │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ cfn-lint       │ True    │ CfnLintScanner       │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "cfn-lint",  │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "regions": [],     │
+│                │         │                      │                       │     "ignore_checks":   │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "include_checks":  │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "honor_inline_ign… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ ">=1.43.3,<2.0.0",     │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ cfn-nag        │ True    │ CfnNagScanner        │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "cfn-nag",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ checkov        │ True    │ CheckovScanner       │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "checkov",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "skip_path": [],   │
+│                │         │                      │                       │     "additional_forma… │
+│                │         │                      │                       │ [                      │
+│                │         │                      │                       │       "cyclonedx_json" │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "frameworks": [    │
+│                │         │                      │                       │       "all"            │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "skip_frameworks": │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "skip_ash_output_… │
+│                │         │                      │                       │ true,                  │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ detect-secrets │ True    │ DetectSecretsScanner │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name":              │
+│                │         │                      │                       │ "detect-secrets",      │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "baseline_file":   │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_settings": { │
+│                │         │                      │                       │       "version": null, │
+│                │         │                      │                       │       "generated_at":  │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │       "plugins_used":  │
+│                │         │                      │                       │ [                      │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "ArtifactoryDetector", │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "AWSKeyDetector",      │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "AzureStorageKeyDetec… │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "BasicAuthDetector",   │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "CloudantDetector",    │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "DiscordBotTokenDetec… │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "GitHubTokenDetector", │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "GitLabTokenDetector", │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "Base64HighEntropyStr… │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "HexHighEntropyString… │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "IbmCloudIamDetector", │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "IbmCosHmacDetector",  │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "IPPublicDetector",    │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "JwtTokenDetector",    │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "KeywordDetector",     │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "MailchimpDetector",   │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "NpmDetector",         │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "OpenAIDetector",      │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "PrivateKeyDetector",  │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "PypiTokenDetector",   │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "SendGridDetector",    │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "SlackDetector",       │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "SoftlayerDetector",   │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "SquareOAuthDetector", │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "StripeDetector",      │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "TelegramBotTokenDete… │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         },             │
+│                │         │                      │                       │         {              │
+│                │         │                      │                       │           "name":      │
+│                │         │                      │                       │ "TwilioKeyDetector",   │
+│                │         │                      │                       │           "limit":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │           "keyword_ex… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │         }              │
+│                │         │                      │                       │       ],               │
+│                │         │                      │                       │       "filters_used":  │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │       "results": {}    │
+│                │         │                      │                       │     },                 │
+│                │         │                      │                       │     "skip_generated_l… │
+│                │         │                      │                       │ true,                  │
+│                │         │                      │                       │     "max_worker_outpu… │
+│                │         │                      │                       │ 256                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ gitleaks       │ True    │ GitleaksScanner      │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "gitleaks",  │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "baseline_path":   │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "honor_inline_ign… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "max_target_megab… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ grype          │ True    │ GrypeScanner         │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "grype",     │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ npm-audit      │ True    │ NpmAuditScanner      │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "npm-audit", │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ opengrep       │ True    │ OpengrepScanner      │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "opengrep",  │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config": "p/ci",  │
+│                │         │                      │                       │     "exclude": [       │
+│                │         │                      │                       │       "*-converted.py… │
+│                │         │                      │                       │       "*_report_resul… │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "exclude_rule":    │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "severity": [],    │
+│                │         │                      │                       │     "metrics": "auto", │
+│                │         │                      │                       │     "patterns": [],    │
+│                │         │                      │                       │     "version":         │
+│                │         │                      │                       │ "v1.30.2",             │
+│                │         │                      │                       │     "sha256": {}       │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ semgrep        │ True    │ SemgrepScanner       │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "semgrep",   │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config": "p/ci",  │
+│                │         │                      │                       │     "exclude": [       │
+│                │         │                      │                       │       "*-converted.py… │
+│                │         │                      │                       │       "*_report_resul… │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "exclude_rule":    │
+│                │         │                      │                       │ [],                    │
+│                │         │                      │                       │     "severity": [],    │
+│                │         │                      │                       │     "metrics": "auto", │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ syft           │ True    │ SyftScanner          │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "syft",      │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "exclude": [],     │
+│                │         │                      │                       │     "additional_outpu… │
+│                │         │                      │                       │ [                      │
+│                │         │                      │                       │       "syft-table"     │
+│                │         │                      │                       │     ]                  │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ trivy          │ True    │ TrivyScanner         │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "trivy",     │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "scanners": [      │
+│                │         │                      │                       │       "vuln"           │
+│                │         │                      │                       │     ],                 │
+│                │         │                      │                       │     "license_full":    │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "ignore_unfixed":  │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "disable_telemetr… │
+│                │         │                      │                       │ true,                  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "ignore_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "secret_config_fi… │
+│                │         │                      │                       │ null                   │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
+│ zizmor         │ True    │ ZizmorScanner        │ automated_security_h… │ {                      │
+│                │         │                      │                       │   "name": "zizmor",    │
+│                │         │                      │                       │   "enabled": true,     │
+│                │         │                      │                       │   "options": {         │
+│                │         │                      │                       │     "severity_thresho… │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "scan_timeout":    │
+│                │         │                      │                       │ 1800,                  │
+│                │         │                      │                       │     "offline": false,  │
+│                │         │                      │                       │     "config_file":     │
+│                │         │                      │                       │ null,                  │
+│                │         │                      │                       │     "persona":         │
+│                │         │                      │                       │ "regular",             │
+│                │         │                      │                       │     "online_audits":   │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "honor_inline_ign… │
+│                │         │                      │                       │ false,                 │
+│                │         │                      │                       │     "tool_version":    │
+│                │         │                      │                       │ ">=1.29.0,<2.0.0",     │
+│                │         │                      │                       │     "install_timeout": │
+│                │         │                      │                       │ 300                    │
+│                │         │                      │                       │   }                    │
+│                │         │                      │                       │ }                      │
+└────────────────┴─────────┴──────────────────────┴───────────────────────┴────────────────────────┘
 ASH Converters
 ┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Name    ┃ Enabled ┃ Class            ┃ Module                      ┃ Plugin Config               ┃
@@ -430,7 +645,9 @@ ASH Reporters
 │                     │         │                     │                      │   "enabled": true,  │
 │                     │         │                     │                      │   "options": {      │
 │                     │         │                     │                      │     "exclude_suppr… │
-│                     │         │                     │                      │ true                │
+│                     │         │                     │                      │ true,               │
+│                     │         │                     │                      │     "emit_automati… │
+│                     │         │                     │                      │ false               │
 │                     │         │                     │                      │   },                │
 │                     │         │                     │                      │   "extension":      │
 │                     │         │                     │                      │ "ghas.sarif"        │

@@ -192,7 +192,13 @@ def _spy(monkeypatch) -> list:
 def _misfits(calls, redaction_values) -> list:
     """What in each recorded call does not fit ``validate_bedrock_model``: a call
     its signature rejects, values that do not arrive as ``values``, or a label
-    that is not the one the call site means."""
+    that names the wrong model.
+
+    The configured model's check must carry its reference (CONFIGURED_LABEL): that
+    is the label the check prints in the ID's place. A fallback's check may carry
+    no label or the fallback's own ID, which name the same model; what it must not
+    carry is the configured model's reference, which would name that model in the
+    fallback's place."""
     problems = []
     for args, kwargs in calls:
         model = args[1]
@@ -203,9 +209,10 @@ def _misfits(calls, redaction_values) -> list:
             continue
         if tuple(given.get("values", ())) != tuple(redaction_values):
             problems.append(f"{model}: values arrived as {given.get('values')!r}")
-        wanted = CONFIGURED_LABEL if model == CONFIGURED else None
-        if given.get("label") != wanted:
-            problems.append(f"{model}: label arrived as {given.get('label')!r}")
+        label = given.get("label")
+        accepted = {CONFIGURED_LABEL} if model == CONFIGURED else {None, model}
+        if label not in accepted:
+            problems.append(f"{model}: label arrived as {label!r}")
     return problems
 
 
@@ -279,8 +286,9 @@ def test_an_available_fallback_satisfies_the_dependency_check(
     text = "\n".join(reporter.errors)
     assert f"Configured model '{CONFIGURED}' is not valid" in text, text
     assert f"Fallback model '{FALLBACK}' is available" in text, text
-    # The configured model was checked against a listing, then the fallback.
-    assert control.list_inference_profiles.call_count == 2
+    # The configured model and then the fallback were checked against ONE
+    # listing: the walk reuses the dependency check's listings.
+    assert control.list_inference_profiles.call_count == 1
 
 
 @patch("boto3.Session")
@@ -297,8 +305,10 @@ def test_an_unavailable_fallback_leaves_the_dependency_unsatisfied(
     assert f"Configured model '{CONFIGURED}' is not valid" in text, text
     assert "Fallback model" not in text, text
     assert "TypeError" not in text, text
-    # The fallback was checked against a listing and refused, not skipped.
-    assert control.list_inference_profiles.call_count == 2
+    # The fallback was checked against the one kept listing and refused, not
+    # skipped: the configured model's refusal names it, and the walk lists no
+    # second time.
+    assert control.list_inference_profiles.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -447,3 +457,41 @@ def test_a_label_given_by_name_names_the_model_in_its_place():
     assert is_valid is False
     assert reason == f"Model {CONFIGURED_LABEL} not found in available models"
     assert MODEL_CANARY not in reason
+
+
+# ---------------------------------------------------------------------------
+# The _misfits reading itself: which labels a fallback's check may carry
+# ---------------------------------------------------------------------------
+
+
+def _recorded(model: str, **kwargs) -> tuple:
+    """One call as ``_spy`` records it: the client, the model, then by name."""
+    return ((MagicMock(), model), {"values": [CANARY], **kwargs})
+
+
+@pytest.mark.parametrize("label", [None, FALLBACK], ids=["no label", "its own id"])
+def test_a_fallbacks_check_may_name_itself_or_carry_no_label(label):
+    """A fallback's check names the fallback either way, so a call site that
+    passes the fallback's own ID as its label fits the signature's meaning."""
+    calls = [_recorded(FALLBACK, label=label)]
+
+    assert _misfits(calls, [CANARY]) == []
+
+
+def test_a_fallbacks_check_may_not_carry_the_configured_models_reference():
+    """The configured model's reference on a fallback's check would name the
+    configured model in the fallback's place."""
+    calls = [_recorded(FALLBACK, label=CONFIGURED_LABEL)]
+
+    assert _misfits(calls, [CANARY]) == [
+        f"{FALLBACK}: label arrived as {CONFIGURED_LABEL!r}"
+    ]
+
+
+@pytest.mark.parametrize("label", [None, CONFIGURED], ids=["no label", "raw id"])
+def test_the_configured_models_check_must_carry_its_reference(label):
+    """Control: the configured model's check is still held to its reference,
+    which is what the check prints in the ID's place."""
+    calls = [_recorded(CONFIGURED, label=label)]
+
+    assert _misfits(calls, [CANARY]) == [f"{CONFIGURED}: label arrived as {label!r}"]

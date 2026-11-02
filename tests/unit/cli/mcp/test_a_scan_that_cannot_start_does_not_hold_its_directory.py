@@ -45,9 +45,11 @@ _MGMT = "automated_security_helper.core.resource_management.scan_management"
 _RESULTS = "ash_aggregated_results.json"
 
 
-def _close_the_runner(scan_id, runner):
+def _close_the_runner(scan_id, runner, **_start_options):
     # A start that never runs the scan: the cells test the tool, not the
-    # runner. The scope ends as the real task's completion ends it.
+    # runner. The scope ends as the real task's completion ends it. The real
+    # start's keywords (ran, if_never_run) are accepted and left alone, as in
+    # every start stand-in below.
     runner.close()
     end_the_scans_scope_as_its_task_would()
 
@@ -119,7 +121,7 @@ def test_a_scan_whose_task_cannot_start_puts_the_previous_results_back(
     (output / _RESULTS).write_text('{"previous": 1}')
     registry = ScanRegistry()
 
-    def a_start_that_fails(scan_id, runner):
+    def a_start_that_fails(scan_id, runner, **_start_options):
         runner.close()
         raise RuntimeError("the task could not be started")
 
@@ -239,7 +241,7 @@ def test_a_start_failure_shows_no_value_the_scan_config_read(tmp_path, monkeypat
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)
 
-    def a_start_that_quotes_the_value(scan_id, runner):
+    def a_start_that_quotes_the_value(scan_id, runner, **_start_options):
         runner.close()
         raise RuntimeError(f"the task could not be started: {secret}")
 
@@ -303,7 +305,9 @@ def test_a_start_failures_context_and_suggestions_show_no_value(tmp_path, monkey
     )
     registry = ScanRegistry()
 
-    def a_start_that_quotes_the_value_beside_the_text(scan_id, runner):
+    def a_start_that_quotes_the_value_beside_the_text(
+        scan_id, runner, **_start_options
+    ):
         runner.close()
         raise MCPResourceError(
             f"the task could not be started: {secret}",
@@ -355,7 +359,7 @@ def test_a_start_failures_context_leaves_show_no_value(tmp_path, monkeypatch, le
     else:
         context = {"detail": ("a", ("b", f"in {secret}"))}
 
-    def a_start_that_quotes_it_beside_the_text(scan_id, runner):
+    def a_start_that_quotes_it_beside_the_text(scan_id, runner, **_start_options):
         runner.close()
         raise MCPResourceError("the task could not be started", context=context)
 
@@ -398,7 +402,7 @@ def test_a_start_failure_shows_no_value_the_operator_config_read(tmp_path, monke
     registry = ScanRegistry()
     logger = MagicMock(spec=ASHLogger)
 
-    def a_start_that_quotes_the_value(scan_id, runner):
+    def a_start_that_quotes_the_value(scan_id, runner, **_start_options):
         runner.close()
         raise RuntimeError(f"the task could not be started: {secret}")
 
@@ -558,7 +562,7 @@ def test_a_scan_that_cannot_start_gives_its_concurrency_slot_back(
     limits = SimpleNamespace(max_concurrent_scans=1, scan_timeout_seconds=None)
     starts = []
 
-    def fail_the_first_start(scan_id, runner):
+    def fail_the_first_start(scan_id, runner, **_start_options):
         runner.close()
         starts.append(scan_id)
         if len(starts) == 1:

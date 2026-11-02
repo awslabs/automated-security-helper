@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis import EXPECTED_TRANSFORMATIONS
+from automated_security_helper.utils.meta_analysis import is_expected_transformation
 from automated_security_helper.utils.meta_analysis.field_mapping import (
     categorize_field_importance,
     extract_field_paths,
@@ -32,14 +32,11 @@ def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> Lis
         if path in ["properties", ".properties"]:
             continue
 
-        # Check if this is an expected transformation
-        is_expected_transformation = False
-        for transform_path in EXPECTED_TRANSFORMATIONS:
-            if path == transform_path or path.startswith(f"{transform_path}."):
-                is_expected_transformation = True
-                break
-
-        if path not in agg_paths and not is_expected_transformation:
+        # An expected transformation (the entry itself, a field under it such as
+        # "tool.driver.name", or an item of it such as "properties.tags[0]") is
+        # decided by the one predicate the meta-analysis module keeps, so this
+        # loop and the module cannot read the list two different ways.
+        if path not in agg_paths and not is_expected_transformation(path):
             # Get the value from the original result
             orig_value = get_value_from_path(original_result, path)
 

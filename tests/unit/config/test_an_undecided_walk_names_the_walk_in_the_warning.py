@@ -88,9 +88,9 @@ class TestTheSentenceArms:
         without = membership_clause(checkout_membership=False, client_supplied=True)
         assert with_undecided == without
 
-    def test_the_confinement_sentence_keeps_the_attribution_tail(self):
+    def test_the_confinement_sentence_does_not_claim_who_wrote_the_file(self):
         sentence = confinement_membership(checkout_membership=False, undecided=True)
-        assert sentence.endswith(", so that repository wrote it"), sentence
+        assert sentence.endswith(", so that repository may have written it"), sentence
         assert _WALK_STOPPED in sentence, sentence
 
     def test_every_decided_sentence_is_unchanged(self):
@@ -1062,16 +1062,21 @@ class TestTheWarnedWindow:
     def test_a_walk_warning_and_a_git_warning_for_one_name_both_print_once(
         self, tmp_path, monkeypatch, caplog, _warned_window
     ):
-        """The .git entry the boundary rests on and the name whose link walk
-        stopped are spelled alike here -- the name is the entry's path -- and
-        each kind of warning still prints, once: green at base by design,
-        since the old "link walk: " prefix on the stored name already kept
-        the two kinds of warning apart before the key carried the kind.
+        """A name whose link walk stopped and the .git entry that cannot be
+        examined behind it each print their own warning, once, however often
+        the name is judged. The key of each warning carries its kind, so the
+        two cannot take each other's place.
+
+        The name here is itself a mode 000 .git directory, so the first entry
+        the boundary look-up reaches is the .git inside it, which nobody can
+        examine; that entry, not the name, is the one the warning spells. An
+        entry that cannot be examined bounds the tree the way a .git that
+        cannot be searched does, so the look-up stops there.
 
         The link bound is lowered to 1 for the cell. At its real value of 40 a
         name the walk stops on cannot be looked up at all: the kernel follows
         no more than 40 links either, so the entry behind such a name is never
-        read and never warned about, and the two spellings cannot meet."""
+        read and never warned about."""
         monkeypatch.setattr(sandbox_grants, "_MAX_LINKS", 1)
         real = tmp_path / "real"
         real.mkdir()
@@ -1095,7 +1100,7 @@ class TestTheWarnedWindow:
         git = [
             record.getMessage()
             for record in caplog.records
-            if record.getMessage().startswith(f"Treating {spelled} as a checkout")
+            if record.getMessage().startswith(f"Treating {spelled}/.git as a checkout")
         ]
         assert len(walk) == 1, caplog.text
         assert len(git) == 1, caplog.text

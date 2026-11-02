@@ -8,6 +8,7 @@ from pydantic import ValidatorFunctionWrapHandler
 from typing import get_args
 from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.unknown_keys import (
+    UNKNOWN_KEY_NOTE,
     known_keys,
     misplaced_key_problems,
     tolerated_notes,
@@ -60,11 +61,18 @@ class PluginConfigBase(RedactedSection):
         notes = tolerated_notes(info)
         if notes is not None and cls.__dict__.get("GENERIC_SECTION", False):
             return data
-        problems = section_key_problems(cls, data, section_location(cls))
+        where = section_location(cls)
+        problems = section_key_problems(cls, data, where)
         if not problems:
             return data
         if notes is not None:
-            notes.extend(problems)
+            # One note per kept key, naming the section and not the key: a stored
+            # key is the results file's data (UNKNOWN_KEY_NOTE), where a config
+            # file's refusal names it.
+            notes.extend(
+                f"{UNKNOWN_KEY_NOTE} in '{where}'"
+                for _ in unknown_section_keys(cls, data)
+            )
             return data
         raise ValueError(" ".join(problems))
 
@@ -122,6 +130,7 @@ def config_validated_by_declared_model(
     base_config: type[PluginConfigBase],
     value: Any,
     handler: ValidatorFunctionWrapHandler,
+    info: Optional[ValidationInfo] = None,
 ) -> Any:
     """``value`` for a plugin's ``config`` field, validated by the plugin's own model.
 
@@ -142,6 +151,9 @@ def config_validated_by_declared_model(
     a config of another class is written into the plugin's config only when the
     plugin declares a name to compare it with. A plugin that declares no model
     of its own takes any config of ``base_config``, as before.
+
+    ``info`` is the wrap validator's ValidationInfo. When given, the plugin's own
+    model validates under the same validation context as the field would have.
     """
     declared = declared_config_model(plugin_class, base_config)
     if declared is None or value is None:
@@ -164,11 +176,15 @@ def config_validated_by_declared_model(
     if isinstance(value, declared):
         return handler(value)
     if isinstance(value, BaseModel):
-        given = value.model_dump(exclude_unset=True)
+        # By alias, as the declared model reads its input: a field it declares
+        # under an alias would otherwise be dumped by name and left to its default.
+        given = value.model_dump(exclude_unset=True, by_alias=True)
         if name is not None and expected is not None:
             given["name"] = name
         value = given
-    return declared.model_validate(value)
+    return declared.model_validate(
+        value, context=info.context if info is not None else None
+    )
 
 
 def section_location(config_class: type[BaseModel]) -> str:
@@ -177,6 +193,14 @@ def section_location(config_class: type[BaseModel]) -> str:
     name_field = config_class.model_fields.get("name")
     name = getattr(name_field, "default", None)
     return f"{segment}.{name}" if isinstance(name, str) and name else segment
+
+
+def unknown_section_keys(config_class: type[BaseModel], section: Any) -> List[str]:
+    """The keys of ``section`` that ``config_class`` does not declare."""
+    if not isinstance(section, dict):
+        return []
+    known = known_keys(config_class)
+    return [key for key in section if isinstance(key, str) and key not in known]
 
 
 def section_key_problems(
@@ -188,12 +212,10 @@ def section_key_problems(
     (config/plugin_option_check.py) and ``ash config validate``
     (config/config_validator.py), so all three say the same thing.
     """
-    if not isinstance(section, dict):
-        return []
-    known = known_keys(config_class)
-    unknown = [key for key in section if isinstance(key, str) and key not in known]
+    unknown = unknown_section_keys(config_class, section)
     if not unknown:
         return []
+    known = known_keys(config_class)
     options_class = _options_class(config_class)
     option_keys = known_keys(options_class) if options_class is not None else set()
     return misplaced_key_problems(unknown, known, option_keys, where)
@@ -256,3 +278,38 @@ def plugin_config_key(plugin_class: type) -> str:
         declared_plugin_name(plugin_class)
         or getattr(plugin_class, "__name__", "Unknown").lower()
     )
+
+
+#: The spellings of false a string ``enabled`` is read as. The same set the
+#: config resolver reads for its own switches (``resolve_config._FALSE_SPELLINGS``),
+#: kept here because that module cannot be imported from this one.
+_DISABLED_SPELLINGS = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
+def section_enabled(plugin_config: Any) -> bool:
+    """Whether a plugin's config section leaves it enabled.
+
+    The one reading of ``enabled`` the phases share: the pre-filter dependency
+    skip, the constructor-failure row's ``excluded`` flag, the filtered-out
+    row and the not-selected test of a scanner all ask this, so they cannot
+    disagree. Read from the dict ``get_plugin_config`` returns as well as from
+    a model; an absent section or an absent key means the default, enabled.
+
+    A section an external plugin keeps is never validated, so ``enabled`` can be
+    the text of an environment reference (``"false"``, ``"no"``, ``"0"``). Text
+    is read the way the plugin's own ``enabled: bool`` field would read it, not by
+    truthiness, which called every non-empty string enabled: a spelling of false
+    disables the plugin, an empty or whitespace-only string is off (a bool field
+    would refuse it, and an empty value is not a choice to run), and any other text
+    leaves it enabled (a scanner that silently does not run is the worse error).
+    """
+    if plugin_config is None:
+        return True
+    if isinstance(plugin_config, dict):
+        enabled = plugin_config.get("enabled", True)
+    else:
+        enabled = getattr(plugin_config, "enabled", True)
+    if isinstance(enabled, str):
+        spelled = enabled.strip().lower()
+        return bool(spelled) and spelled not in _DISABLED_SPELLINGS
+    return bool(enabled)

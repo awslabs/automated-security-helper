@@ -192,8 +192,8 @@ def test_bandits_link_refusal_carries_no_exit_code(tmp_path):
     source.mkdir()
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "outside.py").write_text("y = 2\n", encoding="utf-8")
-    # A glob character: bandit's --exclude cannot leave out this path alone.
-    (source / "l[1].py").symlink_to(tmp_path / "outside.py")
+    # A comma: bandit splits --exclude on commas, so no entry can carry this path.
+    (source / "l,1.py").symlink_to(tmp_path / "outside.py")
     output = tmp_path / "ash-output"
     output.mkdir()
     scanner = BanditScanner(
@@ -214,7 +214,7 @@ def test_bandits_link_refusal_carries_no_exit_code(tmp_path):
         message = _failure(scanner, source)
 
     run.assert_not_called()
-    assert "'l[1].py'" in message
+    assert "'l,1.py'" in message
     assert "link leaves the scanned tree" in message
     assert "bandit was not started" in message
     assert "accepted exit code" not in message

@@ -149,30 +149,27 @@ def test_a_path_with_a_lone_surrogate_is_logged_once(tmp_path, monkeypatch):
         assert "\\\\udce9" not in written, ascii(written)
 
 
-def _windows_filter_on(logger) -> bool:
-    from automated_security_helper.utils.log import WindowsSafeFilter
-
-    return any(isinstance(f, WindowsSafeFilter) and f._active for f in logger.filters)
-
-
 @pytest.mark.unit
 @pytest.mark.parametrize("console_logger", ["native", "windows-ci"], indirect=True)
 @pytest.mark.parametrize("text, shown", OBEYED)
 def test_the_console_shows_a_control_sequence(console_logger, capsys, text, shown):
-    """On Windows CI, WindowsSafeFilter drops every non-ASCII character first, C1
-    included, so a C1 sequence never reaches the console handler to be shown."""
+    """On Windows CI too: WindowsSafeFilter shows the message first and writes
+    what is still outside ASCII as its escape, so a C1 sequence or a format
+    character reaches the console as the same escape the native console shows
+    (it used to be dropped, which hid it and mangled the text around it)."""
     console_logger.warning(f"unknown key '{text}'")
 
     out = capsys.readouterr().out
-    if _windows_filter_on(console_logger) and not text.isascii():
-        shown = text.encode("ascii", errors="ignore").decode("ascii")
     assert shown in out, repr(out)
     assert not re.search(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", out), repr(out)
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("console_logger", ["native", "windows-ci"], indirect=True)
 @pytest.mark.parametrize("text", COMMANDS)
 def test_no_line_of_the_console_is_a_workflow_command(console_logger, capsys, text):
+    """On Windows CI too, where WindowsSafeFilter leaves an all-ASCII message as
+    it was logged: the console's own show breaks the command."""
     console_logger.warning(text)
 
     out = capsys.readouterr().out

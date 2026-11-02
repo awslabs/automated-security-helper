@@ -9,7 +9,7 @@ base the scan's sandbox grants are held to in three places that each judge a
 file that way: ``ASH_CONFIG``'s file (``default_config_chain``), the
 operator's ``trusted_config_path``, and the ``--config`` file the scan selected
 (``_with_own_sandbox``). Every shape below reaches one of them with a client's
-file that writes all four sandbox grants and ``network_scanners``, and none of
+file that writes all five sandbox grants and ``network_scanners``, and none of
 them may reach the resolved config.
 
 The client-policy step (``apply_client_config_rules``) is replaced by one that
@@ -34,14 +34,16 @@ from tests.utils.helpers import mark_git_checkout
 
 pytestmark = pytest.mark.unit
 
-#: The sandbox settings every client file writes: the four grants and a
-#: network_scanners list. Each differs from the default.
+#: The sandbox settings every client file writes: the five grants, the environment
+#: list among them (a marker label, never a real library). Each differs from the
+#: default.
 GRANTS: Dict[str, Any] = {
     "sandbox": {
         "network_scanners": ["checkov"],
         "extra_read_paths": ["/data"],
         "read_path_scanners": ["semgrep"],
         "env_scanners": ["semgrep"],
+        "environment": ["LD_PRELOAD=MARKER-not-a-real-library"],
     }
 }
 
@@ -50,6 +52,7 @@ GRANT_KEYS = (
     "extra_read_paths",
     "read_path_scanners",
     "env_scanners",
+    "environment",
 )
 
 

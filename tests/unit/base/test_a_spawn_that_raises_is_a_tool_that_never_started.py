@@ -64,6 +64,21 @@ def _raises(name: str) -> Exception:
     return RAISED[name]
 
 
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    The cells below stand in for the plain runner or for Popen and pass the
+    spawn "tool", a program installed nowhere. On Windows ASH refuses a bare name
+    its lookup cannot resolve before it spawns anything
+    (``subprocess_utils._refuse_unresolved_on_windows``), so the stand-in was
+    never called and each cell read the refusal's text, not the error it plants.
+    These cells are about how a spawn that raises is reported, so that decision
+    is set aside here. Only a bare name that resolves nowhere reaches that check.
+    """
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
 @pytest.mark.parametrize("name", sorted(RAISED))
 @pytest.mark.unit
 def test_run_command_with_output_handling_from_subprocess_run(tmp_path, name):

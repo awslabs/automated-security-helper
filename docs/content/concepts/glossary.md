@@ -120,7 +120,7 @@ Where a scan runs: `local` (the default), `container`, `nix`, or `precommit`, ch
 
 ## Sandbox grant
 
-A setting that gives sandboxed scanners more than the default policy: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, or `sandbox.env_scanners`. Only the operator may grant. See [Scanner sandbox](sandbox.md#grants).
+A setting that gives sandboxed scanners more than the default policy: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners`, or `sandbox.environment`. Only the operator may grant. See [Scanner sandbox](sandbox.md#grants).
 
 ## Scanned directory
 

@@ -48,6 +48,7 @@ from automated_security_helper.utils.undecodable_text import (
     path_in_record_form,
     resolve_uri_reading,
     text_of_undecodable,
+    undecodable_of_text,
 )
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
@@ -121,7 +122,10 @@ def load_npm_lock_entries(
             f"{refused.reason}"
         )
         return None
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
+        # RecursionError: json.loads recurses per nesting level, so a lockfile
+        # nested past the interpreter's limit raises it; the contract here is
+        # None for a lockfile that cannot be read, not a failed scanner run.
         ASH_LOGGER.debug(f"Could not read npm lockfile {lockfile}: {exc}")
         return None
     packages = data.get("packages") if isinstance(data, dict) else None
@@ -135,8 +139,13 @@ def load_npm_lock_entries(
     # bare package names, which could collide with a workspace key such as
     # "lib", but never with a node_modules path. The first occurrence wins,
     # because the packages map precedes the legacy v2 "dependencies" section.
+    # Lines are counted as the scanners count them, at "\n" only: str.splitlines
+    # also breaks on U+2028, U+2029, U+0085 and a lone CR, so a string value
+    # holding one of those shifted every later key's line and attributed a
+    # location to the wrong entry. A trailing CR stays on its line, where the
+    # key pattern does not reach it.
     key_lines: Dict[str, int] = {}
-    for number, line in enumerate(text.splitlines(), start=1):
+    for number, line in enumerate(text.split("\n"), start=1):
         match = _JSON_KEY_LINE.match(line)
         if not match:
             continue
@@ -189,6 +198,14 @@ def scan_relative_path(uri: str, root: PurePath) -> Optional[str]:
     a drive or prefix outside it, or a relative path that climbs out with
     ``..``. No path is then claimed, so a package-scoped suppression fails
     closed rather than matching a package somewhere else.
+
+    One rooted spelling is read as inside the root on purpose: a POSIX path with
+    a leading slash and no drive that is not under ``root`` lexically or once
+    resolved (``/deploy/cdk/package-lock.json``) is grype's spelling of a
+    location relative to the scan root, and is taken as such. Nothing in the
+    text tells that spelling from an absolute path outside the root, so the
+    rule is the scanner's convention, not a check; a drive-qualified path or
+    one holding ``..`` is still refused.
     """
     if not uri:
         return None
@@ -250,9 +267,14 @@ class NpmLockIndex:
         rel = lockfile_rel.lstrip("/")
         if rel not in self._cache:
             # Path() because the root may be a PurePath kept for its flavor, and
-            # only a concrete path can be read.
+            # only a concrete path can be read. ``lockfile_rel`` is a record's
+            # text (scan_relative_path writes a non-UTF-8 name in the record
+            # form, each lone surrogate as six characters), and the file is
+            # named on disk by its own bytes: the name is read back before it
+            # is opened (undecodable_of_text), or a lockfile under a non-UTF-8
+            # directory name was never found and its findings got no path.
             self._cache[rel] = load_npm_lock_entries(
-                Path(self.root / rel), scan_root=Path(self.root)
+                Path(self.root / undecodable_of_text(rel)), scan_root=Path(self.root)
             )
         return self._cache[rel]
 
@@ -292,9 +314,31 @@ def install_path(lockfile_rel: str, key: str) -> str:
     it. A scanner's raw URI is not: on Windows it can carry a drive and the scan
     root, which this function has no way to remove. npm lockfile keys always use
     forward slashes.
+
+    The result is normalized whatever directory the lockfile is in, and it is
+    always inside the scan root: a key that climbs out of the lockfile's own
+    directory (``../shared-lib``, which npm writes for a linked package outside
+    the project) or that is absolute gives ``""``, which
+    :func:`identity_properties` writes as no ``package_path``. The module's
+    contract is a scan-root-relative POSIX path with no prefix; a path carrying
+    ``..`` or a root would match no suppression written that way, and a
+    normalized ``..`` named another directory of the scan root as the package's.
     """
+    if posixpath.isabs(key):
+        return ""
     directory = posixpath.dirname(lockfile_rel)
-    return posixpath.normpath(posixpath.join(directory, key)) if directory else key
+    # The key is judged on its own before the join: a key that climbs out of
+    # the lockfile's directory names nothing the lockfile describes, whatever
+    # the join normalizes to. Judged only after the join, a nested lockfile's
+    # ``deploy/..`` cancelled against the climb and ``../shared-lib`` claimed
+    # ``shared-lib``, a directory at the scan root.
+    climb = posixpath.normpath(key) if key else ""
+    if climb == ".." or climb.startswith("../"):
+        return ""
+    joined = posixpath.normpath(posixpath.join(directory, key)) if key else ""
+    if not joined or joined == "." or joined == ".." or joined.startswith("../"):
+        return ""
+    return joined
 
 
 def identity_properties(

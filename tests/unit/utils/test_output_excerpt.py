@@ -53,3 +53,39 @@ def test_a_tool_excerpt_is_cut_after_cleaning():
     assert "\x1b" not in excerpt
     assert excerpt.startswith("x" * 25) and excerpt.endswith("y" * 75)
     assert "characters omitted" in excerpt
+
+
+#: A configured value a tool echoed back in its stderr; a placeholder, never a
+#: credential.
+CONFIGURED = "placeholder-configured-value-7"
+
+
+def test_a_tool_excerpt_hides_the_callers_values_before_the_cut():
+    """The excerpt lands in an error message that results and logs keep, so a
+    configured value the tool echoed is hidden as error_text hides it, and on the
+    whole text before the cut: a value the cut's marker would split is still
+    matched."""
+    text = "loading " + CONFIGURED + "\n" + "-" * 400 + "\nfailed: token " + CONFIGURED
+
+    excerpt = tool_output_excerpt(text, 500, values=[CONFIGURED])
+
+    assert CONFIGURED not in excerpt
+    assert "loading" in excerpt and "failed: token" in excerpt
+
+
+def test_a_value_the_cut_would_split_is_still_hidden():
+    # The cut's head (a quarter of the limit, 25 characters) ends inside the value:
+    # without redaction before the cut, the value's halves would sit on either
+    # side of the marker.
+    text = "a" * 18 + " " + CONFIGURED + " " + "b" * 400
+
+    excerpt = tool_output_excerpt(text, 100, values=[CONFIGURED])
+
+    assert CONFIGURED not in excerpt
+    assert CONFIGURED[:5] not in excerpt and CONFIGURED[-5:] not in excerpt
+
+
+def test_a_tool_excerpt_without_values_is_cleaned_and_cut_as_before():
+    text = "x" * 300 + "y" * 300
+    assert tool_output_excerpt(text, 100) == tool_output_excerpt(text, 100, values=())
+    assert tool_output_excerpt("plain", 100, values=["other"]) == "plain"

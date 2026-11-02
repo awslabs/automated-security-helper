@@ -99,12 +99,19 @@ from automated_security_helper.config.confinement_remedy import (
 )
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, current_run_log_scope
 
 if TYPE_CHECKING:
     from automated_security_helper.config.sandbox_grants import WalkJudgment
 
-_WARNED: Set[Tuple[str, str]] = set()
+#: The path refusals already logged, as (run log scope, option key, path). Keyed
+#: on the run's log scope so a long-lived process (the MCP server) logs a
+#: refusal again for a later scan run that refuses the same option and path;
+#: within one run the many per-path checks stay deduplicated. None is the scope
+#: outside every run. The derived-root clause of refused_derived_product adds
+#: its entries as (option key, path), without the scope, so the declared shape
+#: is a tuple of optional strings.
+_WARNED: Set[Tuple[Optional[str], ...]] = set()
 _WARNED_LOCK = threading.Lock()
 
 #: The scan run the derived roots recorded and judged here belong to, set by
@@ -137,8 +144,38 @@ def _key_segments(key: str) -> List[Tuple[str, bool]]:
     return segments
 
 
-def _leaves(node: Any, segments: List[Tuple[str, bool]]) -> Iterator[Any]:
-    """The values at ``segments`` in a parsed config document."""
+def _section_key_matches(key: Any, name: str, parent: Optional[str]) -> bool:
+    """Whether document key ``key`` is the option segment ``name``.
+
+    Directly under a plugin segment (``scanners``, ``reporters``,
+    ``converters``) a section is matched under the fold the configuration
+    reads it by (``folded_section_name``: ASCII case and the separators
+    dropped), so an operator's override written under ``scanners.Syft`` or
+    ``scanners.detectsecrets`` is credited to the section the document holds.
+    Elsewhere the two separators are alike and case is kept, as config
+    merging compares keys.
+    """
+    if not isinstance(key, str):
+        return False
+    if parent is not None:
+        from automated_security_helper.config.plugin_section_names import (
+            PLUGIN_SEGMENT_KEYS,
+            folded_section_name,
+        )
+
+        if parent in PLUGIN_SEGMENT_KEYS:
+            return folded_section_name(key) == folded_section_name(name)
+    return _key_part(key) == name
+
+
+def _leaves(
+    node: Any, segments: List[Tuple[str, bool]], parent: Optional[str] = None
+) -> Iterator[Any]:
+    """The values at ``segments`` in a parsed config document.
+
+    ``parent`` is the key the ``node`` sits under, which decides how the next
+    segment is matched (``_section_key_matches``).
+    """
     if not segments:
         if isinstance(node, list):
             yield from node
@@ -149,22 +186,36 @@ def _leaves(node: Any, segments: List[Tuple[str, bool]]) -> Iterator[Any]:
     if not isinstance(node, dict):
         return
     for key, value in node.items():
-        if _key_part(key) != name:
+        if not _section_key_matches(key, name, parent):
             continue
         if many and isinstance(value, list):
             for item in value:
-                yield from _leaves(item, rest)
+                yield from _leaves(item, rest, name)
         elif not many:
-            yield from _leaves(value, rest)
+            yield from _leaves(value, rest, name)
 
 
 def _same_path(leaf: Any, value: Union[str, Path]) -> bool:
-    """Whether a config value names ``value``; a ``file://...::name`` entry by its file."""
+    """Whether a config value names ``value``; a ``file://...::name`` entry by its file.
+
+    ``leaf`` is what the operator wrote and is compared as written and as
+    ``os.path.normpath`` normalizes it, so an operator spelling such as
+    ``/ops/./rules.yaml`` or ``/ops//rules.yaml`` names the anchored form a
+    scanner holds. ``value`` is the configuration's value, which a repository
+    file may have written, and it is compared ONLY as written: a value carrying
+    ``..`` that normalizes to the operator's spelling is not the operator's,
+    because the operating system walks ``..`` through whatever the path's
+    parent is at run time (a link the repository plants, say), while the
+    lexical normalization does not; crediting it would judge such a value by
+    the operator's tier. A relative value against an absolute one differs,
+    since the document's directory is not known here.
+    """
     if not isinstance(leaf, str):
         return False
     if leaf.startswith("file://"):
         leaf = leaf[len("file://") :].partition("::")[0]
-    return leaf == str(value)
+    written = str(value)
+    return leaf == written or os.path.normpath(leaf) == written
 
 
 @dataclass
@@ -199,9 +250,17 @@ class OperatorPaths:
             return True
         for override_key, parsed in self.overrides:
             prefix = _key_segments(override_key)
-            if [name for name, _ in segments[: len(prefix)]] != [
-                name for name, _ in prefix
-            ]:
+            # Segment by segment under the same matching the document walk
+            # uses: a section segment under a plugin segment folds, so an
+            # override typed under a respelled section is credited too.
+            if len(prefix) > len(segments) or any(
+                not _section_key_matches(
+                    prefix[index][0],
+                    segments[index][0],
+                    segments[index - 1][0] if index else None,
+                )
+                for index in range(len(prefix))
+            ):
                 continue
             rest = segments[len(prefix) :]
             # An override that sets a list (`plugins_used=[...]`) is the list itself.
@@ -210,10 +269,11 @@ class OperatorPaths:
                 if prefix and segments[len(prefix) - 1][1] and isinstance(parsed, list)
                 else [parsed]
             )
+            under = segments[len(prefix) - 1][0] if prefix else None
             if any(
                 _same_path(leaf, value)
                 for item in items
-                for leaf in _leaves(item, rest)
+                for leaf in _leaves(item, rest, under)
             ):
                 return True
         return False
@@ -230,7 +290,14 @@ def parse_overrides(config_overrides: Optional[List[str]]) -> List[Tuple[str, An
         key, separator, raw = override.partition("=")
         if not separator:
             continue
-        parsed.append((key.removesuffix("+"), _parse_config_value(raw)))
+        value = _parse_config_value(raw)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            # Digit text (``2024``, ``007``) parses as a number, and a string
+            # option keeps the text the operator wrote
+            # (``resolve_config._validated_with_overrides``), so a path named
+            # that way is compared as written.
+            value = raw
+        parsed.append((key.removesuffix("+"), value))
     return parsed
 
 
@@ -342,7 +409,8 @@ def scanned_tree_judgment(
     judged = confined_files([Path(path)], trees, named=[Path(path)])
     if judged.members:
         return WalkJudgment(verdict=True, decided=not judged.undecided)
-    return WalkJudgment(verdict=config_is_client_supplied(path), decided=True)
+    delivered = config_is_client_supplied(path)
+    return WalkJudgment(verdict=delivered, decided=True, client_delivered=delivered)
 
 
 def scanned_tree_reason(
@@ -373,12 +441,19 @@ def _checkouts_holding(scan_root: Path) -> List[Path]:
     All of them rather than the nearest: a scanned submodule's superproject chose
     the submodule's commit, so its files are the scanned repository's too.
     """
-    from automated_security_helper.config.sandbox_grants import scan_root_names
+    from automated_security_helper.config.sandbox_grants import (
+        _git_shaped,
+        scan_root_names,
+    )
 
+    # The one checkout definition (sandbox_grants._git_shaped): an empty .git
+    # directory, or one a stranger left in a shared parent, marks no checkout
+    # here either, so this judgment and the sandbox grants' agree on where the
+    # repository ends.
     checkouts: List[Path] = []
     for name in scan_root_names(scan_root):
         for candidate in (name, *name.parents):
-            if os.path.lexists(candidate / ".git") and candidate not in checkouts:
+            if _git_shaped(candidate / ".git") and candidate not in checkouts:
                 checkouts.append(candidate)
     return checkouts
 
@@ -400,7 +475,9 @@ def scanned_checkout_reason(
     code.
     """
     from automated_security_helper.config.sandbox_grants import (
+        UNFINISHED_WALK_REASON,
         _named_within,
+        _walk_links,
         is_within,
         scan_root_names,
     )
@@ -417,22 +494,60 @@ def scanned_checkout_reason(
                 f"it is inside the git checkout at {checkout.as_posix()}, which "
                 f"holds the scanned directory"
             )
+    # A baseline reached through a link that sits in the scanned tree, or in a
+    # checkout holding it, was chosen by whoever placed the link: the
+    # repository's, as the other reason tiers read it (``in_tree_reason``). A
+    # walk that never finished is refused the same way, since the links beyond
+    # the stop were never seen.
+    links, decided = _walk_links(path)
+    for link in links:
+        for tree in (*names, *checkouts):
+            if is_within(link.parent, tree):
+                return (
+                    f"it is reached through {link.as_posix()}, a link inside the "
+                    f"scanned repository at {tree.as_posix()}"
+                )
+    if not decided:
+        return UNFINISHED_WALK_REASON
     return _client_delivered_reason(path)
 
 
-#: Fallback working directories already made, by filesystem root, so a process
-#: makes at most one per root (see cwd_outside_scanned_tree).
+#: Fallback working directories already made, so a process makes at most one
+#: for each filesystem root and scanned tree, and one for each results
+#: directory under a sandbox (see cwd_outside_scanned_tree).
 _FALLBACK_CWDS: Dict[str, Path] = {}
+#: Held over each look-up, making and recording of a fallback working
+#: directory: two scanners that both found none would each make one, and the
+#: later record would leave the earlier directory out of the removal at exit.
+_FALLBACK_CWDS_LOCK = threading.Lock()
 
 
 def _remove_fallback_cwds() -> None:
     """Remove the fallback working directories at exit; rmdir leaves any that hold anything."""
-    for directory in _FALLBACK_CWDS.values():
+    for directory in list(_FALLBACK_CWDS.values()):
         try:
             os.rmdir(directory)
         except OSError:
             pass
     _FALLBACK_CWDS.clear()
+
+
+def _record_fallback_cwd(key: str, made: Path) -> None:
+    """Keep ``made`` as the fallback working directory for ``key``, removed at exit.
+
+    The caller holds ``_FALLBACK_CWDS_LOCK``."""
+    if not _FALLBACK_CWDS:
+        import atexit
+
+        atexit.register(_remove_fallback_cwds)
+    _FALLBACK_CWDS[key] = made
+
+
+def _fallback_key(anchor: Path, root: Union[str, Path]) -> str:
+    """The cache key of the fallback directory for the filesystem root ``anchor``
+    and the scanned tree ``root``: a directory made for one scanned tree is not
+    handed to a scan of another, whose tree it may sit in."""
+    return f"{anchor.as_posix()}|{Path(os.path.abspath(root)).as_posix()}"
 
 
 def _new_directory(parent: Optional[Path]) -> Optional[Path]:
@@ -470,9 +585,10 @@ def cwd_outside_scanned_tree(
        can then lose directories the file shares with the results directory, so
        this is used only when 1 and 2 are not possible, and under a sandbox.
 
-    Each is new and empty, so it holds no config file. One is made per root and
-    process and reused, and removed at exit if it is still empty; nothing is
-    cleared.
+    Each is new and empty, so it holds no config file. One is made per
+    filesystem root, scanned tree and process (per results directory for the
+    third) and reused while it stays empty, and removed at exit if it is still
+    empty; nothing is cleared.
     """
     root = getattr(config, "_scanned_root", None) or source_dir
     anchor = Path(Path(os.path.abspath(target)).anchor)
@@ -480,33 +596,40 @@ def cwd_outside_scanned_tree(
         return anchor
     from automated_security_helper.utils.sandbox.scope import active_scope
 
-    if active_scope() is None:
-        cached = _FALLBACK_CWDS.get(anchor.as_posix())
-        if (
-            cached is not None
-            and cached.is_dir()
-            and not any(cached.iterdir())
-            and (cached.parent == anchor or not in_scanned_tree(cached, root))
+    with _FALLBACK_CWDS_LOCK:
+        if active_scope() is None:
+            key = _fallback_key(anchor, root)
+            cached = _FALLBACK_CWDS.get(key)
+            if (
+                cached is not None
+                and cached.is_dir()
+                and not any(cached.iterdir())
+                and (cached.parent == anchor or not in_scanned_tree(cached, root))
+            ):
+                return cached
+            for parent in (None, anchor):
+                made = _new_directory(parent)
+                if made is None:
+                    continue
+                if parent is None and in_scanned_tree(made, root):
+                    made.rmdir()
+                    continue
+                _record_fallback_cwd(key, made)
+                return made
+        directory = Path(os.path.abspath(results_dir))
+        directory.mkdir(parents=True, exist_ok=True)
+        key = f"results|{directory.as_posix()}"
+        made = _FALLBACK_CWDS.get(key)
+        if not (
+            made is not None
+            and made.parent == directory
+            and made.is_dir()
+            and not any(made.iterdir())
         ):
-            return cached
-        for parent in (None, anchor):
-            made = _new_directory(parent)
+            made = _new_directory(directory)
             if made is None:
-                continue
-            if parent is None and in_scanned_tree(made, root):
-                made.rmdir()
-                continue
-            if not _FALLBACK_CWDS:
-                import atexit
-
-                atexit.register(_remove_fallback_cwds)
-            _FALLBACK_CWDS[anchor.as_posix()] = made
-            return made
-    directory = Path(os.path.abspath(results_dir))
-    directory.mkdir(parents=True, exist_ok=True)
-    made = _new_directory(directory)
-    if made is None:
-        raise OSError(f"cannot create a working directory under {directory}")
+                raise OSError(f"cannot create a working directory under {directory}")
+            _record_fallback_cwd(key, made)
     ASH_LOGGER.warning(
         f"The filesystem root of {Path(target).as_posix()} is inside the scanned "
         f"tree, so the tool runs from {made.as_posix()}; paths in its findings "
@@ -560,18 +683,26 @@ def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path
 
     ``honored_path`` checks this path and returns it, so a caller that hands the
     tool the returned value hands it exactly the file that was checked.
+
+    A value holding a NUL names no file, and ``os.path.realpath`` refuses it.
+    The path comes back normalized and unresolved, which does not exist, so a
+    caller's existence check reads the value as missing instead of raising.
     """
     path = Path(os.path.expanduser(str(value)))
     if not path.is_absolute():
         path = Path(source_dir) / path
-    return Path(os.path.realpath(path))
+    try:
+        return Path(os.path.realpath(path))
+    except ValueError:
+        return Path(os.path.normpath(path))
 
 
 def _first_warning(key: str, path: Path) -> bool:
-    """Whether the refusal of ``path`` for ``key`` is not yet logged; records it."""
+    """Whether the refusal of ``path`` for ``key`` is not yet logged in this run; records it."""
+    entry = (current_run_log_scope(), key, path.as_posix())
     with _WARNED_LOCK:
-        first = (key, path.as_posix()) not in _WARNED
-        _WARNED.add((key, path.as_posix()))
+        first = entry not in _WARNED
+        _WARNED.add(entry)
     return first
 
 
@@ -737,6 +868,54 @@ def _shown(message: str, config: Any) -> str:
     return text_without_values(message, config_environment_values(config))
 
 
+def _shown_escaped(text: str, config: Any) -> str:
+    """*text* with the environment values of *config* hidden, then its control
+    characters escaped, in that order: an escaped control character no longer
+    matches the environment value that held it, so escaping first would print
+    the value in its escaped spelling."""
+    return escape_controls(_shown(text, config))
+
+
+def _warn_of_an_unreadable_value(
+    key: str, source_dir: Union[str, Path], config: Any
+) -> None:
+    """Log, once per run, that the value of *key* holds a NUL and names no file.
+
+    The value is never printed: a repository's baseline can write it, and an
+    environment variable can hold it."""
+    if _first_warning(key, Path(os.fspath(source_dir)) / "<unreadable value>"):
+        ASH_LOGGER.warning(
+            _shown(
+                f"Ignoring {key}: the value holds a character no file name "
+                "can hold, so it names no file and is not passed to the tool.",
+                config,
+            )
+        )
+
+
+#: The characters that separate the components of a path on this platform.
+_PATH_SEPARATORS = re.compile("[" + re.escape(os.sep + (os.altsep or "")) + "]+")
+
+
+def _path_parts(text: str) -> Tuple[str, ...]:
+    """The components of *text* read as a path: normalized (``.`` and ``..``
+    applied), with the root and any leading ``..`` left out."""
+    return tuple(
+        part
+        for part in _PATH_SEPARATORS.split(os.path.normpath(text))
+        if part not in ("", ".", "..")
+    )
+
+
+def _same_tail(left: str, right: str) -> bool:
+    """Whether the components of the shorter of two paths are the last
+    components of the other. Whole components only: ``rules`` is the tail of
+    ``/etc/rules`` and is not part of ``/etc/rules.yaml``."""
+    first, second = _path_parts(left), _path_parts(right)
+    size = min(len(first), len(second))
+    return size > 0 and first[-size:] == second[-size:]
+
+
 def _named(
     value: Union[str, Path], path: Path, config: Any, env_named: bool = False
 ) -> str:
@@ -768,9 +947,13 @@ def _named(
             # Either side can carry a scheme or directory prefix around the
             # other: the config can anchor the environment's value under a
             # prefix, and a caller can strip a scheme (``file://``) before
-            # judging the path, so a suffix match in either direction is a
-            # correspondence.
-            if recorded in written or recorded.endswith(written):
+            # judging the path, so a tail match in either direction is a
+            # correspondence. Compared as normalized paths, whole components
+            # only: loading anchors and normalizes the value (``./`` and ``..``
+            # applied), which a text comparison misses, and a value that is
+            # only a piece of a name (``rules`` in ``rules.yaml``) is not the
+            # value.
+            if _same_tail(recorded, written):
                 return ENVIRONMENT_VALUE_SHOWN
     return path.as_posix()
 
@@ -825,10 +1008,15 @@ def refused_derived_product(
 
     Args as for :func:`honored_path`. True means refused; the caller passes
     nothing built from *value* to the tool. False for a blank value: the
-    caller's own handling of a missing option stands.
+    caller's own handling of a missing option stands. A value holding a NUL
+    names no file and is refused too, whoever wrote it, with a warning that
+    does not print it.
     """
     if value is None or str(value).strip() == "":
         return False
+    if "\x00" in str(value):
+        _warn_of_an_unreadable_value(key, source_dir, config)
+        return True
     if operator_written:
         return False
     path = resolved_path(value, source_dir)
@@ -850,13 +1038,13 @@ def refused_derived_product(
         ):
             continue
         if _inside(path, resolved_base):
-            with _WARNED_LOCK:
-                first = (key, path.as_posix()) not in _WARNED
-                _WARNED.add((key, path.as_posix()))
-            if first:
+            if _first_warning(key, path):
+                shown_path = _shown_escaped(
+                    _named(value, path, config, env_named), config
+                )
                 ASH_LOGGER.warning(
                     _shown(
-                        f"Ignoring {key} ({_named(value, path, config, env_named)}): it is under "
+                        f"Ignoring {key} ({shown_path}): it is under "
                         "the scan's own output or work directory, which "
                         "holds files derived from the scanned repository, "
                         "and the entry is not the operator's own. Such a "
@@ -917,6 +1105,11 @@ def honored_path(
     """
     if value is None or str(value).strip() == "":
         return None
+    if "\x00" in str(value):
+        # A value holding a NUL names no file; it is dropped like a refused path
+        # instead of raising out of the scanner's construction.
+        _warn_of_an_unreadable_value(key, source_dir, config)
+        return None
     path = resolved_path(value, source_dir)
     root = getattr(config, "_scanned_root", None) or source_dir
     # Checked as named, not as resolved: scanned_tree_reason checks both, so a link
@@ -941,10 +1134,7 @@ def honored_path(
         ):
             return None
         return path
-    with _WARNED_LOCK:
-        first = (key, path.as_posix()) not in _WARNED
-        _WARNED.add((key, path.as_posix()))
-    if first:
+    if _first_warning(key, path):
         # Imported here: sandbox_grants imports ash_config, which imports the
         # scanners that import this module.
         from automated_security_helper.config.sandbox_grants import (
@@ -975,12 +1165,15 @@ def honored_path(
         # characters escaped: a newline in an environment variable's value would
         # otherwise start a line of its own in the log. A value an environment
         # variable chose is never printed: the path shows as the shown form
-        # (_named), and the whole message is shown with the configuration's
-        # environment values hidden (_shown).
+        # (_named), and each piece has the configuration's environment values
+        # hidden before it is escaped (_shown_escaped), since an escaped value
+        # no longer matches the value it was made from. The whole message is
+        # shown once more for the key.
+        shown_path = _shown_escaped(_named(value, named, config, env_named), config)
         ASH_LOGGER.warning(
             _shown(
-                f"Ignoring {key} ({escape_controls(_named(value, named, config, env_named))}): "
-                f"{escape_controls(reason)}. {advice}",
+                f"Ignoring {key} ({shown_path}): "
+                f"{_shown_escaped(reason, config)}. {advice}",
                 config,
             )
         )
