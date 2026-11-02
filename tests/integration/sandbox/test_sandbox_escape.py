@@ -17,6 +17,11 @@ doing, not a broken probe.
 A backend that is not available on the machine is skipped, unless it is named in
 ASH_REQUIRE_SANDBOX_BACKENDS (comma separated), which CI sets so a runner that lost
 bubblewrap fails instead of skipping.
+
+Every backend is Linux or macOS, so on Windows the tests that need one skip, and the
+sandbox-off tests and the unavailable-backend refusal still run. Windows CPython has
+no ``socket.AF_UNIX``, so the Unix-socket listeners, and the probe's attempts at
+them, are left out there.
 """
 
 from __future__ import annotations
@@ -44,6 +49,10 @@ pytestmark = pytest.mark.integration
 FIXTURE = Path(__file__).resolve().parents[2] / "test_data" / "sandbox_escape"
 CANARY = "ash-sandbox-canary-7b9e2f"
 BACKENDS = ["bwrap", "firejail", "landlock", "sandbox-exec"]
+#: Windows CPython has no socket.AF_UNIX. The Unix listeners, and the probe's attempts
+#: at them, exist only where the family does. Every backend runs on Linux or macOS,
+#: which have it, so no sandbox is scored on a platform without it.
+HAS_AF_UNIX = hasattr(socket, "AF_UNIX")
 
 
 def _required() -> set:
@@ -75,6 +84,10 @@ class _Listeners:
     bwrap does mount (the Nix daemon's, under /nix) stayed reachable. On Linux
     there is also an abstract stream socket, which has no path at all, and a
     datagram socket, which a datagram socketpair can reach without socket().
+
+    Windows CPython has no ``socket.AF_UNIX``: there none of the Unix listeners is
+    built (``HAS_AF_UNIX``), their paths stay unset, and the probe is given nothing
+    to try.
     """
 
     def __init__(self, directory: Path) -> None:
@@ -85,22 +98,26 @@ class _Listeners:
         self.tcp.listen(8)
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.bind(("127.0.0.1", 0))
-        self.unix_path = directory / "ipc.sock"
-        self.unix = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.unix.bind(str(self.unix_path))
-        self.unix.listen(8)
         #: (listener, data) for everything any listener received.
         self.received: list = []
         self._stop = False
-        self._sockets = [self.tcp, self.udp, self.unix]
+        self._sockets = [self.tcp, self.udp]
         servers = [
             lambda: self._serve_stream("tcp", self.tcp),
             lambda: self._serve_datagram("udp", self.udp, reply=True),
-            lambda: self._serve_stream("unix", self.unix),
         ]
-        self.kinds = {"tcp", "udp", "unix"}
+        self.kinds = {"tcp", "udp"}
+        self.unix_path: Path | None = None
         self.abstract_name = ""
         self.datagram_path: Path | None = None
+        if HAS_AF_UNIX:
+            self.unix_path = directory / "ipc.sock"
+            unix = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            unix.bind(str(self.unix_path))
+            unix.listen(8)
+            self._sockets.append(unix)
+            servers.append(lambda: self._serve_stream("unix", unix))
+            self.kinds.add("unix")
         if sys.platform.startswith("linux"):
             self.abstract_name = f"ash-sbx-{uuid.uuid4().hex[:12]}"
             abstract = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -284,7 +301,7 @@ def _scan(
         "tcp_port": listeners.tcp.getsockname()[1],
         "udp_port": listeners.udp.getsockname()[1],
         "host_ip": host_ip or "127.0.0.1",
-        "unix_socket": str(listeners.unix_path),
+        "unix_socket": str(listeners.unix_path or ""),
         "unix_abstract": listeners.abstract_name,
         "unix_datagram_socket": str(listeners.datagram_path or ""),
         "ipc_env": _ipc_environment(listeners),
@@ -542,6 +559,10 @@ def test_every_attempt_is_blocked_by_the_sandbox(
     assert not listeners.received, f"{backend} let data reach a listener"
 
 
+@pytest.mark.skipif(
+    not HAS_AF_UNIX,
+    reason="no socket.AF_UNIX (Windows), so no Unix-socket IPC endpoint to reach",
+)
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_no_local_ipc_endpoint_is_reachable_with_a_network(
     tmp_path, tmp_path_factory, listeners, backend
