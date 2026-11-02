@@ -7,6 +7,7 @@ import os
 import re
 import stat
 import threading
+from collections import Counter
 from pathlib import Path
 from types import UnionType
 from typing import (
@@ -577,8 +578,16 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     # The rebuild's unknown-entry-key warnings, minus the ones the load already
     # recorded (a file entry re-warns identically here): what is left is an
     # override's own bad entry, which must surface rather than be kept quietly.
+    # Subtracted by COUNT, not set membership: the warning text carries no
+    # entry location, so an override-added entry with the same typo as a file
+    # entry re-produces the file's exact text, and a membership test dropped
+    # it, leaving the new entry inert with no sign (the case this warn mode
+    # exists to surface). Each load warning covers ONE rebuild warning.
+    already = Counter(rebuilt._resolution_warnings)
     for warning in rebuild_warnings:
-        if warning not in rebuilt._resolution_warnings:
+        if already[warning] > 0:
+            already[warning] -= 1
+        else:
             rebuilt._resolution_warnings.append(warning)
     # Each string an override's value holds joins the values a line that prints
     # a section of this config hides (AshConfig._override_values). The value is

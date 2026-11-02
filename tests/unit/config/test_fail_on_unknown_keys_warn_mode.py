@@ -163,6 +163,35 @@ class TestOverrideAddedEntries:
         added = config.global_settings.suppressions[1]
         assert added.has_unknown_keys
 
+    def test_an_override_entry_with_the_files_typo_still_warns(self):
+        """The warning text carries no entry location, so an override-added
+        entry with the SAME typo as a file entry re-produces the file's exact
+        text; the carry subtracts by count, so both entries' warnings surface
+        (a membership dedup dropped the override's, the silent inert entry
+        this warn mode exists to surface)."""
+        config = build_config(
+            _config_data(
+                {
+                    "rule_id": "X",
+                    "path": "a.py",
+                    "reason": "r",
+                    "expiraton": "2099-01-01",
+                }
+            ),
+            config_overrides=[
+                (
+                    "global_settings.suppressions+="
+                    '[{"rule_id":"X","path":"a.py","reason":"r",'
+                    '"expiraton":"2099-01-01"}]'
+                )
+            ],
+        )
+        warnings = [
+            w for w in config._resolution_warnings if "Unknown key 'expiraton'" in w
+        ]
+        assert len(warnings) == 2, config._resolution_warnings
+        assert all(s.has_unknown_keys for s in config.global_settings.suppressions)
+
     def test_a_file_entrys_warning_is_not_duplicated_by_the_rebuild(self):
         config = build_config(
             _config_data(
