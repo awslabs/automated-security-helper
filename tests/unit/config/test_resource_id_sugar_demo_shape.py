@@ -135,7 +135,9 @@ class TestSugarFolds:
     def test_an_empty_sugar_value_without_a_scope_is_still_refused(self):
         # The control: this config-load refusal predates the fix.
         with pytest.raises(ValidationError) as excinfo:
-            AshSuppression.model_validate({"path": "a", "reason": "r", "resource_id": ""})
+            AshSuppression.model_validate(
+                {"path": "a", "reason": "r", "resource_id": ""}
+            )
         assert "selects nothing" in str(excinfo.value)
 
     def test_a_stored_empty_sugar_value_without_a_scope_still_loads(self):
