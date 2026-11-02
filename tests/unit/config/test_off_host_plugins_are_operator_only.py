@@ -47,7 +47,6 @@ from automated_security_helper.config.ash_config import (
     ALWAYS_DENIED_PATHS,
     RuntimeOverridesConfig,
 )
-from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.config.runtime_patch import (
     RuntimePatchDeniedError,
     check_runtime_ops,
@@ -693,6 +692,24 @@ def _scan_with_client_enabled(
     return result, project / ".ash" / "ash_output"
 
 
+#: How the warning for a client's ignored ``enabled: false`` begins, by the way the
+#: change reached the server. Each route drops the change before anything is
+#: written, so the copy of the profile a scan reads holds no ``enabled: false`` and
+#: ``reporter_trust`` has nothing to confine; the warning it gives, which names a
+#: file, is for a config file that sets one. ``select_profile`` drops a
+#: ``patch_ops`` or ``override_yaml`` change (``runtime_patch._without_turn_offs``),
+#: and a workspace scan leaves it out of its ``config_overrides``
+#: (``workspace._gate_client_overrides``).
+_TURN_OFF_IGNORED = {
+    "patch_ops": "Ignoring '/reporters/{reporter}/enabled' from the MCP client: ",
+    "override_yaml": "Ignoring '/reporters/{reporter}/enabled' from the MCP client: ",
+    "config_overrides": (
+        "Ignoring the config override 'reporters.{reporter}.enabled' from the MCP "
+        "client: "
+    ),
+}
+
+
 @pytest.mark.parametrize("change", _CHANGES_OVER_A_SECTION)
 @pytest.mark.parametrize("reporter", OFF_HOST_REPORTERS)
 @pytest.mark.usefixtures("mcp_server")
@@ -702,7 +719,7 @@ def test_a_client_s_enabled_false_leaves_the_operator_s_reporter_running(
 ):
     """The operator's profile enables the reporter. The client's ``false`` is
     accepted, the reporter still runs with the operator's settings, and a warning
-    says the client's value was ignored."""
+    says the client's value was ignored (``_TURN_OFF_IGNORED``)."""
     profile = _register_profile(tmp_path, reporter, "enabled")
 
     result, _ = _scan_with_client_enabled(tmp_path, change, reporter, False, profile)
@@ -722,13 +739,11 @@ def test_a_client_s_enabled_false_leaves_the_operator_s_reporter_running(
     ignored = [
         message
         for message in ash_warnings
-        if message.startswith(f"Ignoring reporters.{reporter}.enabled from ")
+        if message.startswith(_TURN_OFF_IGNORED[change].format(reporter=reporter))
     ]
     assert ignored, ash_warnings
     for message in ignored:
-        assert message.endswith(KEEP_A_SETTING), message
-        if change == "config_overrides":
-            assert "config_overrides" in message, message
+        assert message.endswith("the operator's setting."), message
 
 
 @pytest.mark.parametrize("change", _CHANGES)
