@@ -147,6 +147,33 @@ class TestOptInRefusal:
             )
 
 
+class TestOverrideAddedEntries:
+    def test_an_override_added_bad_entry_warns(self):
+        config = build_config(
+            _config_data({"path": "clean.py", "reason": "r"}),
+            config_overrides=[
+                "global_settings.suppressions+="
+                '[{"rule_id":"X","path":"a.py","reason":"r","expiraton":"2099-01-01"}]'
+            ],
+        )
+        warnings = [
+            w for w in config._resolution_warnings if "Unknown key 'expiraton'" in w
+        ]
+        assert len(warnings) == 1
+        added = config.global_settings.suppressions[1]
+        assert added.has_unknown_keys
+
+    def test_a_file_entrys_warning_is_not_duplicated_by_the_rebuild(self):
+        config = build_config(
+            _config_data(
+                {"path": "a.py", "reason": "r", "expiraton": "2099-01-01"}
+            ),
+            config_overrides=["fail_on_findings=false"],
+        )
+        warnings = [w for w in config._resolution_warnings if "expiraton" in w]
+        assert len(warnings) == 1
+
+
 class TestOtherModesUntouched:
     def test_stored_results_tolerance_still_records_notes(self):
         notes: list = []

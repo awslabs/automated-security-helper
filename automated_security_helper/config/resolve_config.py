@@ -545,10 +545,14 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     # Convert back to AshConfig. An entry warn mode kept at load (an unknown
     # suppression key under fail_on_unknown_keys: false) still carries its key
-    # as an extra, which this rebuild would otherwise refuse; the warning was
-    # recorded at load, so the list here is discarded.
+    # as an extra, which this rebuild would otherwise refuse. The rebuild's own
+    # warnings are KEPT: an override can add a new bad entry (used to be
+    # refused outright), and discarding the list here would keep it silently.
+    # Entries that came from the file re-warn identically, so the carry below
+    # deduplicates against what the load already recorded.
+    rebuild_warnings: List[str] = []
     rebuild_context = (
-        {WARN_UNKNOWN_KEYS: []}
+        {WARN_UNKNOWN_KEYS: rebuild_warnings}
         if config_dict.get("fail_on_unknown_keys") is not True
         else None
     )
@@ -570,6 +574,12 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     # attributes). Without them a run whose overrides were applied here, as to
     # the ASH_CONFIG configuration, printed and recorded those values.
     rebuilt.__pydantic_private__ = copy.deepcopy(config.__pydantic_private__)
+    # The rebuild's unknown-entry-key warnings, minus the ones the load already
+    # recorded (a file entry re-warns identically here): what is left is an
+    # override's own bad entry, which must surface rather than be kept quietly.
+    for warning in rebuild_warnings:
+        if warning not in rebuilt._resolution_warnings:
+            rebuilt._resolution_warnings.append(warning)
     # Each string an override's value holds joins the values a line that prints
     # a section of this config hides (AshConfig._override_values). The value is
     # the operator's, not the environment's, but it can be a credential, and
