@@ -227,15 +227,13 @@ command -v jq && echo "✓ jq available (recommended)" || echo "✗ jq not found
 - Provide progress indicators for large file operations
 
 **Example - Check before loading**:
-<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```python
-import time
+import json
+import os
 
-# LOW is stricter than the default MEDIUM, so LOW findings count as actionable too.
-# Leave severity_threshold out to use the config's threshold.
-scan = run_ash_scan(source_dir="/path/to/project", severity_threshold="LOW")
-if scan.get("success") is False:
-    raise RuntimeError(scan["error"])
+results_file = "ash_aggregated_results.json"
+file_size_mb = os.path.getsize(results_file) / (1024 * 1024)
 
 if file_size_mb > 5:
     print(f"Large file detected ({file_size_mb:.1f}MB). Using streaming parser...")
@@ -1447,45 +1445,41 @@ def scan_or_cancel(source_dir):
     deadline = time.monotonic() + 20 * 60
     canceled = False
     while True:
-        progress = get_scan_progress(scan_id=scan_id)
+        progress = get_scan_progress(scan_id=scan["scan_id"])
+        if progress.get("success") is False:
+            return {"error": progress["error"]}
 
-        # Show status updates
-        current_status = progress.get("message", "Running...")
-        if current_status != last_status:
-            print(f"Status: {current_status}")
-            last_status = current_status
-
-        # Check completion: is_complete is true for every ending
-        if progress.get("is_complete"):
+        # is_complete is true for every ending: completed, incomplete, failed and
+        # cancelled
+        if progress["is_complete"]:
             break
+
+        # Past the deadline, stop the scan once. The next poll sees it end.
+        if not canceled and time.monotonic() > deadline:
+            cancel_scan(scan_id=scan["scan_id"])
+            canceled = True
 
         # Wait before next poll (keeps connection alive)
         time.sleep(5)
 
     # A failed or cancelled scan has no results of its own; the files in its
     # output directory are the previous scan's.
-    if not progress.get("results_available"):
-        reason = progress.get("error_message") or "no results"
-        return {"error": f"Scan {progress['status']}: {reason}"}
+    if not progress["results_available"]:
+        return {"status": progress["status"], "error": progress.get("error_message")}
 
-    # Get filtered results
-    output_dir = progress.get("output_directory", f"{source_dir}/.ash/ash_output")
-    results = get_scan_results(
-        output_dir=output_dir,
-        filter_level="summary",
-        actionable_only=True,
-        severities="critical,high,medium",
+    return get_scan_results(
+        output_dir=progress["output_directory"], filter_level="summary"
     )
 ```
 
-### Pattern 1: fail a build on critical or high findings
+### Filtering Results
 
-Run from the scanned directory after the scan has ended with results:
+Use the `filter_level` parameter to control how much a response holds:
 
 <!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
-import sys
-from pathlib import Path
+# Minimal - fast status check (1-2KB)
+status = await get_scan_results(output_dir=".ash/ash_output", filter_level="minimal")
 
 # Summary - dashboard data (5-15KB)
 summary = await get_scan_results(output_dir=".ash/ash_output", filter_level="summary")
@@ -1523,6 +1517,22 @@ high_priority_sast = await get_scan_results(
     scanners="bandit,semgrep",
     severities="critical,high",
     actionable_only=True,
+)
+```
+
+### Pattern 1: fail a build on critical or high findings
+
+Run from the scanned directory after the scan has ended with results:
+
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
+```python
+import sys
+from pathlib import Path
+
+results = get_scan_results(
+    output_dir=str(Path(".ash/ash_output").resolve()),
+    actionable_only=True,
+    severities="critical,high",
 )
 if results.get("success") is False:
     print(results["error"])
