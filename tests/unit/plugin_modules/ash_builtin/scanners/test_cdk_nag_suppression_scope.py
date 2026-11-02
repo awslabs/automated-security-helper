@@ -27,18 +27,18 @@ CONSTRUCT_PATH = "Stack/CollectorTaskRole/DefaultPolicy/Resource"
 
 
 def _finding(rule_id="AwsSolutions-IAM5[Action::logs:*]", scanner="cdk-nag", **kw):
-    values = dict(
-        id="f1",
-        title="t",
-        description="d",
-        severity="MEDIUM",
-        scanner=scanner,
-        scanner_type="IAC",
-        rule_id=rule_id,
-        file_path="cdk.out/stack.template.json",
-        resource_id=CONSTRUCT_PATH,
-        resource_type="AWS::IAM::Policy",
-    )
+    values = {
+        "id": "f1",
+        "title": "t",
+        "description": "d",
+        "severity": "MEDIUM",
+        "scanner": scanner,
+        "scanner_type": "IAC",
+        "rule_id": rule_id,
+        "file_path": "cdk.out/stack.template.json",
+        "resource_id": CONSTRUCT_PATH,
+        "resource_type": "AWS::IAM::Policy",
+    }
     values.update(kw)
     return FlatVulnerability(**values)
 
@@ -61,9 +61,10 @@ class TestRegistration:
 
 class TestQualifierSplit:
     def test_splits_the_bracketed_tail(self):
-        assert CdkNagScanner.split_rule_qualifier(
-            "AwsSolutions-IAM5[Resource::*]"
-        ) == ("AwsSolutions-IAM5", "Resource::*")
+        assert CdkNagScanner.split_rule_qualifier("AwsSolutions-IAM5[Resource::*]") == (
+            "AwsSolutions-IAM5",
+            "Resource::*",
+        )
 
     def test_no_brackets_no_qualifier(self):
         assert CdkNagScanner.split_rule_qualifier("AwsSolutions-IAM5") == (

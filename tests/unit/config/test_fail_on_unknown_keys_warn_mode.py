@@ -92,9 +92,7 @@ class TestWarnModeDefault:
 
     def test_control_entry_without_the_typo_applies(self):
         config = build_config(
-            _config_data(
-                {"rule_id": "RULE-1", "path": "src/app.py", "reason": "test"}
-            )
+            _config_data({"rule_id": "RULE-1", "path": "src/app.py", "reason": "test"})
         )
         entry = config.global_settings.suppressions[0]
         suppressed, matched = should_suppress_finding(_finding(), [entry])
@@ -152,8 +150,10 @@ class TestOverrideAddedEntries:
         config = build_config(
             _config_data({"path": "clean.py", "reason": "r"}),
             config_overrides=[
-                "global_settings.suppressions+="
-                '[{"rule_id":"X","path":"a.py","reason":"r","expiraton":"2099-01-01"}]'
+                (
+                    "global_settings.suppressions+="
+                    '[{"rule_id":"X","path":"a.py","reason":"r","expiraton":"2099-01-01"}]'
+                )
             ],
         )
         warnings = [

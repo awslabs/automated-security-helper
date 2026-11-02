@@ -49,23 +49,28 @@ def fake_engine(monkeypatch):
 
 
 def _finding(**overrides):
-    values = dict(
-        id="f1",
-        title="t",
-        description="d",
-        severity="HIGH",
-        scanner="fake-engine",
-        scanner_type="IAC",
-        rule_id="RULE-1",
-        file_path="a.py",
-    )
+    values = {
+        "id": "f1",
+        "title": "t",
+        "description": "d",
+        "severity": "HIGH",
+        "scanner": "fake-engine",
+        "scanner_type": "IAC",
+        "rule_id": "RULE-1",
+        "file_path": "a.py",
+    }
     values.update(overrides)
     return FlatVulnerability(**values)
 
 
 def _entry(engines, rule_id="RULE-1"):
     return AshSuppression.model_validate(
-        {"rule_id": rule_id, "path": "a.py", "reason": "r", "scope": {"engines": engines}}
+        {
+            "rule_id": rule_id,
+            "path": "a.py",
+            "reason": "r",
+            "scope": {"engines": engines},
+        }
     )
 
 
@@ -76,7 +81,10 @@ class TestDefaults:
         assert "engine-scoped suppressions" in problems[0]
 
     def test_default_match_never_matches(self):
-        assert ScannerPluginBase.suppression_scope_matches({"any": 1}, _finding()) is False
+        assert (
+            ScannerPluginBase.suppression_scope_matches({"any": 1}, _finding())
+            is False
+        )
 
     def test_default_split_is_no_split(self):
         assert ScannerPluginBase.split_rule_qualifier("R[1]") == ("R[1]", None)

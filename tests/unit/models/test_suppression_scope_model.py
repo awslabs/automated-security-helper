@@ -50,8 +50,7 @@ class TestScopeParses:
         entry = AshSuppression.model_validate(CANONICAL)
         assert entry.scope is not None
         assert (
-            entry.scope.resource_id
-            == "Stack/CollectorTaskRole/DefaultPolicy/Resource"
+            entry.scope.resource_id == "Stack/CollectorTaskRole/DefaultPolicy/Resource"
         )
         assert entry.scope.resource_type == "AWS::IAM::Policy"
         assert set(entry.scope.engines) == {"cdk-nag"}

@@ -26,18 +26,18 @@ CONSTRUCT_PATH = "Stack/CollectorTaskRole/DefaultPolicy/Resource"
 
 
 def _finding(**overrides):
-    values = dict(
-        id="f1",
-        title="t",
-        description="d",
-        severity="HIGH",
-        scanner="cdk-nag",
-        scanner_type="IAC",
-        rule_id="AwsSolutions-IAM5",
-        file_path="cdk.out/stack.template.json",
-        resource_id=CONSTRUCT_PATH,
-        resource_type="AWS::IAM::Policy",
-    )
+    values = {
+        "id": "f1",
+        "title": "t",
+        "description": "d",
+        "severity": "HIGH",
+        "scanner": "cdk-nag",
+        "scanner_type": "IAC",
+        "rule_id": "AwsSolutions-IAM5",
+        "file_path": "cdk.out/stack.template.json",
+        "resource_id": CONSTRUCT_PATH,
+        "resource_type": "AWS::IAM::Policy",
+    }
     values.update(overrides)
     return FlatVulnerability(**values)
 

@@ -786,14 +786,10 @@ class SuppressionScope(RedactedSection):
         for key in ("resource_id", "resource_type"):
             value = getattr(self, key)
             if problem is None and value is not None and not value.strip():
-                problem = EMPTY_SCOPE_RULE.format(
-                    what=f"scope.{key}", omit="the key"
-                )
+                problem = EMPTY_SCOPE_RULE.format(what=f"scope.{key}", omit="the key")
         if problem is None and self.engines is not None:
             if not self.engines:
-                problem = EMPTY_SCOPE_RULE.format(
-                    what="scope.engines", omit="engines"
-                )
+                problem = EMPTY_SCOPE_RULE.format(what="scope.engines", omit="engines")
             else:
                 for name, block in self.engines.items():
                     if not block:

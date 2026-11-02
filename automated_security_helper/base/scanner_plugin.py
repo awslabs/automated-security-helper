@@ -464,8 +464,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         name = getattr(cls, "__name__", "this scanner")
         return [
-            f"{name} does not support engine-scoped suppressions; "
-            "remove the block or upgrade the plugin."
+            (
+                f"{name} does not support engine-scoped suppressions; "
+                "remove the block or upgrade the plugin."
+            )
         ]
 
     @classmethod

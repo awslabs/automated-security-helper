@@ -25,7 +25,7 @@ once per name so an entry that silently stopped suppressing is visible.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -84,9 +84,9 @@ def warn_once_unmatched_engine(scanner_name: str) -> None:
     )
 
 
-def split_rule_qualifier_for(scanner_name: Optional[str], rule_id: str) -> Tuple[
-    str, Optional[str]
-]:
+def split_rule_qualifier_for(
+    scanner_name: Optional[str], rule_id: str
+) -> Tuple[str, Optional[str]]:
     """``(base, qualifier)`` for ``rule_id`` as the producing engine spells it.
 
     Dispatched to the scanner's ``split_rule_qualifier`` hook when one is

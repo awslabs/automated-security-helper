@@ -785,7 +785,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         except ValidationError as e:
             # The model's own messages carry the did-you-mean wording; the
             # input is never quoted (hide_input_in_errors).
-            return [error.get("msg", "invalid cdk-nag scope block") for error in e.errors()]
+            return [
+                error.get("msg", "invalid cdk-nag scope block")
+                for error in e.errors()
+            ]
         problems: List[str] = []
         if model.applies_to is None and model.resource_path is None:
             problems.append(
