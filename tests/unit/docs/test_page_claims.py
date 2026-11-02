@@ -20874,8 +20874,8 @@ def test_a_signal_on_one_target_makes_the_row_an_error(
 #: A uv that answers the runner's probes and, for a real ``tool run``, dies by the
 #: signal ASH_PAGE_CLAIMS_SIGNAL names (or exits 0 without it), the way a tool
 #: killed under ``uv tool run`` reaches ASH. ASH prefers the uv installed with it
-#: (``bundled_uv_executable``) over any PATH entry, by design, so the cell points
-#: the runner at this stand-in with ``for_probed_uv`` rather than through PATH;
+#: (``bundled_uv_executable``) over any PATH entry, by design, so the cell builds
+#: the runner for this stand-in's path rather than finding it through PATH;
 #: everything after the lookup, the uv branch, the flag carry-through and the
 #: recorders, runs real code on a real subprocess.
 _UV_STAND_IN = """\
@@ -20932,9 +20932,9 @@ def test_a_uv_tool_scanners_tool_ended_by_a_signal_is_the_same_error(
     through to the same record as a directly started tool: the row is ``ERROR``
     with 128 plus the signal's number, and the error names the signal. The uv here
     is a stand-in executable that really dies by the named signal; only the uv
-    lookup is pinned (``for_probed_uv``), because ASH prefers its own bundled uv
-    over PATH. The sandbox mode is explicitly ``off``. The control, the same uv
-    exiting 0, is not ``ERROR``.
+    lookup is pinned (the runner is built for the stand-in's path), because ASH
+    prefers its own bundled uv over PATH. The sandbox mode is explicitly ``off``.
+    The control, the same uv exiting 0, is not ``ERROR``.
     """
     assert_on_page(READ_RESULTS, _A_SIGNAL_ENDED_TOOL_IS_AN_ERROR)
     from unittest.mock import MagicMock
@@ -20959,11 +20959,14 @@ def test_a_uv_tool_scanners_tool_ended_by_a_signal_is_the_same_error(
     script = tmp_path / "uv-stand-in.py"
     script.write_text(_UV_STAND_IN, encoding="utf-8")
     stand_in = _interpreter_launcher(tmp_path, "uv-stand-in", script)
-    monkeypatch.setattr(
-        uv_tool_runner,
-        "get_uv_tool_runner",
-        lambda: UVToolRunner.for_probed_uv(str(stand_in)),
-    )
+    # The runner is built for the stand-in executable and handed to every uv gate
+    # of the scan, so none of them resolves the uv installed with ASH. A build with
+    # a probed-uv constructor takes the stand-in through it; this one builds the
+    # runner from the executable itself, which probes it on first use and keeps
+    # the answer for the stand-in it was probed from.
+    make_runner = getattr(UVToolRunner, "for_probed_uv", UVToolRunner)
+    runner = make_runner(str(stand_in))
+    monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", lambda: runner)
     if signal_name:
         monkeypatch.setenv("ASH_PAGE_CLAIMS_SIGNAL", signal_name)
     else:
