@@ -418,7 +418,7 @@ class TestSocketFilterWrapper:
     daemon's socket under /nix answered, offline and online.
     """
 
-    # firejail's plan reads os.getuid(), which Windows lacks; neither backend runs there.
+    # Neither backend runs on Windows.
     @pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
     @pytest.mark.parametrize("backend_class", [BwrapBackend, FirejailBackend])
     @pytest.mark.parametrize("network", [False, True])
@@ -809,7 +809,9 @@ class TestScope:
             scan_target=None,
             offline=True,
         )
-        true = "/usr/bin/true"
+        # A program path with a drive on Windows too: "/usr/bin/true" has none there,
+        # and the spawn helpers refuse a rooted path with no drive before they plan.
+        true = sys.executable
         with sandbox_scope(scope):
             result = subprocess_utils.run_command([true])
             streamed = subprocess_utils.run_command_stream_output([true])
@@ -1094,8 +1096,7 @@ class TestProbeScope:
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="no backend runs on Windows: firejail is Linux-only and its plan reads "
-    "os.getuid()",
+    reason="no backend runs on Windows: firejail is Linux-only",
 )
 @pytest.mark.unit
 class TestFirejailHidesBothHomes:
@@ -1967,6 +1968,10 @@ class TestAshsInterpreterThroughAHome:
         with pytest.raises(SandboxUnavailable, match="home directory"):
             _policy(layout)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a file name with a newline or a colon cannot exist on Windows",
+    )
     def test_the_refusal_names_the_path_escaped_and_the_way_out(
         self, layout, tmp_path, monkeypatch
     ):
@@ -2350,6 +2355,10 @@ class TestBackendProbesKeepHome:
     def test_the_landlock_probe_passes_home(self, tmp_path, monkeypatch):
         home = tmp_path / "operator-home"
         monkeypatch.setenv("HOME", str(home))
+        # Windows reads the home from USERPROFILE (usable_home), and the probe hands
+        # its child that variable instead of HOME.
+        monkeypatch.setenv("USERPROFILE", str(home))
+        variable = "USERPROFILE" if os.name == "nt" else "HOME"
         envs = []
 
         def run(argv, **kwargs):
@@ -2359,7 +2368,7 @@ class TestBackendProbesKeepHome:
         monkeypatch.setattr(backends_module.subprocess, "run", run)
         backends_module.LandlockBackend()._probe()
         assert envs, "the probe started nothing"
-        assert all(env is not None and env.get("HOME") == str(home) for env in envs)
+        assert all(env is not None and env.get(variable) == str(home) for env in envs)
 
 
 @pytest.mark.unit
