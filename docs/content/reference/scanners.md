@@ -331,7 +331,7 @@ Options, under `scanners.npm-audit.options`. An option not listed here refuses t
 |--------|------|---------|-------------|
 | <a id="scanners.npm-audit.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
 | <a id="scanners.npm-audit.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
-| <a id="scanners.npm-audit.options.offline"></a>`offline` | boolean | `false` | Treat this scanner as offline even if ASH is not. npm, yarn and pnpm audit by asking the registry, so offline npm-audit does not run: it is MISSING for a project with a lockfile and SKIPPED for one without. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
+| <a id="scanners.npm-audit.options.offline"></a>`offline` | boolean | `false` | Treat this scanner as offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, with a lockfile the scanner is reported MISSING, and with none it is SKIPPED. When true, this scanner is offline even if ASH is not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
 
 ## `opengrep`
 
