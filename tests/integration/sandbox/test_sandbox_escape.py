@@ -629,7 +629,8 @@ def test_an_output_directory_reached_through_a_link_in_the_tree_is_refused(
         ),
     )
     # Whitespace collapsed: the console wraps long lines at the terminal width.
-    output = " ".join((result.stdout + result.stderr).split())
+    # None-safe: on Windows result.stdout can be None here.
+    output = " ".join(((result.stdout or "") + (result.stderr or "")).split())
     assert outcomes is None, (
         f"the scanner ran with a linked output directory: {outcomes}"
     )
@@ -661,7 +662,8 @@ def test_with_the_sandbox_off_a_linked_output_directory_in_the_tree_is_refused_t
             target, target_is_directory=True
         ),
     )
-    output = " ".join((result.stdout + result.stderr).split())
+    # None-safe: on Windows result.stdout can be None here.
+    output = " ".join(((result.stdout or "") + (result.stderr or "")).split())
     assert result.returncode == 3, output[-4000:]
     assert "is a symlink" in output, output[-4000:]
     assert _snapshot(target) == before, "the scan changed the link's target"
