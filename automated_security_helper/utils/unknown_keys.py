@@ -209,8 +209,10 @@ def closest_key(key: str, known: Iterable[str]) -> Optional[str]:
 #: (substrings of the ``where`` wording): the spellings here are suppression
 #: vocabulary, and an ignore path has no ``resource_id`` and no ``scope``, so
 #: advice pointing at either must not fire there (following it would only
-#: produce another unknown-key error). A plugin may register its own keys
-#: (register_placement_hint).
+#: produce another unknown-key error). The table is STATIC by design: these
+#: warnings are produced at config load, which precedes plugin imports, so a
+#: registration API could never reach them (and a hint registered between the
+#: load and an override rebuild made one entry warn twice, with two wordings).
 _PLACEMENT_HINTS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "resource": ("did you mean 'resource_id'?", ("suppression",)),
     # cdk-nag's block keys, seeded statically rather than registered when the
@@ -221,18 +223,6 @@ _PLACEMENT_HINTS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "applies_to": ("move it under scope.engines.cdk-nag", ("suppression",)),
     "resource_path": ("move it under scope.engines.cdk-nag", ("suppression",)),
 }
-
-
-def register_placement_hint(
-    key: str, suggestion: str, kinds: Tuple[str, ...] = ("suppression",)
-) -> None:
-    """Register what to suggest for ``key`` typed where an entry refuses it.
-
-    ``kinds`` are the entry-kind words (substrings of the ``where`` wording)
-    the hint applies to; the default covers suppressions and their scopes
-    and nothing else.
-    """
-    _PLACEMENT_HINTS[key] = (suggestion, tuple(kinds))
 
 
 def _placement_hint(key: str, where: str) -> Optional[str]:

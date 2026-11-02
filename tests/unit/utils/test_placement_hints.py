@@ -82,10 +82,11 @@ class TestPlacementSuggestions:
         assert "did you mean 'resource_id'?" not in message
         assert "scope.engines" not in message
 
-    def test_a_registered_hint_is_isolated_and_scoped_to_its_kinds(self, monkeypatch):
-        """register_placement_hint stays the plugin API; a test exercising it
-        isolates the session-wide table (monkeypatch.setitem restores it), and
-        the registered hint fires only for its own entry kinds."""
+    def test_a_table_entry_is_isolated_and_scoped_to_its_kinds(self, monkeypatch):
+        """The static table is the one mechanism (no registration API: config
+        load precedes plugin imports); a test adding an entry isolates the
+        session-wide table (monkeypatch.setitem restores it), and the entry
+        fires only for its own entry kinds."""
         from automated_security_helper.utils import unknown_keys
 
         monkeypatch.setitem(
