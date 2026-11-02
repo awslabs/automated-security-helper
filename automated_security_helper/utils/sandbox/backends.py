@@ -1236,6 +1236,18 @@ def _firejail_hidden_path(path: Path, granted: Sequence[Path] = ()) -> str:
     return value
 
 
+def _user_runtime_directory() -> str:
+    """``/run/user/<uid>``, or "" on a platform that has no user id.
+
+    ``os.getuid`` does not exist on Windows. firejail runs only on Linux, but the
+    plan is computed on every platform (it is only computed, never run, in the
+    policy tests), so a platform without a user id has no runtime directory to
+    hide. The caller skips the empty string as it skips an unset SSH_AUTH_SOCK.
+    """
+    getuid = getattr(os, "getuid", None)
+    return f"/run/user/{getuid()}" if getuid is not None else ""
+
+
 class FirejailBackend(SandboxBackend):
     name = "firejail"
     platforms = ("linux",)
@@ -1382,7 +1394,7 @@ class FirejailBackend(SandboxBackend):
             "/run/podman",
             "/run/containerd",
             "/var/run/containerd",
-            f"/run/user/{os.getuid()}",
+            _user_runtime_directory(),
             os.environ.get("SSH_AUTH_SOCK", ""),
         ]
         for path in ipc:
