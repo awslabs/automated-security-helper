@@ -71,3 +71,30 @@ def test_a_dot_dot_after_a_link_is_judged_where_the_os_takes_it(tmp_path):
     assert output_dir_refusal(through_fresh) is None
     lexical_twin = os.path.join(str(real), "dangling", "out")
     assert output_dir_refusal(lexical_twin) is not None
+
+
+def test_a_file_on_the_way_is_not_a_directory_where_stat_only_says_not_found(
+    tmp_path, monkeypatch
+):
+    """Windows stat answers "not found" for ``<file>\\ash_output``, where POSIX
+    answers ENOTDIR. The refusal walks up to the first part that is there, so both
+    give ``Not a directory``, and neither lets the output directory be made."""
+    blocker = tmp_path / ".ash"
+    blocker.write_text("a file\n", encoding="utf-8")
+    output = blocker / "ash_output"
+    fresh = tmp_path / "fresh" / "ash_output"
+    (tmp_path / "fresh").mkdir()
+    real_stat = os.stat
+
+    def stat_that_only_says_not_found(path, *args, **kwargs):
+        if os.fspath(path) in (str(output), str(fresh)):
+            raise FileNotFoundError(2, "The system cannot find the path", str(path))
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat_that_only_says_not_found)
+
+    refusal = output_dir_refusal(output)
+
+    assert refusal == f"Output directory cannot be created: {output} (Not a directory)"
+    # The control: a missing directory under a directory is still made, not refused.
+    assert output_dir_refusal(fresh) is None

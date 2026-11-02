@@ -134,7 +134,7 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
             return output_dir_unmakeable(
                 path, error.strerror or "No such file", error.errno
             )
-        return _link_to_nothing_on_the_way(path)
+        return _obstacle_on_the_way(path)
     except ValueError as error:
         return output_dir_unmakeable(path, str(error) or type(error).__name__)
     except OSError as error:
@@ -159,11 +159,20 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
     return None
 
 
-def _link_to_nothing_on_the_way(path: str) -> Optional[str]:
-    """The refusal of *path*, which is not there, when making it would fail on a link
-    to nothing: the path itself, or the nearest part of it that is there. mkdir
-    cannot make a directory where a link is, and fails with EEXIST, as mkdir -p
-    does in ./ash. None when there is no such link.
+def _obstacle_on_the_way(path: str) -> Optional[str]:
+    """The refusal of *path*, which is not there, when making it would fail on what
+    is already on the way to it: the nearest part of it that is there. None when
+    that is a directory, so the path can be made.
+
+    - A link to nothing: mkdir cannot make a directory where a link is, and fails
+      with EEXIST, as mkdir -p does in ./ash.
+    - Something that is not a directory, such as a file: ``Not a directory``
+      (ENOTDIR). POSIX stat says this itself for ``<file>/x``, before this runs.
+      Windows stat only says that ``<file>\\x`` is not found, and mkdir then
+      fails with "Cannot create a file when that file already exists", for a
+      scan that was already registered. Walking up to the first part that is
+      there gives every platform the same reason, and the same stage, which is
+      before anything is registered.
 
     The path is walked as written, made absolute with the working directory and
     no more: ``os.path.abspath`` folds a ``..`` lexically, so after a symbolic
@@ -178,6 +187,8 @@ def _link_to_nothing_on_the_way(path: str) -> Optional[str]:
         current = parent
     if os.path.islink(current) and not os.path.exists(current):
         return output_dir_unmakeable(path, os.strerror(errno.EEXIST), errno.EEXIST)
+    if not os.path.isdir(current):
+        return output_dir_unmakeable(path, os.strerror(errno.ENOTDIR), errno.ENOTDIR)
     return None
 
 
