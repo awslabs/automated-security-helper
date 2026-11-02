@@ -758,6 +758,32 @@ def _unknown_entry_keys_are_fatal(
     return fatal
 
 
+def _entry_warn_context(
+    data: Any, config_overrides: Optional[List[str]] = None
+) -> Tuple[Dict[str, Any], List[str]]:
+    """The validation context a config-file load runs under, and its warn list.
+
+    ``strict_file_load`` selects the named refusal of an opted typed field's
+    environment reference (RedactedSection's validator): a strict load
+    refuses the reference text at the field either way, but pydantic's own
+    message calls the resolved text not-an-integer and names no variable.
+    ``WARN_UNKNOWN_KEYS``, bound to the returned list, is the warn-then-refuse
+    rollout: an unknown key in a suppression or ignore-path entry warns and
+    disables the entry instead of refusing the config
+    (utils/unknown_keys.py); the refusal returns as the default at v4, and
+    ``fail_on_unknown_keys`` adopts it now (``_unknown_entry_keys_are_fatal``),
+    so the key is left out of the context then. Every loader that validates a
+    config document as a scan does builds its context here
+    (``build_config``, ``validate_config_document``, the overlay fallback), so
+    one route cannot refuse a file another route loads with a warning.
+    """
+    context: Dict[str, Any] = {"strict_file_load": True}
+    warned: List[str] = []
+    if not _unknown_entry_keys_are_fatal(data, config_overrides):
+        context[WARN_UNKNOWN_KEYS] = warned
+    return context, warned
+
+
 def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> AshConfig:
     """The AshConfig a scan builds from a resolved document.
 
@@ -765,18 +791,7 @@ def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> Ash
     ValidationError for the document and ASHConfigValidationError for an
     override; see ``load_config_file``, which every config file goes through.
     """
-    # The context selects the named refusal of an opted typed field's
-    # environment reference (RedactedSection's validator): a strict load
-    # refuses the reference text at the field either way, but pydantic's own
-    # message calls the resolved text not-an-integer and names no variable.
-    context: Dict[str, Any] = {"strict_file_load": True}
-    warned: List[str] = []
-    if not _unknown_entry_keys_are_fatal(data, config_overrides):
-        # Warn-then-refuse rollout: an unknown key in a suppression or
-        # ignore-path entry warns and disables the entry instead of refusing
-        # the config (utils/unknown_keys.py WARN_UNKNOWN_KEYS). The refusal
-        # returns as the default at v4.
-        context[WARN_UNKNOWN_KEYS] = warned
+    context, warned = _entry_warn_context(data, config_overrides)
     config = AshConfig.model_validate(data, strict=True, context=context)
     if warned:
         # Logged where every other resolution warning is (the orchestrator
@@ -4254,7 +4269,14 @@ def _resolve_config(
             documents_out.update(overlay.documents)
         if names_out is not None:
             names_out.update(overlay.names)
-        overlaid = AshConfig.model_validate(overlay.data, strict=True)
+        # The scan's own context (_entry_warn_context), so the overlay used
+        # alone warns about an unknown suppression key as it does when it is
+        # merged over a selected document, instead of refusing; an override
+        # that sets fail_on_unknown_keys adopts the refusal here too.
+        context, warned = _entry_warn_context(overlay.data, config_overrides)
+        overlaid = AshConfig.model_validate(overlay.data, strict=True, context=context)
+        if warned:
+            overlaid._resolution_warnings.extend(warned)
         overlaid._environment_references = tuple(overlay.environment_references)
         return overlaid
 
@@ -4828,13 +4850,20 @@ def validate_config_document(
     scan validates it; ``ASHConfigValidationError`` naming ``config_path`` if it
     does not validate.
 
+    As a scan validates it: under the context ``build_config`` builds
+    (``_entry_warn_context``), so unless the document sets
+    ``fail_on_unknown_keys``, an unknown key in a suppression or ignore-path
+    entry warns and disables the entry instead of refusing the config, with
+    the warning recorded on the returned config's ``_resolution_warnings``.
+
     ``unquoted`` is why the file's values may not be repeated (``CLIENT_FILE``,
     ``REPOSITORY_FILE``): the error then gives each problem's location and kind
     only (``_client_validation_error``), and is raised with no cause or context
     that holds pydantic's text.
     """
+    context, warned = _entry_warn_context(document.data)
     try:
-        return AshConfig.model_validate(document.data, strict=True)
+        config = AshConfig.model_validate(document.data, strict=True, context=context)
     except ValidationError as e:
         if unquoted is None:
             raise ASHConfigValidationError(
@@ -4843,6 +4872,10 @@ def validate_config_document(
                 "Run 'ash config lint' to identify and fix issues."
             ) from e
         refused = _client_validation_error(config_path, e, why=unquoted)
+    else:
+        if warned:
+            config._resolution_warnings.extend(warned)
+        return config
     raise refused
 
 
