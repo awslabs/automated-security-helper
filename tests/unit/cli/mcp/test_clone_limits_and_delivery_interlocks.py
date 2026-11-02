@@ -115,6 +115,44 @@ def test_a_clone_past_the_entry_cap_is_refused(
 
 
 # ---------------------------------------------------------------------------
+# S1b: the byte cap engages on the delivery path itself.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_the_byte_cap_engages_on_the_delivery_path(
+    fake_git, workspace, monkeypatch
+) -> None:
+    """Regression: the delivery's own git calls run under the size cap.
+
+    Before the commit under test, ``_run_git_step`` did not forward
+    ``grows_in`` and the clone/fetch/checkout call sites did not pass it, so
+    ``_refuse_oversized`` never ran on a delivery: on that code this test
+    fails, because the delivery below succeeds instead of refusing.
+    """
+
+    monkeypatch.setattr(sd, "MAX_CLONE_BYTES", 1)
+    fake_git(count=10)
+
+    result = mcp_set_source_git(url=URL, session_id=SESSION)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "clone_too_large", result
+    assert not (workspace / SESSION / "source").exists()
+
+
+@pytest.mark.integration
+def test_the_default_cap_delivers_the_same_tiny_repo(fake_git, monkeypatch) -> None:
+    """Control: under the default caps the same tiny repository delivers."""
+
+    fake_git(count=10)
+
+    result = mcp_set_source_git(url=URL, session_id=SESSION)
+
+    assert result.get("success") is True, result
+
+
+# ---------------------------------------------------------------------------
 # S2: a tree that cannot be read is refused, not measured as empty.
 # ---------------------------------------------------------------------------
 
@@ -191,10 +229,14 @@ def test_an_unreadable_tree_is_reported_by_its_own_error_type(
     real = os.scandir
 
     def deny_the_clone_target(path: Any = ".") -> Any:
-        # A descriptor (shutil.rmtree's own scan) is passed through.
-        if isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(
-            os.sep + "source"
-        ):
+        # A descriptor (shutil.rmtree's own scan) is passed through. The
+        # directory the size check watches is the delivery's own staging
+        # sibling (``_STAGING_DIR_PREFIX`` plus a unique suffix), so the
+        # denial matches that prefix; a name match on ``source`` would never
+        # touch the watched path.
+        if isinstance(path, (str, os.PathLike)) and os.path.basename(
+            os.fspath(path)
+        ).startswith(sd._STAGING_DIR_PREFIX):
             raise PermissionError(13, "Permission denied", os.fspath(path))
         return real(path)
 
