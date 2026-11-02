@@ -22,8 +22,10 @@ starts the container and carries the inner refusal's exit 3.
 
 The runners are stand-ins first on PATH (``docker``, ``podman``, ``finch``,
 ``nerdctl``, ``nix``) that record each call and exit 97, so nothing real starts.
-On Windows each stand-in is a Python script behind a ``.bat`` launcher
-(``tests/utils/stand_ins.py``), because ``CreateProcess`` starts no shell script.
+On Windows each container runner's stand-in is a Python script behind a ``.bat``
+launcher (``tests/utils/stand_ins.py``), because ``CreateProcess`` starts no shell
+script, and ``nix``, which does not run there, is replaced in process
+(``_enter_nix_in_process``).
 """
 
 from __future__ import annotations
@@ -73,16 +75,19 @@ def _write_runners(bin_dir: Path, runner_log: Path, code: int) -> None:
     ``<name>.bat`` and ``<name>.cmd`` before the bare name, so with a script the
     stand-in never ran: container mode resolved the host's own ``docker.exe``, nix
     mode found no ``nix``, and every test that waits for a runner's call failed.
-    There the stand-in is a Python script behind a ``.bat`` launcher
+    There the container runners are a Python script behind a ``.bat`` launcher
     (``tests.utils.stand_ins.write_stand_in``), the form a package manager leaves
     on PATH. ASH tries ``finch`` before ``docker``, so the stand-in for ``finch`` is
-    found ahead of any ``docker.exe`` on PATH.
+    found ahead of any ``docker.exe`` on PATH. ``nix`` gets no launcher there; see
+    :func:`_enter_nix_in_process`.
     """
-    windows = on_windows()
+    if on_windows():
+        for name in RUNNERS:
+            if name != "nix":
+                source = _recording_program(name, runner_log, code)
+                write_stand_in(bin_dir, name, source)
+        return
     for name in RUNNERS:
-        if windows:
-            write_stand_in(bin_dir, name, _recording_program(name, runner_log, code))
-            continue
         stub = bin_dir / name
         stub.write_text(
             f'#!/bin/sh\necho "{name} $*" >> "{runner_log}"\nexit {code}\n',
@@ -100,6 +105,9 @@ class Stage:
         self.named = root / "cfg" / "ash.yaml"
         self.discovered = self.source / ".ash.yaml"
         self.env = root / "env" / "environment-config.yaml"
+        # What a stand-in runner exits with: 97 marks one that should never have
+        # been reached; see inner_run_refuses.
+        self.runner_exit = 97
 
     def runner_calls(self) -> List[str]:
         if not self.runner_log.exists():
@@ -110,6 +118,7 @@ class Stage:
         """Make the stand-in runners exit as the scan inside does when it refuses
         its config: 3, ASH's invalid-config status, instead of the 97 that marks a
         runner that should never have been reached."""
+        self.runner_exit = code
         _write_runners(self.root / "bin", self.runner_log, code)
 
     def output_snapshot(self) -> Dict[str, bytes]:
@@ -119,6 +128,39 @@ class Stage:
             )
             for path in sorted(self.output.rglob("*"))
         }
+
+
+def _enter_nix_in_process(stage: Stage, monkeypatch) -> None:
+    """Stand in for ``nix`` on Windows without a program, as the other nix tests do.
+
+    Nix installs on Linux and macOS, and the refusal for a host without it sends
+    Windows to WSL2, so there is no program to imitate there. A ``.bat`` stand-in
+    would also be handed the argument that enters the shell, which holds line
+    breaks (``utils/python_child.DROP_WORKING_DIRECTORY`` ends in one), and a batch
+    program cannot be handed those through cmd.exe (``utils/subprocess_utils``,
+    "Batch programs on Windows"). So the lookup of ``nix`` and the one call that
+    enters the shell are replaced (``run_ash_nix.find_executable`` and
+    ``_enter_shell``), as ``tests/snapshot/container/test_snapshot_container_nix.py``
+    does. What the host decides before and after them is its own. The call is
+    recorded in the runner log as a stand-in program records its own.
+    """
+    from automated_security_helper.interactions import run_ash_nix
+
+    nix = str(stage.root / "bin" / "nix")
+    find_executable = run_ash_nix.find_executable
+
+    def find_nix(name: str):
+        return nix if name == "nix" else find_executable(name)
+
+    def enter_shell(cmd, env=None):
+        with open(stage.runner_log, "a", encoding="utf-8") as log:
+            log.write(" ".join(["nix", *cmd[1:]]) + "\n")
+        return subprocess_utils.create_completed_process(
+            args=list(cmd), returncode=stage.runner_exit
+        )
+
+    monkeypatch.setattr(run_ash_nix, "find_executable", find_nix)
+    monkeypatch.setattr(run_ash_nix, "_enter_shell", enter_shell)
 
 
 @pytest.fixture
@@ -139,7 +181,9 @@ def stage(tmp_path, monkeypatch) -> Stage:
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_runners(bin_dir, stage.runner_log, 97)
+    _write_runners(bin_dir, stage.runner_log, stage.runner_exit)
+    if on_windows():
+        _enter_nix_in_process(stage, monkeypatch)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     for name in (
         "ASH_CONFIG",
