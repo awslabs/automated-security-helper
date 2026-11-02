@@ -231,9 +231,7 @@ class TestConfigFiles:
             "the error should say which entry"
         )
 
-    def test_a_misspelled_ignore_path_key_warns_and_is_inert_by_default(
-        self, tmp_path
-    ):
+    def test_a_misspelled_ignore_path_key_warns_and_is_inert_by_default(self, tmp_path):
         source = self._source(tmp_path, self._ignore_path_config("expiraton"))
         config = resolve_config(source_dir=source)
         warnings = [w for w in config._resolution_warnings if "expiraton" in w]
