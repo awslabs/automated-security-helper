@@ -522,7 +522,7 @@ For a config in `/home/me/src/app/.ash/.ash.yaml` that grants grype a network an
 read path, the warning reads:
 
 ```text
-WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+WARNING  Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /home/me/src/app/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 This applies to a trusted config kept in a checkout of its own as well, such as an

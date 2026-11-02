@@ -11912,14 +11912,15 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
     """
     assert_on_page(
         _SANDBOX_HOW_TO,
-        "A root config file inside the scanned tree, by the file's own path, its resolved "
-        "path, or any symbolic link it passes through, cannot grant.",
+        "A config file the scanned repository could have written can't grant any of "
+        "them. That means a config file inside any git checkout, where a directory at or "
+        "above the file, by its own path or its resolved path, holds a `.git` entry (a "
+        "directory, or the file a submodule or linked worktree has).",
     )
     assert_on_page(
         _SANDBOX_HOW_TO,
-        "Nor can a root config file in any other git checkout, meaning a directory at or "
-        "above it holds a `.git` directory or file, such as an ops or dotfiles repository "
-        "you name with `--config`",
+        "This applies to a trusted config kept in a checkout of its own as well, such as "
+        "an ops or dotfiles repository: its grants are dropped with the same warning.",
     )
     assert_on_page(
         SANDBOX,
@@ -11929,8 +11930,13 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
     )
     assert_on_page(
         _SANDBOX_HOW_TO,
-        "A base cannot grant when it is inside any git checkout, the scanned one or a "
-        "separate one, or inside the scanned tree, and ASH names that base in a warning.",
+        "A file that can grant itself but extends a base that can't keeps the settings "
+        "its own `sandbox` section writes, `mode` included.",
+    )
+    assert_on_page(
+        _SANDBOX_HOW_TO,
+        "ASH logs a warning that names the files that can't grant and the settings it "
+        "dropped.",
     )
     assert_on_page(
         _CONFIG_PLATFORM_PAGE,
@@ -12002,11 +12008,16 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
 
 
 #: trust-model.md's quote of the warning for a repository config at
-#: /work/repo/.ash/.ash.yaml that grants grype a network and a read path.
+#: /work/repo/.ash/.ash.yaml that grants grype a network and a read path. The sandbox
+#: step says where the file sits (``sandbox_grants.confinement_membership``): the
+#: scanned repository's own config is inside the scanned tree, so the repository being
+#: scanned wrote it. The reporter and scanner-config steps give the generic reason
+#: instead (``untrusted_source.IN_TREE_OR_DELIVERED``), which the AWS reporter quote
+#: below keeps.
 _DROPPED_GRANTS_WARNING = (
     "Ignoring sandbox.network_scanners, sandbox.extra_read_paths from "
-    "/work/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, "
-    "or was delivered by an MCP client. A network_scanners list there still removes "
+    "/work/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository "
+    "being scanned wrote it. A network_scanners list there still removes "
     "network from scanners it does not name, and a sandbox mode there still applies when "
     "nothing else turns the sandbox on. To keep a setting, move the file outside every "
     "git checkout, or pass the setting with --config-overrides. A file inside the scanned "
@@ -12060,8 +12071,8 @@ def test_the_dropped_grants_warning_reads_as_the_pages_quote(
         + _DROPPED_GRANTS_WARNING.replace("/work/repo/", "/home/me/src/app/"),
     )
     troubleshoot = (
-        "Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: that config "
-        "is inside a git checkout or the scanned tree, or was delivered by an MCP client."
+        "Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file "
+        "is inside the scanned tree, so the repository being scanned wrote it."
     )
     assert_on_page("how-to/troubleshoot.md", f"{troubleshoot} ...")
     monkeypatch.delenv("ASH_CONFIG", raising=False)

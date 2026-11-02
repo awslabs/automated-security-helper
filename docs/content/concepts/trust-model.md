@@ -94,7 +94,7 @@ Settings not listed here can be set from any tier. The repository tier's limits 
 From a repository file, ASH ignores the value, uses the trusted one, logs a warning that names the settings and the file and says how to keep them, and runs the scan. For example:
 
 ```text
-Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 Here the repository's config gave grype a network and a read path. To give grype a network yourself, pass `--config-overrides 'sandbox.network_scanners=[grype]'`.
