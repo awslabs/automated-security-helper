@@ -2132,6 +2132,7 @@ _INTERPOLATED_AS_IS = {
     "$envConfigHeld",  # a newline, a carriage return, a comma or a double quote
     "$runnerRefusal",  # the OCI_RUNNER refusal, built from $tried
     "$mountRefusal",  # the --mount refusal, built from shown paths and a held phrase
+    "$wrapperRefusal",  # the OCI_RUNNER_WRAPPER refusal, built from the shown wrapper word
     "$outputHint",  # '' or the fixed hint naming -OutputDir, chosen by the helper
 }
 
