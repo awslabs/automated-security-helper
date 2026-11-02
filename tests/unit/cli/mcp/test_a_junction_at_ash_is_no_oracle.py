@@ -165,14 +165,29 @@ def _junction_out(
         (outside / name).write_text(text, encoding="utf-8")
     junction = directory / ".ash"
     # Something has to lead there on this platform; lstat then says it is no link.
-    junction.symlink_to(outside, target_is_directory=True)
+    try:
+        junction.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        # Windows makes a symbolic link only for an account that holds the
+        # privilege; without it nothing leads there to be reported as a junction.
+        pytest.skip(f"cannot make a symbolic link here: {error}")
     _as_a_junction(monkeypatch, junction, outside)
 
 
 def _without(response: Any, *paths: Path) -> str:
+    """The response as text, with the tree paths that differ between runs out.
+
+    A path is taken out as the text writes it, which depends on the platform: as
+    ``str(path)``, as ``path.as_posix()`` (a refusal names a source as found with
+    it, forward slashes on Windows too), and either of those as json.dumps writes
+    it (a Windows path with its backslashes doubled). On POSIX all four are one
+    spelling.
+    """
     text = json.dumps(response, default=str, sort_keys=True)
     for path in paths:
-        text = text.replace(str(path), "<tree>")
+        for spelling in (str(path), path.as_posix()):
+            for written in (spelling, json.dumps(spelling)[1:-1]):
+                text = text.replace(written, "<tree>")
     return text
 
 
