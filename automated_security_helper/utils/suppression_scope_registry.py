@@ -25,26 +25,47 @@ once per name so an entry that silently stopped suppressing is visible.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Set, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+class SupportsSuppressionScope(Protocol):
+    """The three hooks a scope-owning plugin class exposes.
+
+    Structural: the registry stores class objects, which satisfy this through
+    their bound classmethods (PEP 544), so a test's fake hooks class matches
+    without inheriting ScannerPluginBase. The parameters stay ``Any`` because
+    this module sits below the models and must not import them.
+    """
+
+    def validate_suppression_scope(self, block: Any) -> List[str]: ...
+
+    def suppression_scope_matches(self, block: Any, finding: Any) -> bool: ...
+
+    def split_rule_qualifier(self, rule_id: str) -> Tuple[str, Optional[str]]: ...
+
 
 #: Scanner name -> the plugin class whose scope hooks handle its blocks.
 #: Registration is per process, at plugin-module import, like the plugin
 #: manager's own registry.
-_ENGINE_HOOKS: Dict[str, type] = {}
+_ENGINE_HOOKS: Dict[str, SupportsSuppressionScope] = {}
 
 #: Engine names already warned about this process, so a scan with many
 #: findings logs each missing engine once.
 _WARNED_ENGINES: Set[str] = set()
 
 
-def register_suppression_scope_engine(scanner_name: str, plugin_cls: type) -> None:
+def register_suppression_scope_engine(
+    scanner_name: str, plugin_cls: SupportsSuppressionScope
+) -> None:
     """Register ``plugin_cls`` as the owner of ``scanner_name``'s scope blocks."""
     _ENGINE_HOOKS[scanner_name] = plugin_cls
 
 
-def engine_hooks_for(scanner_name: Optional[str]) -> Optional[type]:
+def engine_hooks_for(
+    scanner_name: Optional[str],
+) -> Optional[SupportsSuppressionScope]:
     """The plugin class owning ``scanner_name``'s blocks, or None."""
     if scanner_name is None:
         return None
