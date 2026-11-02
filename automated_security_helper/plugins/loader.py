@@ -1490,7 +1490,10 @@ def _unfindable_level(module_path: str) -> Optional[str]:
         parent = spec
         try:
             spec = _spec_without_importing(prefix, spec)
-        except (ImportError, ValueError):
+        except (ImportError, KeyError, ValueError):
+            # KeyError: a zipimporter evicted by a per-scan cache clear can
+            # raise it from its own directory cache on the next probe
+            # (discovery._is_top_level_package documents the prior instance).
             return None
         if spec is None:
             # find_spec returns None for a missing name; PathFinder for a
