@@ -771,6 +771,77 @@ def test_the_results_json_carries_no_environment_value(tmp_path, config):
     assert f"{WRITTEN}|SECRET-AWS-ACCESS-KEY|*|*" in entries, entries
 
 
+def test_scoped_entries_change_no_rendered_output_shape(tmp_path):
+    """The id-only nested scope record (recorded_suppressions) leaks into no
+    rendered output: the unused report renders a scoped entry with exactly an
+    unscoped entry's key set (no "scope" key, no injected resource_id or
+    resource_type, so an engines-only scope adds no None values either), and
+    the SARIF justification for a match in the same config keeps its exact
+    wording with no properties bag. Pins the consumer audit: every record
+    consumer reads named flat keys (the reporter's _suppression_to_dict, the
+    expiration checker's _shown), never the record's items."""
+    import json
+
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+        UnusedSuppressionsReporter,
+    )
+
+    profile = tmp_path / "suppressions.ash.yaml"
+    profile.write_text(
+        "project_name: output-shape\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: u/*.py\n"
+        "      rule_id: SECRET-AWS-ACCESS-KEY\n"
+        "      reason: unscoped entry\n"
+        "    - path: s/*.py\n"
+        "      rule_id: SECRET-AWS-ACCESS-KEY\n"
+        "      reason: scoped entry\n"
+        "      scope:\n"
+        "        resource_id: Stack/Thing/Resource\n"
+        "    - path: e/*.py\n"
+        "      rule_id: SECRET-AWS-ACCESS-KEY\n"
+        "      reason: engines only\n"
+        "      scope:\n"
+        "        engines:\n"
+        "          cdk-nag:\n"
+        "            resource_path: Stack/*\n",
+        encoding="utf-8",
+    )
+    loaded = load_config_file_for_run(profile)[1]
+    context = _context(tmp_path, loaded)
+
+    # The SARIF side: a match in this config renders exactly the unscoped
+    # wording, with no properties bag.
+    out = apply_suppressions_to_sarif(
+        _sarif_with_finding("u/app.py"), context, used_suppressions=set()
+    )
+    (applied,) = out.runs[0].results[0].suppressions
+    assert applied.justification == (
+        "(ASH) Suppressing finding for rule 'SECRET-AWS-ACCESS-KEY' in "
+        "'u/app.py' with reason: unscoped entry"
+    )
+    assert applied.properties is None
+
+    # The unused report: all three entries render with ONE key set.
+    rendered = UnusedSuppressionsReporter(context=context).report(
+        AshAggregatedResults()
+    )
+    data = json.loads(rendered)
+    entries = data["unused_suppressions"]
+    assert len(entries) == 3, entries
+    key_sets = {tuple(sorted(entry)) for entry in entries}
+    assert len(key_sets) == 1, key_sets
+    assert "scope" not in entries[0]
+    assert "resource_id" not in entries[0]
+    assert "resource_type" not in entries[0]
+    assert '"scope"' not in rendered, rendered
+
+
 def test_a_canonical_scopes_written_form_reaches_the_id(tmp_path, monkeypatch):
     """A ``scope.resource_id`` read from the environment is recorded by its
     reference in the id: the written id equals the raw YAML dict's id (the
