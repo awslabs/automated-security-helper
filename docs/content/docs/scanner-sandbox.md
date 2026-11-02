@@ -36,6 +36,21 @@ configuration, whose mode is `off`.
 | `landlock` | Linux 6.2+ (Landlock ABI 3) | nothing (kernel LSM) | No package to install. Needs Landlock enabled in the kernel's LSM list. Below ABI 3 it counts as unavailable. |
 | `sandbox-exec` | macOS | ships with macOS | Apple marks `sandbox-exec` deprecated. See risks. |
 
+`auto` uses the first backend that can start a sandbox on this machine: on Linux
+`bwrap`, then `firejail`, then `landlock`; on macOS `sandbox-exec`. To require one
+backend, name it: `ash scan --sandbox bwrap`.
+
+The scan output and `ash.log` say which backend ran each scanner:
+
+```text
+INFO     Scanner sandbox: using bwrap (--sandbox auto)
+INFO     Scanner sandbox: bandit on source runs under bwrap
+INFO     Scanner sandbox: detect-secrets on source runs under bwrap
+```
+
+The results record the mode you asked for (`ash_config.sandbox.mode` in
+`ash_aggregated_results.json`), not the backend that ran.
+
 Container mode (`--mode container`) does not apply the setting: it never sandboxes the
 scanners inside the image, and the container is the boundary. So `--sandbox` with any
 mode but `off` is refused there, with exit 5 (a usage error), before the image is built
@@ -1015,6 +1030,8 @@ reported `MISSING` with:
 ```text
 no scanner sandbox is available on Windows; run ASH under WSL2 and use --sandbox bwrap there, or use --mode container
 ```
+
+A named backend reports `<backend> is not available on Windows` instead.
 
 Run ASH under WSL2 and use `bwrap` there, or use container mode. A native backend would use an AppContainer or a restricted token plus
 a job object; that is a larger piece of work and is not in this release.
