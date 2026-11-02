@@ -1142,6 +1142,10 @@ class ScannerExecutor:
                             raw_results = apply_suppressions_to_sarif(
                                 sarif_report=raw_results,
                                 plugin_context=self.plugin_context,
+                                # The registered name: the driver still carries
+                                # the tool's own SARIF name at this point, which
+                                # scope.engines entries are not keyed by.
+                                scanner_name=scanner_config_name,
                             )
                         else:
                             # The flag lifts suppressions and ignore paths, not

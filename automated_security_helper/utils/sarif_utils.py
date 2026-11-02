@@ -1160,11 +1160,39 @@ def ignore_paths_for_locations(
     return found
 
 
+def _suppression_scanner_identity(result, run, scanner_name):
+    """The registered scanner name ``AshSuppression.matches`` keys engines by.
+
+    ``scope.engines`` keys and the scoped base-rule-id fallback are keyed by
+    the REGISTERED scanner name (the config name "cdk-nag"), but at suppression
+    time the run's driver carries a different name on every production pass:
+    the tool's own SARIF name ("ash-cdk-nag-wrapper") at the two per-scanner
+    passes, which run before ``attach_scanner_details`` renames it, and ASH's
+    own aggregator name at the merged pass. So the identity is resolved in
+    order: the caller's ``scanner_name`` first (the per-scanner passes know
+    which registered scanner produced the report, and a tool-emitted result
+    property must not outrank that); then the per-result
+    ``properties.scanner_name`` that ``attach_scanner_details`` wrote (the
+    merged pass and ``ash merge``, whose one run mixes every scanner's
+    results); and only then the driver name, which keeps external SARIF on
+    today's fail-closed path with its warn-once receipt.
+    """
+    if scanner_name:
+        return scanner_name
+    attached = (
+        getattr(result.properties, "scanner_name", None) if result.properties else None
+    )
+    if isinstance(attached, str) and attached:
+        return attached
+    return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
     used_suppressions: set | None = None,
     exclude_output_dir: bool = True,
+    scanner_name: str | None = None,
 ) -> SarifReport:
     """Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
 
@@ -1172,6 +1200,13 @@ def apply_suppressions_to_sarif(
     its work directory, is dropped unless the repository committed that file.
     ``ash merge`` passes False: each shard already made that decision with its
     own git answer and run ID, and the merge has neither.
+
+    ``scanner_name`` is the registered name of the scanner whose report this
+    is, passed by the per-scanner passes (the scan executor and the result
+    processor, which run before ``attach_scanner_details`` renames the driver).
+    Callers over mixed-scanner reports (the merged pass, ``ash merge``) leave
+    it None and each result's identity comes from the ``scanner_name``
+    property ``attach_scanner_details`` wrote (``_suppression_scanner_identity``).
     """
     # KNOWN_IGNORE_PATHS (.venv/, venv/, node_modules/) are not applied here.
     # Applied, they would drop findings that matter: grype and npm-audit locate a
@@ -1409,10 +1444,8 @@ def apply_suppressions_to_sarif(
                                 else "No description available"
                             ),
                             severity="MEDIUM",
-                            scanner=(
-                                run.tool.driver.name
-                                if run.tool and run.tool.driver
-                                else "unknown"
+                            scanner=_suppression_scanner_identity(
+                                result, run, scanner_name
                             ),
                             scanner_type="SAST",
                             rule_id=result.ruleId,
