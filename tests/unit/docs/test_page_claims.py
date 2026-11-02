@@ -411,13 +411,26 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
 
 
 def _ash(args: List[str], cwd: Path, **env: str) -> subprocess.CompletedProcess:
-    """Run this interpreter's ``ash`` with a private home directory and no network installs."""
+    """Run this interpreter's ``ash`` with a private home directory and no network installs.
+
+    The output is decoded as UTF-8 with ``errors="replace"``, named here and not left to
+    the host code page. Under CI on Windows ASH writes UTF-8
+    (``configure_windows_safe_logging``), and a capture decoded as cp1252 ends at the
+    first byte that code page does not map. On Windows ``subprocess.run`` then hands
+    back ``stdout=None`` and raises nothing, so the test's first
+    ``result.stdout + result.stderr`` is a ``TypeError`` that hides what the run
+    printed (tests/unit/utils/test_windows_console_encoding.py pins the mechanism).
+    Every child this file captures as text names the same two arguments, and
+    ``test_every_child_this_file_captures_as_text_names_its_decode`` holds it to that.
+    """
     return subprocess.run(
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         cwd=cwd,
         env=_ash_environment(cwd, **env),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -544,6 +557,74 @@ def _plugin_path(tmp_path: Path, module: str, text: str) -> str:
     (package / "__init__.py").write_text(text, encoding="utf-8")
     return os.pathsep.join(
         p for p in (str(package.parent), os.environ.get("PYTHONPATH")) if p
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The children this file captures as text
+# --------------------------------------------------------------------------- #
+
+#: The ``subprocess`` entry points that start a child and can hand its output back as
+#: text.
+_CHILD_LAUNCHERS = frozenset({"run", "Popen", "check_output"})
+
+
+def _text_captures_without_a_decode(source: str) -> List[int]:
+    """The line of each ``subprocess`` call in ``source`` that asks for text and does
+    not name both ``encoding`` and ``errors``."""
+    found: List[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _CHILD_LAUNCHERS
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+        ):
+            continue
+        named = {keyword.arg: keyword.value for keyword in node.keywords}
+        as_text = False
+        for name in ("text", "universal_newlines"):
+            value = named.get(name)
+            if isinstance(value, ast.Constant) and value.value is True:
+                as_text = True
+        if as_text and not {"encoding", "errors"} <= set(named):
+            found.append(node.lineno)
+    return found
+
+
+@pytest.mark.unit
+def test_every_child_this_file_captures_as_text_names_its_decode() -> None:
+    """tests/unit/utils/test_windows_console_encoding.py (the capture hazard), held to
+    this file's own source.
+
+    A call that asks ``subprocess`` for text and names no ``encoding`` decodes the
+    child's output with the host code page. On a Windows runner that is cp1252, while
+    ASH writes UTF-8 under CI, and the first byte cp1252 does not map ends the
+    capture: ``stdout`` comes back None and nothing is raised, so the test's first
+    line that joins the two streams is a ``TypeError`` and what the run printed is
+    lost. Every call here that asks for text names ``encoding="utf-8"`` and
+    ``errors="replace"``, which no byte can make fail. The scan is run on a snippet it
+    must flag and one it must not before it reads this file, so a scan that reads
+    nothing fails here.
+    """
+    flagged = (
+        "import subprocess\nsubprocess.run(['x'], capture_output=True, text=True)\n"
+    )
+    clean = (
+        "import subprocess\n"
+        "subprocess.run(['x'], capture_output=True, text=True, "
+        "encoding='utf-8', errors='replace')\n"
+        "subprocess.run(['x'], capture_output=True)\n"
+    )
+    assert _text_captures_without_a_decode(flagged) == [2]
+    assert _text_captures_without_a_decode(clean) == []
+
+    source = Path(__file__).read_text(encoding="utf-8")
+    lines = _text_captures_without_a_decode(source)
+    assert lines == [], (
+        f"the calls at lines {lines} of this file ask for text and name no "
+        'encoding="utf-8", errors="replace"'
     )
 
 
@@ -1422,6 +1503,8 @@ def _ash_with_no_aws_credentials(
         env=_no_aws_credentials_environment(cwd, **env),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -1589,6 +1672,8 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
                 env=_moto_child_environment(work, endpoint),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=600,
             )
             uploaded = client.list_objects_v2(Bucket=bucket).get("Contents", [])
@@ -1951,6 +2036,8 @@ def test_each_run_in_one_process_gives_the_error_for_a_missing_setting(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     tail = result.stdout[-4000:]
@@ -2592,6 +2679,8 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
         env=environment,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert child.returncode == 0, _output_tail(child)
@@ -3069,6 +3158,8 @@ def test_a_scan_uses_only_the_plugin_modules_it_names(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert f"runs: {runs}" in result.stdout, _output_tail(result)
@@ -6861,6 +6952,8 @@ def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
         env=_ash_environment(tmp_path, PWD=str(linked_tree)),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert result.returncode == verdict, (
@@ -7658,6 +7751,8 @@ def _run_interrupted(
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -8072,6 +8167,8 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=300,
     )
 
@@ -9092,6 +9189,8 @@ def test_no_mcp_server_outlives_the_cell_that_started_it(
             env=_ash_environment(tmp_path),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=900,
         )
         assert pids.is_file(), _output_tail(result)
@@ -10471,6 +10570,8 @@ def _another_servers_lock(root: Path, tmp_path: Path) -> Iterator[None]:
         [sys.executable, "-c", _ANOTHER_SERVERS_LOCK, str(lock), str(release)],
         stdout=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     try:
         assert holder.stdout is not None
@@ -14157,6 +14258,8 @@ def test_a_linked_output_directory_is_refused_in_every_mode_before_the_write_che
             env=environment,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
     else:
@@ -14497,6 +14600,8 @@ def test_container_mode_and_dot_ash_refuse_a_directory_a_local_scan_refuses(
             env=environment,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
         expected = f"ERROR: {lines[0]}"
@@ -14879,6 +14984,8 @@ def test_the_s3_reporter_sends_a_value_read_from_the_environment_as_its_referenc
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
         assert result.returncode == 0, _output_tail(result)
@@ -16121,6 +16228,8 @@ def _git(cwd: Path, *args: str) -> str:
         env=environment,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert result.returncode == 0, (args, result.stdout, result.stderr)
@@ -16469,6 +16578,8 @@ def _child_answer(
         env=environment,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert result.returncode == 0, _output_tail(result)
@@ -16762,6 +16873,8 @@ def test_ash_dependencies_install_starts_no_program_for_a_tool_it_cannot_select(
         env=_ash_environment(cwd),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -16831,6 +16944,8 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
         env=_ash_environment(cwd),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert started.returncode == 0, _output_tail(started)
@@ -17932,6 +18047,8 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
             },
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
         )
         assert result.stderr == "", (result.stdout, result.stderr)
@@ -18076,6 +18193,8 @@ def test_the_scan_job_shows_what_a_tool_prints_as_text(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         start_new_session=True,
     )
     try:
@@ -18222,6 +18341,8 @@ def test_the_scan_workflow_at_v3_7_0_and_v3_7_1_has_the_inputs_the_page_names(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     if has_tag.returncode != 0:
@@ -18234,6 +18355,8 @@ def test_the_scan_workflow_at_v3_7_0_and_v3_7_1_has_the_inputs_the_page_names(
         ["git", "-C", str(REPO_ROOT), "show", f"{tag}:{path}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     assert shown.returncode == 0, shown.stderr
@@ -18712,6 +18835,8 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
             env=_ash_environment(cwd, **_UNWRAPPED),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
         refusal = "Output directory is not a valid path: out\\x00dir"
@@ -20197,6 +20322,8 @@ def _backend_unavailable(class_name: str) -> Optional[str]:
         env={**os.environ, **_child_containment(scratch)},
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     if result.returncode != 0:
