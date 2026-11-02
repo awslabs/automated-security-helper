@@ -25,7 +25,6 @@ once per name so an entry that silently stopped suppressing is visible.
 
 from __future__ import annotations
 
-import contextvars
 from typing import Any, Dict, List, Optional, Protocol, Set, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -52,23 +51,16 @@ class SupportsSuppressionScope(Protocol):
 #: manager's own registry.
 _ENGINE_HOOKS: Dict[str, SupportsSuppressionScope] = {}
 
-#: Engine names already warned about in the current scan context, so a scan
-#: with many findings logs each missing engine once. Per context, not module
-#: state: workspace mode builds several engines on several threads at once,
-#: and a process-global set let one project's reset swallow another's receipt.
-_WARNED_ENGINES: contextvars.ContextVar[Optional[Set[str]]] = contextvars.ContextVar(
-    "ash_warned_unmatched_engines", default=None
-)
-
-#: The fallback for a context no engine initialized (a bare matcher call, a
-#: worker thread that inherited no scan context): process-global and never
-#: cleared, so the receipt still appears at least once per process there.
-_FALLBACK_WARNED_ENGINES: Set[str] = set()
-
-
-def _warned_engines() -> Set[str]:
-    warned = _WARNED_ENGINES.get()
-    return warned if warned is not None else _FALLBACK_WARNED_ENGINES
+#: The warned names for a match that reaches the registry with NO engine-owned
+#: set: a bare matcher call outside a scan (the no-engine fallback). A scan's
+#: own receipts live on its run's PluginContext (warned_unmatched_engines),
+#: a new set per run that the matcher is handed explicitly, so they are
+#: per engine whatever thread or context runs the match; neither a ContextVar
+#: nor a thread-local can promise that (a worker thread started without
+#: copy_context sees neither, and threads copying one context share one set).
+#: This fallback is cleared by reset_unmatched_engine_warnings, so the
+#: per-scan guarantee holds for engine-less callers too.
+_NO_ENGINE_WARNED: Set[str] = set()
 
 
 def register_suppression_scope_engine(
@@ -93,26 +85,33 @@ def registered_engine_names() -> Set[str]:
 
 
 def reset_unmatched_engine_warnings() -> None:
-    """Give the calling scan context a fresh warned set, so its scan warns again.
+    """Forget the no-engine fallback's warned names, so the next scan warns again.
 
     A long-lived process (the MCP server, a workspace scan) runs many scans:
-    without the reset only the first scan got the receipt that a listed
-    engine's blocks suppress nothing. Each execution engine calls this as it
-    initializes, in its own thread, and the set is scoped to that context
-    (contextvars), so one project's reset never clears what another project's
-    scan is yet to warn about.
+    without the reset only the first got the receipt that a listed engine's
+    blocks suppress nothing. Each execution engine calls this as it
+    initializes. An engine's OWN receipts need no reset: they live on its
+    run's PluginContext, a new set per run, and are never cleared by another
+    project's engine coming up (the cross-swallowing a shared set had).
     """
-    _WARNED_ENGINES.set(set())
+    _NO_ENGINE_WARNED.clear()
 
 
-def warn_once_unmatched_engine(scanner_name: str) -> None:
-    """Warn, once per name per scan context, that a listed engine's blocks
+def warn_once_unmatched_engine(
+    scanner_name: str, warned: Optional[Set[str]] = None
+) -> None:
+    """Warn, once per name per ``warned`` set, that a listed engine's blocks
     suppress nothing.
+
+    ``warned`` is the scan's engine-owned set
+    (``PluginContext.warned_unmatched_engines``), threaded through the
+    matcher; a caller with no engine gets the module's no-engine fallback.
 
     Fail closed is the safe direction, and this is its receipt: without it an
     entry whose plugin went missing would stop suppressing with no sign.
     """
-    warned = _warned_engines()
+    if warned is None:
+        warned = _NO_ENGINE_WARNED
     if scanner_name in warned:
         return
     warned.add(scanner_name)

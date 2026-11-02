@@ -639,6 +639,7 @@ def _apply_config_suppression(
     written_reasons: Dict[int, str] | None = None,
     recorded_fields: Dict[int, Dict[str, Any]] | None = None,
     written_ids: Dict[int, str] | None = None,
+    warned_engines: set | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
@@ -653,7 +654,7 @@ def _apply_config_suppression(
     caller applying many findings computes it once per matched suppression.
     """
     should_suppress, matching_suppression = should_suppress_finding(
-        flat_finding, suppressions, symbol_resolver
+        flat_finding, suppressions, symbol_resolver, warned_engines=warned_engines
     )
     if not should_suppress:
         return False
@@ -1430,6 +1431,10 @@ def apply_suppressions_to_sarif(
                         written_reasons,
                         recorded_fields,
                         written_ids,
+                        # The run's engine-owned warn-once set for fail-closed
+                        # engine blocks; a context without one (a test double)
+                        # falls back to the registry's no-engine set.
+                        getattr(plugin_context, "warned_unmatched_engines", None),
                     )
                     if config_suppressed and len(result.suppressions or []) >= 1:
                         updated_results.append(result)

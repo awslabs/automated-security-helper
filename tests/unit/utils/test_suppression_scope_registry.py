@@ -139,27 +139,63 @@ class TestWarnOnceResets:
         assert len(warnings) == 2
 
     def test_two_engine_contexts_each_warn_once_independently(self, caplog):
-        """Workspace mode runs engines concurrently: one project's reset must
-        not swallow another's receipt. Each context that initialized gets its
-        own warned set, so the same missing engine warns once per context."""
-        import contextvars
-
+        """Workspace mode runs engines concurrently: one engine's state must
+        not swallow another's receipt. The warned set is engine-owned (the
+        run's PluginContext) and handed to the matcher, so the same missing
+        engine warns once per engine, and nothing another engine does clears
+        it."""
         entry = _entry({"ctx-engine": {"marker": "RULE-1"}})
         finding = _finding(scanner="ctx-engine")
-        ctx_a = contextvars.copy_context()
-        ctx_b = contextvars.copy_context()
+        engine_a: set = set()
+        engine_b: set = set()
         with caplog.at_level(logging.WARNING):
-            ctx_a.run(registry.reset_unmatched_engine_warnings)
-            ctx_b.run(registry.reset_unmatched_engine_warnings)
-            ctx_a.run(entry.matches, finding)
+            assert not entry.matches(finding, warned_engines=engine_a)
             # A's second match stays deduplicated inside A.
-            ctx_a.run(entry.matches, finding)
-            # B's reset and match must not be absorbed by A's warning.
-            ctx_b.run(entry.matches, finding)
+            assert not entry.matches(finding, warned_engines=engine_a)
+            # B's scan must not be absorbed by A's warning.
+            assert not entry.matches(finding, warned_engines=engine_b)
         warnings = [
             record for record in caplog.records if "ctx-engine" in record.getMessage()
         ]
         assert len(warnings) == 2
+
+    def test_worker_threads_share_the_engine_owned_set(self, caplog):
+        """The set travels on the object, not the context: a worker thread
+        started WITHOUT copy_context (ThreadPoolExecutor's default) still
+        deduplicates within its engine, and a second engine still warns."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        entry = _entry({"pool-engine": {"marker": "RULE-1"}})
+        finding = _finding(scanner="pool-engine")
+        engine_a: set = set()
+        engine_b: set = set()
+        with caplog.at_level(logging.WARNING):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                for _ in range(3):
+                    assert (
+                        pool.submit(
+                            entry.matches, finding, warned_engines=engine_a
+                        ).result()
+                        is False
+                    )
+                assert (
+                    pool.submit(
+                        entry.matches, finding, warned_engines=engine_b
+                    ).result()
+                    is False
+                )
+        warnings = [
+            record for record in caplog.records if "pool-engine" in record.getMessage()
+        ]
+        assert len(warnings) == 2
+
+    def test_the_plugin_context_owns_a_fresh_warned_set_per_run(self, tmp_path):
+        from automated_security_helper.base.plugin_context import PluginContext
+
+        first = PluginContext(source_dir=tmp_path, output_dir=tmp_path / "out")
+        second = PluginContext(source_dir=tmp_path, output_dir=tmp_path / "out")
+        assert first.warned_unmatched_engines == set()
+        assert first.warned_unmatched_engines is not second.warned_unmatched_engines
 
 
 class TestEngineCheckRefusal:

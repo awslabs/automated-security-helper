@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, TypeVar
 
 from automated_security_helper.models.core import (
     PACKAGE_SUPPRESSION_FIELDS,
@@ -64,12 +64,15 @@ def matches_suppression(
     finding: FlatVulnerability,
     suppression: AshSuppression,
     symbol_resolver: Optional[SymbolResolver] = None,
+    warned_engines: Optional[Set[str]] = None,
 ) -> bool:
     """Thin wrapper around ``AshSuppression.matches`` kept for backward compatibility.
 
-    Prefer ``suppression.matches(finding)`` in new code.
+    Prefer ``suppression.matches(finding)`` in new code. ``warned_engines`` is
+    the scan's engine-owned warn-once set
+    (``PluginContext.warned_unmatched_engines``).
     """
-    return suppression.matches(finding, symbol_resolver)
+    return suppression.matches(finding, symbol_resolver, warned_engines)
 
 
 def _rule_id_matches(finding_rule_id: Optional[str], suppression_rule_id: str) -> bool:
@@ -210,6 +213,7 @@ def should_suppress_finding(
     suppressions: List[AshSuppression],
     symbol_resolver: Optional[SymbolResolver] = None,
     where: str = "global_settings.suppressions",
+    warned_engines: Optional[Set[str]] = None,
 ) -> Tuple[bool, Optional[AshSuppression]]:
     """
     Determine if a finding should be suppressed based on the suppression rules.
@@ -221,6 +225,9 @@ def should_suppress_finding(
             Without it, a suppression that sets ``symbol`` matches nothing.
         where: The list's location, which names an entry in a message
             (_has_expired).
+        warned_engines: The scan's engine-owned warn-once set for fail-closed
+            engine blocks (``PluginContext.warned_unmatched_engines``); without
+            one the registry's no-engine fallback applies.
 
     Returns:
         A tuple of (should_suppress, matching_suppression)
@@ -232,7 +239,7 @@ def should_suppress_finding(
         ):
             continue
 
-        if matches_suppression(finding, suppression, symbol_resolver):
+        if matches_suppression(finding, suppression, symbol_resolver, warned_engines):
             return True, suppression
 
     return False, None

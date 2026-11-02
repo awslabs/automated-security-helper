@@ -14,6 +14,7 @@ from typing import (
     List,
     Annotated,
     Optional,
+    Set,
     Tuple,
     TYPE_CHECKING,
 )
@@ -1044,6 +1045,7 @@ class AshSuppression(IgnorePathWithReason):
         self,
         finding: "FlatVulnerability",
         symbol_resolver: "SymbolResolver | None" = None,
+        warned_engines: Optional[Set[str]] = None,
     ) -> bool:
         """Return True if ``finding`` is covered by this suppression rule.
 
@@ -1094,7 +1096,7 @@ class AshSuppression(IgnorePathWithReason):
         if not self._package_matches(finding):
             return False
 
-        if not self._scope_matches(finding):
+        if not self._scope_matches(finding, warned_engines):
             return False
 
         if self.symbol is not None:
@@ -1106,7 +1108,11 @@ class AshSuppression(IgnorePathWithReason):
 
         return True
 
-    def _scope_matches(self, finding: "FlatVulnerability") -> bool:
+    def _scope_matches(
+        self,
+        finding: "FlatVulnerability",
+        warned_engines: Optional[Set[str]] = None,
+    ) -> bool:
         """Whether this suppression's ``scope`` covers ``finding``.
 
         No scope: today's behavior, unchanged. A scope fails closed on every
@@ -1145,13 +1151,20 @@ class AshSuppression(IgnorePathWithReason):
             if finding.scanner is None or finding.scanner not in scope.engines:
                 return False
             if not self._engine_block_matches(
-                finding.scanner, scope.engines[finding.scanner], finding
+                finding.scanner,
+                scope.engines[finding.scanner],
+                finding,
+                warned_engines,
             ):
                 return False
         return True
 
     def _engine_block_matches(
-        self, scanner_name: str, block: Dict[str, Any], finding: "FlatVulnerability"
+        self,
+        scanner_name: str,
+        block: Dict[str, Any],
+        finding: "FlatVulnerability",
+        warned_engines: Optional[Set[str]] = None,
     ) -> bool:
         """Whether the named scanner's plugin accepts ``block`` for ``finding``.
 
@@ -1163,7 +1176,7 @@ class AshSuppression(IgnorePathWithReason):
         """
         hooks = engine_hooks_for(scanner_name)
         if hooks is None:
-            warn_once_unmatched_engine(scanner_name)
+            warn_once_unmatched_engine(scanner_name, warned_engines)
             return False
         return hooks.suppression_scope_matches(block, finding)
 
