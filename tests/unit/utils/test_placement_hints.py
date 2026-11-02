@@ -5,18 +5,17 @@
 
 A known misplacement gets a shaped suggestion naming where the key belongs
 (``move it under scope.engines.cdk-nag``), not merely the nearest spelling.
-Core seeds the spellings it owns; a plugin registers its own at load (cdk-nag
-registers ``applies_to`` and ``resource_path``). The suggestion surfaces in
-both modes: inside the refusal under fail_on_unknown_keys, inside the warning
-otherwise. A key with no map entry falls through to closest_key unchanged.
+The engine-specific spellings are seeded in the static table beside core's
+own (unknown-key warnings are produced at config load, which precedes plugin
+imports, so no import here and no plugin load is needed for them). The
+suggestion surfaces in both modes: inside the refusal under
+fail_on_unknown_keys, inside the warning otherwise. A key with no map entry
+falls through to closest_key unchanged.
 """
 
 import pytest
 from pydantic import ValidationError
 
-# Importing the cdk-nag scanner module is what registers its placement hints,
-# as a plugin load would.
-import automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner  # noqa: F401
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.utils.unknown_keys import (
     WARN_UNKNOWN_KEYS,
@@ -82,6 +81,22 @@ class TestPlacementSuggestions:
         )
         assert "did you mean 'resource_id'?" not in message
         assert "scope.engines" not in message
+
+    def test_a_registered_hint_is_isolated_and_scoped_to_its_kinds(self, monkeypatch):
+        """register_placement_hint stays the plugin API; a test exercising it
+        isolates the session-wide table (monkeypatch.setitem restores it), and
+        the registered hint fires only for its own entry kinds."""
+        from automated_security_helper.utils import unknown_keys
+
+        monkeypatch.setitem(
+            unknown_keys._PLACEMENT_HINTS,
+            "fake_block_key",
+            ("move it under scope.engines.fake", ("suppression",)),
+        )
+        hit = unknown_keys_message(["fake_block_key"], ["path"], "a suppression")
+        miss = unknown_keys_message(["fake_block_key"], ["path"], "an ignore path")
+        assert "move it under scope.engines.fake" in hit
+        assert "move it under scope.engines.fake" not in miss
 
     def test_an_ignore_path_entry_with_resource_gets_no_placement_advice(self):
         from automated_security_helper.models.core import IgnorePathWithReason

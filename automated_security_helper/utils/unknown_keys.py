@@ -213,6 +213,13 @@ def closest_key(key: str, known: Iterable[str]) -> Optional[str]:
 #: (register_placement_hint).
 _PLACEMENT_HINTS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     "resource": ("did you mean 'resource_id'?", ("suppression",)),
+    # cdk-nag's block keys, seeded statically rather than registered when the
+    # scanner module loads: unknown-key warnings are produced at config load,
+    # which PRECEDES plugin imports, so an import-time registration reached
+    # only configs that happened to load after the scanner module did (and
+    # the wording could drift between a load and a later rebuild).
+    "applies_to": ("move it under scope.engines.cdk-nag", ("suppression",)),
+    "resource_path": ("move it under scope.engines.cdk-nag", ("suppression",)),
 }
 
 

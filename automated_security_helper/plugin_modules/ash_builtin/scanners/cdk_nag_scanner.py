@@ -61,7 +61,6 @@ from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.suppression_scope_registry import (
     register_suppression_scope_engine,
 )
-from automated_security_helper.utils.unknown_keys import register_placement_hint
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 # Last-resort copy of the "cdk" extra's contents. The source of truth is
@@ -1600,10 +1599,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 # the plugin manager's own).
 register_suppression_scope_engine("cdk-nag", CdkNagScanner)
 
-# A cdk-nag block key typed at the wrong level (on the entry or the scope)
-# points at the block it belongs in, instead of the nearest spelling.
-register_placement_hint("applies_to", "move it under scope.engines.cdk-nag")
-register_placement_hint("resource_path", "move it under scope.engines.cdk-nag")
+# The placement hints for cdk-nag's block keys (applies_to, resource_path)
+# are seeded statically in utils/unknown_keys.py: unknown-key warnings are
+# produced at config load, which precedes plugin imports, so a registration
+# here never reached them.
 
 
 if __name__ == "__main__":
