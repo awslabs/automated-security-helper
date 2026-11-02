@@ -454,6 +454,11 @@ def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
         ],
         capture_output=True,
         text=True,
+        # ASH writes UTF-8 to a pipe on Windows (utils/log.py). A parent that decodes
+        # it with the ANSI code page loses stdout and stderr to None when one byte has
+        # no mapping there, so the log below raised TypeError whatever the scan did.
+        encoding="utf-8",
+        errors="replace",
         timeout=900,
         env=env,
     )
