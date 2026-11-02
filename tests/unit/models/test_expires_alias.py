@@ -96,6 +96,56 @@ class TestExpiresAlias:
         assert "expiration" in keys
         assert "expires" in keys
 
+    def test_both_spellings_disagreeing_are_refused(self):
+        with pytest.raises(ValidationError) as excinfo:
+            AshSuppression.model_validate(
+                {
+                    "rule_id": "RULE-1",
+                    "path": "src/app.py",
+                    "reason": "test",
+                    "expiration": "2099-12-31",
+                    "expires": "2026-01-01",
+                }
+            )
+        assert "two spellings of one field" in str(excinfo.value)
+
+    def test_an_equal_duplicate_is_accepted_and_stays_applicable(self):
+        entry = AshSuppression.model_validate(
+            {
+                "rule_id": "RULE-1",
+                "path": "src/app.py",
+                "reason": "test",
+                "expiration": "2099-12-31",
+                "expires": "2099-12-31",
+            }
+        )
+        assert entry.expiration == "2099-12-31"
+        # The alias must not survive as an extra, which would silently make
+        # the entry inert.
+        assert not entry.has_unknown_keys
+
+    def test_a_tolerated_disagreement_is_kept_but_inert(self):
+        from automated_security_helper.models.core import (
+            BOTH_EXPIRATION_SPELLINGS_NOTE,
+        )
+        from automated_security_helper.utils.unknown_keys import (
+            TOLERATE_STORED_CONFIG,
+        )
+
+        notes: list = []
+        entry = AshSuppression.model_validate(
+            {
+                "rule_id": "RULE-1",
+                "path": "src/app.py",
+                "reason": "test",
+                "expiration": "2099-12-31",
+                "expires": "2026-01-01",
+            },
+            context={TOLERATE_STORED_CONFIG: notes},
+        )
+        assert BOTH_EXPIRATION_SPELLINGS_NOTE in notes
+        assert entry.has_unknown_keys  # the unconsumed alias marks it inert
+
     def test_expires_is_not_refused_as_unknown(self):
         # The refusal path must not fire for the alias: a key refusal would
         # name it as "Unknown key 'expires'".

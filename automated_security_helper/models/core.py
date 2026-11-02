@@ -50,6 +50,10 @@ if TYPE_CHECKING:
     from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 
+#: What an entry setting both expiration spellings to different values records
+#: under TOLERATE_STORED_CONFIG (IgnorePathWithReason._one_expiration_spelling).
+BOTH_EXPIRATION_SPELLINGS_NOTE = "both expiration spellings, disagreeing"
+
 #: What an entry's expiration that is not a YYYY-MM-DD date records under
 #: TOLERATE_STORED_CONFIG. No value: the reader of a results file names where the
 #: entry is (models/asharp_model.py), since the value is the file's data.
@@ -234,6 +238,38 @@ class IgnorePathWithReason(RedactedSection):
         message and for the results-file exception.
         """
         return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_expiration_spelling(cls, data: Any, info: ValidationInfo) -> Any:
+        """An entry sets ``expiration`` or its alias ``expires``, not both.
+
+        Both set, pydantic would take ``expiration`` and keep ``expires`` as an
+        extra, so a shorter ``expires`` the author meant would be silently
+        ignored or the entry silently inert. A disagreement is refused with
+        which key to keep (as resource_id / scope.resource_id disagreements
+        are); an equal duplicate is accepted, with the alias dropped so it does
+        not land in the extras. Under TOLERATE_STORED_CONFIG a disagreement is
+        recorded and kept; the extra then marks the entry as one never applied.
+        """
+        if (
+            not isinstance(data, dict)
+            or "expiration" not in data
+            or "expires" not in data
+        ):
+            return data
+        if data["expiration"] == data["expires"]:
+            kept = dict(data)
+            del kept["expires"]
+            return kept
+        notes = tolerated_notes(info)
+        if notes is not None:
+            notes.append(BOTH_EXPIRATION_SPELLINGS_NOTE)
+            return data
+        raise ValueError(
+            "expiration and expires are two spellings of one field and "
+            "disagree; keep one"
+        )
 
     @field_validator("expiration", mode="before")
     @classmethod
