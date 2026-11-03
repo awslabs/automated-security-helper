@@ -3369,7 +3369,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>3</td>
-<td>The configuration cannot be used: the config file that <code>--config</code> or <code>ASH_CONFIG</code> names, or that discovery finds, does not exist, is not a regular file, cannot be read, is not UTF-8, or does not parse; it does not validate (an unknown key in a suppression, an ignore path, or a plugin's options makes it invalid, and so does one plugin's section written under two spellings, such as <code>detect-secrets</code> and <code>DETECT_SECRETS</code>); an override does not parse or does not validate; a config file an MCP client delivered sets a field the server's policy denies; or two plugins of one type that the scan loads have the same name or names that read as one (<a href="../../plugins/#package-a-third-party-plugin">Package a third-party plugin</a>)</td>
+<td>The configuration cannot be used: the config file that <code>--config</code> or <code>ASH_CONFIG</code> names, or that discovery finds, does not exist, is not a regular file, cannot be read, is not UTF-8, or does not parse; it does not validate (an unknown key in a plugin's options makes it invalid, and so does one plugin's section written under two spellings, such as <code>detect-secrets</code> and <code>DETECT_SECRETS</code>; an unknown key in a suppression or an ignore-path entry instead warns and leaves the entry applying to nothing, unless <code>fail_on_unknown_keys: true</code> is set, the default from ASH v4); an override does not parse or does not validate; a config file an MCP client delivered sets a field the server's policy denies; or two plugins of one type that the scan loads have the same name or names that read as one (<a href="../../plugins/#package-a-third-party-plugin">Package a third-party plugin</a>)</td>
 </tr>
 <tr>
 <td>3</td>
@@ -3805,8 +3805,8 @@ SOFTWARE.
 <!-- doctest: run expect-exit=3 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ash<span class="w"> </span>config<span class="w"> </span>update<span class="w"> </span>--set<span class="w"> </span><span class="nv">fail_on_finding</span><span class="o">=</span><span class="nb">false</span>
 </span></code></pre></div>
-<p>A config that a scan refuses exits 3 from <code>ash config validate</code>, here for the misspelled <code>rule_id</code>:</p>
-<!-- doctest: run expect-exit=3 -->
+<p>A misspelled suppression key no longer makes the config invalid on its own: the entry is kept but suppresses nothing until the key is fixed, and a scan warns, naming the key with a did-you-mean. <code>ash config validate</code> accepts the file (exit 0), here with <code>ruleId</code> for <code>rule_id</code>:</p>
+<!-- doctest: run expect-exit=0 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>misspelled.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
 </span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="s">project_name: payments-api</span>
 </span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="s">global_settings:</span>
@@ -3816,6 +3816,19 @@ SOFTWARE.
 </span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="s">      reason: Fixture value, not a real password</span>
 </span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="s">EOF</span>
 </span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>ash<span class="w"> </span>config<span class="w"> </span>validate<span class="w"> </span>--config<span class="w"> </span>misspelled.yaml
+</span></code></pre></div>
+<p>With <code>fail_on_unknown_keys: true</code> the same typo makes the config one a scan refuses, so <code>ash config validate</code> names the key and exits 3. ASH v4 makes that the default:</p>
+<!-- doctest: run expect-exit=3 -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>misspelled-strict.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="s">project_name: payments-api</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="s">fail_on_unknown_keys: true</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="s">global_settings:</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="s">  suppressions:</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="s">    - path: app.py</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="s">      ruleId: SECRET-SECRET-KEYWORD</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="s">      reason: Fixture value, not a real password</span>
+</span><span id="__span-23-9"><a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="s">EOF</span>
+</span><span id="__span-23-10"><a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>ash<span class="w"> </span>config<span class="w"> </span>validate<span class="w"> </span>--config<span class="w"> </span>misspelled-strict.yaml
 </span></code></pre></div>
 <h2 id="other">Other commands<a class="headerlink" href="#other" title="Permanent link">&para;</a></h2>
 <table>
@@ -3890,8 +3903,8 @@ SOFTWARE.
 </tbody>
 </table>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nv">tool</span><span class="o">=</span>not-a-tool
-</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>ash<span class="w"> </span>dependencies<span class="w"> </span>install<span class="w"> </span>--tool<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">tool</span><span class="si">}</span><span class="s2">&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nv">tool</span><span class="o">=</span>not-a-tool
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>ash<span class="w"> </span>dependencies<span class="w"> </span>install<span class="w"> </span>--tool<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">tool</span><span class="si">}</span><span class="s2">&quot;</span>
 </span></code></pre></div>
 
 

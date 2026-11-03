@@ -1849,6 +1849,17 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
+  <a href="#global_settingssuppressionsscope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.suppressions[].scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#global_settingsmcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2019,6 +2030,17 @@ SOFTWARE.
     <span class="md-ellipsis">
       
         Workspace policy workspace.suppressions[]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-policy-workspacesuppressionsscope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace.suppressions[].scope
       
     </span>
   </a>
@@ -3326,6 +3348,17 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
+  <a href="#global_settingssuppressionsscope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        global_settings.suppressions[].scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#global_settingsmcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3503,6 +3536,17 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
+  <a href="#workspace-policy-workspacesuppressionsscope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace policy workspace.suppressions[].scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#workspace-policy-workspaceignore_paths" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3666,6 +3710,12 @@ SOFTWARE.
 <td>boolean</td>
 <td><code>true</code></td>
 <td>Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. One ending overrides this setting: a run where ASH could not stop a scanner's tool exits 1 either way, because the tool may still be running and writing into the output directory.</td>
+</tr>
+<tr>
+<td><a id="fail_on_unknown_keys"></a><code>fail_on_unknown_keys</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>Whether an unknown key in a suppression or ignore-path entry refuses the config at load. False (the default) loads the config with a warning that names the key, with a did-you-mean, and the entry it sits in suppresses nothing until it is fixed, so a typo can never widen a suppression. True refuses the config, naming the same key. ASH v4 flips the default to True; set it True now to adopt the error early.</td>
 </tr>
 <tr>
 <td><a id="honor_ignore_files"></a><code>honor_ignore_files</code></td>
@@ -3836,7 +3886,7 @@ SOFTWARE.
 <td><a id="global_settings.ignore_paths.expiration"></a><code>expiration</code></td>
 <td>string or null</td>
 <td><code>null</code></td>
-<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.</td>
 </tr>
 <tr>
 <td><a id="global_settings.ignore_paths.client_supplied"></a><code>client_supplied</code></td>
@@ -3877,7 +3927,7 @@ SOFTWARE.
 <td><a id="global_settings.suppressions.expiration"></a><code>expiration</code></td>
 <td>string or null</td>
 <td><code>null</code></td>
-<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.</td>
 </tr>
 <tr>
 <td><a id="global_settings.suppressions.client_supplied"></a><code>client_supplied</code></td>
@@ -3926,6 +3976,52 @@ SOFTWARE.
 <td>string or null</td>
 <td><code>null</code></td>
 <td>(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.scope"></a><code>scope</code></td>
+<td><a href="#section-global_settings-suppressions-scope">section</a> or null</td>
+<td><code>null</code></td>
+<td>(Optional) Scope the suppression to a resource identity, a resource type, or named engines' findings; see SuppressionScope. Omit it to keep today's matching. An empty scope is refused: match-all is the absence of the field.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.resource_id"></a><code>resource_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="global_settingssuppressionsscope"><a id="section-global_settings-suppressions-scope"></a><code>global_settings.suppressions[].scope</code><a class="headerlink" href="#global_settingssuppressionsscope" title="Permanent link">&para;</a></h3>
+<p>What a suppression is scoped to beyond path, lines and package fields.</p>
+<p>A key not listed here is accepted and kept, without validation.</p>
+<!-- doctest: options of=global_settings.suppressions.scope -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="global_settings.suppressions.scope.resource_id"></a><code>resource_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about the resource with this identity, as the producing engine reports it (for cdk-nag, the CDK construct path). Literal match first, then glob; case-sensitive. Findings that carry no resource identity never match.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.scope.resource_type"></a><code>resource_type</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about resources of this type (e.g. 'AWS::IAM::Policy'). Literal match first, then glob; case-insensitive. Findings that carry no resource type never match.</td>
+</tr>
+<tr>
+<td><a id="global_settings.suppressions.scope.engines"></a><code>engines</code></td>
+<td>mapping of string to mapping of string to any or null</td>
+<td><code>null</code></td>
+<td>(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin.</td>
 </tr>
 </tbody>
 </table>
@@ -4612,7 +4708,7 @@ SOFTWARE.
 <td><a id="workspace-policy.workspace.suppressions.expiration"></a><code>expiration</code></td>
 <td>string or null</td>
 <td><code>null</code></td>
-<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.</td>
 </tr>
 <tr>
 <td><a id="workspace-policy.workspace.suppressions.client_supplied"></a><code>client_supplied</code></td>
@@ -4662,6 +4758,52 @@ SOFTWARE.
 <td><code>null</code></td>
 <td>(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.</td>
 </tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.scope"></a><code>scope</code></td>
+<td><a href="#workspace-section-workspace-suppressions-scope">section</a> or null</td>
+<td><code>null</code></td>
+<td>(Optional) Scope the suppression to a resource identity, a resource type, or named engines' findings; see SuppressionScope. Omit it to keep today's matching. An empty scope is refused: match-all is the absence of the field.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.resource_id"></a><code>resource_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="workspace-policy-workspacesuppressionsscope"><a id="workspace-section-workspace-suppressions-scope"></a>Workspace policy <code>workspace.suppressions[].scope</code><a class="headerlink" href="#workspace-policy-workspacesuppressionsscope" title="Permanent link">&para;</a></h3>
+<p>What a suppression is scoped to beyond path, lines and package fields.</p>
+<p>A key not listed here is accepted and kept, without validation.</p>
+<!-- doctest: options of=workspace-policy.workspace.suppressions.scope -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.scope.resource_id"></a><code>resource_id</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about the resource with this identity, as the producing engine reports it (for cdk-nag, the CDK construct path). Literal match first, then glob; case-sensitive. Findings that carry no resource identity never match.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.scope.resource_type"></a><code>resource_type</code></td>
+<td>string or null</td>
+<td><code>null</code></td>
+<td>(Optional) Only suppress findings about resources of this type (e.g. 'AWS::IAM::Policy'). Literal match first, then glob; case-insensitive. Findings that carry no resource type never match.</td>
+</tr>
+<tr>
+<td><a id="workspace-policy.workspace.suppressions.scope.engines"></a><code>engines</code></td>
+<td>mapping of string to mapping of string to any or null</td>
+<td><code>null</code></td>
+<td>(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="workspace-policy-workspaceignore_paths"><a id="workspace-section-workspace-ignore_paths"></a>Workspace policy <code>workspace.ignore_paths[]</code><a class="headerlink" href="#workspace-policy-workspaceignore_paths" title="Permanent link">&para;</a></h3>
@@ -4695,7 +4837,7 @@ SOFTWARE.
 <td><a id="workspace-policy.workspace.ignore_paths.expiration"></a><code>expiration</code></td>
 <td>string or null</td>
 <td><code>null</code></td>
-<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.</td>
+<td>(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.</td>
 </tr>
 <tr>
 <td><a id="workspace-policy.workspace.ignore_paths.client_supplied"></a><code>client_supplied</code></td>

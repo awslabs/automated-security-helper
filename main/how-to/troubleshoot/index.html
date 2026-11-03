@@ -4146,22 +4146,24 @@ misspelled name among valid ones in <code>--scanners</code> is not a usage error
 <div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ERROR (3) Invalid configuration: Configuration validation failed for &#39;/home/me/repo/.ashrc.yaml&#39;: Invalid value at &#39;global_settings.fail_on_findings&#39;: Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ashrc.yaml
 </span></code></pre></div>
 <p>Cause: the configuration file has a key ASH does not know below the top level, or a
-value of the wrong type anywhere, top level included. A suppression, an ignore path, or
-a plugin's options with a key ASH does not know is refused too, and the message lists
-the keys it accepts:</p>
+value of the wrong type anywhere, top level included. A plugin's options with a key ASH
+does not know is refused too. In a suppression or an ignore path an unknown key warns
+by default and the entry suppresses nothing until it is fixed; with
+<code>fail_on_unknown_keys: true</code> (the default from ASH v4) it is refused the same way, and
+the message lists the keys the entry accepts:</p>
 <!-- doctest: run expect-exit=3 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="s">global_settings:</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s">  suppressions:</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s">    - rule_id: B602</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s">      path: app.py</span>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="s">      reason: Commands come from a fixed allowlist</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="s">      expires: &quot;2027-04-30&quot;</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="s">fail_on_unknown_keys: true</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s">global_settings:</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s">  suppressions:</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s">    - rule: B602</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="s">      path: app.py</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="s">      reason: Commands come from a fixed allowlist</span>
 </span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="s">EOF</span>
 </span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>ash<span class="w"> </span>config<span class="w"> </span>validate
 </span></code></pre></div>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>❌ 1 error(s); a scan refuses the configuration because of these:
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>  1. Invalid value at &#39;global_settings.suppressions[0]&#39;: Value error, Unknown key &#39;expires&#39; (did you mean &#39;expiration&#39;?) in a suppression. Accepted keys: expiration, line_end, line_start, package_name, package_path, package_version, path, reason, rule_id, symbol.
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>  1. Invalid value at &#39;global_settings.suppressions[0]&#39;: Value error, Unknown key &#39;rule&#39; (did you mean &#39;rule_id&#39;?) in a suppression. Accepted keys: expiration, expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
 </span></code></pre></div>
 <p>A common case is an unquoted <code>expiration</code> date in a suppression: YAML reads it as a
 date, and ASH expects text. Quote it, as in <code>"2027-04-30"</code>.</p>

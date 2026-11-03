@@ -3545,10 +3545,14 @@ and put in the date the agent gave you. The project has no config yet, so create
 </span></code></pre></div>
 <p>It checks the config a scan of the project would use, the way the scan loads it, and ends
 with <code>Configuration is valid! A scan accepts it.</code> It may also warn that <code>project_name</code> is not
-set, which a scan accepts. A wrong value, a missing required field such as <code>reason</code>, or a
-misspelled key such as <code>expiry</code> for <code>expiration</code> makes it name the field and exit with code 3:</p>
+set, which a scan accepts. A typo in an optional key such as <code>expiry</code> for <code>expiration</code> does
+not make the file invalid: validate still accepts it, the entry suppresses nothing until the
+key is fixed, and the scan that loads the config warns, naming the key with a did-you-mean
+(<code>fail_on_unknown_keys: true</code> makes it an error, the default from ASH v4). A wrong value or a
+missing required field such as <code>reason</code> makes validate name the field and exit with code 3; a
+typo in a required key does the same, because the required field then goes missing:</p>
 <!-- doctest: run expect-exit=3 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sed<span class="w"> </span><span class="s1">&#39;s/expiration:/expiry:/&#39;</span><span class="w"> </span>.ashrc.yaml<span class="w"> </span>&gt;<span class="w"> </span>typo.yaml
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sed<span class="w"> </span><span class="s1">&#39;s/reason:/reasn:/&#39;</span><span class="w"> </span>.ashrc.yaml<span class="w"> </span>&gt;<span class="w"> </span>typo.yaml
 </span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>ash<span class="w"> </span>config<span class="w"> </span>validate<span class="w"> </span>--config<span class="w"> </span>typo.yaml
 </span></code></pre></div>
 <p>Then delete the copy:</p>
