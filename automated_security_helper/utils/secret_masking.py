@@ -455,7 +455,7 @@ _SYNTHETIC_GUID = "-".join(("0" * 8, "0" * 4, "4" + "0" * 3, "8" + "0" * 3, "0" 
 #: GUID, ``dottedQuadFileVersion``, a language tag and a MIME type. A field whose
 #: text was masked to something its pattern refuses takes the first of these the
 #: pattern accepts, which keeps the report loadable without keeping the value.
-_SYNTHETIC_PATTERN_VALUES = (_SYNTHETIC_GUID, "0.0.0.0", "en", "x/x")
+_SYNTHETIC_PATTERN_VALUES = (_SYNTHETIC_GUID, "0.0.0.0", "en", "x/x")  # nosec B104
 #: The GUID fields of a report already reduced to plain JSON, which carries no
 #: declarations (``deprecatedGuids`` holds a list of GUID strings). ``guid`` and
 #: ``correlationGuid`` are skipped outright (``_SKIPPED_FIELDS``).
@@ -2258,7 +2258,7 @@ def _mask_url(node: AnyUrl, index: _SecretIndex) -> Any:
 
     A pydantic URL (``versionControlProvenance.repositoryUri``,
     ``hostedViewerUri``) is neither a str nor a model, and a credential written
-    into it (``https://user:token@host/repo``) was kept.
+    into it (``https://user:token@host/repo``) was kept.  # pragma: allowlist secret
 
     ``str(node)`` is the URL as pydantic writes it, with the userinfo and the path
     percent-encoded, so a value with ``@``, ``:``, ``/``, ``#``, ``?``, ``%`` or a
@@ -2957,7 +2957,7 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: quote_plus(value, safe=""),
     # A URL's userinfo as pydantic writes it (the WHATWG spelling): ``@ : / ; = [
     # \ ] ^ |`` percent-encoded, ``! $ & ' ( ) * + ,`` and ``%`` left as they are.
-    # A credential written into a URL as is (``https://user:pa@ss!1@host``) is
+    # A credential written into a URL as is (``https://user:pa@ss!1@host``) is  # pragma: allowlist secret
     # in ``str(url)`` in this spelling, which neither form above matches.
     lambda value: quote(value, safe="!$&'()*+,%"),
     # A URL's path and query as pydantic writes them: the path leaves ``@ : = ;

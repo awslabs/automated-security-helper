@@ -153,7 +153,7 @@ def _bandit(message):
 class TestAUrlTypedField:
     #: Characters that percent-encoding changes: ``@ : / # ? %`` and a letter
     #: outside ASCII (U+00FC).
-    PASSWORD = "pa@ss:w/rd#9?x%" + chr(0xFC)
+    PASSWORD = "pa@ss:w/rd#9?x%" + chr(0xFC)  # pragma: allowlist secret
 
     def _masked_uri(self, password):
         url = f"https://user:{quote(password, safe='')}@example.com/repo"

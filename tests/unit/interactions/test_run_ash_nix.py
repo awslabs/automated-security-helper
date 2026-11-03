@@ -270,7 +270,7 @@ class TestShownFlakeRef:
                 id="access-token-between-others",
             ),
             pytest.param(
-                "git+https://alice:hunter2@host/repo?API_KEY=hunter2",
+                "git+https://alice:hunter2@host/repo?API_KEY=hunter2",  # pragma: allowlist secret
                 "git+https://<userinfo>@host/repo?API_KEY=<hidden>",
                 id="userinfo-and-query",
             ),
@@ -689,7 +689,7 @@ class TestRunAshNix:
         monkeypatch.setattr(module, "ASH_LOGGER", recorder)
         monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
         monkeypatch.setenv(
-            ASH_NIX_FLAKE_REF_ENV_VAR, "git+https://user:token-1@host/org/repo"
+            ASH_NIX_FLAKE_REF_ENV_VAR, "git+https://user:token-1@host/org/repo"  # pragma: allowlist secret
         )
         monkeypatch.setattr(module, "find_executable", lambda _: "/usr/bin/nix")
 

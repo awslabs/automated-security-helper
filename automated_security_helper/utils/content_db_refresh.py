@@ -834,7 +834,7 @@ def _say_grype_auto_update_once(setting: str, cache: Path) -> None:
             return
         _grype_notices.add(setting)
     ASH_LOGGER.warning(
-        f"The operator's {setting} turns grype's own database update off, which "
+        f"The operator's {setting} turns grype's own database update off, which "  # nosec B608
         "ASH does not read as a request to leave its own refresh out: ASH still "
         f"updates grype's database in {cache.as_posix()} before the scan, because "
         "the scanner cannot update it itself. To keep ASH off the database "

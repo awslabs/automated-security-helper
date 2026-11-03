@@ -74,7 +74,7 @@ def installed(tmp_path, monkeypatch):
 def test_a_shell_command_reaches_the_runner_with_shell_true(installed):
     calls = installed(
         [
-            CustomCommand(args=["echo $HOME"], shell=True),
+            CustomCommand(args=["echo $HOME"], shell=True),  # nosec B604
             CustomCommand(args=["echo", "ready"]),
         ]
     )

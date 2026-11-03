@@ -50,7 +50,7 @@ from automated_security_helper.utils.uv_tool_runner import UVToolRunnerError
 
 pytestmark = pytest.mark.unit
 
-SECRET = "ENVCANARY-uvlow-31337"
+SECRET = "ENVCANARY-uvlow-31337"  # pragma: allowlist secret #gitleaks:allow
 RUNNER = "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
 
 

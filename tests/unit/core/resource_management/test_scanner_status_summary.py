@@ -163,7 +163,7 @@ class TestTheReasonIsShownAsAnErrorMessageIs:
         assert "\n" not in detail
 
     def test_an_environment_value_is_redacted(self, tmp_path):
-        secret = "s3cr3t-Value-zqxj-ptlm-rwvn"
+        secret = "s3cr3t-Value-zqxj-ptlm-rwvn"  # pragma: allowlist secret
         _write_results(
             tmp_path, self._skipped_with(f"could not build: {secret} was refused")
         )
