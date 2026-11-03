@@ -5092,7 +5092,11 @@ def _resolve_config(
                 # expected of the file, as before.
                 expect = discovery.selected.identity
                 confinement_dir = source_dir
-                discovered_label = discovery.selected.label
+                # The resolved form: a file ASH finds on its own is announced
+                # by its resolved path, every symbolic link followed, which
+                # platform-teams.md's `pwd -P` check greps for; a --config is
+                # announced as named (run_ash_scan), never through this label.
+                discovered_label = discovery.selected.resolved_label
                 ASH_LOGGER.verbose(
                     f"Found configuration file at: {config_path.as_posix()}",
                     extra=NO_MARKUP,
