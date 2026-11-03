@@ -4280,14 +4280,43 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     checked by workspace/execution.py before it is created; here a workspace run's
     ``projects`` and spool directories are checked with the rest.
 
-    Container mode first applies its own link rule: the output directory is mounted
-    read-write at ``/out``, so the scan inside the container would write wherever a
-    link leads (``container_output_dir_refusal``). The general check then runs as
-    in every other mode, for the paths that rule does not name. Either refusal
-    exits OUTPUT_DIR_REFUSED_EXIT_CODE (3).
+    The CLI makes the same refusal earlier, before its writability probe
+    (:func:`refuse_output_dir_links` from ``cli/scan._settle_output_dir``); this
+    one stays for the callers that do not come through the CLI, the MCP scan
+    runner among them.
     """
-    if opts.mode == RunMode.container:
-        refusal = container_output_dir_refusal(opts.source_dir, opts.output_dir)
+    refuse_output_dir_links(
+        opts.source_dir,
+        opts.output_dir,
+        container=opts.mode == RunMode.container,
+        workspace=opts.workspace_plan is not None,
+    )
+
+
+def refuse_output_dir_links(
+    source_dir: str | Path | None,
+    output_dir: str | Path | None,
+    *,
+    container: bool = False,
+    workspace: bool = False,
+) -> None:
+    """The symlinked-output-directory refusal, for a caller with no ScanOptions yet.
+
+    The one implementation every entry point routes through: ``run_ash_scan``
+    (:func:`_refuse_symlinked_output_dir`) and the CLI's ``_settle_output_dir``,
+    which must refuse the link BEFORE its writability probe makes and removes a
+    file in the directory (exit-codes.md: "before the check that the directory
+    can be written"), since that probe follows a link and moves the target's
+    mtime.
+
+    With ``container``, container mode's own link rule runs first: the output
+    directory is mounted read-write at ``/out``, so the scan inside the container
+    would write wherever a link leads (``container_output_dir_refusal``). The
+    general check then runs as in every other mode, for the paths that rule does
+    not name. Either refusal exits OUTPUT_DIR_REFUSED_EXIT_CODE (3).
+    """
+    if container:
+        refusal = container_output_dir_refusal(source_dir, output_dir)
         if refusal is not None:
             secho(str(refusal), fg=typer.colors.RED)
             raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
@@ -4298,9 +4327,9 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
 
     try:
         refuse_linked_output_dir(
-            opts.source_dir,
-            opts.output_dir,
-            workspace=opts.workspace_plan is not None,
+            source_dir,
+            output_dir,
+            workspace=workspace,
         )
     except OutputDirLinkRefused as refusal:
         # The reason names the output directory, whose path is the caller's

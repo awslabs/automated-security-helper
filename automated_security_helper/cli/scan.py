@@ -56,6 +56,7 @@ from automated_security_helper.interactions.run_ash_container import (
 )
 from automated_security_helper.interactions.run_ash_scan import (
     PRECOMMIT_MODE_SCANNERS,
+    refuse_output_dir_links,
     resolve_workspace_execution_config,
     resolved_console_log_level,
     run_ash_scan,
@@ -409,15 +410,23 @@ def _settle_output_dir(
     output_dir: str | Path | None,
     use_existing: bool,
     ignore_suppressions: bool = False,
+    *,
+    mode: RunMode | str | None = None,
+    workspace: bool = False,
 ) -> tuple[str | Path, str | None]:
     """The output directory the scan writes to, and the existing results it reads.
 
     Defaults ``output_dir`` to ``<source_dir>/.ash/ash_output``, moves it there when
-    it is the source directory itself, refuses one the scan would clear the scanned
-    tree through, refuses one that cannot be written into, refuses
+    it is the source directory itself, refuses one that is a symlink or is reached
+    through one (exit 3, before anything here writes), refuses one the scan would
+    clear the scanned tree through, refuses one that cannot be written into, refuses
     ``--use-existing`` together with ``--ignore-suppressions``, and resolves
     ``--use-existing`` to the results file or refuses when it is not there. Every
     refusal exits, so the caller gets back only a pair the scan can run with.
+
+    ``mode`` chooses container mode's own wording for the link refusal, and
+    ``workspace`` extends it to the workspace directories; see
+    :func:`refuse_output_dir_links`.
 
     Called where the real run settles them, and from the workspace dry run before
     it prints its plan, so a dry run that exits 0 describes a command line the
@@ -447,6 +456,23 @@ def _settle_output_dir(
             "collisions and potential impact to source code: "
             f"{escape_markup(Path(output_dir).as_posix())}[/bold yellow]"
         )
+    # The linked-output refusal, before anything below can write. exit-codes.md
+    # promises a linked output directory is refused in every mode BEFORE the check
+    # that the directory can be written, and output_dir_refusal further down proves
+    # writability by making a file in the directory and removing it, which follows
+    # a link at the output directory, or at a component on the way to it, and moves
+    # the link target's mtime. Every CLI run -- `ash scan`, `ash` with no
+    # subcommand, `--mode container` with and without --no-run, and `--mode nix` --
+    # settles its output directory here before run_ash_scan's own refusal runs, so
+    # this is where the refusal has to come first: exit 3, nothing made, the link's
+    # target keeps its entries and mtime. One implementation, shared with
+    # run_ash_scan (refuse_output_dir_links).
+    refuse_output_dir_links(
+        source_dir,
+        output_dir,
+        container=mode is not None and RunMode(mode) == RunMode.container,
+        workspace=workspace,
+    )
     output_resolved = _resolved(output_dir)
     for working_dir in OUTPUT_WORKING_DIRS:
         cleared = output_resolved.joinpath(working_dir)
@@ -1687,7 +1713,12 @@ def run_ash_scan_cli_command(
     # The output directory's default, the collision adjustment, its refusals and
     # --use-existing, in one place for the real run and the workspace dry run.
     output_dir, existing_results = _settle_output_dir(
-        source_dir, output_dir, use_existing, ignore_suppressions
+        source_dir,
+        output_dir,
+        use_existing,
+        ignore_suppressions,
+        mode=mode,
+        workspace=workspace_plan is not None,
     )
     if workspace_plan is not None and dry_run:
         # After the preflight above, in the real run's order, so the dry run
