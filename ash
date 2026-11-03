@@ -111,7 +111,14 @@ shown() (
   if has_format_character "$1"; then
     LC_ALL=C
     printf '%q' "$1"
-  elif [[ "$1" == *[![:print:]]* || "$1" == *\\* || "$1" == *\$\'* ]]; then
+  elif [[ "$1" == *[![:print:]]* ]]; then
+    # A value holding a non-printable (Cc) is quoted in the C locale too: in a
+    # UTF-8 locale this bash's %q leaves a multibyte control's lead byte raw
+    # and escapes only its final byte, so part of the sequence still reached
+    # the terminal. In the C locale every byte of it prints as octal.
+    LC_ALL=C
+    printf '%q' "$1"
+  elif [[ "$1" == *\\* || "$1" == *\$\'* ]]; then
     printf '%q' "$1"
   else
     printf '%s' "$1"

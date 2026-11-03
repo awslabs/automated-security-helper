@@ -75,6 +75,9 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
     ScannerTargetStatusInfo,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScannerConfig,
+)
 
 # The shard fixtures live in tests/unit/cli/merge_shard_support.py, so a test module
 # that needs shards does not have to import this one. They are imported back here
@@ -3472,20 +3475,28 @@ class TestPythonOnlyShardsNameTheFlagThatLeftScannersOut:
             if needle in record.getMessage()
         ]
 
+    # The non-Python set whose members the PLATFORM enables by default.
+    # OpengrepScannerConfig.enabled defaults to False on Windows, and a
+    # default-disabled scanner's skipped reason is the disabled one, never
+    # PYTHON_ONLY_SKIPPED_REASON, so it enters no left-out or owner set there.
     NOT_PYTHON_ONLY = [
-        "actionlint",
-        "cdk-nag",
-        "cfn-guard",
-        "cfn-nag",
-        "ferret-scan",
-        "gitleaks",
-        "grype",
-        "npm-audit",
-        "opengrep",
-        "snyk-code",
-        "syft",
-        "trivy",
-        "trivy-repo",
+        scanner
+        for scanner, enabled_by_default in [
+            ("actionlint", True),
+            ("cdk-nag", True),
+            ("cfn-guard", True),
+            ("cfn-nag", True),
+            ("ferret-scan", True),
+            ("gitleaks", True),
+            ("grype", True),
+            ("npm-audit", True),
+            ("opengrep", OpengrepScannerConfig().enabled),
+            ("snyk-code", True),
+            ("syft", True),
+            ("trivy", True),
+            ("trivy-repo", True),
+        ]
+        if enabled_by_default
     ]
 
     def test_the_scanners_python_only_left_out_are_not_a_hole(self, capture, tmp_path):

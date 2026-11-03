@@ -41,6 +41,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
+#: The whole module measures POSIX semantics: ./ash is the POSIX wrapper
+#: (Windows runs the PowerShell wrapper), Git Bash receives drive-lettered
+#: arguments the POSIX walk cannot judge (its positive controls fail there),
+#: chmod 0o000 makes no directory unsearchable on Windows, and the Win32 path
+#: parser collapses the link and dotdot layouts lexically before the
+#: filesystem sees them, so the failing shapes cannot exist on that runner.
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="POSIX wrapper and POSIX link/permission semantics"
+)
+
 
 def _fact(cell: str, **facts: Any) -> None:
     print("GATE|%s|%s" % (cell, "|".join("%s=%r" % (k, v) for k, v in facts.items())))

@@ -361,6 +361,8 @@ def test_paths_are_normalized_the_same_way_everywhere(tmp_path):
     assert relative_path(str(tmp_path / "src" / "app.py"), tmp_path) == "src/app.py"
     assert relative_path(f"{tmp_path}/x/../src/app.py", tmp_path) == "src/app.py"
     assert relative_path("C:\\repo\\src\\app.py", "C:\\repo") == "src/app.py"
-    outside = Path("/elsewhere/app.py")
-    assert relative_path(str(outside), tmp_path) == outside.as_posix()
+    # The POSIX literal itself: str(Path(...)) would respell it with
+    # backslashes on Windows, which the function keeps as POSIX file-name
+    # characters by contract, so the WindowsPath round-trip is not the input.
+    assert relative_path("/elsewhere/app.py", tmp_path) == "/elsewhere/app.py"
     assert relative_path(None) is None

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import fnmatch
+import warnings
 from typing import (
     Any,
     ClassVar,
@@ -45,6 +46,7 @@ from automated_security_helper.utils.symbol_spans import is_valid_symbol
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
     tolerated_notes,
+    warned_notes,
 )
 
 if TYPE_CHECKING:
@@ -55,6 +57,29 @@ if TYPE_CHECKING:
 #: What an entry setting both expiration spellings to different values records
 #: under TOLERATE_STORED_CONFIG (IgnorePathWithReason._one_expiration_spelling).
 BOTH_EXPIRATION_SPELLINGS_NOTE = "both expiration spellings, disagreeing"
+
+#: The deprecation a config read under the ``expiration`` spelling gets.
+#: ``expires`` is the canonical spelling; ``expiration`` is the accepted
+#: alternative until ASH v4 removes it.
+EXPIRATION_SPELLING_DEPRECATION = (
+    "The 'expiration' key is a deprecated spelling of 'expires' and will be "
+    "removed in ASH v4; write 'expires'."
+)
+
+
+def _warn_expiration_spelling() -> None:
+    """One ``DeprecationWarning`` per read of the ``expiration`` spelling.
+
+    A Python warning, not an ``ASH_LOGGER`` line: entries are validated
+    wherever a config or an override is read, so a logger line would land in
+    every command's output (and in the committed CLI snapshots) for a spelling
+    that still works. The schema, the reference docs and the validator wording
+    all name the deprecation too; the v4 removal turns the alias into the
+    ordinary unknown-key refusal. ``stacklevel`` is left at the default: the
+    caller is pydantic's validator machinery, so no user frame is nearer.
+    """
+    warnings.warn(EXPIRATION_SPELLING_DEPRECATION, DeprecationWarning)
+
 
 #: What an entry's expiration that is not a YYYY-MM-DD date records under
 #: TOLERATE_STORED_CONFIG. No value: the reader of a results file names where the
@@ -207,32 +232,34 @@ def value_at(container: Any, keys: Tuple[str, ...]) -> Any:
     return value
 
 
-def _entry_schema_admits_expires(schema: Dict[str, Any]) -> None:
-    """The entry models' published schema: closed, and with the ``expires`` alias.
+def _entry_schema_admits_expiration(schema: Dict[str, Any]) -> None:
+    """The entry models' published schema: closed, and with the ``expiration`` alias.
 
     ``additionalProperties: false`` says what a config file may contain (the
     results schema reopens it for the stored-config tolerance,
-    ``schemas/generate_schemas.py``). The loader also accepts ``expires`` as an
-    alias of ``expiration`` (``AliasChoices`` on the field), which pydantic
-    publishes nowhere in the schema, so a schema-validating surface (an editor
-    bound to the published schema, a CI check, an MCP client reading the served
-    copy) flagged the documented alias as an unknown property while ASH loaded
-    it. The alias is published here as its own property, mirroring
-    ``expiration``'s shape, with a description that names it an alias.
+    ``schemas/generate_schemas.py``). The loader also accepts ``expiration`` as
+    a deprecated alias of ``expires`` (``AliasChoices`` on the field, removed in
+    ASH v4), which pydantic publishes nowhere in the schema, so a
+    schema-validating surface (an editor bound to the published schema, a CI
+    check, an MCP client reading the served copy) would flag the documented
+    alias as an unknown property while ASH loaded it. The alias is published
+    here as its own property, mirroring ``expires``'s shape, with a description
+    that names it deprecated and its removal.
     """
     schema["additionalProperties"] = False
     properties = schema.get("properties")
-    if isinstance(properties, dict) and "expiration" in properties:
-        expires = dict(properties["expiration"])
-        expires["title"] = "Expires"
-        expires["description"] = (
-            "(Optional) Alias of 'expiration', accepted when a config is read; "
-            "the entry is written and stored as 'expiration'."
+    if isinstance(properties, dict) and "expires" in properties:
+        expiration = dict(properties["expires"])
+        expiration["title"] = "Expiration"
+        expiration["description"] = (
+            "(Optional) Deprecated alias of 'expires', accepted when a config "
+            "is read and removed in ASH v4; the entry is written and stored "
+            "as 'expires'."
         )
-        properties["expires"] = expires
+        properties["expiration"] = expiration
 
 
-# ``expiration`` means the same here and on ``AshSuppression``, which inherits
+# ``expires`` means the same here and on ``AshSuppression``, which inherits
 # it: a YYYY-MM-DD date compared with ``current_date()``. The entry stops applying
 # at the start of that day, so on the expiration date itself it no longer applies.
 # ``utils/suppression_matcher.py`` enforces it for both. (A comment rather than
@@ -245,11 +272,11 @@ class IgnorePathWithReason(RedactedSection):
     # Unknown keys are refused by _refuse_unknown_keys below. Extras are allowed
     # only so that a results file holding one (utils/unknown_keys.py) keeps it,
     # and the schema says what a config file may contain -- including the
-    # ``expires`` alias (_entry_schema_admits_expires).
+    # deprecated ``expiration`` alias (_entry_schema_admits_expiration).
     model_config = ConfigDict(
         extra="allow",
         hide_input_in_errors=True,
-        json_schema_extra=_entry_schema_admits_expires,
+        json_schema_extra=_entry_schema_admits_expiration,
     )
 
     # How errors and warnings name an entry of this kind.
@@ -257,19 +284,21 @@ class IgnorePathWithReason(RedactedSection):
 
     path: Annotated[str, Field(..., description="Path or pattern to exclude")]
     reason: Annotated[str, Field(..., description="Reason for exclusion")]
-    expiration: Annotated[
+    expires: Annotated[
         str | None,
         Field(
             None,
-            # "expires" is accepted when a config is read (the spelling users
-            # reach for on their own); the field is still written and stored as
-            # "expiration", so results files do not churn. The name itself is
-            # the first choice, so no populate_by_name is needed.
-            validation_alias=AliasChoices("expiration", "expires"),
+            # "expires" is the canonical spelling (the one written, stored and
+            # documented); "expiration", the field's earlier name, is accepted
+            # as a deprecated alias until ASH v4 removes it
+            # (_warn_expiration_spelling). The name itself is the first choice,
+            # so no populate_by_name is needed.
+            validation_alias=AliasChoices("expires", "expiration"),
             description=(
                 "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying "
                 "on this date, by the local clock of the host running the scan. "
-                "'expires' is accepted as an alias when a config is read."
+                "'expiration' is accepted as a deprecated alias when a config is "
+                "read; the alias is removed in ASH v4."
             ),
         ),
     ] = None
@@ -300,36 +329,51 @@ class IgnorePathWithReason(RedactedSection):
     @model_validator(mode="before")
     @classmethod
     def _one_expiration_spelling(cls, data: Any, info: ValidationInfo) -> Any:
-        """An entry sets ``expiration`` or its alias ``expires``, not both.
+        """An entry sets ``expires`` or its deprecated alias ``expiration``, not both.
 
-        Both set, pydantic would take ``expiration`` and keep ``expires`` as an
-        extra, so a shorter ``expires`` the author meant would be silently
+        Both set, pydantic would take ``expires`` and keep ``expiration`` as an
+        extra, so a shorter ``expiration`` the author meant would be silently
         ignored or the entry silently inert. A disagreement is refused with
         which key to keep (as resource_id / scope.resource_id disagreements
         are); an equal duplicate is accepted, with the alias dropped so it does
         not land in the extras. Under TOLERATE_STORED_CONFIG a disagreement is
         recorded and kept; the extra then marks the entry as one never applied.
+
+        Reading the ``expiration`` spelling at all is deprecated
+        (``_warn_expiration_spelling``): ``expires`` is canonical and the alias
+        is removed in ASH v4.
         """
-        if (
-            not isinstance(data, dict)
-            or "expiration" not in data
-            or "expires" not in data
-        ):
+        if not isinstance(data, dict) or "expiration" not in data:
+            return data
+        if tolerated_notes(info) is None:
+            # A config an author wrote, not a stored results file (which this
+            # version and earlier ones wrote under the old spelling themselves).
+            _warn_expiration_spelling()
+            # The Python warning is dropped by the default filters outside
+            # __main__, so an `ash` run never showed it. A config load binds
+            # the warn-unknown-keys list (resolve_config), whose contents land
+            # on the config's _resolution_warnings and are printed at scan
+            # start, so the operator sees the deprecation once per entry; the
+            # rebuild-after-overrides dedup subtracts repeats by count there.
+            warned = warned_notes(info)
+            if warned is not None:
+                warned.append(f"In {cls.ENTRY_KIND}: {EXPIRATION_SPELLING_DEPRECATION}")
+        if "expires" not in data:
             return data
         if data["expiration"] == data["expires"]:
             kept = dict(data)
-            del kept["expires"]
+            del kept["expiration"]
             return kept
         notes = tolerated_notes(info)
         if notes is not None:
             notes.append(BOTH_EXPIRATION_SPELLINGS_NOTE)
             return data
         raise ValueError(
-            "expiration and expires are two spellings of one field and "
+            "expires and expiration are two spellings of one field and "
             "disagree; keep one"
         )
 
-    @field_validator("expiration", mode="before")
+    @field_validator("expires", mode="before")
     @classmethod
     def _expiration_is_text(cls, v: Any, info: ValidationInfo) -> Any:
         """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``).
@@ -347,7 +391,7 @@ class IgnorePathWithReason(RedactedSection):
             return str(v)
         return refuse_an_expiration_that_is_not_text(v)
 
-    @field_validator("expiration")
+    @field_validator("expires")
     @classmethod
     def validate_expiration_date(cls, v, info: ValidationInfo):
         """Validate that expiration date is in YYYY-MM-DD format.
@@ -378,6 +422,30 @@ class IgnorePathWithReason(RedactedSection):
         return bool(self.model_extra)
 
     @property
+    def expiration(self) -> Optional[str]:
+        """``expires`` under its deprecated name, for code written against it.
+
+        The configuration spelling ``expiration`` is deprecated and removed in
+        ASH v4; this attribute keeps a caller that still reads
+        ``entry.expiration`` (a plugin, a script over results models) working
+        until then. New code reads ``expires``.
+        """
+        return self.expires
+
+    @expiration.setter
+    def expiration(self, value: Optional[str]) -> None:
+        """Assignment under the deprecated name writes the ``expires`` field.
+
+        Before the rename, ``entry.expiration = x`` set the field; a read-only
+        property turned that into ``AttributeError``. Note that
+        ``model_copy(update={"expiration": ...})`` does NOT go through this
+        setter: pydantic writes update keys directly, and with ``extra="allow"``
+        an ``expiration`` update key lands as an extra (marking the entry
+        ``has_unknown_keys``); such callers pass ``expires`` instead.
+        """
+        self.expires = value
+
+    @property
     def is_expired(self) -> bool:
         """Return True if this entry's expiration date has been reached.
 
@@ -392,10 +460,10 @@ class IgnorePathWithReason(RedactedSection):
         and reading it as no expiration applied the entry permanently while the
         load warning said it did not apply.
         """
-        if self.expiration is None:
+        if self.expires is None:
             return False
         try:
-            return expiration_has_passed(self.expiration)
+            return expiration_has_passed(self.expires)
         except ValueError:
             return True
 
@@ -405,10 +473,10 @@ class IgnorePathWithReason(RedactedSection):
 
         A negative value indicates the entry has already expired.
         """
-        if not self.expiration:
+        if not self.expires:
             return None
         try:
-            expiration_date = datetime.strptime(self.expiration, "%Y-%m-%d").date()
+            expiration_date = datetime.strptime(self.expires, "%Y-%m-%d").date()
         except ValueError:
             return None
         return (expiration_date - current_date()).days

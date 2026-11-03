@@ -6642,7 +6642,7 @@ def mcp_suggest_suppression(
             rule_id=finding.rule_id,
             line_start=finding.line_start,
             line_end=line_end,
-            expiration=expiration_date,
+            expires=expiration_date,
             reason=reason,
         )
     except ValidationError as e:

@@ -434,4 +434,9 @@ def test_regular_inputs_still_convert(scan):
     assert by_name.pop("ok_tar.py") == "print('in-tree tar')\n"
     (notebook_name,) = [n for n in by_name if n.endswith("ok__ipynb-converted.py")]
     assert by_name.pop(notebook_name) == "print('in-tree notebook')\n"
+    # Converters record their source mapping beside the converted files
+    # (utils/scan_output_dirs.record_converted_sources), a shipped artifact
+    # of every run that converted something.
+    sources = by_name.pop("converted-sources.json", None)
+    assert sources, "converted-sources.json was not recorded"
     assert by_name == {}, "nothing else was converted"

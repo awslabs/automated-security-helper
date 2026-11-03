@@ -1837,7 +1837,12 @@ def _filesystem_folds_case(target_path: Optional[Path]) -> bool:
         directory = parent
     probe = directory / _CASE_PROBE_NAME.format(pid=os.getpid())
     try:
-        with open(probe, "x"):
+        # Through the write guard: the probe lands under an output/extraction
+        # directory, where every ASH write goes through fs_guard so a link at
+        # any component is refused instead of written through.
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+        with open_for_write(probe, exclusive=True):
             pass
         try:
             return (directory / probe.name.upper()).exists()
@@ -3126,6 +3131,22 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             archive_file,
                             f"it is named as {_named_kind(archive_file)} but "
                             "could not be read as one",
+                            kind="input",
+                        )
+                        continue
+                    elif plain_gzip is not None:
+                        # Named as a .gz of one file and its bytes carry no
+                        # gzip magic (a gzip stream that is damaged past its
+                        # head raises and is recorded by the handler below), so
+                        # none of it is read: coverage lost, recorded as the
+                        # zip and tar arms record a damaged archive. An INPUT
+                        # error: no tool is involved, and a reviewed
+                        # ash-unconverted-input suppression may accept the file.
+                        self.record_failed_input(
+                            archive_file,
+                            "it is named as a gzip-compressed file but its "
+                            "bytes do not start a gzip stream, so it could not "
+                            "be read as one",
                             kind="input",
                         )
                         continue

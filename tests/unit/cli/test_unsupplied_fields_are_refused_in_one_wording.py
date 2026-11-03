@@ -71,7 +71,7 @@ OTHERS = "Supply each of the other fields named the same way."
 
 
 def _text(*pairs: tuple[str, str]) -> str:
-    named = "; ".join(f"{field} is recorded as {ref}" for field, ref in pairs)
+    named = "; ".join(f"{field} holds {ref}" for field, ref in pairs)
     return str(unsupplied_refusal(named, list(pairs), HOW_TO_SUPPLY))
 
 

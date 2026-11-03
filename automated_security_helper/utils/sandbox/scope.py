@@ -498,6 +498,27 @@ def scanner_sandbox_scope(
     if mode == SandboxMode.off:
         return None
 
+    # The sandbox gives each scanner the home directory as HOME and grants
+    # paths under it (docs/content/concepts/scanning-untrusted-code.md, "The
+    # sandbox also needs an absolute `HOME`"). A HOME that is set but empty or
+    # relative cannot anchor those grants: the policy's fallback
+    # (policy._policy_home) would quietly protect the passwd entry's home, or
+    # none, instead of the one the environment names, so the scanner is not
+    # run and its scan is ERROR with the start-failure code, as the page says
+    # ("With an empty or relative `HOME`, a scanner it would run is not run
+    # and is ERROR, with `HOME is not an absolute path` in its error."). An
+    # unset HOME keeps the passwd fallback: nothing named a different home.
+    # The value itself is not quoted: it is the environment's text, and the
+    # refusal reaches ash.log, the row and the results files.
+    home_env = os.environ.get("HOME")
+    if home_env is not None and not os.path.isabs(home_env):
+        raise SandboxBackendUnavailable(
+            "HOME is not an absolute path, so the sandbox cannot anchor the "
+            "home directory it gives each scanner; set HOME to an absolute "
+            "path, or unset it to use the passwd entry's home",
+            mode.value,
+        )
+
     name = _plugin_name(scanner_plugin)
     declared, declared_config = _declared_identity(scanner_plugin)
     config = getattr(scanner_plugin, "config", None)

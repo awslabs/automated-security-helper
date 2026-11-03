@@ -468,7 +468,10 @@ def take_own_values(
                         ),
                     ]
     if missing and refuse_unless_supplied is not None:
+        # "holds", as `ash merge`'s per-shard form words it (configure.md, Read
+        # values from the environment: the refusal names the field and the
+        # reference).
         named = "; ".join(
-            f"{field} is recorded as {reference}" for field, reference in missing
+            f"{field} holds {reference}" for field, reference in missing
         )
         raise unsupplied_refusal(named, missing, refuse_unless_supplied)

@@ -705,9 +705,9 @@ def test_an_unavailable_named_sandbox_is_an_error_and_never_runs_the_scanner(
     assert outcomes is None, f"the scanner ran under an unavailable sandbox: {outcomes}"
     assert result.returncode == 1, output[-4000:]
     assert "sandbox-escape: ERROR" in output, output[-4000:]
-    assert f"could not start its tool: {unavailable} is not available on" in output, (
-        output[-4000:]
-    )
+    # The line names the target, the shape concepts/sandbox.md documents.
+    assert "could not start its tool on" in output, output[-4000:]
+    assert f"{unavailable} is not available on" in output, output[-4000:]
     results = json.loads((tmp_path / "out" / "ash_aggregated_results.json").read_text())
     row = results["scanner_results"]["sandbox-escape"]
     assert row["status"] == "ERROR"

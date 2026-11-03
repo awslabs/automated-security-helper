@@ -16,6 +16,13 @@ the file travels in the mark, so a mark cannot carry a grant. A file the host
 could not place because the walk of the links in its name stopped is marked the
 same way: the limits are the same, and no second option exists for it.
 
+The files of ``ASH_CONFIG``'s chain are the exception: the host counts any
+checkout's file there as written by a repository and marks it file by file with
+``--config-file-from-scanned-repository`` (run-in-a-container.md, The config
+file, pinned by tests/unit/docs/test_page_claims.py,
+test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is),
+so the another-checkout mark stays for a one-directory ``--config`` chain alone.
+
 Each end-to-end cell resolves one layout twice: on the host (``resolve_config``,
 or each workspace project's config), and in container mode, where
 ``run_ash_container`` assembles the run command against a recording runner, the
@@ -533,9 +540,11 @@ def test_a_base_in_the_scanned_checkout_is_marked_once_as_the_scanned_trees(
     assert CHAIN_FLAG not in inner
 
 
-def test_an_ash_config_in_another_checkout_is_marked_as_such(
+def test_an_ash_config_in_another_checkout_is_marked_file_by_file(
     launch, monkeypatch, tmp_path
 ):
+    """Any checkout's file of ASH_CONFIG's chain carries the per-file repository
+    mark (run-in-a-container.md, The config file)."""
     envco = tmp_path / "envco"
     mark_git_checkout(envco)
     env = _write(envco / "env.yaml", "project_name: env\n")
@@ -545,8 +554,8 @@ def test_an_ash_config_in_another_checkout_is_marked_as_such(
     inner = _inner_args(_assemble(launch["source"], launch["out"], config=str(config)))
 
     assert inner[inner.index(ENV_FLAG) + 1] == "/ash-env-config/env.yaml"
-    assert _flags(inner, FLAG) == ["/ash-env-config/env.yaml"]
-    assert _flags(inner, TREE_FILE_FLAG) == []
+    assert _flags(inner, TREE_FILE_FLAG) == ["/ash-env-config/env.yaml"]
+    assert _flags(inner, FLAG) == []
     assert CHAIN_FLAG not in inner
 
 
@@ -561,8 +570,8 @@ def test_each_file_gets_the_mark_of_its_own_place(launch, monkeypatch, tmp_path)
     inner = _inner_args(_assemble(launch["source"], launch["out"], config=str(config)))
 
     assert CHAIN_FLAG in inner
-    assert _flags(inner, FLAG) == ["/ash-env-config/env.yaml"]
-    assert _flags(inner, TREE_FILE_FLAG) == []
+    assert _flags(inner, TREE_FILE_FLAG) == ["/ash-env-config/env.yaml"]
+    assert _flags(inner, FLAG) == []
 
 
 @pytest.mark.parametrize("layout", LINKS_IN_ANOTHER_CHECKOUT)
@@ -1151,9 +1160,11 @@ def test_a_base_whose_walk_stopped_is_marked_beside_a_root_found_in_another_chec
     assert _flags(inner, TREE_FILE_FLAG) == []
 
 
-def test_an_ash_config_file_whose_walk_stopped_is_marked_as_in_another_checkout(
+def test_an_ash_config_file_whose_walk_stopped_is_marked_file_by_file(
     launch, monkeypatch, tmp_path
 ):
+    """The fail-closed answer takes the per-file repository mark, as any
+    checkout's file of ASH_CONFIG's chain does."""
     env = _write(tmp_path / "envdir" / "env.yaml", "project_name: env\n")
     config = _write(launch["operator"] / "ash.yaml")
     monkeypatch.setenv("ASH_CONFIG", str(env))
@@ -1162,9 +1173,9 @@ def test_an_ash_config_file_whose_walk_stopped_is_marked_as_in_another_checkout(
     inner = _inner_args(_assemble(launch["source"], launch["out"], config=str(config)))
 
     assert inner[inner.index(ENV_FLAG) + 1] == "/ash-env-config/env.yaml"
-    assert _flags(inner, FLAG) == ["/ash-env-config/env.yaml"]
+    assert _flags(inner, TREE_FILE_FLAG) == ["/ash-env-config/env.yaml"]
     assert RETIRED_FLAG not in inner
-    assert _flags(inner, TREE_FILE_FLAG) == []
+    assert _flags(inner, FLAG) == []
 
 
 def test_the_launcher_has_no_option_for_a_stopped_walk():

@@ -1048,6 +1048,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1088,6 +1090,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1127,6 +1131,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1169,6 +1175,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1201,6 +1209,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1229,6 +1239,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"

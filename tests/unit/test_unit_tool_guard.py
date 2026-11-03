@@ -319,6 +319,18 @@ def test_the_check_fails_each_test_that_starts_a_tool_or_leaves_its_files(
     # A child that inherited these would act as an xdist worker of this run.
     for name in [n for n in os.environ if n.startswith("PYTEST_XDIST_")]:
         monkeypatch.delenv(name)
+    # The tiered/sharded CI selection reaches a child pytest the same way: the
+    # shard and floor variables of tests/utils/sharding.py would select by the
+    # CI job's shape, and PYTEST_ADDOPTS survives -o addopts=. The child runs
+    # the probe's whole file, so the selection family is cleared here and both
+    # tier flags are passed below.
+    for name in [
+        n
+        for n in os.environ
+        if n.startswith("ASH_TEST_SHARD")
+        or n in ("ASH_TEST_TIER_FLOOR", "PYTEST_ADDOPTS")
+    ]:
+        monkeypatch.delenv(name)
 
     result = pytester.runpytest_subprocess(
         str(PROBE),
@@ -328,6 +340,8 @@ def test_the_check_fails_each_test_that_starts_a_tool_or_leaves_its_files(
         "no:cacheprovider",
         "-p",
         "no:randomly",
+        "--run-integration",
+        "--run-slow",
         "-n",
         "0",
         "-rA",

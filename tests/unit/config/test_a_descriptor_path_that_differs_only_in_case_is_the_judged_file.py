@@ -52,7 +52,10 @@ def test_a_path_reported_in_another_case_is_the_judged_file(
     config = _repo_with_a_config(tmp_path)
     judged = Path(os.path.realpath(config))
     reported = judged.with_name(judged.name.upper())
-    assert reported != judged, "premise: the spelling differs"
+    # Compare the SPELLINGS: WindowsPath equality is case-insensitive, so a
+    # Path != Path premise compares equal on Windows and never reaches the
+    # product code.
+    assert os.fspath(reported) != os.fspath(judged), "premise: the spelling differs"
     monkeypatch.setattr(
         config_sources, "_descriptor_path", lambda fd, named, identity: reported
     )

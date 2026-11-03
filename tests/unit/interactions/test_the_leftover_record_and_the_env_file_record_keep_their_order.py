@@ -113,6 +113,13 @@ def events(monkeypatch, tmp_path) -> List[str]:
     return log
 
 
+#: Leftover records a run writes: none on Windows, where the state-dir opener
+#: returns None by design ("Where the platform has no directory descriptors
+#: there are no records and no sweep", container_leftovers.py), so the order
+#: of the record calls is still asserted there while the count is zero.
+_RECORDS_PER_RUN = 0 if os.name == "nt" else 1
+
+
 def _records(tmp_path: Path) -> List[str]:
     state = tmp_path / "ash-state"
     return (
@@ -148,7 +155,7 @@ def test_a_run_that_ends_on_its_own_takes_and_drops_both_records_in_order(
         "env-file-removed",
         "env-record-discarded",
     ], events
-    assert len(seen["leftover_records"]) == 1, seen
+    assert len(seen["leftover_records"]) == _RECORDS_PER_RUN, seen
     assert len(seen["env_records"]) == 1, seen
     assert _records(tmp_path) == []
     assert cancellation._CLEANUP_FILES == ()
@@ -177,7 +184,7 @@ def test_a_run_ended_by_an_exception_keeps_the_leftover_record_and_drops_the_env
         "env-file-removed",
         "env-record-discarded",
     ], events
-    assert len(_records(tmp_path)) == 1, (
+    assert len(_records(tmp_path)) == _RECORDS_PER_RUN, (
         "the interrupted run's container is not recorded"
     )
     assert cancellation._CLEANUP_FILES == ()

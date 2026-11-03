@@ -143,8 +143,8 @@ async def test_suggest_suppression_defaults(project, snapshot):
         "suggest_suppression", finding_id=ids["B602"], results_path=str(results_file)
     )
     expected = (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
-    assert defaulted["result"]["json"]["expiration"] == expected
-    assert f"expiration: '{expected}'" in defaulted["result"]["yaml"]
+    assert defaulted["result"]["json"]["expires"] == expected
+    assert f"expires: '{expected}'" in defaulted["result"]["yaml"]
     assert defaulted["result"]["json"]["reason"] == snapshot(
         name="default_justification"
     )

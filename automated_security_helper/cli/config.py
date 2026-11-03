@@ -327,7 +327,18 @@ def _refuse_missing_config(config_path: str | Path) -> NoReturn:
     try:
         os.stat(config_path)
     except OSError as e:
-        if e.errno == errno.ELOOP:
+        looped = e.errno == errno.ELOOP
+        if not looped and e.errno == errno.EINVAL:
+            # Windows stats a self-looped symlink with a WinError that maps to
+            # errno EINVAL ("the name ... cannot be resolved"), never ELOOP.
+            # The link entry itself is there, which lstat shows: an
+            # unresolvable name whose link exists is a loop, not a missing
+            # file.
+            try:
+                looped = stat.S_ISLNK(os.lstat(config_path).st_mode)
+            except OSError:
+                looped = False
+        if looped:
             message = (
                 f"❌ Config file is a symbolic link loop: "
                 f"{Path(config_path).as_posix()}"

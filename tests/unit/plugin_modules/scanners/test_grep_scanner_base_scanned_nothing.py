@@ -32,6 +32,7 @@ it; no tool starts here.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -315,10 +316,13 @@ def test_an_absolute_path_outside_the_target_keeps_only_its_file_name(
     scanner = _scanner(test_plugin_context, monkeypatch)
     target = tmp_path / "src"
     target.mkdir()
+    # Platform-absolute: on Windows a drive-less "/elsewhere/..." path reads
+    # is_absolute() False and is not classed absolute-outside at all.
+    elsewhere = "C:/elsewhere" if os.name == "nt" else "/elsewhere"
 
-    assert _grade(scanner, tmp_path, _excluded("/elsewhere/static/app.min.js")) == 0
+    assert _grade(scanner, tmp_path, _excluded(f"{elsewhere}/static/app.min.js")) == 0
     with pytest.raises(ScannerError, match="left out all"):
-        _grade(scanner, tmp_path, _excluded("/elsewhere/tests/test_app.py"))
+        _grade(scanner, tmp_path, _excluded(f"{elsewhere}/tests/test_app.py"))
 
 
 def test_files_in_an_ash_output_directory_grade_skipped(

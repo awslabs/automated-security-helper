@@ -215,7 +215,19 @@ def _same_path(leaf: Any, value: Union[str, Path]) -> bool:
     if leaf.startswith("file://"):
         leaf = leaf[len("file://") :].partition("::")[0]
     written = str(value)
-    return leaf == written or os.path.normpath(leaf) == written
+    if leaf == written or os.path.normpath(leaf) == written:
+        return True
+    # The fold below is what normpath does for "." and doubled separators, kept
+    # in the spelling's own "/" separators: normpath rewrites them to the
+    # platform's, so on Windows "/ops/./syft.yaml" normalized to a backslashed
+    # form and never matched the anchored "/ops/syft.yaml". ".." is left alone,
+    # as the docstring says: a fold of it would credit a value the operating
+    # system may walk elsewhere.
+    if "/" in leaf and ".." not in leaf.split("/"):
+        parts = [part for part in leaf.split("/") if part not in ("", ".")]
+        folded = ("/" if leaf.startswith("/") else "") + "/".join(parts)
+        return folded == written
+    return False
 
 
 @dataclass

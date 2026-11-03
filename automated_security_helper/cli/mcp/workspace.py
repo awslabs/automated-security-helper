@@ -2443,7 +2443,12 @@ async def mcp_resolve_workspace(
 
     Returns:
         On success, ``success`` True, ``exit_code`` 0, the rendered plan under
-        ``plan``, the same decisions structured under ``projects``, and
+        ``plan``, the same decisions structured under ``projects`` (each with
+        its ``project`` key and the ``config_source`` its config was read
+        from), ``plugin_names_checked`` False -- resolution imports no
+        project's plugin module, so unlike ``--dry-run`` and
+        ``run_ash_workspace_scan`` it cannot refuse two plugins whose names
+        read as one -- and
         ``session_config_path`` -- the config a scan of this plan would run under,
         or None. That last field is why this tool is worth calling before the
         scan: a dry run that reported the plan a *different* config would produce
@@ -2555,6 +2560,16 @@ async def mcp_resolve_workspace(
         "exit_code": int(WorkspaceExitCode.SUCCESS),
         "exit_code_meaning": ASH_EXIT_CODES[int(WorkspaceExitCode.SUCCESS)],
         "scanned": False,
+        # This tool returns the plan like --dry-run EXCEPT that it does not
+        # check plugin names: it runs in the server and scans nothing, so it
+        # imports no project's plugin module, and without the import there is
+        # no registered class to judge (scale-large-repos.md, "Workspace scans
+        # over MCP"). Said here so a client does not read a resolved plan as
+        # the dry run's name-clash verdict: ``--dry-run`` and
+        # ``run_ash_workspace_scan`` refuse two plugins whose names read as
+        # one, with exit 3, through the prewarm's
+        # ``plugins.loader.refuse_plugin_name_clashes`` pass.
+        "plugin_names_checked": False,
         "plan": plan.render(),
         "session_id": session_id,
         "session_config_path": session_config,

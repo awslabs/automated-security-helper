@@ -470,6 +470,12 @@ MCP_SERVE_ENVIRONMENTS = (
 
 def terraform_mcp_serve_invocations() -> list[Invocation]:
     serve = _load_by_path("_ash_mcp_serve_cli_contract", TF_MCP_SERVE)
+    if not hasattr(os, "memfd_create"):
+        # The script's own target is the Linux image (its sibling
+        # ash-container-init says "This image needs Linux memfd_create."), and
+        # what this reader checks is the argv's option contract, so on a host
+        # without memfd_create the auth-header hand-over is a fixed fd number.
+        serve._hand_over = lambda value: 3
     found: list[Invocation] = []
     for environment in MCP_SERVE_ENVIRONMENTS:
         with _environment(environment, ("ASH_MCP_",)):

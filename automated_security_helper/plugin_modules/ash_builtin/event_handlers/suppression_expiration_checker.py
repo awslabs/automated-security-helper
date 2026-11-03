@@ -113,7 +113,7 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
         # one lookup rule.
         ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
         for suppression in expiring_suppressions:
-            expiration_date = _shown(suppression, "expiration", recorded)
+            expiration_date = _shown(suppression, "expires", recorded)
             # A suppression with no rule covers every rule, spelled "*" as the
             # expired-entries warning and the suppression's own id spell it;
             # this line printed Rule 'None' for the same entry.
@@ -165,7 +165,7 @@ def _warn_about_expiring_ignore_paths(ignore_path_lists, recorded=None) -> None:
     for subject, ignore_path in expiring:
         ASH_LOGGER.warning(
             f"  - {subject} '{_shown(ignore_path, 'path', recorded)}' expires on "
-            f"{_shown(ignore_path, 'expiration', recorded)}. "
+            f"{_shown(ignore_path, 'expires', recorded)}. "
             f"Reason: {_shown(ignore_path, 'reason', recorded)}",
             extra=NO_MARKUP,
         )
@@ -222,11 +222,11 @@ def _warn_about_expired_entries(ignore_path_lists, suppressions, recorded=None) 
 def _expired_since(entry, recorded=None) -> str:
     """How ``entry`` has expired, or an empty string if it still applies. The
     date is shown as ``_shown`` shows it."""
-    if not entry.expiration:
+    if not entry.expires:
         return ""
     try:
-        if expiration_has_passed(entry.expiration):
-            return f"expired on {_shown(entry, 'expiration', recorded)}"
+        if expiration_has_passed(entry.expires):
+            return f"expired on {_shown(entry, 'expires', recorded)}"
     except ValueError:
         # Not the date itself: a stored configuration keeps one that does not
         # parse as written, and it can be a value read from the environment.

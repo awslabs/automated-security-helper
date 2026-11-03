@@ -101,8 +101,19 @@ def _answers_the_same(select, ops_for, right: str, wrong: str) -> bool:
 
 
 def _entry(path: str, reason: str) -> Dict[str, Any]:
-    """An ignore_paths entry as the configuration holds it, every field."""
-    return {"path": path, "reason": reason, "expiration": None}
+    """An ignore_paths entry as the configuration's dump holds it, every field.
+
+    ``expires`` is the canonical spelling (``expiration`` is a deprecated alias,
+    removed in v4), and the model adds ``client_supplied`` to every entry
+    (models/core.py), so a test op's value equals the as-written dump only in
+    this shape.
+    """
+    return {
+        "path": path,
+        "reason": reason,
+        "expires": None,
+        "client_supplied": False,
+    }
 
 
 # Each case: the ops for a guess at the setting read from the environment, the

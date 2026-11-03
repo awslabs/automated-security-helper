@@ -105,6 +105,8 @@ def _conforms(name: str, odd_runs: List[int], plain_runs: List[int]) -> bool:
       form as data (the finding's code element and the copy attribute), so the
       naming count matches, every naming is the record or the doubled form,
       and the table's naming is the doubled one;
+    - the junit report shows each naming of the odd file with the record form's
+      backslash doubled (reporter-level escaping, Q1);
     - every other report is machine-read and holds the record form unchanged.
     """
     if name in ("ash.summary.md", "ash.summary.txt"):
@@ -116,6 +118,12 @@ def _conforms(name: str, odd_runs: List[int], plain_runs: List[int]) -> bool:
             and set(odd_runs) <= {1, 2}
             and 2 in odd_runs
         )
+    if name == "ash.junit.xml":
+        # The junit report shows the record form with its backslash doubled:
+        # the odd name's ``\\udcNN`` reads as an escape there, where the plain
+        # name's does not, so each odd naming is its plain run doubled.
+        # Reporter-level escaping is the shipped behavior and stays (Q1).
+        return odd_runs == sorted(2 * run for run in plain_runs)
     return odd_runs == plain_runs
 
 

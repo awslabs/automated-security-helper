@@ -657,8 +657,15 @@ def _carried_values_by_band(
     """
     all_values = []
     strict = []
+    # One snapshot, not per-name os.environ reads: the names come from the
+    # operator's chain, so the read is dynamic, and this module's dynamic reads
+    # go through snapshot_environ (as _readable_environment_values does). The
+    # docs probe enumerates this module's literal environment reads and refuses
+    # a computed-name os.environ read it could not set
+    # (tests/unit/docs/test_page_claims.py, _ci_env_module_reads).
+    environ = snapshot_environ()
     for name in environment_names:
-        value = os.environ.get(name, "")
+        value = environ.get(name, "")
         if not value:
             continue
         all_values.append(value)
@@ -3798,7 +3805,12 @@ def _another_checkout_marks(
     so the host tells the scan inside, one file at a time, with
     CONFIG_FILE_FROM_ANOTHER_CHECKOUT_FLAG. Only the class travels: the scan
     inside reads the mounted file itself for what it restricts, so no value of
-    the file is in a mark and a mark cannot carry a grant.
+    the file is in a mark and a mark cannot carry a grant. The caller decides
+    what the answer carries: ``_assemble_run_command`` sends this flag for a
+    one-directory ``--config`` chain only, and promotes the files of
+    ``ASH_CONFIG``'s chain, and a workspace ``--config`` chain rooted here, to
+    the repository marks the pages pin (run-in-a-container.md, The config
+    file).
 
     A file the judgment admitted only because the walk of the links in its name
     stopped before it could rule a checkout out is returned with the others: the
@@ -4891,9 +4903,24 @@ def _assemble_run_command(
             )
             # A chain mark already makes every file of the chain the repository's.
             if not config_from_scanned_repository:
-                another_checkout_files.extend(
-                    _another_checkout_marks(config, config_plan, marked_config_files)
+                another = _another_checkout_marks(
+                    config, config_plan, marked_config_files
                 )
+                if workspace_relative_file is not None and inner_config in another:
+                    # A workspace scan's --config from another git checkout is a
+                    # repository's for the scan inside, whole chain: the chain
+                    # mark is passed, with each base listed on its own as for a
+                    # chain the scanned tree wrote (run-in-a-container.md, The
+                    # config file: "A workspace scan does the same with a
+                    # `--config` from another git checkout"; scale-large-repos.md,
+                    # Workspaces). The workspace's own checkout was refused
+                    # above, so the chain this covers is another checkout's.
+                    config_from_scanned_repository = True
+                    marked_config_files = sorted(
+                        {inner for _file, inner in config_plan.placements[1:]}
+                    )
+                else:
+                    another_checkout_files.extend(another)
     # The file the host's ASH_CONFIG names, which a local scan reads as its base
     # whatever names the config (_host_ash_config), mounted on its own, with each
     # file of its chain the host counts as repository-written marked on its own,
@@ -4914,10 +4941,20 @@ def _assemble_run_command(
             )
         if env_files:
             env_marked = _env_config_marks(env_config, marks_source, env_plan)
-            marked_config_files = [*marked_config_files, *env_marked]
-            another_checkout_files.extend(
-                _another_checkout_marks(env_config, env_plan, env_marked)
+            # A file of ASH_CONFIG's chain in another git checkout carries the
+            # same per-file mark as one the scanned checkout wrote
+            # (run-in-a-container.md, The config file: "A file of that chain
+            # the host counts as written by a repository is marked for the
+            # scan inside, file by file."), so the host counts any checkout's
+            # file as a repository's there, not as the weaker another-checkout
+            # class a one-directory --config chain keeps.
+            env_marked = sorted(
+                {
+                    *env_marked,
+                    *_another_checkout_marks(env_config, env_plan, env_marked),
+                }
             )
+            marked_config_files = [*marked_config_files, *env_marked]
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:
         _refuse_config_linked_out_of_the_tree(
@@ -5594,13 +5631,18 @@ def run_ash_container(
     # already refused above when a run was asked for, so the catch is for a
     # build alone, which keeps building as it did, with no values to carry;
     # the run phase still refuses such a chain before any container sees it.
+    # One snapshot, not per-name os.environ reads, as _carried_values_by_band
+    # reads its names: the docs probe enumerates this module's literal
+    # environment reads and refuses a computed-name os.environ read it could
+    # not set (tests/unit/docs/test_page_claims.py, _ci_env_module_reads).
+    build_environ = snapshot_environ()
     try:
         build_hidden = tuple(
             value
             for name in operator_environment_names(
                 config, reads.host_ash_config(), named_source, reads
             )
-            for value in (os.environ.get(name, ""),)
+            for value in (build_environ.get(name, ""),)
             if value
         )
     except ContainerInputError:

@@ -23,6 +23,8 @@ from automated_security_helper.core.cancellation import (
     CancelEvent,
     ScanCancelled,
     cancel_scope,
+    discard_die_now_message,
+    record_die_now_message,
     shutdown_cancels,
     shutdown_requested,
 )
@@ -56,6 +58,7 @@ from automated_security_helper.interactions.run_ash_container import (
 )
 from automated_security_helper.interactions.run_ash_scan import (
     PRECOMMIT_MODE_SCANNERS,
+    refuse_output_dir_links,
     resolve_workspace_execution_config,
     resolved_console_log_level,
     run_ash_scan,
@@ -97,6 +100,17 @@ from automated_security_helper.workspace.resolver import resolve_workspace
 from automated_security_helper.workspace.workspace_file import (
     WORKSPACE_AUTO,
     discover_workspace_file,
+)
+
+#: The only word on how an interrupted scan ended, as exit-codes.md quotes it
+#: (the 130 row). Printed by the scan command's KeyboardInterrupt arm for the
+#: first Ctrl-C, and registered with the die-now ending for the second
+#: (``record_die_now_message``): exit-codes.md says "a second Ctrl-C during the
+#: wait kills it at once" and "A scan prints the interrupted-scan message
+#: above", so both endings say it and both exit 130.
+_SCAN_INTERRUPTED_MESSAGE = (
+    "ASH scan interrupted before it finished: there is no verdict, and the "
+    "output directory may hold partial results."
 )
 
 
@@ -303,11 +317,14 @@ def _resolved(path: str | Path) -> Path:
     Falls back to the absolute spelling when resolving fails: a symbolic link
     that leads back to itself made ``Path.resolve`` raise (RuntimeError before
     Python 3.13, OSError in strict mode), which ended ``ash scan`` in a traceback
-    where the output directory refusal below would have named the link.
+    where the output directory refusal below would have named the link. A path
+    the OS cannot take at all (an embedded NUL, from a ``--cli-json-input``
+    document) raises ValueError the same way, and the absolute spelling is pure
+    string work, so the ``is not a valid path`` refusal below names it too.
     """
     try:
         return Path(path).resolve()
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         return Path(path).absolute()
 
 
@@ -409,15 +426,23 @@ def _settle_output_dir(
     output_dir: str | Path | None,
     use_existing: bool,
     ignore_suppressions: bool = False,
+    *,
+    mode: RunMode | str | None = None,
+    workspace: bool = False,
 ) -> tuple[str | Path, str | None]:
     """The output directory the scan writes to, and the existing results it reads.
 
     Defaults ``output_dir`` to ``<source_dir>/.ash/ash_output``, moves it there when
-    it is the source directory itself, refuses one the scan would clear the scanned
-    tree through, refuses one that cannot be written into, refuses
+    it is the source directory itself, refuses one that is a symlink or is reached
+    through one (exit 3, before anything here writes), refuses one the scan would
+    clear the scanned tree through, refuses one that cannot be written into, refuses
     ``--use-existing`` together with ``--ignore-suppressions``, and resolves
     ``--use-existing`` to the results file or refuses when it is not there. Every
     refusal exits, so the caller gets back only a pair the scan can run with.
+
+    ``mode`` chooses container mode's own wording for the link refusal, and
+    ``workspace`` extends it to the workspace directories; see
+    :func:`refuse_output_dir_links`.
 
     Called where the real run settles them, and from the workspace dry run before
     it prints its plan, so a dry run that exits 0 describes a command line the
@@ -447,6 +472,23 @@ def _settle_output_dir(
             "collisions and potential impact to source code: "
             f"{escape_markup(Path(output_dir).as_posix())}[/bold yellow]"
         )
+    # The linked-output refusal, before anything below can write. exit-codes.md
+    # promises a linked output directory is refused in every mode BEFORE the check
+    # that the directory can be written, and output_dir_refusal further down proves
+    # writability by making a file in the directory and removing it, which follows
+    # a link at the output directory, or at a component on the way to it, and moves
+    # the link target's mtime. Every CLI run -- `ash scan`, `ash` with no
+    # subcommand, `--mode container` with and without --no-run, and `--mode nix` --
+    # settles its output directory here before run_ash_scan's own refusal runs, so
+    # this is where the refusal has to come first: exit 3, nothing made, the link's
+    # target keeps its entries and mtime. One implementation, shared with
+    # run_ash_scan (refuse_output_dir_links).
+    refuse_output_dir_links(
+        source_dir,
+        output_dir,
+        container=mode is not None and RunMode(mode) == RunMode.container,
+        workspace=workspace,
+    )
     output_resolved = _resolved(output_dir)
     for working_dir in OUTPUT_WORKING_DIRS:
         cleared = output_resolved.joinpath(working_dir)
@@ -473,9 +515,11 @@ def _settle_output_dir(
     # A directory on the way that cannot be searched: before CPython 3.13,
     # Path.is_dir() re-raised that PermissionError (3.13 reads it as False), so
     # the run ended in a traceback where the refusal below names the reason.
+    # ValueError is a path the OS takes no stat of at all (an embedded NUL),
+    # which the refusal below words as "is not a valid path".
     try:
         probe_after_containment = output_resolved.is_dir()
-    except OSError:
+    except (OSError, ValueError):
         probe_after_containment = False
     if not probe_after_containment:
         output_refusal = output_dir_refusal(output_dir)
@@ -1687,7 +1731,12 @@ def run_ash_scan_cli_command(
     # The output directory's default, the collision adjustment, its refusals and
     # --use-existing, in one place for the real run and the workspace dry run.
     output_dir, existing_results = _settle_output_dir(
-        source_dir, output_dir, use_existing, ignore_suppressions
+        source_dir,
+        output_dir,
+        use_existing,
+        ignore_suppressions,
+        mode=mode,
+        workspace=workspace_plan is not None,
     )
     if workspace_plan is not None and dry_run:
         # After the preflight above, in the real run's order, so the dry run
@@ -1732,6 +1781,11 @@ def run_ash_scan_cli_command(
     # run_ash_scan inside a scope of its own, whose event its registry stops; a
     # scope installed below the shared frame would shadow it.
     cancel_event = CancelEvent()
+    # A second Ctrl-C takes the die-now ending, which never returns to the
+    # interrupt arm below, so the word on how the run ended is registered with
+    # it: exit-codes.md pins that a second Ctrl-C still prints the
+    # interrupted-scan message and exits 130.
+    record_die_now_message(_SCAN_INTERRUPTED_MESSAGE)
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
             run_ash_scan(
@@ -1799,11 +1853,7 @@ def run_ash_scan_cli_command(
         # real set calls are safe here where the signal handler's are not.
         cancel_event.stop_promptly = True
         cancel_event.set()
-        echo(
-            "ASH scan interrupted before it finished: there is no verdict, and the "
-            "output directory may hold partial results.",
-            err=True,
-        )
+        echo(_SCAN_INTERRUPTED_MESSAGE, err=True)
         raise typer.Exit(ASH_EXIT_INTERRUPTED) from None
     except ScanCancelled as error:
         if not shutdown_requested():
@@ -1829,3 +1879,8 @@ def run_ash_scan_cli_command(
             message += f" A tool the stop could not end may still be running: {names}."
         echo(message, err=True)
         raise typer.Exit(ASH_EXIT_TERMINATED) from None
+    finally:
+        # The die-now ending speaks for this run only while this run exists: a
+        # process that goes on living (a test running the command in-process)
+        # must not keep a stale word for a later interrupt.
+        discard_die_now_message()

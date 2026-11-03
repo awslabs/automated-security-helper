@@ -67,7 +67,6 @@ from urllib.request import url2pathname
 from importlib_metadata import packages_distributions
 
 from automated_security_helper.core.constants import ASH_REPO_URL
-from automated_security_helper.utils.error_text import traceback_text
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
@@ -87,7 +86,13 @@ def _debug_with_traceback(message: str, error: BaseException) -> None:
     text can carry an environment-read value, and the handler would format the
     raw traceback, last line included. ``traceback_text`` redacts the values the
     error carries and prints the message once.
+
+    Imported lazily: this module prints the reinstall hints, so it has to
+    import in a broken or minimal venv, and error_text imports pydantic at
+    module level.
     """
+    from automated_security_helper.utils.error_text import traceback_text
+
     ASH_LOGGER.debug(f"{message}\n{traceback_text(error)}", extra=NO_MARKUP)
 
 

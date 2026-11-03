@@ -8,6 +8,8 @@ from automated_security_helper.core.cancellation import (
     CancelEvent,
     ScanCancelled,
     cancel_scope,
+    discard_die_now_message,
+    record_die_now_message,
     shutdown_cancels,
     shutdown_requested,
 )
@@ -218,6 +220,18 @@ def build_ash_image_cli_command(
     # and the handler cooperates only while a scope is registered: with none, a
     # SIGTERM took the die-now kill instead of the cooperative stop.
     cancel_event = CancelEvent()
+    # A second Ctrl-C takes the die-now ending, which never returns to the
+    # interrupt arm below, so the word on how the run ended is registered with
+    # it, built as that arm builds it: exit-codes.md pins that `ash build-image`
+    # prints its interrupted line and, without --no-run, the no-verdict clause,
+    # and that a second Ctrl-C still exits 130.
+    interrupted_message = "ASH build-image interrupted before it finished"
+    if not no_run:
+        interrupted_message += (
+            ": there is no verdict, and the output directory may hold partial "
+            "results"
+        )
+    record_die_now_message(f"{interrupted_message}.")
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
             run_ash_scan(
@@ -302,3 +316,8 @@ def build_ash_image_cli_command(
             )
         echo(f"{message}.", err=True)
         raise typer.Exit(ASH_EXIT_INTERRUPTED) from None
+    finally:
+        # The die-now ending speaks for this run only while this run exists: a
+        # process that goes on living (a test running the command in-process)
+        # must not keep a stale word for a later interrupt.
+        discard_die_now_message()

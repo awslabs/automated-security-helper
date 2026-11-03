@@ -431,7 +431,7 @@ global_settings:
       package_name: "braces"
       package_version: "3.0.3"
       package_path: "deploy/cdk-constructs/node_modules/braces"
-      expiration: "2026-11-04"
+      expires: "2026-11-04"
       reason: >-
         GHSA-vfj7-8cjw-p6xm: braces 3.0.3 in deploy/cdk-constructs/package-lock.json. No patched
         version exists. Reachable only through dev/build tooling (micromatch via
@@ -453,7 +453,7 @@ global_settings:
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk/node_modules/deepmerge"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk/package-lock.json. No patched
         version exists (advisory published 2026-09-18, updated 2026-10-27). Dev dependency
@@ -465,7 +465,7 @@ global_settings:
       package_name: "deepmerge"
       package_version: "4.3.1"
       package_path: "deploy/cdk-constructs/node_modules/deepmerge"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk-constructs/package-lock.json. No
         patched version exists (advisory published 2026-09-18, updated 2026-10-27). Dev
@@ -551,7 +551,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.3"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         GHSA-v4x8-3wr5-3wq8: filelock 4.0.3 in uv.lock, the Python 3.10 entry. Dev group only;
         no filelock release above 4.2.0 supports Python 3.10. The Python 3.11 and later entry
@@ -569,7 +569,7 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
@@ -578,7 +578,7 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         GHSA-45c3-73f7-pv4m (CVE-2026-114605): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
@@ -606,7 +606,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-v4x8-3wr5-3wq8: filelock 4.0.12 in uv.lock, the Python 3.10 resolution.
         No patched release supports Python 3.10 (the fix is 4.2.1, which requires
@@ -618,7 +618,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-fj95-fr6c-h845 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -631,7 +631,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-69hj-f68j-2879 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -644,7 +644,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-cwqr-hh33-gh44 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -657,7 +657,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-9c4x-gm8v-wgc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -670,7 +670,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-rfpc-qcw5-3pc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -683,7 +683,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-fq56-3cx3-fjxp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -696,7 +696,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-6627-m3xw-93mp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -709,7 +709,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-8mx5-7m5m-r77g (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -722,7 +722,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-m462-7rxw-wvpg (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -735,7 +735,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-9j6q-wvj5-jgjg (Low): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -748,7 +748,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-567q-5qvw-pf92 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
@@ -761,7 +761,7 @@ global_settings:
       path: "uv.lock"
       package_name: "filelock"
       package_version: "4.0.*"
-      expiration: "2026-11-20"
+      expires: "2026-11-20"
       reason: >-
         GHSA-9vhv-jxww-xfm5 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
         resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python

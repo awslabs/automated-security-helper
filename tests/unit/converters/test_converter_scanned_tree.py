@@ -550,6 +550,19 @@ def jupyter(request, test_plugin_context, monkeypatch, tmp_path):
             ),
         )
         monkeypatch.setattr(jupyter_converter_module, "spawn_run", run)
+        monkeypatch.setattr(jupyter_converter_module, "run_ended_with_the_server", run)
+        # The tool-availability pre-check (_verified_direct_nbconvert, through
+        # verify_pre_installed_tool) would probe the planted file as a real
+        # nbconvert and refuse the whole run before the stubbed launch is
+        # reached; these cells are about the launch, so the pre-check is
+        # satisfied with the planted copy.
+        monkeypatch.setattr(
+            type(converter),
+            "_verified_direct_nbconvert",
+            lambda self, executable=None: jupyter_converter_module._FoundNbconvert(
+                str(installed), None, None, "7.16"
+            ),
+        )
     return converter, calls
 
 

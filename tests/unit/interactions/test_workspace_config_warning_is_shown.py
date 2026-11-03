@@ -55,7 +55,9 @@ if sys.argv[2] == "unreadable":
 else:
     config = None
 
-    def discovered(source_dir):
+    # The real signature (run_ash_scan._discovered_config_path) also takes
+    # log_selection and permit, and the product calls it with permit=...
+    def discovered(source_dir, log_selection=False, permit=None):
         raise ASHConfigSourceError(f"two config files named {hostile}")
 
     run_ash_scan._discovered_config_path = discovered
@@ -94,6 +96,11 @@ def test_the_workspace_config_refusal_is_shown(tmp_path, case, says):
     )
     # Its bytes: text mode would turn a bare carriage return into "\n".
     shown = child.stdout.decode("utf-8") + child.stderr.decode("utf-8")
+    # The Windows child's console ends each line CRLF; that terminator is the
+    # child's, not a character the refusal printed, so the pair is normalized
+    # before the raw-control scan. A bare carriage return inside a line is
+    # still a raw control and still fails.
+    shown = shown.replace("\r\n", "\n")
 
     assert child.returncode == 3, shown
     assert says in shown, repr(shown)

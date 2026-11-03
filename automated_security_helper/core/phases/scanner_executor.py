@@ -1464,10 +1464,13 @@ class ScannerExecutor:
                             if isinstance(sandbox_refusal, SandboxBackendUnavailable):
                                 # The operator named this backend: the tool could
                                 # not start as requested, with the start-failure
-                                # code.
+                                # code. The line names the target, the shape
+                                # concepts/sandbox.md documents ("detect-secrets
+                                # could not start its tool on source: ..."), as
+                                # the spawn-failure handler's line does.
                                 text = (
                                     f"{scanner_config_name} could not start its "
-                                    f"tool: {reason}"
+                                    f"tool on {target_type}: {reason}"
                                 )
                                 scanner_plugin.exit_code = SPAWN_FAILURE_RETURNCODE
                                 # scan() is never called, so the carry-over below
