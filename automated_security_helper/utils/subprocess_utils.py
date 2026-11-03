@@ -727,6 +727,41 @@ def signal_death(returncode: Any, cmd_str: str) -> Optional[Tuple[int, str]]:
     return number, f"{text}, a signal ASH did not send"
 
 
+def describe_signal(number: int) -> str:
+    """``SIGKILL (signal 9)`` for a number :mod:`signal` has a member for, else
+    ``signal 9``.
+
+    Read from the ``signal`` module, so the name is the platform's own, and the
+    fallback keeps the builder from raising where the number has no ``Signals``
+    member (Windows has few), so a message can be built for any number anywhere.
+    """
+    try:
+        name = signal.Signals(number).name
+    except ValueError:
+        return f"signal {number}"
+    return f"{name} (signal {number})"
+
+
+def inferred_signal_death_message(signum: int, returncode: int) -> str:
+    """The read-back's reason for a sandboxed tool whose exit code says a signal
+    ended it: the one wording source, which the docs tests import
+    (tests/unit/docs/test_page_claims.py), so a reword moves both.
+
+    ``returncode`` is the exit code the sandbox reported, usually
+    ``128 + signum``, the shell convention for a death by that signal. The death
+    is inferred from that convention rather than seen, so the reason says
+    "likely" and names the exit code it was read from; and ASH's own stops
+    raise instead of returning a code, so a signal here is one ASH did not
+    send, which the reason says too, as :func:`signal_death` does for a direct
+    negative code.
+    """
+    return (
+        f"the tool was likely ended by {describe_signal(signum)}, a signal ASH "
+        f"did not send: the sandbox reported exit code {returncode}, the shell "
+        "convention for a death by that signal"
+    )
+
+
 def _signaled_failure(
     returncode: Any,
     cmd_str: str,
