@@ -693,12 +693,15 @@ jobs:
   #   windows-latest   py3.10  6127 s (102.1 min)
   #
   # Each unit job's timeout-minutes is ceil(its pool's worst projected cell x 1.3),
-  # rounded up to a multiple of 5: 90 for the Linux pool, 80 for the macOS pool, 135 for
+  # rounded up to a multiple of 5: 90 for the Linux pool, 80 for the macOS pool, 210 for
   # the Windows pool. The projection overstates the unsharded wall, because the sum of
   # four shards counts four checkouts and installs (about two minutes each) where one leg
   # pays one, so the 1.3 margin sits on top of that slack. The projection is a reading,
   # not a measurement of this layout: the first run on this branch is the measurement,
-  # and the timeouts move with it. The cost of unsharding is a longer single leg on the
+  # and the timeouts move with it. The first unsharded run (41677686649, 2026-11-03)
+  # measured two Windows legs at about 138 minutes against the projected 135 bound while
+  # a sibling leg finished in 44 (pool variance), so the Windows bound is set from the
+  # live run, not the shard projection. The cost of unsharding is a longer single leg on the
   # critical path of every run, which the maintainer's word accepts; the integration tier
   # keeps its four shards and the 30-minute timeout, and the e2e tier stays as it is.
   #
@@ -851,10 +854,11 @@ jobs:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    # ceil(102.1 min x 1.3) rounded up to a multiple of 5: the worst projected unsharded
-    # cell of this pool (windows-latest, py3.10, 6127 s over its four shards in run
-    # 41511189913; the note above unit-test-linux).
-    timeout-minutes: 135
+    # The first unsharded run (41677686649) measured the py3.10 and py3.12 legs of this
+    # pool at about 138 minutes against the projected 135 bound (a sibling leg took 44:
+    # pool variance), so this bound comes from the live run, not the shard projection
+    # (the note above unit-test-linux).
+    timeout-minutes: 210
     permissions:
       contents: read
       pull-requests: write

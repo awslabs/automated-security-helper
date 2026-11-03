@@ -153,12 +153,14 @@ SHARDED_TIER_JOB_IDS = INTEGRATION_TEST_JOB_IDS
 #: The per-pool unit timeouts: ceil(the pool's worst projected unsharded cell x 1.3)
 #: rounded up to a multiple of 5, from the four-shard walls of run 41511189913 on main
 #: (worst cells 4124 s ubuntu-latest py3.10, 3547 s macos-latest py3.12, 6127 s
-#: windows-latest py3.10). Written out here so that moving a timeout is a change to this
+#: windows-latest py3.10). Windows is sized from the first unsharded run instead
+#: (41677686649: two legs at about 138 minutes against the projected 135, a sibling at
+#: 44 -- pool variance). Written out here so that moving a timeout is a change to this
 #: file in the same diff, as the shard axis is.
 UNIT_TIMEOUT_MINUTES = {
     "unit-test-linux": 90,
     "unit-test-macos": 80,
-    "unit-test-windows": 135,
+    "unit-test-windows": 210,
 }
 
 
