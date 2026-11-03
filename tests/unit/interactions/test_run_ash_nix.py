@@ -168,6 +168,11 @@ class TestResolveFlakeRef:
         # path (below); an ordinary directory name is its own encoding.
         assert resolve_flake_ref() == "path:" + quote(str(tmp_path), safe="/")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="'?' is not a legal Windows file-name character, so the checkout "
+        "this cell encodes cannot exist here",
+    )
     def test_a_checkout_under_a_url_delimiter_is_percent_encoded(
         self, monkeypatch, tmp_path
     ):
@@ -671,7 +676,10 @@ class TestRunAshNix:
         with scanning_tree(repo):
             run_ash_nix(argv=["scan"])
 
-        assert entered_shell.env["PATH"] == "/usr/bin"
+        # ``system`` is what the cell put on PATH: os.path.abspath("/usr/bin"),
+        # which is a drive-lettered spelling on Windows, so the kept entry is
+        # compared against the computed value, not the POSIX literal.
+        assert entered_shell.env["PATH"] == system
         assert entered_shell.env[ASH_IN_NIX_ENV_VAR] == "1"
 
     def test_the_flake_reference_is_logged_without_its_userinfo(

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -100,6 +101,11 @@ def test_a_syft_exclude(tmp_path, console):
     assert REASON in _shown(console)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="checkov's _output_dir_skip_patterns emits nothing on Windows by "
+    "design, where checkov's walked paths use backslashes",
+)
 @pytest.mark.parametrize(
     "name",
     ["o[/b]", "o[/b](x)"],
