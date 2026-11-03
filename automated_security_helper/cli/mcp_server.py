@@ -3559,17 +3559,69 @@ def _only_the_client_left(error: BaseException) -> bool:
     return isinstance(error, _CLIENT_GONE)
 
 
+#: Whether a SIGINT reached this process while the stdio transport was serving.
+#: Set by ``_note_sigint_then_interrupt``, which run_mcp_server installs only
+#: where the asyncio signal watcher cannot run (``_watches_signals`` False:
+#: Windows) and only in place of Python's own default handler. Read by
+#: ``_interrupted``: Python 3.10's asyncio surfaces that Ctrl-C as a bare
+#: ``asyncio.CancelledError`` out of ``anyio.run`` (the interrupt cancels the
+#: serving task and 3.10's runner re-raises the cancellation, where 3.11+
+#: re-raises the KeyboardInterrupt), and without this record that shape fell to
+#: the re-raise arm and ``ash mcp`` exited 1 instead of the 130 exit-codes.md
+#: pins ("ash mcp" row; mcp-server.md, How the server runs scans).
+_sigint_seen_while_serving = False
+
+
+def _note_sigint_then_interrupt(signum: int, frame: Any) -> None:
+    """Python's default Ctrl-C handler, with a note that the signal arrived.
+
+    One plain store, then ``signal.default_int_handler``, which raises
+    ``KeyboardInterrupt`` as the handler this replaces did: every Ctrl-C
+    behaves as before, and ``_interrupted`` can tell a cancellation that a
+    Ctrl-C caused from one that something else did. Installed only in place of
+    ``signal.default_int_handler`` itself (run_mcp_server), so a SIGINT the
+    process started with ignored stays ignored and a handler someone else set
+    keeps its own semantics.
+    """
+    global _sigint_seen_while_serving
+    _sigint_seen_while_serving = True
+    signal.default_int_handler(signum, frame)
+
+
+def _ctrl_c_on_record() -> bool:
+    """Whether a SIGINT reached this process while or before the serving ended.
+
+    Two records, either of which counts: the marker handler's
+    (``_sigint_seen_while_serving``, installed when Python's own default
+    handler was in charge), and the CLI Ctrl-C handler's latch
+    (``cancellation.sigint_seen``), which is the handler ``ash mcp`` actually
+    runs under -- the entry point installs it for every command, and its first
+    interrupt chains the default handler after setting the latch.
+    """
+    if _sigint_seen_while_serving:
+        return True
+    from automated_security_helper.core.cancellation import sigint_seen
+
+    return sigint_seen()
+
+
 def _interrupted(error: BaseException) -> bool:
     """Whether ``error`` is a Ctrl-C, alone or grouped with the client going away.
 
     A group counts only if it holds a KeyboardInterrupt: one of nothing but the
-    client going away is a disconnect, which exits 0.
+    client going away is a disconnect, which exits 0. A bare cancellation
+    counts only once a SIGINT is on record (``_sigint_seen_while_serving``):
+    that is the shape Python 3.10's asyncio hands the serving's Ctrl-C to on
+    Windows, while a cancellation with no SIGINT behind it is a defect to
+    raise, not an interrupt to dress up as one.
     """
     inner = _grouped(error)
     if inner is not None:
         return any(_interrupted(e) for e in inner) and all(
             _interrupted(e) or _only_the_client_left(e) for e in inner
         )
+    if isinstance(error, asyncio.CancelledError) and _ctrl_c_on_record():
+        return True
     return isinstance(error, KeyboardInterrupt)
 
 
@@ -3638,6 +3690,24 @@ def run_mcp_server():
         if _watches_signals()
         else {}
     )
+    # Where the asyncio watcher cannot run (Windows), a Ctrl-C while serving is
+    # Python's default handler raising KeyboardInterrupt into the loop, which
+    # Python 3.10's asyncio can hand back as a bare CancelledError. The marker
+    # handler notes the signal so _interrupted still reads that shape as the
+    # Ctrl-C it was, and only Python's own default handler is replaced: an
+    # ignored SIGINT stays ignored (_KEPT_IGNORED), and someone else's handler
+    # keeps its own semantics. Only the main thread may set handlers.
+    marker_installed = False
+    if (
+        not _watches_signals()
+        and threading.current_thread() is threading.main_thread()
+        and signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    ):
+        try:
+            signal.signal(signal.SIGINT, _note_sigint_then_interrupt)
+            marker_installed = True
+        except (ValueError, OSError):
+            marker_installed = False
     stdio_presence = StdioServerPresence()
     try:
         # Inside the try, so that a server which cannot lock its presence entry
@@ -3672,6 +3742,14 @@ def run_mcp_server():
         except Exception as e:
             # Shutdown must not fail on cleanup.
             logger.warning(f"Could not remove the stdio session workspace: {e}")
+        if (
+            marker_installed
+            and signal.getsignal(signal.SIGINT) is _note_sigint_then_interrupt
+        ):
+            # Put Python's own handler back, and only when the marker is still
+            # the one installed: a handler someone set meanwhile stays theirs.
+            with suppress(ValueError, OSError):
+                signal.signal(signal.SIGINT, signal.default_int_handler)
         for signum, handler in previous_handlers.items():
             if handler is None:
                 continue
