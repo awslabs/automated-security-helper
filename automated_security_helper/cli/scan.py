@@ -317,11 +317,14 @@ def _resolved(path: str | Path) -> Path:
     Falls back to the absolute spelling when resolving fails: a symbolic link
     that leads back to itself made ``Path.resolve`` raise (RuntimeError before
     Python 3.13, OSError in strict mode), which ended ``ash scan`` in a traceback
-    where the output directory refusal below would have named the link.
+    where the output directory refusal below would have named the link. A path
+    the OS cannot take at all (an embedded NUL, from a ``--cli-json-input``
+    document) raises ValueError the same way, and the absolute spelling is pure
+    string work, so the ``is not a valid path`` refusal below names it too.
     """
     try:
         return Path(path).resolve()
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         return Path(path).absolute()
 
 
@@ -512,9 +515,11 @@ def _settle_output_dir(
     # A directory on the way that cannot be searched: before CPython 3.13,
     # Path.is_dir() re-raised that PermissionError (3.13 reads it as False), so
     # the run ended in a traceback where the refusal below names the reason.
+    # ValueError is a path the OS takes no stat of at all (an embedded NUL),
+    # which the refusal below words as "is not a valid path".
     try:
         probe_after_containment = output_resolved.is_dir()
-    except OSError:
+    except (OSError, ValueError):
         probe_after_containment = False
     if not probe_after_containment:
         output_refusal = output_dir_refusal(output_dir)

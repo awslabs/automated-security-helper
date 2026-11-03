@@ -26,6 +26,7 @@ from automated_security_helper.core.resource_management.exceptions import (
 from automated_security_helper.utils.directory_refusals import (
     REFUSED_CANNOT_BE_CREATED,
     REFUSED_NOT_A_DIRECTORY,
+    REFUSED_NOT_A_VALID_PATH,
     output_dir_refusal,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -657,7 +658,8 @@ def validate_output_directory_path(
     a path that is there and is not a directory is ``invalid_path``; a directory
     that is there and is refused (it cannot be entered, or nothing can be made in
     it) is ``permission_denied``, as is a path stat itself refuses; a path that
-    cannot be made because of what is on the way to it is ``invalid_path``. Every
+    cannot be made because of what is on the way to it is ``invalid_path``, and
+    so is one the OS cannot take at all (an embedded NUL). Every
     refusal used to be ``invalid_parameter``, so a client was told to check its
     parameter for a directory it had no permission to write.
     """
@@ -698,7 +700,7 @@ def _output_directory_refusal_category(
         number = getattr(refusal, "error_number", None)
         if number in _OUT_OF_SPACE_ERRNOS:
             return ErrorCategory.RESOURCE_EXHAUSTED
-        if kind == REFUSED_NOT_A_DIRECTORY:
+        if kind in (REFUSED_NOT_A_DIRECTORY, REFUSED_NOT_A_VALID_PATH):
             return ErrorCategory.INVALID_PATH
         if kind == REFUSED_CANNOT_BE_CREATED:
             # Refused for what is on the way to it, unless stat itself was

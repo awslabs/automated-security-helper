@@ -19,6 +19,8 @@ which case it is and no flag, since the MCP server's parameter is
   ``\x00``, as it shows every control character
 - ``Output directory is not a directory: <path>``
 - ``Output directory cannot be entered: <path>``
+- ``Output directory is not a valid path: <path>``, for a path the OS cannot
+  take at all, as for the source directory above
 - ``Output directory cannot be created: <path> (<reason>)``, where the reason is
   the system's own text for the error (its strerror), such as ``Not a
   directory`` for a file on the way to it
@@ -61,6 +63,7 @@ REFUSED_NOT_A_DIRECTORY = "not_a_directory"
 REFUSED_CANNOT_BE_ENTERED = "cannot_be_entered"
 REFUSED_CANNOT_BE_CREATED = "cannot_be_created"
 REFUSED_CANNOT_BE_WRITTEN = "cannot_be_written"
+REFUSED_NOT_A_VALID_PATH = "not_a_valid_path"
 
 
 class DirectoryRefusal(str):
@@ -133,7 +136,10 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
     An empty path is refused as mkdir refuses it (``No such file or directory``):
     stat answers the same, and nothing was about to make it, while the run that
     took it would have written into the current directory. A path the OS cannot
-    take (an embedded NUL) is refused with the reason Python gives.
+    take at all (an embedded NUL, which a ``--cli-json-input`` document can carry
+    and a command line cannot) is "not a valid path", the same refusal the source
+    directory gets, since no mkdir could ever make it (exit-codes.md, ``ash
+    scan``'s output-directory lines and ``ash merge``).
     """
     path = os.fspath(output_dir)
     try:
@@ -144,8 +150,12 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
                 path, error.strerror or "No such file", error.errno
             )
         return _obstacle_on_the_way(path)
-    except ValueError as error:
-        return output_dir_unmakeable(path, str(error) or type(error).__name__)
+    except ValueError:
+        # The OS takes no such path, so nothing could ever make or enter it:
+        # its own refusal, worded as the source directory's is.
+        return DirectoryRefusal(
+            f"Output directory is not a valid path: {path}", REFUSED_NOT_A_VALID_PATH
+        )
     except OSError as error:
         return output_dir_unmakeable(
             path, error.strerror or type(error).__name__, error.errno
@@ -164,6 +174,24 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
     if failed is not None:
         return output_dir_unwritable(
             path, failed.strerror or type(failed).__name__, failed.errno
+        )
+    return None
+
+
+def output_dir_invalid_path(output_dir: PathLike) -> Optional[DirectoryRefusal]:
+    """The refusal of *output_dir* when the OS can take no such path, else None.
+
+    For a caller that resolves or joins the path before any stat of it:
+    ``Path.resolve`` raises the same ``ValueError`` an embedded NUL gives
+    ``os.stat``, so without this first question ``ash merge`` ended in that
+    traceback where exit-codes.md promises the ``Output directory is not a
+    valid path`` line and exit 5. :func:`output_dir_refusal` answers the same
+    for the same path; this asks only the one question that must come first.
+    """
+    path = os.fspath(output_dir)
+    if "\x00" in path:
+        return DirectoryRefusal(
+            f"Output directory is not a valid path: {path}", REFUSED_NOT_A_VALID_PATH
         )
     return None
 
@@ -288,8 +316,10 @@ __all__ = [
     "REFUSED_CANNOT_BE_ENTERED",
     "REFUSED_CANNOT_BE_WRITTEN",
     "REFUSED_NOT_A_DIRECTORY",
+    "REFUSED_NOT_A_VALID_PATH",
     "WRITE_CHECK_PREFIX",
     "DirectoryRefusal",
+    "output_dir_invalid_path",
     "output_dir_refusal",
     "output_dir_unmakeable",
     "output_dir_unwritable",

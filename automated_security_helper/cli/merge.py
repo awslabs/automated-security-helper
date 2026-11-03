@@ -338,6 +338,7 @@ from automated_security_helper.utils.error_text import (
     config_environment_values,
     text_without_values,
 )
+from automated_security_helper.utils.directory_refusals import output_dir_invalid_path
 from automated_security_helper.utils.inner_run_outcome import without_run_records
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
@@ -3460,6 +3461,16 @@ def merge_command(
         print(f"[red]Invalid configuration: {escape_markup(str(exc))}[/red]")
         raise typer.Exit(3)
 
+    # Before the directory is resolved below: a path the OS cannot take at all
+    # (an embedded NUL, which a --cli-json-input document can carry and a command
+    # line cannot) raises the same ValueError from Path.resolve as from os.stat,
+    # so without this question the merge ended in that traceback where
+    # exit-codes.md (ash merge) promises the scan's "Output directory" line on
+    # standard output, with the path as given, exit 5, and nothing created.
+    invalid_output = output_dir_invalid_path(output_dir)
+    if invalid_output is not None:
+        print(f"[red]{escape_markup(str(invalid_output))}[/red]")
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
     # The merged results file must not be one of the shard results files it is
     # merged from: an --output-dir that holds a --results file would replace that
