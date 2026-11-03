@@ -49,7 +49,7 @@ pytestmark = pytest.mark.unit
     ids=["refused", "link", "collision"],
 )
 @pytest.mark.parametrize(
-    "round_trip", [copy.deepcopy, lambda e: pickle.loads(pickle.dumps(e))]
+    "round_trip", [copy.deepcopy, lambda e: pickle.loads(pickle.dumps(e))]  # nosec B301
 )
 def test_a_refusal_survives_a_round_trip(make, round_trip):
     original = make()

@@ -220,7 +220,7 @@ def test_a_legacy_private_key_and_a_readme_are_extracted(
     archive = _zip(
         Path(test_plugin_context.source_dir) / "a.zip",
         [
-            (".ssh/identity", b"-----BEGIN OPENSSH PRIVATE KEY-----\nnot a key\n"),
+            (".ssh/identity", b"-----BEGIN OPENSSH PRIVATE KEY-----\nnot a key\n"),  # pragma: allowlist secret
             ("README", b"token: not a token\n"),
             ("ok.js", b"ok = 1\n"),
         ],

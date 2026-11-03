@@ -1782,7 +1782,7 @@ def install_dependencies(
                 # A CustomCommand declared with shell=True runs through the shell,
                 # as declared; the flag was dropped before the installer saw it.
                 cmd_exit_code = (
-                    run_command(cmd, shell=shell) if shell else run_command(cmd)
+                    run_command(cmd, shell=shell) if shell else run_command(cmd)  # nosec B604
                 )
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")

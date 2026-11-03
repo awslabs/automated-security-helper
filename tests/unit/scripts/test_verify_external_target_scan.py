@@ -485,7 +485,7 @@ class TestUnattributedRules:
 class TestNormalizeUri:
     def test_a_file_uri_is_decoded_and_the_drive_separator_dropped(self, gate):
         assert gate._normalize_uri("file:///C:/a%20b/x.py") == "C:/a b/x.py"
-        assert gate._normalize_uri("file:///tmp/a%20b/x.py") == "/tmp/a b/x.py"
+        assert gate._normalize_uri("file:///tmp/a%20b/x.py") == "/tmp/a b/x.py"  # nosec B108
 
 
 class TestInsideTheRepository:

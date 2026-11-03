@@ -295,8 +295,8 @@ _ENV_SCALAR_SPELLING = {
     int: "integer",
     float: "number",
     str: "string",
-    SecretStr: "string",
-    SecretBytes: "bytes",
+    SecretStr: "string",  # pragma: allowlist secret
+    SecretBytes: "bytes",  # pragma: allowlist secret
 }
 
 
