@@ -26,6 +26,12 @@ from pathlib import Path
 
 import pytest
 
+#: The child run loads the repository conftest, whose tier contract refuses a
+#: collected test with no tier; the probe's tests run in-process against the
+#: guard's stand-ins, which is the unit tier's shape. The suite itself never
+#: collects this file (its name does not match python_files).
+pytestmark = pytest.mark.unit
+
 #: What the tool guard points into each test's home.
 _HOME_LOCATIONS = (
     "XDG_CONFIG_HOME",
