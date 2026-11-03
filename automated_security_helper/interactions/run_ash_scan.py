@@ -3520,6 +3520,28 @@ def _unusable_nix_config(opts: ScanOptions) -> Optional[ASHConfigValidationError
             f"Config file cannot be read: {opts.config}. The scan inside the "
             "shell reads it with this process's rights."
         )
+    # os.access answers from the mode bits, which on Windows reflect only the
+    # read-only attribute, so a file an NTFS deny-ACL makes unreadable read as
+    # readable there and the run went on to the Nix launch (exit 1, "requires
+    # Nix") instead of this exit-3 refusal (install.md, Nix mode: "A file that
+    # is missing, cannot be read, does not parse, or is not a valid config
+    # stops the scan with exit code 3"). Opening the file asks the operating
+    # system itself. The stat above says the path is a regular file;
+    # O_NONBLOCK (absent on Windows, so a no-op spelling there) keeps the
+    # probe from waiting on a path that stopped being one between the two
+    # calls. A ValueError is a path no open can take (an embedded NUL),
+    # refused the same way, so no error comes out of the handler that calls
+    # this, as promised above.
+    try:
+        readable = os.open(
+            opts.config, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+        )
+    except (OSError, ValueError):
+        return ASHConfigValidationError(
+            f"Config file cannot be read: {opts.config}. The scan inside the "
+            "shell reads it with this process's rights."
+        )
+    os.close(readable)
     return None
 
 
