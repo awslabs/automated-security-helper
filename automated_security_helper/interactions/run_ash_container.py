@@ -657,8 +657,15 @@ def _carried_values_by_band(
     """
     all_values = []
     strict = []
+    # One snapshot, not per-name os.environ reads: the names come from the
+    # operator's chain, so the read is dynamic, and this module's dynamic reads
+    # go through snapshot_environ (as _readable_environment_values does). The
+    # docs probe enumerates this module's literal environment reads and refuses
+    # a computed-name os.environ read it could not set
+    # (tests/unit/docs/test_page_claims.py, _ci_env_module_reads).
+    environ = snapshot_environ()
     for name in environment_names:
-        value = os.environ.get(name, "")
+        value = environ.get(name, "")
         if not value:
             continue
         all_values.append(value)
@@ -5624,13 +5631,18 @@ def run_ash_container(
     # already refused above when a run was asked for, so the catch is for a
     # build alone, which keeps building as it did, with no values to carry;
     # the run phase still refuses such a chain before any container sees it.
+    # One snapshot, not per-name os.environ reads, as _carried_values_by_band
+    # reads its names: the docs probe enumerates this module's literal
+    # environment reads and refuses a computed-name os.environ read it could
+    # not set (tests/unit/docs/test_page_claims.py, _ci_env_module_reads).
+    build_environ = snapshot_environ()
     try:
         build_hidden = tuple(
             value
             for name in operator_environment_names(
                 config, reads.host_ash_config(), named_source, reads
             )
-            for value in (os.environ.get(name, ""),)
+            for value in (build_environ.get(name, ""),)
             if value
         )
     except ContainerInputError:
