@@ -123,6 +123,12 @@ def resolve_uri_reading(text: str, base: Optional[Path] = None) -> Optional[Path
     reading raising out of a loop over results. The one guard for every place
     that resolves such a text, so the sites cannot drift apart.
     """
+    if "\x00" in text:
+        # An embedded NUL cannot be a file's name (the class the comment above
+        # ``_UNRESOLVABLE`` describes), but ``WindowsPath.resolve`` on CPython
+        # 3.13+ returns a path for such a name instead of raising, so the
+        # guard below never fires there: named as no file before resolving.
+        return None
     candidate = Path(undecodable_of_text(text))
     if base is not None:
         candidate = Path(base) / candidate
