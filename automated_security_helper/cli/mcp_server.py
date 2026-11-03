@@ -1816,16 +1816,16 @@ async def get_scan_results(
         # fault, logged as unexpected and with no category a client could
         # branch on. The response names its category (the filter class
         # carries it) and the server log does not record it as its own error.
-        message = raw_controls_on_one_line(
-            f"Error getting scan results: {error_text(e)}"
-        )
+        shown = f"Error getting scan results: {error_text(e)}"
         try:
-            await _tell_client_error(ctx, message)
+            await _tell_client_error(ctx, raw_controls_on_one_line(shown))
         except Exception:
             logger.error(f"Failed to send error message to client: {error_text(e)}")
         return {
             "success": False,
-            "error": message,
+            # The escaper is spelled inline so the controls guard reads the
+            # site; the text is the same either way.
+            "error": raw_controls_on_one_line(shown),
             "error_type": type(e).__name__,
             "error_category": e.error_category,
         }
