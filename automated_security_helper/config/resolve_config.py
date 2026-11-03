@@ -7415,11 +7415,21 @@ def _whose_file(
             f" '{shared.as_posix()}'" if shared is not None else ""
         )
         return f"was delivered by an MCP client, under {place}", place
-    # A scanned tree is a checkout's top, or the scan root when it is in none
-    # (sandbox_grants._outermost_checkout).
-    in_checkout = os.path.lexists(tree / ".git")
+    # The place to move out of is the outermost checkout around the tree: a
+    # workspace root inside a git checkout is scanned as its own tree, and
+    # naming the root alone sent the operator to a place still inside the
+    # checkout, where the file is refused the same way (scale-large-repos.md,
+    # run-in-a-container.md: move it outside the checkout, or outside the
+    # workspace root, which the error calls the scanned directory, when that
+    # is in no checkout). For an ordinary scan the tree is already a
+    # checkout's top, or the scan root when it is in none, so this names what
+    # it always named (sandbox_grants._outermost_checkout).
+    from automated_security_helper.config.sandbox_grants import _outermost_checkout
+
+    around = _outermost_checkout(tree)
+    in_checkout = os.path.lexists(around / ".git")
     kind = "the checkout" if in_checkout else "the scanned directory"
-    place = f"{kind} '{tree.as_posix()}'"
+    place = f"{kind} '{around.as_posix()}'"
     if any(is_within(path, each) for each in trees):
         return f"is inside {place}", place
     return f"is reached through a link inside {place}", place
