@@ -3818,6 +3818,16 @@ global_settings:
     # === The #865 chain's test files: gitleaks ===
     # Per-file entries naming the flagged value, as the gitleaks fixture-token
     # section above does.
+    #
+    # Why these live here and not inline: ASH runs gitleaks with
+    # --ignore-gitleaks-allow and neutralizes .gitleaksignore, so the inline
+    # "gitleaks:allow" markers these fixture lines carry are inert by design
+    # in ASH scans; this config is the suppression mechanism the existing
+    # gitleaks entries already use. All seven findings are deliberate,
+    # permanent test fixtures, so the entries carry no expiration, as the
+    # other gitleaks false-positive entries do. The required PR check reads
+    # this config from the BASE commit, so these entries take effect at
+    # merge; the pre-merge residual on the PR's own run is by design.
     - rule_id: "generic-api-key"
       path: "tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
