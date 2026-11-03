@@ -104,7 +104,7 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="global_settings.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="global_settings.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
+| <a id="global_settings.ignore_paths.expires"></a>`expires` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4. |
 | <a id="global_settings.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 
 ### <a id="section-global_settings-suppressions"></a>`global_settings.suppressions[]`
@@ -120,7 +120,7 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="global_settings.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="global_settings.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
+| <a id="global_settings.suppressions.expires"></a>`expires` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4. |
 | <a id="global_settings.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 | <a id="global_settings.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="global_settings.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
@@ -368,7 +368,7 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="workspace-policy.workspace.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
+| <a id="workspace-policy.workspace.suppressions.expires"></a>`expires` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4. |
 | <a id="workspace-policy.workspace.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 | <a id="workspace-policy.workspace.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="workspace-policy.workspace.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
@@ -406,5 +406,5 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="workspace-policy.workspace.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
+| <a id="workspace-policy.workspace.ignore_paths.expires"></a>`expires` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4. |
 | <a id="workspace-policy.workspace.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |

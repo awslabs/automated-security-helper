@@ -1003,7 +1003,7 @@ Array of suppression rules to mark findings as false positives or accepted risks
 - `line_start`: Optional - specific line number
 - `line_end`: Optional - end line for multi-line suppressions
 - `reason`: Required - explanation for suppression
-- `expiration`: Optional - ISO date when suppression expires (`expires` is accepted as an alias when a config is read)
+- `expires`: Optional - ISO date when suppression expires (`expiration` is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4)
 - `resource_id`: Optional - only suppress findings about this resource identity (for cdk-nag, the CDK construct path); sugar for `scope.resource_id`
 - `scope`: Optional - narrow the entry to a resource identity, a resource type, or named engines' findings:
 
