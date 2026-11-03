@@ -11,11 +11,12 @@ expensive tier. Every test carries one of ``unit``, ``integration`` or ``e2e``, 
 three families of jobs, one job per runner pool so that each pool carries its own
 ``max-parallel`` cap, run one tier each:
 
-* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit`` in four shards per OS
-  and Python version: the tier first ran unsharded on the reading that its in-process
-  tests take minutes on one runner, and the first tiered run of main measured the
-  unsharded legs at 1837 to 1972 s with 13 of the 20 non-arm legs cancelled at the
-  30-minute timeout, so it took the integration tier's shard axis;
+* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit`` UNSHARDED, one leg
+  per OS and Python version, on the maintainer's word ("i get shards for integration/e2e
+  tests but for unit they shouldn't be needed", 2026-11-03); each job's timeout is sized
+  from the measured shard walls of the last sharded run on main (the note above
+  unit-test-linux in the workflow), so the 30-minute cap that once forced the tier into
+  four shards no longer applies to it;
 * ``integration-test-linux``, ``-macos`` and ``-windows`` run ``-m integration`` in
   four shards per OS and Python version, because the tests that start real tools carry
   about 6,300 serial seconds by the classification and the per-file medians of one run
@@ -24,11 +25,12 @@ three families of jobs, one job per runner pool so that each pool carries its ow
 * ``e2e-test-linux``, ``-macos`` and ``-windows`` run ``-m e2e`` once per runner image
   on one Python version, unsharded.
 
-Four things have to agree for the unit and integration tiers to run every test exactly
-once:
+Four things have to agree for the integration tier to run every test exactly once, and
+for the unit tier to stay whole:
 
-* the ``shard`` axis in each of the six unit and integration jobs, one literal list whose
-  entries each carry the total they were cut for (``3of4``);
+* the ``shard`` axis in each of the three integration jobs, one literal list whose
+  entries each carry the total they were cut for (``3of4``), and NO shard axis on the
+  three unit jobs, which run the whole tier per leg;
 * ``tests/utils/sharding.py``, a ``pytest_ignore_collect`` hook that ignores the test
   modules another shard owns, so pytest's own ``testpaths``, ``python_files`` and ignore
   rules still decide what is collected;
@@ -36,15 +38,16 @@ once:
   shard otherwise, and names its artifact after the tier and the shard;
 * the ``unit-coverage`` job, which downloads the unit tier's artifacts of one OS family
   and applies the 80% gate to their data, failing when a shard is missing or
-  unreadable. (The unit tier is four artifacts, ``shard1of4`` to ``shard4of4``; a set
-  of one, ``shard1of1``, is still admitted as complete, which is what an unsharded run
-  uploads.)
+  unreadable. (The unsharded unit tier uploads one artifact, ``shard1of1``, which the
+  gate admits as a complete set of one; a sharded set is admitted only whole.)
 
-A shard dropped from the axis would silently stop running its slice of the suite, and
-every remaining shard would still pass. The first test below is that guard. A split made
-outside pytest (a list of files on the command line) would also skip pytest's ignore
-rules for those files; the real-collection tests below run pytest on a planted tree to
-hold the hook to the unsharded run's collection.
+A shard dropped from the integration axis would silently stop running its slice of the
+suite, and every remaining shard would still pass. The first test below is that guard,
+and its sibling holds the unit jobs to no shard axis at all, so a re-added unit shard
+axis fails here in the same diff. A split made outside pytest (a list of files on the
+command line) would also skip pytest's ignore rules for those files; the
+real-collection tests below run pytest on a planted tree to hold the hook to the
+unsharded run's collection.
 
 What it does not cover
 ----------------------
@@ -137,15 +140,26 @@ def _assert_only_the_pull_request_cover(job_id: str, matrix: dict[str, Any]) -> 
             )
 
 
-#: The shard axis of the unit and integration tiers. For the integration tier four is a
-#: reading from the real classification and the per-file medians of one run of the earlier
-#: layout (eight was the figure before the tests were classified); for the unit tier it is
-#: the measured cure for the unsharded legs that timed out on the first tiered run of main
-#: (two shards would have read about 950 s on x86_64, four about 480 s). The list is
-#: written out here so that moving it is a change to this file in the same diff.
+#: The shard axis of the integration tier. Four is a reading from the real
+#: classification and the per-file medians of one run of the earlier layout (eight was
+#: the figure before the tests were classified). The list is written out here so that
+#: moving it is a change to this file in the same diff. The unit tier carries no shard
+#: axis: it runs whole, one leg per OS and Python version, under a timeout sized from
+#: the measured shard walls (the note above unit-test-linux in the workflow).
 INTEGRATION_SHARDS = ["1of4", "2of4", "3of4", "4of4"]
-#: The six jobs that carry the shard axis: the three unit and the three integration jobs.
-SHARDED_TIER_JOB_IDS = (*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS)
+#: The jobs that carry the shard axis: the three integration jobs and no other.
+SHARDED_TIER_JOB_IDS = INTEGRATION_TEST_JOB_IDS
+
+#: The per-pool unit timeouts: ceil(the pool's worst projected unsharded cell x 1.3)
+#: rounded up to a multiple of 5, from the four-shard walls of run 41511189913 on main
+#: (worst cells 4124 s ubuntu-latest py3.10, 3547 s macos-latest py3.12, 6127 s
+#: windows-latest py3.10). Written out here so that moving a timeout is a change to this
+#: file in the same diff, as the shard axis is.
+UNIT_TIMEOUT_MINUTES = {
+    "unit-test-linux": 90,
+    "unit-test-macos": 80,
+    "unit-test-windows": 135,
+}
 
 
 def _load_script(filename: str) -> ModuleType:
@@ -276,18 +290,30 @@ class TestTheShardAxis:
         assert "matrix.shard" in _workflow_job(job_id)["name"]
 
     @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
-    def test_the_unit_jobs_hand_their_shard_and_their_tier_to_the_action(self, job_id):
-        """The unit tier is sharded like the integration tier (the module docstring).
+    def test_the_unit_jobs_run_the_whole_tier_unsharded(self, job_id):
+        """The unit tier runs whole, by the maintainer's word (the module docstring).
 
-        An unsharded unit leg did not fit the 30-minute timeout on the hosted x86_64,
-        macOS and Windows runners, so each unit job carries the shard axis and hands its
-        shard to the action; a job that dropped the axis would run the whole tier again.
+        No shard axis, no shard input and no shard in the job name: the action's empty
+        default runs the whole tier, the e2e jobs' existing shape, and the artifact
+        uploads as the complete set of one the coverage gate admits. A re-added unit
+        shard axis, or a shard handed to the action, fails here.
         """
         job = _workflow_job(job_id)
-        assert job["strategy"]["matrix"]["shard"] == INTEGRATION_SHARDS, job["strategy"]
+        assert "shard" not in job["strategy"]["matrix"], (
+            f"{job_id} carries a shard axis; the unit tier runs unsharded"
+        )
+        assert "shard" not in job["name"], job["name"]
         uses = _uses_the_action(job_id)
-        assert uses["with"]["shard"] == "${{ matrix.shard }}"
+        assert "shard" not in uses["with"], (
+            f"{job_id} hands a shard to the action; the empty default is the whole tier"
+        )
         assert uses["with"]["marker"] == "unit"
+
+    @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
+    def test_the_unit_jobs_carry_the_timeout_the_measured_walls_size(self, job_id):
+        """The timeout is what replaced the shards; a silent cut back to 30 re-breaks
+        the tier the way the first unsharded run broke (the module docstring)."""
+        assert _workflow_job(job_id)["timeout-minutes"] == UNIT_TIMEOUT_MINUTES[job_id]
 
     @pytest.mark.parametrize("job_id", E2E_TEST_JOB_IDS)
     def test_the_e2e_jobs_run_one_python_and_are_not_sharded(self, job_id):
@@ -2549,14 +2575,21 @@ class TestTheUnitTestMatrixIsSplitByOs:
 
     @staticmethod
     def _comparable(job: dict[str, Any]) -> dict[str, Any]:
-        """The job without what the split is for: its cap and its matrix."""
+        """The job without what the split is for: its cap, its matrix and, for the unit
+        family, its timeout, which is sized per pool from that pool's measured walls
+        (pinned per job by test_the_unit_jobs_carry_the_timeout_the_measured_walls_size).
+        """
         strategy = {
             k: v
             for k, v in job["strategy"].items()
             if k not in ("matrix", "max-parallel")
         }
         return {
-            **{k: v for k, v in job.items() if k != "strategy"},
+            **{
+                k: v
+                for k, v in job.items()
+                if k not in ("strategy", "timeout-minutes")
+            },
             "strategy": strategy,
         }
 
@@ -2600,8 +2633,9 @@ class TestTheUnitTestMatrixIsSplitByOs:
         }
         first = keys[UNIT_TEST_JOB_IDS[0]]
         assert all(value == first for value in keys.values()), keys
-        assert first == ["os", "python-version", "shard"], (
-            "the unit tier is the OS, Python and shard axes, the integration tier's shape"
+        assert first == ["os", "python-version"], (
+            "the unit tier is the OS and Python axes alone; a shard axis here re-shards "
+            "a tier the maintainer said should not need shards"
         )
         for job_id, job in self._jobs().items():
             matrix = job["strategy"]["matrix"]
@@ -2706,13 +2740,21 @@ class TestTheIntegrationAndE2eFamiliesMirrorTheUnitFamily:
             assert not differing, f"{job_id} differs from {first_id} in {differing}"
 
     @pytest.mark.parametrize(
-        "job_id", [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
+        "job_id", [*INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
     )
-    def test_every_tier_job_keeps_the_timeout_the_shard_arithmetic_assumes(
+    def test_every_sharded_or_e2e_job_keeps_the_timeout_the_shard_arithmetic_assumes(
         self, job_id
     ):
+        """The unit jobs carry their own measured timeouts, pinned per job in
+        TestTheShardAxis; the 30 minutes here is what the integration shard
+        arithmetic was done against."""
+        assert _workflow_job(job_id)["timeout-minutes"] == 30
+
+    @pytest.mark.parametrize(
+        "job_id", [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
+    )
+    def test_every_tier_job_keeps_the_tier_permissions(self, job_id):
         job = _workflow_job(job_id)
-        assert job["timeout-minutes"] == 30
         assert job["permissions"] == {
             "contents": "read",
             "pull-requests": "write",
