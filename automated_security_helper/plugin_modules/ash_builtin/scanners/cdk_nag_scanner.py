@@ -7,7 +7,14 @@ from collections.abc import Mapping
 from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
 from pathlib import Path
 
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from automated_security_helper.utils.redacted_model import RedactedSection
 from yaml import YAMLError
@@ -63,7 +70,13 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
 )
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
-from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.core import (
+    EMPTY_SCOPE_RULE,
+    IgnorePathWithReason,
+)
+from automated_security_helper.utils.suppression_scope_registry import (
+    register_suppression_scope_engine,
+)
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     names_a_location,
@@ -984,6 +997,97 @@ class CdkNagScannerConfig(ScannerPluginConfigBase):
     ] = CdkNagScannerConfigOptions()
 
 
+class CdkNagScopeBlock(RedactedSection):
+    """What a suppression's ``scope.engines.cdk-nag`` block may say.
+
+    Owned by this plugin (utils/suppression_scope_registry.py); ASH's core
+    never reads the keys. ``applies_to`` is exact string membership, as
+    cdk-nag's own appliesTo; ``resource_path`` is literal-first, then glob
+    with ``[`` escaped, so bracketed spellings match as written.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+        hide_input_in_errors=True,
+        json_schema_extra={"additionalProperties": False},
+    )
+
+    ENTRY_KIND: ClassVar[str] = "a cdk-nag suppression scope"
+
+    applies_to: Annotated[
+        str | List[str] | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only cover findings whose granular qualifier -- the "
+                "bracketed tail cdk-nag appends to a rule id, e.g. "
+                "'Action::logs:*' in 'AwsSolutions-IAM5[Action::logs:*]' -- "
+                "equals one of these exactly, as cdk-nag's own appliesTo "
+                "(no glob reading). A finding with no qualifier never "
+                "matches an applies_to block."
+            ),
+        ),
+    ] = None
+    resource_path: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only cover findings about this CDK construct path "
+                "(the resource identity cdk-nag reports); glob, case-sensitive."
+            ),
+        ),
+    ] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unknown_keys(cls, data, info):
+        """A typo inside the block gets the same did-you-mean as everywhere."""
+        from automated_security_helper.utils.unknown_keys import refuse_unknown_keys
+
+        return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
+
+    @field_validator("applies_to", "resource_path")
+    @classmethod
+    def _refuse_an_empty_value(cls, v, info):
+        """Refuse ``""`` and lists that say nothing: they can never match.
+
+        ``applies_to`` is exact membership and ``resource_path`` needs a
+        non-blank pattern, so an empty value makes the entry silently inert,
+        the defect class the suppression-scope feature exists to surface
+        (EMPTY_SCOPE_RULE: match-all is the ABSENCE of the field). A list
+        counts empty when it is ``[]`` OR every element is an empty or
+        whitespace string: ``qualifier not in values`` can never hit on one
+        (no real qualifier is blank), so ``[""]`` is as inert as ``[]``. Both
+        the config checks (validate_suppression_scope) and the matcher
+        (suppression_scope_matches) validate the block through this model, so
+        validation and match time agree: the checks report the field by name
+        and the matcher fails closed.
+        """
+        if v is None:
+            return v
+        # all() over [] is True, so the bare-[] case rides the same test; a
+        # list holding a non-string element keeps its current handling (not
+        # classed empty here).
+        empty = (
+            (not v.strip())
+            if isinstance(v, str)
+            else all(isinstance(e, str) and not e.strip() for e in v)
+        )
+        if empty:
+            raise ValueError(
+                EMPTY_SCOPE_RULE.format(
+                    what=f"{info.field_name} in a cdk-nag scope block",
+                    omit="the key",
+                )
+            )
+        return v
+
+    @property
+    def has_unknown_keys(self) -> bool:
+        return bool(self.model_extra)
+
+
 @ash_scanner_plugin
 class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     """CDK Nag security scanner, custom CDK-CLI-less implementation."""
@@ -1040,6 +1144,73 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         named = _jsii_node_value()
         carried = named if names_a_location(named) else ""
         return (*super()._environment_values(), *((carried,) if carried else ()))
+
+    # --- Suppression-scope hooks (ScannerPluginBase; registered below) ---
+
+    @classmethod
+    def validate_suppression_scope(cls, block) -> List[str]:
+        """Problems with a scope.engines.cdk-nag block, for the config checks."""
+        try:
+            model = CdkNagScopeBlock.model_validate(block)
+        except ValidationError as e:
+            # The model's own messages carry the did-you-mean wording; the
+            # input is never quoted (hide_input_in_errors).
+            return [
+                error.get("msg", "invalid cdk-nag scope block") for error in e.errors()
+            ]
+        problems: List[str] = []
+        if model.applies_to is None and model.resource_path is None:
+            problems.append(
+                "a cdk-nag scope block needs applies_to or resource_path; an "
+                "empty block selects nothing."
+            )
+        return problems
+
+    @classmethod
+    def suppression_scope_matches(cls, block, finding) -> bool:
+        """Whether this cdk-nag block covers ``finding``. Fails closed throughout."""
+        from automated_security_helper.models.core import scope_value_matches
+
+        try:
+            model = CdkNagScopeBlock.model_validate(block)
+        except ValidationError:
+            return False
+        if model.has_unknown_keys or (
+            model.applies_to is None and model.resource_path is None
+        ):
+            return False
+        if model.applies_to is not None:
+            _, qualifier = cls.split_rule_qualifier(finding.rule_id or "")
+            if qualifier is None:
+                return False
+            values = (
+                [model.applies_to]
+                if isinstance(model.applies_to, str)
+                else model.applies_to
+            )
+            # Exact membership, as cdk-nag's own appliesTo: a literal ported
+            # from a cdk-nag config, such as "Resource::*", covers only the
+            # finding with that exact qualifier, never every Resource::-
+            # qualified finding of the rule. No glob reading here.
+            if qualifier not in values:
+                return False
+        if model.resource_path is not None:
+            if finding.resource_id is None:
+                return False
+            if not scope_value_matches(
+                finding.resource_id, model.resource_path, case_sensitive=True
+            ):
+                return False
+        return True
+
+    @classmethod
+    def split_rule_qualifier(cls, rule_id: str):
+        """cdk-nag's ``rule[qualifier]`` split (utils/cdk_nag_wrapper._rule_id_parts)."""
+        # Imported lazily: the wrapper module pulls in cfn_tools, which the
+        # scanner must not require just to be importable.
+        from automated_security_helper.utils.cdk_nag_wrapper import _rule_id_parts
+
+        return _rule_id_parts(rule_id)
 
     def model_post_init(self, context):
         if self.config is None:
@@ -2084,6 +2255,17 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             )
 
         return report
+
+
+# cdk-nag owns its scope.engines blocks: the matcher and the config checks
+# find the hooks above through this registration (made at module load, like
+# the plugin manager's own).
+register_suppression_scope_engine("cdk-nag", CdkNagScanner)
+
+# The placement hints for cdk-nag's block keys (applies_to, resource_path)
+# are seeded statically in utils/unknown_keys.py: unknown-key warnings are
+# produced at config load, which precedes plugin imports, so a registration
+# here never reached them.
 
 
 def _script_report_json(report: "SarifReport | bool", scanner: CdkNagScanner) -> str:

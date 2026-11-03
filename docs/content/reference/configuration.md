@@ -59,6 +59,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="global_settings"></a>`global_settings` | [section](#section-global_settings) | see the section | Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence. |
 | <a id="fail_on_findings"></a>`fail_on_findings` | boolean | `true` | Whether to exit with non-zero code if findings are detected |
 | <a id="fail_on_incomplete_scanners"></a>`fail_on_incomplete_scanners` | boolean | `true` | Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. One ending overrides this setting: a run where ASH could not stop a scanner's tool exits 1 either way, because the tool may still be running and writing into the output directory. |
+| <a id="fail_on_unknown_keys"></a>`fail_on_unknown_keys` | boolean | `false` | Whether an unknown key in a suppression or ignore-path entry refuses the config at load. False (the default) loads the config with a warning that names the key, with a did-you-mean, and the entry it sits in suppresses nothing until it is fixed, so a typo can never widen a suppression. True refuses the config, naming the same key. ASH v4 flips the default to True; set it True now to adopt the error early. |
 | <a id="honor_ignore_files"></a>`honor_ignore_files` | boolean | `true` | Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions. |
 | <a id="sandbox"></a>`sandbox` | [section](#section-sandbox) | see the section | OS-level sandboxing of scanner subprocesses. |
 | <a id="content_db_staleness"></a>`content_db_staleness` | one of `fail`, `warn` | `fail` | What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'. |
@@ -103,7 +104,7 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="global_settings.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="global_settings.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
+| <a id="global_settings.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
 | <a id="global_settings.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 
 ### <a id="section-global_settings-suppressions"></a>`global_settings.suppressions[]`
@@ -119,7 +120,7 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="global_settings.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="global_settings.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="global_settings.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
+| <a id="global_settings.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
 | <a id="global_settings.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 | <a id="global_settings.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="global_settings.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
@@ -128,6 +129,21 @@ A key not listed here is accepted and kept, without validation.
 | <a id="global_settings.suppressions.package_version"></a>`package_version` | string or null | `null` | (Optional) Only suppress findings about this installed package version (glob, case-insensitive). Findings that do not report an installed version never match. |
 | <a id="global_settings.suppressions.package_path"></a>`package_path` | string or null | `null` | (Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports \*\*), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match. |
 | <a id="global_settings.suppressions.symbol"></a>`symbol` | string or null | `null` | (Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches. |
+| <a id="global_settings.suppressions.scope"></a>`scope` | [section](#section-global_settings-suppressions-scope) or null | `null` | (Optional) Scope the suppression to a resource identity, a resource type, or named engines' findings; see SuppressionScope. Omit it to keep today's matching. An empty scope is refused: match-all is the absence of the field. |
+| <a id="global_settings.suppressions.resource_id"></a>`resource_id` | string or null | `null` | (Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error. |
+
+### <a id="section-global_settings-suppressions-scope"></a>`global_settings.suppressions[].scope`
+
+What a suppression is scoped to beyond path, lines and package fields.
+
+A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=global_settings.suppressions.scope -->
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| <a id="global_settings.suppressions.scope.resource_id"></a>`resource_id` | string or null | `null` | (Optional) Only suppress findings about the resource with this identity, as the producing engine reports it (for cdk-nag, the CDK construct path). Literal match first, then glob; case-sensitive. Findings that carry no resource identity never match. |
+| <a id="global_settings.suppressions.scope.resource_type"></a>`resource_type` | string or null | `null` | (Optional) Only suppress findings about resources of this type (e.g. 'AWS::IAM::Policy'). Literal match first, then glob; case-insensitive. Findings that carry no resource type never match. |
+| <a id="global_settings.suppressions.scope.engines"></a>`engines` | mapping of string to mapping of string to any or null | `null` | (Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin. |
 
 ### <a id="section-global_settings-mcp"></a>`global_settings.mcp`
 
@@ -352,7 +368,7 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.suppressions.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.suppressions.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="workspace-policy.workspace.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
+| <a id="workspace-policy.workspace.suppressions.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
 | <a id="workspace-policy.workspace.suppressions.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |
 | <a id="workspace-policy.workspace.suppressions.rule_id"></a>`rule_id` | string or null | `null` | Rule ID to suppress |
 | <a id="workspace-policy.workspace.suppressions.line_start"></a>`line_start` | integer or null | `null` | (Optional) Starting line number |
@@ -361,6 +377,21 @@ A key not listed here is accepted and kept, without validation.
 | <a id="workspace-policy.workspace.suppressions.package_version"></a>`package_version` | string or null | `null` | (Optional) Only suppress findings about this installed package version (glob, case-insensitive). Findings that do not report an installed version never match. |
 | <a id="workspace-policy.workspace.suppressions.package_path"></a>`package_path` | string or null | `null` | (Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports \*\*), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match. |
 | <a id="workspace-policy.workspace.suppressions.symbol"></a>`symbol` | string or null | `null` | (Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches. |
+| <a id="workspace-policy.workspace.suppressions.scope"></a>`scope` | [section](#workspace-section-workspace-suppressions-scope) or null | `null` | (Optional) Scope the suppression to a resource identity, a resource type, or named engines' findings; see SuppressionScope. Omit it to keep today's matching. An empty scope is refused: match-all is the absence of the field. |
+| <a id="workspace-policy.workspace.suppressions.resource_id"></a>`resource_id` | string or null | `null` | (Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error. |
+
+### <a id="workspace-section-workspace-suppressions-scope"></a>Workspace policy `workspace.suppressions[].scope`
+
+What a suppression is scoped to beyond path, lines and package fields.
+
+A key not listed here is accepted and kept, without validation.
+
+<!-- doctest: options of=workspace-policy.workspace.suppressions.scope -->
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| <a id="workspace-policy.workspace.suppressions.scope.resource_id"></a>`resource_id` | string or null | `null` | (Optional) Only suppress findings about the resource with this identity, as the producing engine reports it (for cdk-nag, the CDK construct path). Literal match first, then glob; case-sensitive. Findings that carry no resource identity never match. |
+| <a id="workspace-policy.workspace.suppressions.scope.resource_type"></a>`resource_type` | string or null | `null` | (Optional) Only suppress findings about resources of this type (e.g. 'AWS::IAM::Policy'). Literal match first, then glob; case-insensitive. Findings that carry no resource type never match. |
+| <a id="workspace-policy.workspace.suppressions.scope.engines"></a>`engines` | mapping of string to mapping of string to any or null | `null` | (Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin. |
 
 ### <a id="workspace-section-workspace-ignore_paths"></a>Workspace policy `workspace.ignore_paths[]`
 
@@ -375,5 +406,5 @@ A key not listed here is accepted and kept, without validation.
 |-----|------|---------|-------------|
 | <a id="workspace-policy.workspace.ignore_paths.path"></a>`path` | string | required | Path or pattern to exclude |
 | <a id="workspace-policy.workspace.ignore_paths.reason"></a>`reason` | string | required | Reason for exclusion |
-| <a id="workspace-policy.workspace.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. |
+| <a id="workspace-policy.workspace.ignore_paths.expiration"></a>`expiration` | string or null | `null` | (Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read. |
 | <a id="workspace-policy.workspace.ignore_paths.client_supplied"></a>`client_supplied` | boolean | `false` | Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored. |

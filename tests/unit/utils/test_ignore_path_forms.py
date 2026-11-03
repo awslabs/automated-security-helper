@@ -407,7 +407,13 @@ def test_sarif_step_gives_a_dot_slash_location_the_file_path_and_id_of_its_file(
     finding the suppression step builds has that file_path and that id."""
     seen = []
 
-    def record(finding, suppressions, symbol_resolver=None):
+    def record(
+        finding,
+        suppressions,
+        symbol_resolver=None,
+        where="global_settings.suppressions",
+        warned_engines=None,
+    ):
         seen.append((finding.file_path, finding.id))
         return False, None
 

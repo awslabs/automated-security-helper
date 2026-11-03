@@ -6701,7 +6701,12 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
         pytest.param(
             None, 0, "Configuration is valid! A scan accepts it.", id="as-written"
         ),
-        pytest.param(("expiration:", "expiry:"), 3, "'expiry'", id="a-misspelled-key"),
+        pytest.param(
+            ("expiration:", "expiry:"),
+            0,
+            "Configuration is valid! A scan accepts it.",
+            id="a-misspelled-key",
+        ),
         pytest.param(
             ("line_start: 6", 'line_start: "six"'), 3, "line_start", id="a-wrong-value"
         ),
@@ -6724,21 +6729,31 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
 
     The tutorial's ``.ashrc.yaml``, read from its ``cat`` block, is checked with
     ``ash config validate`` as written and with one field broken in each way the
-    sentence lists; the misspelling is the one the page's ``sed`` makes. Each broken
-    file must exit 3 and name the field, and a scan, resolving the same file, must
-    refuse it too. The file as written is the control: it exits 0, with the warning
-    about ``project_name``.
+    page's sentence lists. A wrong value and a missing required field exit 3 and
+    name the field, and a scan, resolving the same file, refuses it too. A typo
+    in an optional key (``expiry`` for ``expiration``) is the warn-then-refuse
+    rollout's default: validate accepts the file, a scan accepts it too, the
+    scan's resolution warning names the key with a did-you-mean, and the entry
+    is kept but applies to nothing (``has_unknown_keys``). The page's ``sed``
+    makes a required-key typo (``reasn`` for ``reason``), which exits 3 because
+    the required field then goes missing: the missing-required case here is that
+    refusal's shape. The file as written is the control: it exits 0, with the
+    warning about ``project_name``.
     """
     assert_on_page(
         _CONFIG_AGENTS_PAGE,
         "It checks the config a scan of the project would use, the way the scan loads it, "
         "and ends with `Configuration is valid! A scan accepts it.` It may also warn that "
-        "`project_name` is not set, which a scan accepts. A wrong value, a missing required "
-        "field such as `reason`, or a misspelled key such as `expiry` for `expiration` "
-        "makes it name the field and exit with code 3:",
+        "`project_name` is not set, which a scan accepts. A typo in an optional key such as "
+        "`expiry` for `expiration` does not make the file invalid: validate still accepts "
+        "it, the entry suppresses nothing until the key is fixed, and the scan that loads "
+        "the config warns, naming the key with a did-you-mean (`fail_on_unknown_keys: true` "
+        "makes it an error, the default from ASH v4). A wrong value or a missing required "
+        "field such as `reason` makes validate name the field and exit with code 3; a typo "
+        "in a required key does the same, because the required field then goes missing:",
     )
     assert_on_page(
-        _CONFIG_AGENTS_PAGE, "sed 's/expiration:/expiry:/' .ashrc.yaml > typo.yaml"
+        _CONFIG_AGENTS_PAGE, "sed 's/reason:/reasn:/' .ashrc.yaml > typo.yaml"
     )
     text = _config_heredoc(_CONFIG_AGENTS_PAGE, ".ashrc.yaml")
     if change is not None:
@@ -6759,14 +6774,22 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
     try:
-        resolve_config(source_dir=tree)
+        resolved = resolve_config(source_dir=tree)
         refused = False
     except ASHConfigValidationError:
+        resolved = None
         refused = True
     assert refused is (verdict == 3), (
         f"a scan {'refuses' if refused else 'accepts'} the file validate exited "
         f"{result.returncode} for"
     )
+    if change is not None and verdict == 0:
+        # The warn-mode half of the page's claim: the scan's resolution
+        # warning names the misspelled key, and the entry is kept but inert.
+        warnings = list(resolved._resolution_warnings)
+        assert any("'expiry'" in warning for warning in warnings), warnings
+        (entry,) = resolved.global_settings.suppressions
+        assert entry.has_unknown_keys is True
 
 
 # --------------------------------------------------------------------------- #

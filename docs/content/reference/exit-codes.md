@@ -18,7 +18,7 @@ On every command, a command-line usage error exits 5: an unknown option, subcomm
 | 1 | `--use-existing` finds no `ash_aggregated_results.json` in the output directory. The command is well formed, but what it asks to use is not on disk, so this is the code `ash report` gives for missing results and not a usage error |
 | 1 | Any other error during the scan |
 | 2 | Actionable findings: an unsuppressed finding at or above its scanner's severity threshold, with `fail_on_findings` on and `--min-severity` met |
-| 3 | The configuration cannot be used: the config file that `--config` or `ASH_CONFIG` names, or that discovery finds, does not exist, is not a regular file, cannot be read, is not UTF-8, or does not parse; it does not validate (an unknown key in a suppression, an ignore path, or a plugin's options makes it invalid, and so does one plugin's section written under two spellings, such as `detect-secrets` and `DETECT_SECRETS`); an override does not parse or does not validate; a config file an MCP client delivered sets a field the server's policy denies; or two plugins of one type that the scan loads have the same name or names that read as one ([Package a third-party plugin](../plugins/index.md#package-a-third-party-plugin)) |
+| 3 | The configuration cannot be used: the config file that `--config` or `ASH_CONFIG` names, or that discovery finds, does not exist, is not a regular file, cannot be read, is not UTF-8, or does not parse; it does not validate (an unknown key in a plugin's options makes it invalid, and so does one plugin's section written under two spellings, such as `detect-secrets` and `DETECT_SECRETS`; an unknown key in a suppression or an ignore-path entry instead warns and leaves the entry applying to nothing, unless `fail_on_unknown_keys: true` is set, the default from ASH v4); an override does not parse or does not validate; a config file an MCP client delivered sets a field the server's policy denies; or two plugins of one type that the scan loads have the same name or names that read as one ([Package a third-party plugin](../plugins/index.md#package-a-third-party-plugin)) |
 | 3 | Refused before writing: the output directory, a directory on the way to it, or a directory or fixed-name file ASH writes in it, such as `reports` or `ash.log`, is a link ([Output files](output-files.md#links)). An output directory that is a symlink, or that a symlink below the source directory leads to, is refused this way in every mode, `--mode container` (also with `--no-run`) and `--mode nix` included, and before the check that the directory can be written, so nothing is made and the link's target keeps its entries. |
 | 4 | A workspace error (see [Workspace mode](#workspace)), or `--dry-run`, `--allow-missing-projects`, or `--workspace-config` given without `--workspace` |
 | 5 | A usage error. For a scan that includes: the source directory (`--source-dir` or `ASH_SOURCE_DIR`) does not exist, is not a directory, cannot be entered, or is not a valid path because it holds a NUL character; the output directory is not a directory, cannot be created, cannot be entered, or cannot be written, or it is not a valid path because it holds a NUL character, which a `--cli-json-input` document can carry and a command line cannot; with `--changed-files-only`, a `--base-ref` that git would read as something other than a revision, such as one that starts with `-`; `--changed-files-only`, or `ASH_CHANGED_FILES_ONLY`, with `--mode container`, which is refused before anything is built or run; the shard options are invalid or combined with `--workspace`; an `--output-formats` value is not a format name ASH accepts; no name in `--scanners` (or `ASH_SCANNERS`) matches a scanner; every scanner `--scanners` names is also excluded; every scanner `--scanners` names is left out of a `--python-only` run. ASH checks the `--scanners` names when the scan phase starts, after the converters have run and the output directory has been written. |
@@ -305,9 +305,9 @@ So does a `--set` whose top-level key the configuration does not have, such as t
 ash config update --set fail_on_finding=false
 ```
 
-A config that a scan refuses exits 3 from `ash config validate`, here for the misspelled `rule_id`:
+A misspelled suppression key no longer makes the config invalid on its own: the entry is kept but suppresses nothing until the key is fixed, and a scan warns, naming the key with a did-you-mean. `ash config validate` accepts the file (exit 0), here with `ruleId` for `rule_id`:
 
-<!-- doctest: run expect-exit=3 -->
+<!-- doctest: run expect-exit=0 -->
 ```bash
 cat > misspelled.yaml <<'EOF'
 project_name: payments-api
@@ -318,6 +318,22 @@ global_settings:
       reason: Fixture value, not a real password
 EOF
 ash config validate --config misspelled.yaml
+```
+
+With `fail_on_unknown_keys: true` the same typo makes the config one a scan refuses, so `ash config validate` names the key and exits 3. ASH v4 makes that the default:
+
+<!-- doctest: run expect-exit=3 -->
+```bash
+cat > misspelled-strict.yaml <<'EOF'
+project_name: payments-api
+fail_on_unknown_keys: true
+global_settings:
+  suppressions:
+    - path: app.py
+      ruleId: SECRET-SECRET-KEYWORD
+      reason: Fixture value, not a real password
+EOF
+ash config validate --config misspelled-strict.yaml
 ```
 
 ## Other commands {#other}

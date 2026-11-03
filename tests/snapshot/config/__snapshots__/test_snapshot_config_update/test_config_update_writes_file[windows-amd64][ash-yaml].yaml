@@ -117,6 +117,7 @@ global_settings:
       replace_default_denied_paths: false
 fail_on_findings: true
 fail_on_incomplete_scanners: true
+fail_on_unknown_keys: false
 honor_ignore_files: true
 sandbox:
   mode: 'off'

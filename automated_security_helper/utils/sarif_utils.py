@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.package_identity import (
     extract_package_identity,
+    extract_resource_identity,
     extract_root_advisories,
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
@@ -1275,6 +1276,7 @@ def _apply_config_suppression(
     written_reasons: Dict[int, str] | None = None,
     recorded_fields: Dict[int, Dict[str, Any]] | None = None,
     written_ids: Dict[int, str] | None = None,
+    warned_engines: set | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
@@ -1289,7 +1291,7 @@ def _apply_config_suppression(
     caller applying many findings computes it once per matched suppression.
     """
     should_suppress, matching_suppression = should_suppress_finding(
-        flat_finding, suppressions, symbol_resolver
+        flat_finding, suppressions, symbol_resolver, warned_engines=warned_engines
     )
     if not should_suppress:
         return False
@@ -1340,6 +1342,36 @@ def _apply_config_suppression(
         extra=MARKUP,
     )
     client_supplied = getattr(matching_suppression, "client_supplied", False) is True
+    # A suppression from the config of a tree an MCP client delivered is
+    # marked so a reader can tell it from the operator's; a scoped entry
+    # records what it was scoped to, so merge and report readers can say WHY
+    # this result was suppressed without re-matching the config.
+    applied_properties: Dict[str, Any] = {}
+    if client_supplied:
+        applied_properties["clientSupplied"] = True
+    applied_scope = getattr(matching_suppression, "scope", None)
+    if applied_scope is not None:
+        # Recorded by the WRITTEN form, as the reason is. The entry-level
+        # sugar is a shown field (recorded_suppressions), so an entry whose
+        # resource_id the config read from the environment records the
+        # reference as the file wrote it, never the resolved value. A scope
+        # written in the canonical spelling alone has no written record, so
+        # its value keys are LEFT OUT (fail safe); the engine names, which are
+        # structural keys of the config file, are kept either way.
+        sugar_resource_id = getattr(matching_suppression, "resource_id", None)
+        if sugar_resource_id is not None:
+            written_resource_id = (
+                (recorded_fields or {})
+                .get(id(matching_suppression), {})
+                .get("resource_id")
+            )
+            applied_properties["scope_resource_id"] = (
+                written_resource_id
+                if isinstance(written_resource_id, str)
+                else sugar_resource_id
+            )
+        if applied_scope.engines:
+            applied_properties["scope_engines"] = sorted(applied_scope.engines)
     result.suppressions.append(
         Suppression(
             kind=Kind1.inSource,
@@ -1351,7 +1383,9 @@ def _apply_config_suppression(
             # Marked as ASH's own (ash_applied_properties), and a suppression from
             # the config of a tree an MCP client delivered is marked so a reader
             # can tell it from the operator's.
-            properties=ash_applied_properties(client_supplied=client_supplied),
+            properties=ash_applied_properties(
+                client_supplied=client_supplied, extra=applied_properties or None
+            ),
         )
     )
     return True
@@ -1557,17 +1591,23 @@ ASH_SUPPRESSION_JUSTIFICATION_PREFIXES = (
 )
 
 
-def ash_applied_properties(*, client_supplied: bool = False) -> PropertyBag:
+def ash_applied_properties(
+    *, client_supplied: bool = False, extra: dict | None = None
+) -> PropertyBag:
     """The property bag every suppression this module attaches carries.
 
     ``ashApplied`` marks the suppression as ASH's own, whatever its wording, so a
     reader (``ash merge --ignore-suppressions``, which lifts them) need not match
     the justification text. ``clientSupplied`` is added for an entry a config or
-    workspace policy file an MCP client delivered supplied, as before.
+    workspace policy file an MCP client delivered supplied, as before. ``extra``
+    carries a caller's own keys (the scope-provenance properties the applied
+    suppression records) merged into the bag; the markers win a key collision.
     """
+    properties: dict[str, Any] = dict(extra or {})
+    properties["ashApplied"] = True
     if client_supplied:
-        return PropertyBag(ashApplied=True, clientSupplied=True)
-    return PropertyBag(ashApplied=True)
+        properties["clientSupplied"] = True
+    return PropertyBag(**properties)
 
 
 def _add_client_suppression(result: Any, justification: str) -> None:
@@ -1917,11 +1957,39 @@ def ignore_paths_for_locations(
     return found
 
 
+def _suppression_scanner_identity(result, run, scanner_name):
+    """The registered scanner name ``AshSuppression.matches`` keys engines by.
+
+    ``scope.engines`` keys and the scoped base-rule-id fallback are keyed by
+    the REGISTERED scanner name (the config name "cdk-nag"), but at suppression
+    time the run's driver carries a different name on every production pass:
+    the tool's own SARIF name ("ash-cdk-nag-wrapper") at the two per-scanner
+    passes, which run before ``attach_scanner_details`` renames it, and ASH's
+    own aggregator name at the merged pass. So the identity is resolved in
+    order: the caller's ``scanner_name`` first (the per-scanner passes know
+    which registered scanner produced the report, and a tool-emitted result
+    property must not outrank that); then the per-result
+    ``properties.scanner_name`` that ``attach_scanner_details`` wrote (the
+    merged pass and ``ash merge``, whose one run mixes every scanner's
+    results); and only then the driver name, which keeps external SARIF on
+    today's fail-closed path with its warn-once receipt.
+    """
+    if scanner_name:
+        return scanner_name
+    attached = (
+        getattr(result.properties, "scanner_name", None) if result.properties else None
+    )
+    if isinstance(attached, str) and attached:
+        return attached
+    return run.tool.driver.name if run.tool and run.tool.driver else "unknown"
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
     used_suppressions: set | None = None,
     exclude_output_dir: bool = True,
+    scanner_name: str | None = None,
     strip_source_dir_basename: bool = True,
 ) -> SarifReport:
     """Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
@@ -1930,6 +1998,13 @@ def apply_suppressions_to_sarif(
     its work directory, is dropped unless the repository committed that file.
     ``ash merge`` passes False: each shard already made that decision with its
     own git answer and run ID, and the merge has neither.
+
+    ``scanner_name`` is the registered name of the scanner whose report this
+    is, passed by the per-scanner passes (the scan executor and the result
+    processor, which run before ``attach_scanner_details`` renames the driver).
+    Callers over mixed-scanner reports (the merged pass, ``ash merge``) leave
+    it None and each result's identity comes from the ``scanner_name``
+    property ``attach_scanner_details`` wrote (``_suppression_scanner_identity``).
 
     With *strip_source_dir_basename*, a relative URI whose first component is
     the source directory's basename loses it, which is how offline opengrep's
@@ -1955,6 +2030,7 @@ def apply_suppressions_to_sarif(
             used_suppressions,
             exclude_output_dir,
             strip_source_dir_basename,
+            scanner_name,
             evaluation_budget,
         )
 
@@ -1965,6 +2041,7 @@ def _apply_suppressions_within_budget(
     used_suppressions: set | None,
     exclude_output_dir: bool,
     strip_source_dir_basename: bool,
+    scanner_name: str | None,
     evaluation_budget: "EvaluationBudget",
 ) -> SarifReport:
     """The suppression pass itself; the caller owns *evaluation_budget*'s lifetime.
@@ -2249,6 +2326,9 @@ def _apply_suppressions_within_budget(
                             _source_dir_prefix_no_drive,
                             None,
                         )
+                    resource_id, resource_type = extract_resource_identity(
+                        result.properties
+                    )
 
                     # The message text, or for a message given by id alone (SARIF
                     # admits one with no text) its id: FlatVulnerability requires
@@ -2259,14 +2339,14 @@ def _apply_suppressions_within_budget(
                         package_name=package_name,
                         package_version=package_version,
                         package_path=package_path,
+                        resource_id=resource_id,
+                        resource_type=resource_type,
                         id=get_finding_id(result.ruleId, uri, line_start, line_end),
                         title=message_text or "Unknown Issue",
                         description=message_text or "No description available",
                         severity="MEDIUM",
-                        scanner=(
-                            run.tool.driver.name
-                            if run.tool and run.tool.driver
-                            else "unknown"
+                        scanner=_suppression_scanner_identity(
+                            result, run, scanner_name
                         ),
                         scanner_type="SAST",
                         rule_id=result.ruleId,
@@ -2276,6 +2356,14 @@ def _apply_suppressions_within_budget(
                     )
 
                 if flat_finding:
+                    # The run's engine-owned warn-once set for fail-closed
+                    # engine blocks; a context without one (a test double)
+                    # falls back to the registry's no-engine set. Bound once:
+                    # the two attempts below must judge against the same run
+                    # state.
+                    warned_engines = getattr(
+                        plugin_context, "warned_unmatched_engines", None
+                    )
                     config_suppressed = _apply_config_suppression(
                         result,
                         suppressions,
@@ -2285,6 +2373,7 @@ def _apply_suppressions_within_budget(
                         written_reasons,
                         recorded_fields,
                         written_ids,
+                        warned_engines=warned_engines,
                     )
                     if not config_suppressed and uri_as_written is not None:
                         config_suppressed = _apply_config_suppression(
@@ -2298,6 +2387,7 @@ def _apply_suppressions_within_budget(
                             written_reasons,
                             recorded_fields,
                             written_ids,
+                            warned_engines=warned_engines,
                         )
                     if config_suppressed and suppressions_in_effect(
                         result.suppressions

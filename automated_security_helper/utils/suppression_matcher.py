@@ -11,7 +11,7 @@ import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, TypeVar
 
 from automated_security_helper.models.core import (
     PACKAGE_SUPPRESSION_FIELDS,
@@ -343,12 +343,15 @@ def matches_suppression(
     finding: FlatVulnerability,
     suppression: AshSuppression,
     symbol_resolver: Optional[SymbolResolver] = None,
+    warned_engines: Optional[Set[str]] = None,
 ) -> bool:
     """Thin wrapper around ``AshSuppression.matches`` kept for backward compatibility.
 
-    Prefer ``suppression.matches(finding)`` in new code.
+    Prefer ``suppression.matches(finding)`` in new code. ``warned_engines`` is
+    the scan's engine-owned warn-once set
+    (``PluginContext.warned_unmatched_engines``).
     """
-    return suppression.matches(finding, symbol_resolver)
+    return suppression.matches(finding, symbol_resolver, warned_engines)
 
 
 def _rule_id_matches(finding_rule_id: Optional[str], suppression_rule_id: str) -> bool:
@@ -536,6 +539,7 @@ def should_suppress_finding(
     suppressions: List[AshSuppression],
     symbol_resolver: Optional[SymbolResolver] = None,
     where: str = "global_settings.suppressions",
+    warned_engines: Optional[Set[str]] = None,
 ) -> Tuple[bool, Optional[AshSuppression]]:
     """
     Determine if a finding should be suppressed based on the suppression rules.
@@ -547,6 +551,9 @@ def should_suppress_finding(
             Without it, a suppression that sets ``symbol`` matches nothing.
         where: The list's location, which names an entry in a message
             (_has_expired).
+        warned_engines: The scan's engine-owned warn-once set for fail-closed
+            engine blocks (``PluginContext.warned_unmatched_engines``); without
+            one the registry's no-engine fallback applies.
 
     Returns:
         A tuple of (should_suppress, matching_suppression)
@@ -558,7 +565,7 @@ def should_suppress_finding(
         ):
             continue
 
-        if matches_suppression(finding, suppression, symbol_resolver):
+        if matches_suppression(finding, suppression, symbol_resolver, warned_engines):
             return True, suppression
 
     return False, None
@@ -745,6 +752,11 @@ def _expiring_within(
 
 
 #: The fields of a suppression that the reports and warnings quoting it show.
+#: Flat fields only: resource_id is the entry-level sugar, whose written form
+#: covers the folded scope.resource_id too. The canonical scope's value keys
+#: ride along as a nested ``scope`` dict (recorded_suppressions), for the id
+#: path only (written_suppression_id); the reports keep reading these flat
+#: names.
 SHOWN_SUPPRESSION_FIELDS = (
     "path",
     "rule_id",
@@ -754,6 +766,7 @@ SHOWN_SUPPRESSION_FIELDS = (
     "expiration",
     *PACKAGE_SUPPRESSION_FIELDS,
     "symbol",
+    "resource_id",
 )
 
 
@@ -781,6 +794,19 @@ def recorded_suppressions(config: Any) -> Dict[int, Dict[str, Any]]:
         {name: getattr(s, name, None) for name in SHOWN_SUPPRESSION_FIELDS}
         for s in suppressions
     ]
+    # The canonical scope's value keys, nested as the config dump nests them,
+    # so a reference read at scope.resource_id or scope.resource_type is
+    # recorded too. Without this, an entry written in the canonical spelling
+    # alone put the RESOLVED value into its id (written_suppression_id), which
+    # used_suppressions writes to the results file. Consumers of this record
+    # read named flat keys, so the extra key is invisible to them.
+    for s, entry in zip(suppressions, shown):
+        scope = getattr(s, "scope", None)
+        if scope is not None:
+            entry["scope"] = {
+                "resource_id": getattr(scope, "resource_id", None),
+                "resource_type": getattr(scope, "resource_type", None),
+            }
     references = getattr(config, "_environment_references", ()) or ()
     if references:
         from automated_security_helper.config.environment_record import (
@@ -828,15 +854,30 @@ def written_suppression_id(
     than ruling them out: an entry the file writes as quoted text that only
     looks like a reference (``path: '${VAR}'``) has that text as its id, the
     same id an env-read ``path: ${VAR}`` entry is recorded by, and a use of
-    either reads as a use of both."""
+    either reads as a use of both.
+
+    The record's nested ``scope`` dict covers the canonical spelling: a
+    ``scope.resource_id`` or ``scope.resource_type`` the file read from the
+    environment is rewritten in a copied scope, so the id carries the
+    reference whether the entry wrote the sugar or the canonical key."""
     written = (recorded or {}).get(id(suppression))
     if not written:
         return suppression.id
     changed = {
         name: value
         for name, value in written.items()
-        if value != getattr(suppression, name, None)
+        if name != "scope" and value != getattr(suppression, name, None)
     }
+    written_scope = written.get("scope")
+    scope = getattr(suppression, "scope", None)
+    if isinstance(written_scope, dict) and scope is not None:
+        scope_changed = {
+            name: value
+            for name, value in written_scope.items()
+            if value != getattr(scope, name, None)
+        }
+        if scope_changed:
+            changed["scope"] = scope.model_copy(update=scope_changed)
     if not changed:
         return suppression.id
     return suppression.model_copy(update=changed).id

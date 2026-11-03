@@ -421,6 +421,21 @@
           "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. One ending overrides this setting: a run where ASH could not stop a scanner's tool exits 1 either way, because the tool may still be running and writing into the output directory.",
           "title": "Fail On Incomplete Scanners"
         },
+        "fail_on_unknown_keys": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "description": "An environment reference, resolved to the variable's value when the file is loaded.",
+              "pattern": "^(!ENV )?\\$\\{\\w+(:.*)?\\}$",
+              "type": "string"
+            }
+          ],
+          "default": false,
+          "description": "Whether an unknown key in a suppression or ignore-path entry refuses the config at load. False (the default) loads the config with a warning that names the key, with a did-you-mean, and the entry it sits in suppresses nothing until it is fixed, so a typo can never widen a suppression. True refuses the config, naming the same key. ASH v4 flips the default to True; set it True now to adopt the error early.",
+          "title": "Fail On Unknown Keys"
+        },
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
@@ -1349,8 +1364,21 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.",
           "title": "Expiration"
+        },
+        "expires": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Alias of 'expiration', accepted when a config is read; the entry is written and stored as 'expiration'.",
+          "title": "Expires"
         },
         "line_end": {
           "anyOf": [
@@ -1437,6 +1465,19 @@
           "title": "Reason",
           "type": "string"
         },
+        "resource_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error.",
+          "title": "Resource Id"
+        },
         "rule_id": {
           "anyOf": [
             {
@@ -1449,6 +1490,18 @@
           "default": null,
           "description": "Rule ID to suppress",
           "title": "Rule Id"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SuppressionScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Scope the suppression to a resource identity, a resource type, or named engines' findings; see SuppressionScope. Omit it to keep today's matching. An empty scope is refused: match-all is the absence of the field."
         },
         "symbol": {
           "anyOf": [
@@ -4157,8 +4210,21 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.",
           "title": "Expiration"
+        },
+        "expires": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Alias of 'expiration', accepted when a config is read; the entry is written and stored as 'expiration'.",
+          "title": "Expires"
         },
         "path": {
           "description": "Path or pattern to exclude",
@@ -6890,6 +6956,57 @@
         }
       },
       "title": "SemgrepScannerConfigOptions",
+      "type": "object"
+    },
+    "SuppressionScope": {
+      "additionalProperties": false,
+      "description": "What a suppression is scoped to beyond path, lines and package fields.\n\nThe universal keys (``resource_id``, ``resource_type``) are evaluated by\nASH's own matcher against the resource identity a finding carries, whatever\nengine produced it. ``engines`` carries per-engine blocks, keyed by scanner\nname, whose contents are opaque to ASH's core and owned by the named\nscanner plugin (the way a k8s object carries per-controller blocks under\none metadata envelope).",
+      "properties": {
+        "engines": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin.",
+          "title": "Engines"
+        },
+        "resource_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about the resource with this identity, as the producing engine reports it (for cdk-nag, the CDK construct path). Literal match first, then glob; case-sensitive. Findings that carry no resource identity never match.",
+          "title": "Resource Id"
+        },
+        "resource_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about resources of this type (e.g. 'AWS::IAM::Policy'). Literal match first, then glob; case-insensitive. Findings that carry no resource type never match.",
+          "title": "Resource Type"
+        }
+      },
+      "title": "SuppressionScope",
       "type": "object"
     },
     "SyftScannerConfig": {

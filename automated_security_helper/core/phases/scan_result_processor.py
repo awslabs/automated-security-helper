@@ -194,6 +194,10 @@ class ScanResultProcessor:
                     sarif_report=sanitized_sarif,
                     plugin_context=self.plugin_context,
                     used_suppressions=aggregated_results.used_suppressions,
+                    # The registered name: attach_scanner_details renames the
+                    # driver only below, so here it is still the tool's own,
+                    # which scope.engines entries are not keyed by.
+                    scanner_name=results.scanner_name,
                 )
             else:
                 ASH_LOGGER.debug(

@@ -321,26 +321,28 @@ ERROR (3) Invalid configuration: Configuration validation failed for '/home/me/r
 ```
 
 Cause: the configuration file has a key ASH does not know below the top level, or a
-value of the wrong type anywhere, top level included. A suppression, an ignore path, or
-a plugin's options with a key ASH does not know is refused too, and the message lists
-the keys it accepts:
+value of the wrong type anywhere, top level included. A plugin's options with a key ASH
+does not know is refused too. In a suppression or an ignore path an unknown key warns
+by default and the entry suppresses nothing until it is fixed; with
+`fail_on_unknown_keys: true` (the default from ASH v4) it is refused the same way, and
+the message lists the keys the entry accepts:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
 cat > .ashrc.yaml <<'EOF'
+fail_on_unknown_keys: true
 global_settings:
   suppressions:
-    - rule_id: B602
+    - rule: B602
       path: app.py
       reason: Commands come from a fixed allowlist
-      expires: "2027-04-30"
 EOF
 ash config validate
 ```
 
 ```text
 ❌ 1 error(s); a scan refuses the configuration because of these:
-  1. Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'expires' (did you mean 'expiration'?) in a suppression. Accepted keys: expiration, line_end, line_start, package_name, package_path, package_version, path, reason, rule_id, symbol.
+  1. Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'rule' (did you mean 'rule_id'?) in a suppression. Accepted keys: expiration, expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
 ```
 
 A common case is an unquoted `expiration` date in a suppression: YAML reads it as a

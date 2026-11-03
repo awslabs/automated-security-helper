@@ -3841,6 +3841,7 @@ class ConfigValidator:
         "project_name",
         "fail_on_findings",
         "fail_on_incomplete_scanners",
+        "fail_on_unknown_keys",
         "content_db_staleness",
         "content_db_staleness_overrides",
         "honor_ignore_files",

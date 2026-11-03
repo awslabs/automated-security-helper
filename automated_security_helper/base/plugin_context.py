@@ -14,7 +14,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
-from typing import Annotated, Any, Dict, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, Optional, Set, TYPE_CHECKING
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -252,6 +252,22 @@ class PluginContext(BaseModel):
         freed, so a later scan's context could inherit an earlier scan's state.
         """
         return self._scan_id
+
+    # Private, like _scan_id: per-run state no dump or schema carries.
+    _warned_unmatched_engines: Set[str] = PrivateAttr(default_factory=set)
+
+    @property
+    def warned_unmatched_engines(self) -> Set[str]:
+        """This run's warn-once receipts for ``scope.engines`` blocks whose
+        engine has no registered plugin
+        (``suppression_scope_registry.warn_once_unmatched_engine``).
+
+        On the context because the context is the one object built per run and
+        shared with every phase, whatever thread runs the match: module state
+        let one scan's reset swallow another's receipt, and context-local
+        state missed worker threads started without a copied context.
+        """
+        return self._warned_unmatched_engines
 
     @field_validator("config")
     def validate_config(cls, value):

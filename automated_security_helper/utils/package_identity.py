@@ -58,6 +58,17 @@ from automated_security_helper.utils.scanned_tree import (
 PACKAGE_NAME_KEY = "package_name"
 PACKAGE_VERSION_KEY = "package_version"
 PACKAGE_PATH_KEY = "package_path"
+
+#: The universal resource-identity contract for resource-scoped suppressions
+#: (models/core.py SuppressionScope). A scanner or wrapper that wants
+#: resource-scoped suppressions to bind writes these two flat keys into its
+#: SARIF Result PropertyBag; an engine that publishes neither simply never
+#: matches a resource-scoped entry (fail closed). cdk-nag writes both
+#: (utils/cdk_nag_wrapper.py); :func:`extract_resource_identity` also reads the
+#: cdk-nag property bag already shipped in the field, so resource scoping works
+#: against existing cdk-nag output files.
+ASH_RESOURCE_ID_KEY = "ash_resource_id"
+ASH_RESOURCE_TYPE_KEY = "ash_resource_type"
 ROOT_ADVISORIES_KEY = "root_advisories"
 """Property on an npm-audit transitive result: the direct findings it stems from.
 
@@ -374,6 +385,48 @@ def extract_package_identity(
         return value if isinstance(value, str) and value else None
 
     return _get(PACKAGE_NAME_KEY), _get(PACKAGE_VERSION_KEY), _get(PACKAGE_PATH_KEY)
+
+
+def extract_resource_identity(
+    properties: Any,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Read (resource_id, resource_type) from a SARIF result's properties.
+
+    The generic flat keys (ASH_RESOURCE_ID_KEY, ASH_RESOURCE_TYPE_KEY) are the
+    contract and are read first. A result without them falls back to the
+    cdk-nag property bag shipped in the field before the contract existed:
+    ``cdk_nag_finding.resource_id`` (the CDK construct path) and the single
+    resource's ``Type`` under ``cfn_resource.Resources``. Accepts a
+    PropertyBag, a dict, or None; non-string values are ignored, and a result
+    that carries no identity answers (None, None), so a resource-scoped
+    suppression fails closed on it.
+    """
+    if properties is None:
+        return None, None
+    if hasattr(properties, "model_dump"):
+        properties = properties.model_dump(exclude_none=True)
+    if not isinstance(properties, dict):
+        return None, None
+
+    def _text(value: Any) -> Optional[str]:
+        return value if isinstance(value, str) and value else None
+
+    resource_id = _text(properties.get(ASH_RESOURCE_ID_KEY))
+    resource_type = _text(properties.get(ASH_RESOURCE_TYPE_KEY))
+
+    if resource_id is None:
+        finding = properties.get("cdk_nag_finding")
+        if isinstance(finding, dict):
+            resource_id = _text(finding.get("resource_id"))
+    if resource_type is None:
+        cfn_resource = properties.get("cfn_resource")
+        if isinstance(cfn_resource, dict):
+            resources = cfn_resource.get("Resources")
+            if isinstance(resources, dict) and len(resources) == 1:
+                (only,) = resources.values()
+                if isinstance(only, dict):
+                    resource_type = _text(only.get("Type"))
+    return resource_id, resource_type
 
 
 def extract_root_advisories(properties: Any) -> List[Dict[str, str]]:
