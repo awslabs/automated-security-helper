@@ -195,7 +195,7 @@ _URL_QUERY_CREDENTIAL = re.compile(
 def shown_flake_ref(ref: str) -> str:
     """``ref`` as a log line or a debug echo shows it: a URL's credentials replaced.
 
-    A flake reference can be a URL (``git+https://user:token@host/repo``), and the
+    A flake reference can be a URL (``git+https://user:token@host/repo``), and the  # pragma: allowlist secret
     token in its userinfo is a credential the operator put in ASH_NIX_FLAKE_REF so
     nix can fetch the flake. So is the value of a query parameter named for one
     (``?private_token=...``), the form a git host's API accepts. The INFO line and

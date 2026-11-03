@@ -107,7 +107,7 @@ class TestSafeReadJsonFileNamesEachFailure:
 
     def test_a_link_at_the_file_name_is_not_followed(self, tmp_path):
         outside = tmp_path / "outside.json"
-        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")
+        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")  # pragma: allowlist secret
         link = tmp_path / "ASH.ScanResults.json"
         _symlink_or_skip(link, outside)
 

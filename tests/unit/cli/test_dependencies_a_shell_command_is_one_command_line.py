@@ -33,7 +33,7 @@ def test_a_one_string_shell_command_runs_as_written_through_the_real_runner(
     """The shell reads the whole line, `&&` included, and both halves run."""
     monkeypatch.setenv("COLUMNS", "300")
 
-    code = dependencies.run_command(["echo first && echo second"], shell=True)
+    code = dependencies.run_command(["echo first && echo second"], shell=True)  # nosec B604
 
     printed = "".join(capsys.readouterr())
     assert code == 0, printed
@@ -57,7 +57,7 @@ def seen_by_the_runner(monkeypatch):
 def test_the_one_string_reaches_the_runner_unchanged(seen_by_the_runner):
     line = 'bash -c "cd d && make"'
 
-    assert dependencies.run_command([line], shell=True) == 0
+    assert dependencies.run_command([line], shell=True) == 0  # nosec B604
 
     [(args, kwargs)] = seen_by_the_runner
     assert args == line, args
@@ -71,7 +71,7 @@ def test_a_shell_command_of_several_words_is_refused_not_joined(
     shell ran `bash -c cd d`, then `make` where the installer started."""
     monkeypatch.setenv("COLUMNS", "300")
 
-    code = dependencies.run_command(["bash", "-c", "cd d && make"], shell=True)
+    code = dependencies.run_command(["bash", "-c", "cd d && make"], shell=True)  # nosec B604
 
     printed = " ".join("".join(capsys.readouterr()).split())
     assert code == 1
@@ -88,7 +88,7 @@ def test_a_shell_command_with_no_words_is_refused_not_run_as_an_empty_list(
     refusal needed two, so `[]` reached the runner with shell=True."""
     monkeypatch.setenv("COLUMNS", "300")
 
-    code = dependencies.run_command([], shell=True)
+    code = dependencies.run_command([], shell=True)  # nosec B604
 
     printed = " ".join("".join(capsys.readouterr()).split())
     assert code == 1

@@ -632,7 +632,7 @@ def test_a_module_run_by_an_interpreter_inside_a_shell_line_is_a_word(argv, word
 def test_a_shell_line_with_no_interpreter_adds_no_module_word():
     """The control: a shell line whose words run no Python module is read word
     by word and nothing is added."""
-    assert readers()["_words_of"]("ls -l /tmp") == ["ls", "-l", "/tmp"]
+    assert readers()["_words_of"]("ls -l /tmp") == ["ls", "-l", "/tmp"]  # nosec B108
 
 
 @pytest.mark.unit

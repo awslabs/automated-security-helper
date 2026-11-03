@@ -522,8 +522,8 @@ class TestScanTimestampsAreUtc:
 class TestVulnerabilityIdsAreTheSharedFindingIds:
     def test_two_findings_of_one_rule_at_one_line_get_distinct_ids(self, reporter):
         model = _model(
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
         )
 
         first, second = json.loads(reporter.report(model))["vulnerabilities"]

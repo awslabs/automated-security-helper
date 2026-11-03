@@ -107,7 +107,7 @@ class TestARedirectLeavingHttpsIsRefused:
         # http) the signed URL's query string and any user name or password in it
         # were printed to standard error.
         signed = (
-            "https://user:PASSWORD-IN-URL@objects.example.invalid/asset.tar.gz"
+            "https://user:PASSWORD-IN-URL@objects.example.invalid/asset.tar.gz"  # pragma: allowlist secret
             "?sig=FIRST-HOP-SECRET&X-Amz-Credential=ALSO-SECRET#fragment-secret"
         )
         handler = installer._HttpsOnlyRedirects()
@@ -319,7 +319,7 @@ class TestARedirectLeavingHttpsIsRefused:
         ("source", "location", "secrets"),
         [
             (
-                "https://user:PASSWORD@h.invalid/a?sig=FIRST#FRAGMENT",
+                "https://user:PASSWORD@h.invalid/a?sig=FIRST#FRAGMENT",  # pragma: allowlist secret
                 "http://x.invalid/b?sig=SECOND",
                 ["PASSWORD", "FIRST", "FRAGMENT", "SECOND"],
             ),
@@ -335,7 +335,7 @@ class TestARedirectLeavingHttpsIsRefused:
             ),
             (
                 "https://h.invalid/x",
-                "ftp://user:FTPPASS@x.invalid/f;k=PARAM?q=FTPKEY#FTPFRAG",
+                "ftp://user:FTPPASS@x.invalid/f;k=PARAM?q=FTPKEY#FTPFRAG",  # pragma: allowlist secret
                 ["FTPPASS", "PARAM", "FTPKEY", "FTPFRAG"],
             ),
         ],

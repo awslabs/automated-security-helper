@@ -233,7 +233,7 @@ def test_an_import_error_of_the_runner_module_is_a_false(
     )
 
 
-SECRET = "s3cr3t-constraint-value"
+SECRET = "s3cr3t-constraint-value"  # pragma: allowlist secret
 
 
 @pytest.mark.parametrize(

@@ -144,7 +144,7 @@ def _marks_in_effect(source: str) -> list:
     """The names of the marks the module-level ``pytestmark`` of *source* holds
     once Python has run it, in the order pytest reads them."""
     namespace: dict = {}
-    exec(compile(source, "<probe>", "exec"), namespace)  # noqa: S102 - the probe's own text
+    exec(compile(source, "<probe>", "exec"), namespace)  # noqa: S102 - the probe's own text  # nosec B102
     marks = namespace["pytestmark"]
     if not isinstance(marks, (list, tuple)):
         marks = [marks]

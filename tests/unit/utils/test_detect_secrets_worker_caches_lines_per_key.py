@@ -27,7 +27,7 @@ def _secret(filename: str, value: str, line: int) -> SimpleNamespace:
         secret_value=value,
         line_number=line,
         type="Secret Keyword",
-        secret_hash="h-" + value,
+        secret_hash="h-" + value,  # pragma: allowlist secret
         is_secret=None,
         json=lambda: {"filename": filename, "line_number": line},
     )

@@ -256,7 +256,7 @@ class TestOffTableThresholdIsSaidOnce:
         pointed at an environment variable would have put that variable's value
         in ash.log. A ladder-shaped word (a typo, a case slip) is quoted in full;
         anything else is described by its length and never printed."""
-        secret_shaped = "p@ss word/with:junk=" + "x" * 40
+        secret_shaped = "p@ss word/with:junk=" + "x" * 40  # pragma: allowlist secret
         assert severity_fails_threshold("CRITICAL", secret_shaped) is True
 
         warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]

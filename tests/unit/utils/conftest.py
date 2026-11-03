@@ -59,5 +59,5 @@ def _downloads_open_through_urlopen(monkeypatch):
         monkeypatch.setattr(
             module,
             "_open_url",
-            lambda url, timeout: urllib.request.urlopen(url, timeout=timeout),
+            lambda url, timeout: urllib.request.urlopen(url, timeout=timeout),  # nosec B310
         )

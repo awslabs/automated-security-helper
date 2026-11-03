@@ -147,7 +147,7 @@ class TestARaisingPhaseEventHandlerDoesNotAbortThePhase:
     def test_a_complete_handlers_failure_is_logged_redacted(self, caplog):
         """The logged text carries no value the run's config read from the
         environment, which a plugin's exception can quote."""
-        secret = "zz-quoted-env-value-4411"
+        secret = "zz-quoted-env-value-4411"  # pragma: allowlist secret
         context = _context()
         context.config = SimpleNamespace(_environment_values=[secret])
         phase = _FakePhase(plugin_context=context)
@@ -199,8 +199,8 @@ class TestARaisingCheckIsReportedApartFromAnExclusion:
         it is redacted with the run's configuration values and with the values
         the plugin itself read from the environment, as the phases' other
         plugin-sourced lines are."""
-        run_secret = "zz-run-env-value-7731"
-        own_secret = "zz-plugin-env-value-7732"
+        run_secret = "zz-run-env-value-7731"  # pragma: allowlist secret
+        own_secret = "zz-plugin-env-value-7732"  # pragma: allowlist secret
         context = _context()
         context.config = SimpleNamespace(_environment_values=[run_secret])
         phase = _FakePhase(plugin_context=context)

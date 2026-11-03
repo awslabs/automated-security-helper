@@ -147,7 +147,7 @@ def _usable_cvss_score(cvss: Any) -> float | None:
     return float(score)
 
 
-# The userinfo of a URL (``https://user:token@host``), masked in log excerpts.
+# The userinfo of a URL (``https://user:token@host``), masked in log excerpts.  # pragma: allowlist secret
 _URL_USERINFO = re.compile(r"(://)[^\s/@]+@")
 
 

@@ -110,7 +110,7 @@ def test_a_refusal_survives_a_copy_and_a_pickle_with_its_reason(tmp_path, monkey
             refusal.kind,
             refusal.error_number,
         )
-    unpickled = pickle.loads(pickle.dumps(refusal))
+    unpickled = pickle.loads(pickle.dumps(refusal))  # nosec B301
     assert (unpickled, unpickled.kind, unpickled.error_number) == (
         refusal,
         refusal.kind,

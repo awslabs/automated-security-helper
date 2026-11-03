@@ -272,7 +272,7 @@ def test_a_values_hook_answering_a_generator_is_read_once_and_redacts_every_line
     Fails at the base: the reason carried the secret value.
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
-    secret = "hunter2-token-value"
+    secret = "hunter2-token-value"  # pragma: allowlist secret
     seen_values: list = []
 
     def verify(executable, package, extras=None, version_constraint=None, **kwargs):

@@ -187,7 +187,7 @@ def test_short_and_blank_lines_of_a_value_are_not_hidden_on_their_own():
 
 
 _PEM = (
-    "-----BEGIN PRIVATE KEY-----\n"
+    "-----BEGIN PRIVATE KEY-----\n"  # pragma: allowlist secret #gitleaks:allow
     "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n"
     "-----END PRIVATE KEY-----"
 )
@@ -199,7 +199,7 @@ def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
     body is still hidden, line by line and whole."""
     lines = rac._value_lines((_PEM,))
 
-    assert "-----BEGIN PRIVATE KEY-----" not in lines
+    assert "-----BEGIN PRIVATE KEY-----" not in lines  #gitleaks:allow
     assert "-----END PRIVATE KEY-----" not in lines
     assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" in lines
     assert _PEM in lines
@@ -234,7 +234,7 @@ def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
         '  "version": 2,\n'
         '  "enabled": true,\n'
         '  "aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",\n'
-        '  "password": "not-a-real-password",\n'
+        '  "password": "not-a-real-password",\n'  # pragma: allowlist secret
         '  "pin": 123456\n'
         "}"
     )

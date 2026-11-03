@@ -43,7 +43,7 @@ def test_a_plain_document_past_the_bound_is_refused_while_composing(monkeypatch)
     monkeypatch.setattr(yaml_aliases, "MAX_COMPOSED_NODES", 20)
 
     with pytest.raises(yaml_aliases.DocumentSizeError) as refused:
-        yaml.load(_plain_items(18), Loader=NoRecursiveAliasLoader)  # 21 nodes
+        yaml.load(_plain_items(18), Loader=NoRecursiveAliasLoader)  # 21 nodes  # nosec B506
 
     assert isinstance(refused.value, ComposerError)
     assert "past 20 nodes" in str(refused.value), str(refused.value)
@@ -53,7 +53,7 @@ def test_a_plain_document_past_the_bound_is_refused_while_composing(monkeypatch)
 def test_a_plain_document_at_the_bound_still_loads(monkeypatch):
     monkeypatch.setattr(yaml_aliases, "MAX_COMPOSED_NODES", 20)
 
-    loaded = yaml.load(_plain_items(17), Loader=NoRecursiveAliasLoader)  # 20 nodes
+    loaded = yaml.load(_plain_items(17), Loader=NoRecursiveAliasLoader)  # 20 nodes  # nosec B506
 
     assert len(loaded["items"]) == 17
 
@@ -63,12 +63,12 @@ def test_an_alias_is_not_counted_as_a_node_composed_in_place(monkeypatch):
     # aliases are written out, and this bound counts the ten.
     monkeypatch.setattr(yaml_aliases, "MAX_COMPOSED_NODES", 10)
 
-    loaded = yaml.load(ALIASED, Loader=NoRecursiveAliasLoader)
+    loaded = yaml.load(ALIASED, Loader=NoRecursiveAliasLoader)  # nosec B506
     assert loaded["use"][0] is loaded["base"]
 
     monkeypatch.setattr(yaml_aliases, "MAX_COMPOSED_NODES", 9)
     with pytest.raises(yaml_aliases.DocumentSizeError):
-        yaml.load(ALIASED, Loader=NoRecursiveAliasLoader)
+        yaml.load(ALIASED, Loader=NoRecursiveAliasLoader)  # nosec B506
 
 
 def test_the_bound_counts_each_document_of_a_stream_on_its_own(monkeypatch):
@@ -82,7 +82,7 @@ def test_the_bound_counts_each_document_of_a_stream_on_its_own(monkeypatch):
     # The patched bound is live: the three documents' thirty nodes in one
     # document are refused under it.
     with pytest.raises(yaml_aliases.DocumentSizeError):
-        yaml.load(_plain_items(27), Loader=NoRecursiveAliasLoader)  # 30 nodes
+        yaml.load(_plain_items(27), Loader=NoRecursiveAliasLoader)  # 30 nodes  # nosec B506
 
 
 def test_the_default_bound_sits_above_what_the_alias_bound_lets_a_plain_file_hold():

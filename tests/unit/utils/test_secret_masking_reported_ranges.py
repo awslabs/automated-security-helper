@@ -545,7 +545,7 @@ class TestAResourceLevelCredentialFinding:
             "B105",
             "app.py",
             3,
-            "Possible hardcoded password: 'placeholder-example-value'",
+            "Possible hardcoded password: 'placeholder-example-value'",  # pragma: allowlist secret
             "bandit",
             end=3,
         )

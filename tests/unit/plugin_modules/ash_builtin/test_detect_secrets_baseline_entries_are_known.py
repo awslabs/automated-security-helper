@@ -55,7 +55,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
-SECRET_TYPE = "AWS Access Key"
+SECRET_TYPE = "AWS Access Key"  # pragma: allowlist secret
 # The filter detect-secrets writes into every baseline it generates; it sends
 # each candidate to the service that issued it, so only the operator's own
 # settings may turn it on.

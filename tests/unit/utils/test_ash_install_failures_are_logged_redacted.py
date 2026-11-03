@@ -20,7 +20,7 @@ from automated_security_helper.utils.error_text import carry_environment_values
 
 pytestmark = pytest.mark.unit
 
-SECRET = "tok-9f3a1c77e0b24d58"
+SECRET = "tok-9f3a1c77e0b24d58"  # pragma: allowlist secret #gitleaks:allow
 
 
 class _Recorder:

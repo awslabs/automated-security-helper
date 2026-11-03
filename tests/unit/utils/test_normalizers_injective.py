@@ -88,7 +88,7 @@ def test_names_made_only_of_word_characters_and_dots_keep_their_shape():
 def test_separators_and_the_escape_character_have_their_own_tokens():
     assert get_normalized_filename("dir/nb.ipynb") == "dir_snb__ipynb"
     assert get_normalized_filename("my_nb.ipynb") == "my_0nb__ipynb"
-    assert get_normalized_filename("/tmp/a.yaml") == "_stmp_sa__yaml"
+    assert get_normalized_filename("/tmp/a.yaml") == "_stmp_sa__yaml"  # nosec B108
 
 
 def test_other_characters_are_hex_escaped_and_hyphens_pass_through():
@@ -109,7 +109,7 @@ def test_output_holds_only_filename_safe_characters():
         assert "/" not in normalized
 
 
-ROUND_TRIP_INPUTS = [
+ROUND_TRIP_INPUTS = [  # nosec B108
     "",
     "nb.ipynb",
     "a/b.ipynb",

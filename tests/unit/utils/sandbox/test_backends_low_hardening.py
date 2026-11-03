@@ -1747,7 +1747,7 @@ def test_a_listed_name_passes_the_callers_value_and_an_entry_with_a_value_sets_o
 @pytest.mark.parametrize(
     "entry",
     [
-        "HTTPS_PROXY=http://MARKER-user:MARKER-pw@proxy:3128",
+        "HTTPS_PROXY=http://MARKER-user:MARKER-pw@proxy:3128",  # pragma: allowlist secret
         "https_proxy=https://MARKER-user@proxy",
         "MY_TOOL_URL=socks5://MARKER-user:MARKER-pw@host:1080",
     ],
