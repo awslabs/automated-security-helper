@@ -851,11 +851,16 @@ def test_a_waiters_own_scope_does_not_take_another_scopes_answer(
     assert len(attempts.log) == 2, attempts.log
 
 
+@pytestmark_posix
 @pytest.mark.integration
 def test_a_cancel_reaches_a_thread_waiting_on_another_callers_probe(tmp_path, attempts):
     """A scan cancelled while its thread is parked on the probe lock stops
     within the poll interval and raises ScanCancelled; it does not wait out
-    the other caller's probe and answer False from the window."""
+    the other caller's probe and answer False from the window.
+
+    POSIX only, like the module's other end-to-end cells: the hanging
+    stand-in uv is a ``#!/bin/sh`` script (``_script``), which cannot execute
+    on Windows, so the other caller's probe never hangs there."""
     import threading
 
     hangs = _script(tmp_path, "zz-hangs", "exec sleep 30")
