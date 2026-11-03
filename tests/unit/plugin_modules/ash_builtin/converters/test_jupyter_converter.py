@@ -1059,6 +1059,7 @@ class TestExecuteNbconvertViaUv:
             for m in messages_at(ash_log_records, logging.WARNING)
         )
 
+    @pytest.mark.skipif(os.name == "nt", reason="Windows has no signal deaths")
     def test_a_signal_death_is_not_reported_as_an_exit_code(
         self, converter, uv_runner, ash_log_records
     ):
