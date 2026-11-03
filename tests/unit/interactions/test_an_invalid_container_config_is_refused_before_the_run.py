@@ -758,8 +758,16 @@ def test_an_exit_field_is_read_with_the_constraints_its_annotation_carries(
 #: reference at a boolean field, bare or held in a container, by a named
 #: refusal that keeps the reference marker on the error's input, and hands every
 #: value that holds no such text on as it is.
+#: Also inherited by every section: the after-validator on every field
+#: (``redacted_model``'s ``_env_resolved_text_validation_kept_reads_as_text``),
+#: which only downcasts a leftover str-subclass environment marker inside a
+#: container a before-validator kept. As a ``"*"`` validator it formally
+#: reaches the exit fields too; its downcast changes no exit-field decision.
 _VALIDATORS_THAT_ONLY_REFUSE_AN_EXIT_FIELD_REFERENCE = frozenset(
-    {"_env_resolved_text_reads_as_the_field_type"}
+    {
+        "_env_resolved_text_reads_as_the_field_type",
+        "_env_resolved_text_validation_kept_reads_as_text",
+    }
 )
 
 
