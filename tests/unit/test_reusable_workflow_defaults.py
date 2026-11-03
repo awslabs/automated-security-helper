@@ -120,7 +120,10 @@ def test_no_step_reads_the_raw_inputs():
     readers = [
         step.get("name")
         for step in _steps()
-        if step.get("id") != "ash-source"
+        # "ash-source" resolves the inputs; the id "inputs" step is the check
+        # that refuses an input that could start a workflow command, and the
+        # check itself must read the raw inputs (its own comment says so).
+        if step.get("id") not in ("ash-source", "inputs")
         and ("inputs.ash-version" in str(step) or "inputs.ash-repo" in str(step))
     ]
     assert not readers, f"these steps read ash-version or ash-repo directly: {readers}"

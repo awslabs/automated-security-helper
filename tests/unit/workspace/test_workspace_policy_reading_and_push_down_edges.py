@@ -22,6 +22,7 @@ findings of a non-gating policy scanner the gate never judged.
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -101,8 +102,13 @@ class TestReadingThePolicyFile:
         assert policy.workspace.max_severity_threshold == "HIGH"
 
     def test_a_document_nested_past_the_recursion_limit_is_refused(self, tmp_path):
+        # Sized from the interpreter's own limit, with a floor far past what a
+        # counter-based limit admits: 3.14's stack-sized recursion guard parses
+        # depths well beyond the 50,000 this test used to pin, so a fixed depth
+        # stops being "past the recursion limit" as interpreters change.
+        depth = max(1_000_000, sys.getrecursionlimit() * 20)
         path = tmp_path / ".ash-workspace.json"
-        path.write_text("[" * 50000 + "]" * 50000, encoding="utf-8")
+        path.write_text("[" * depth + "]" * depth, encoding="utf-8")
 
         with pytest.raises(WorkspaceDefinitionError, match="could not be parsed"):
             load_workspace_policy(path)

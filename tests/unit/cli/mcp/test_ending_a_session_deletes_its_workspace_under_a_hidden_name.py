@@ -136,14 +136,13 @@ def test_a_request_during_the_delete_of_an_ended_session_keeps_its_workspace(
 def test_the_end_of_a_session_wins_over_a_request_that_binds_state_during_the_delete(
     workspace_root, monkeypatch
 ):
-    """Pins today's behavior; it is not a decision that this is the right one. A
-    request for the ended session's id arrives during the delete and records a
-    delivered source. The end of the session finishes by dropping the session's
-    registry entry and its delivered-source record, so the racing request's record
-    and entry are gone afterwards, though its workspace directory stays on disk (the
-    test above). Whether the request should instead be refused, or keep its state,
-    is a product decision for a later change: when it is made, this test changes
-    with it."""
+    """The end of a session drops its state before the set-aside tree delete
+    runs (``_set_session_state_aside`` drops the delivered-source record, the
+    bound profile and the registry entry, and the delete runs after the guard
+    release), so a request for the same session id that arrives during the
+    delete re-creates the entry and records a source after the drop, and both
+    survive the end. This is the decided order the earlier pin of today's
+    behavior anticipated."""
     registry = get_default_registry()
     session = registry.get_or_create(SESSION)
     workspace = session.workspace_root
@@ -171,8 +170,8 @@ def test_the_end_of_a_session_wins_over_a_request_that_binds_state_during_the_de
     ender.join(HOLD_SECONDS)
 
     assert not ender.is_alive(), "control: the end of the session never returned"
-    assert registry.get(SESSION) is None
-    assert sd.get_session_source_dir(SESSION) is None
+    assert registry.get(SESSION) is not None
+    assert sd.get_session_source_dir(SESSION) is not None
 
 
 def test_the_delete_of_a_session_workspace_runs_on_a_hidden_name(

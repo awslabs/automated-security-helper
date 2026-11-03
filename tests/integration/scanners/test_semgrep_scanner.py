@@ -1,5 +1,7 @@
 """Tests for Semgrep scanner."""
 
+import sys
+
 import pytest
 from pathlib import Path
 from automated_security_helper.core.enums import ScannerToolType
@@ -64,8 +66,14 @@ def test_semgrep_scanner_init(test_plugin_context):
 
 
 def test_semgrep_scanner_validate(test_semgrep_scanner):
-    """Test SemgrepScanner validation."""
-    assert test_semgrep_scanner.validate_plugin_dependencies() is True
+    """Test SemgrepScanner validation.
+
+    On Windows the scanner is deliberately unsupported (semgrep publishes no
+    Windows build; ``unsupported_platform_reason`` says so), so validation
+    reports False there by design.
+    """
+    expected = sys.platform != "win32"
+    assert test_semgrep_scanner.validate_plugin_dependencies() is expected
 
 
 def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
@@ -104,8 +112,16 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         # those two invocations apart.
         # ``values`` is what the probe redacts from its own log lines: the values
         # the scanner's config read from the environment, none for this config.
+        # The probe also passes the scanner's own offline mode, package and
+        # python pin, as the run and the install do, so the probe resolves the
+        # same environment the scan will use.
         mock_runner_instance.get_tool_version.assert_called_with(
-            "semgrep", scanner._uv_from_spec(), values=()
+            "semgrep",
+            scanner._uv_from_spec(),
+            values=(),
+            offline=scanner._is_offline_mode(),
+            package=scanner._uv_package(),
+            **scanner._uv_python_kwargs(),
         )
 
     # Test validation with UV tool available

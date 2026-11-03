@@ -130,10 +130,26 @@ def test_the_config_dumper_writes_other_values_as_safe_dump_does():
             "rule_id": "R1",
             "path": "tool_name::bandit",
             "reason": "no findings\nin the scan",
-            "inside": "a##vso[x]b",
         }
     ]
 
     assert yaml.dump(
         data, Dumper=_ConfigDumper, default_flow_style=False, sort_keys=False
     ) == yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
+
+
+def test_a_mid_token_command_mark_is_escaped_by_design():
+    """``##vso[`` anywhere in a value is a command mark to the dumper
+    (NAMED_HASH_COMMAND matches it mid-token), so the value is written quoted
+    with the mark broken, unlike ``yaml.safe_dump``, and still reads back to
+    the same value."""
+    from automated_security_helper.config.ash_config import _ConfigDumper
+
+    data = [{"inside": "a##vso[x]b"}]
+
+    text = yaml.dump(
+        data, Dumper=_ConfigDumper, default_flow_style=False, sort_keys=False
+    )
+    assert text != yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
+    assert "##vso[" not in text, text
+    assert yaml.safe_load(text) == data, text

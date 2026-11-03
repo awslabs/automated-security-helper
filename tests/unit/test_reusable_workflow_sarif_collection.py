@@ -19,19 +19,18 @@ to the events that can upload.
 What is asserted
 ----------------
 Both steps are in the `report` job, which runs after the scan job on a runner of its
-own; the tests read that job's steps. The notice loads the one_line helper, which
-write_helper writes from the scan job's definer, the one in the file. That a job
-which loads the helper writes it itself is asserted in
-test_workflow_commands_print_no_unchecked_value.py.
+own; the tests read that job's steps.
 
 The upload step's condition is evaluated for each event the workflow can be called
 on, with the input on and off and with the scan passing and failing: it uploads on
 every pull_request event, from a fork as well as from the repository itself, and
 wherever the input is on but the event is not a pull request, a notice step runs
 instead. Its shell is run for each event: merge_group gets its own reason, and every
-other event is pointed at upload-ash-sarif.yml. It prints the artifact name, which is
-the caller's input, and the event name through one_line, so neither can add a
-workflow command of its own.
+other event is pointed at upload-ash-sarif.yml. The step prints no value (its own
+comment: this job has no one_line helper, and neither the artifact's name nor the
+event's needs printing); its env carries only the event name, which the script
+compares and never echoes, so neither the artifact name nor the event name can add
+a workflow command of its own.
 
 The conditions are evaluated here, not by GitHub, with a small evaluator for the
 operators these steps use; it is checked first against expressions whose values are
@@ -53,7 +52,6 @@ from tests.utils.workflow_one_line import (
     COMMAND_TEXT,
     COMMAND_TEXT_SHOWN,
     command_lines,
-    write_helper,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -142,16 +140,12 @@ def test_a_notice_runs_wherever_the_upload_is_skipped(event, collect, status):
     assert notes == (collect and not event.endswith("pull request")), notice["if"]
 
 
-def _notice_for(
-    runner_temp: Path, event_name: str, artifact_name: str = "ash_output"
-) -> str:
-    """The step's output, after the job's definer has written the one_line helper."""
+def _notice_for(runner_temp: Path, event_name: str) -> str:
+    """The step's output. The shipped step loads no helper and prints no value;
+    its env carries only the event name, so an env entry it grows beyond the
+    mapped expressions fails this harness loudly (the KeyError below)."""
     step = _steps()["Note that the SARIF report was not uploaded"]
-    write_helper(_jobs()["ash"]["steps"], runner_temp)
-    values = {
-        "${{ github.event_name }}": event_name,
-        "${{ inputs.artifact-name }}": artifact_name,
-    }
+    values = {"${{ github.event_name }}": event_name}
     result = subprocess.run(
         [shutil.which("bash") or "bash", "-e", "-o", "pipefail", "-c", step["run"]],
         env={
@@ -179,9 +173,13 @@ posix_only = pytest.mark.skipif(
 def test_the_notice_names_the_workflow_that_can_upload(tmp_path, event_name):
     notice = _notice_for(tmp_path, event_name)
     assert notice.startswith("::notice::"), notice
-    assert event_name in notice and "security-events: write" in notice, notice
+    assert "security-events: write" in notice, notice
     assert "upload-ash-sarif.yml" in notice, notice
-    assert "the ash_output artifact" in notice, notice
+    assert "the uploaded ASH output artifact at reports/ash.ghas.sarif" in notice, (
+        notice
+    )
+    # The step prints no value: the event's name is never echoed back.
+    assert event_name not in notice, notice
 
 
 @pytest.mark.integration
@@ -190,28 +188,21 @@ def test_a_merge_group_notice_gives_the_merge_queues_own_reason(tmp_path):
     notice = _notice_for(tmp_path, "merge_group")
     assert notice.startswith("::notice::"), notice
     assert "merge_group" in notice and "merge queue" in notice, notice
-    assert "the ash_output artifact" in notice, notice
+    assert "the uploaded ASH output artifact at reports/ash.ghas.sarif" in notice, (
+        notice
+    )
     assert notice != _notice_for(tmp_path, "push")
 
 
 @pytest.mark.integration
 @posix_only
-@pytest.mark.parametrize(
-    "event_name, artifact_name",
-    [
-        ("merge_group", COMMAND_TEXT),
-        ("push", COMMAND_TEXT),
-        (COMMAND_TEXT, "ash_output"),
-    ],
-    ids=["artifact name on merge_group", "artifact name on push", "event name"],
-)
-def test_the_notice_prints_its_values_on_its_own_line(
-    tmp_path, event_name, artifact_name
-):
-    """The artifact name is the caller's input; a line break in it, or `::`, would
-    start a workflow command of its own."""
-    notice = _notice_for(tmp_path, event_name, artifact_name)
+@pytest.mark.parametrize("event_name", ["merge_group", "push", COMMAND_TEXT])
+def test_the_notice_is_one_value_free_command_line(tmp_path, event_name):
+    """The step prints no value, so a command text in the event name (the one
+    env value the step carries) never reaches the output, raw or shown."""
+    notice = _notice_for(tmp_path, event_name)
 
     (line,) = command_lines(notice)
     assert line.startswith("::notice::The SARIF report was not uploaded"), line
-    assert line.count(COMMAND_TEXT_SHOWN) == 1, line
+    assert COMMAND_TEXT not in notice, notice
+    assert COMMAND_TEXT_SHOWN not in notice, notice
