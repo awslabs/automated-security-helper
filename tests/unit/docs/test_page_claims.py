@@ -8876,6 +8876,12 @@ _MCP_CHILD_SECONDS = 300
 _MCP_STOP_SECONDS = 120
 
 
+#: SGR color codes, which uvicorn puts inside the phrases the readers wait for
+#: (its listen line arrives as ``\x1b[1mhttp://...\x1b[0m`` in CI), so a line is
+#: matched with them removed. The lines are kept as they arrived.
+_SGR_COLORS = re.compile(r"\x1b\[[0-9;]*m")
+
+
 class _Lines:
     """Every line a child's pipe gives, read on a thread of its own, so the pipe never
     fills and blocks the child, and a test can wait for one line."""
@@ -8894,8 +8900,8 @@ class _Lines:
         self._new.put(None)
 
     def wait_for(self, pattern: "re.Pattern[str]") -> Optional["re.Match[str]"]:
-        """The first match of ``pattern`` in a new line, or None at the end of the
-        pipe or after ``_MCP_CHILD_SECONDS``."""
+        """The first match of ``pattern`` in a new line, its SGR color codes
+        removed, or None at the end of the pipe or after ``_MCP_CHILD_SECONDS``."""
         deadline = time.monotonic() + _MCP_CHILD_SECONDS
         while (remaining := deadline - time.monotonic()) > 0:
             try:
@@ -8904,7 +8910,7 @@ class _Lines:
                 return None
             if line is None:
                 return None
-            match = pattern.search(line)
+            match = pattern.search(_SGR_COLORS.sub("", line))
             if match:
                 return match
         return None
