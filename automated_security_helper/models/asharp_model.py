@@ -784,7 +784,7 @@ def _unreadable_expirations(stored: Any) -> List[str]:
             location_text(item["loc"], names)
             for item in error.errors(include_url=False)
             if item.get("loc")
-            and item["loc"][-1] == "expiration"
+            and item["loc"][-1] in ("expires", "expiration")
             and item.get("type") == "value_error"
         ]
     return []

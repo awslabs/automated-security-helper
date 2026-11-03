@@ -3282,8 +3282,9 @@ def _same_suppression(existing: Any, suppression: AshSuppression) -> bool:
     """
     if not isinstance(existing, dict):
         return False
-    if isinstance(existing.get("expiration"), date):
-        existing = {**existing, "expiration": existing["expiration"].isoformat()}
+    for spelling in ("expires", "expiration"):
+        if isinstance(existing.get(spelling), date):
+            existing = {**existing, spelling: existing[spelling].isoformat()}
     try:
         existing_suppression = AshSuppression.model_validate(existing)
     except ValidationError:
