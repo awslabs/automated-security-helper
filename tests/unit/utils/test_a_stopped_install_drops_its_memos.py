@@ -26,6 +26,7 @@ path; no cell starts a real uv.
 from __future__ import annotations
 
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -43,6 +44,12 @@ from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
     _reset_uv_tool_runner_caches,
+)
+
+
+#: The cells that start the fake uv cannot run where /bin/sh scripts do not.
+_POSIX_FAKE_UV = pytest.mark.skipif(
+    sys.platform == "win32", reason="the fake uv is a POSIX shell script"
 )
 
 
@@ -120,6 +127,7 @@ def test_a_cancelled_install_drops_the_memo():
     assert "bandit::" not in _version_memo_keys()
 
 
+@_POSIX_FAKE_UV
 @pytest.mark.integration
 def test_a_cancelled_install_through_a_real_cancel_scope_drops_the_memo(tmp_path):
     uv = _fake_uv(
@@ -170,12 +178,14 @@ def _timed_out_install(tmp_path, monkeypatch):
     return runner
 
 
+@_POSIX_FAKE_UV
 @pytest.mark.integration
 def test_a_timed_out_install_lets_the_version_be_asked_again(tmp_path, monkeypatch):
     runner = _timed_out_install(tmp_path, monkeypatch)
     assert runner.get_tool_version("bandit") == "1.2.3"
 
 
+@_POSIX_FAKE_UV
 @pytest.mark.integration
 def test_a_timed_out_install_lets_the_command_be_found(tmp_path, monkeypatch):
     """The lookup memos drop with the version memo: a completed install
@@ -190,6 +200,7 @@ def test_a_timed_out_install_lets_the_command_be_found(tmp_path, monkeypatch):
     ]
 
 
+@_POSIX_FAKE_UV
 @pytest.mark.integration
 def test_a_probe_racing_the_install_is_dropped_after_the_stop(tmp_path, monkeypatch):
     """The order pin: a version probe that runs WHILE the install runs
