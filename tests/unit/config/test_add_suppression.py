@@ -167,7 +167,7 @@ class TestAddSuppressionToConfig:
 
         data = yaml.safe_load(config_path.read_text())
         entry = data["global_settings"]["suppressions"][0]
-        assert entry["expiration"] == exp
+        assert entry["expires"] == exp
         assert entry["line_start"] == 10
         assert entry["line_end"] == 20
 
