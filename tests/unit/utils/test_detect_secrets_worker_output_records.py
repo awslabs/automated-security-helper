@@ -56,7 +56,7 @@ def _secret(filename: str, value, line: int = 1, kind: str = "Secret Keyword"):
         ("password = password", "password", 11),
         ('{"password": "password"}', "password", 14),  # pragma: allowlist secret
         ('"password" = "password"', "password", 14),  # pragma: allowlist secret
-        ("'password' => 'password'", "password", 15),
+        ("'password' => 'password'", "password", 15),  # pragma: allowlist secret
         # A quoted value followed by a comma or a bracket is still the value.
         ('["password", "other"]', "password", 2),
         # The only occurrence, bounded or not, is still found.

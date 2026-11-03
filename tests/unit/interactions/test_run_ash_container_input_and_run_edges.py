@@ -204,7 +204,7 @@ def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
     assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" in lines
     assert _PEM in lines
     shown = rac._streamed_line(
-        "a finding: -----BEGIN PRIVATE KEY----- in a file", (_PEM,)
+        "a finding: -----BEGIN PRIVATE KEY----- in a file", (_PEM,)  # pragma: allowlist secret
     )
     assert "BEGIN PRIVATE KEY" in shown
 

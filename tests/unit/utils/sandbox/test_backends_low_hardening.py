@@ -1922,7 +1922,7 @@ def test_the_tmpdir_refusal_says_what_each_backend_does():
         "MARKER value with spaces",
         "A B=MARKER-value",
         "MARKER-not-a-name=MARKER-value",
-        "MARKER-scheme://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+        "MARKER-scheme://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",  # pragma: allowlist secret
         "MARKER+padded/ref==",
     ],
 )

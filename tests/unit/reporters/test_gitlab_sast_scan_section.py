@@ -563,8 +563,8 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         """With no scanner name there is no rule identifier, so the ids are the
         only identifiers the two vulnerabilities carry and they differ."""
         results = [
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
         ]
         for result in results:
             result.properties = None
