@@ -515,9 +515,18 @@ class _InterruptedRuntime:
         self.returncode = None
         self.pid = next(_STAND_IN_PIDS)
         self.calls = []
+        self._interrupted = False
 
     def poll(self):
-        raise KeyboardInterrupt
+        # The planted Ctrl-C lands at the first poll, once, as one keypress
+        # does; later observations answer as Popen.poll does. On a build
+        # without os.waitid (macOS) the die-now discard reads the exit
+        # through poll, and a poll that re-raised there cut the stop short
+        # inside its own except arm.
+        if not self._interrupted:
+            self._interrupted = True
+            raise KeyboardInterrupt
+        return self.returncode
 
     def send_signal(self, signum):
         self.calls.append("send_signal")
@@ -527,6 +536,9 @@ class _InterruptedRuntime:
 
     def kill(self):
         self.calls.append("kill")
+        # A killed child has ended: the poll arm of the die-now observation
+        # then sees the exit at once instead of waiting out its bound.
+        self.returncode = -9
 
     def wait(self, timeout=None):
         self.calls.append(f"wait({timeout})")
@@ -651,6 +663,7 @@ def test_a_ctrl_c_while_the_readers_start_stops_the_runtime(
     """
     import types
 
+    from automated_security_helper.core import cancellation
     from automated_security_helper.interactions import run_ash_container
     from automated_security_helper.utils import subprocess_utils
     from automated_security_helper.utils import threads as ash_threads
@@ -660,7 +673,18 @@ def test_a_ctrl_c_while_the_readers_start_stops_the_runtime(
         subprocess_utils, "create_process_with_pipes", lambda **kwargs: runtime
     )
     stopped = []
-    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", stopped.append)
+
+    def _stop(handed):
+        # The real stop this stands in for is the path that discards the
+        # die-now mirror record (subprocess_utils.stop_after_interrupt); the
+        # stand-in pid is recorded unconditionally (run_cmd_direct), and on a
+        # build without os.waitid the finally-net discard polls the stand-in
+        # as still running, so without this the record survives to the
+        # teardown guard.
+        stopped.append(handed)
+        cancellation.discard_tool_pid(handed.pid)
+
+    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", _stop)
     step, count = interrupted_at
     seen = {"make": 0, "start": 0}
 
@@ -722,6 +746,7 @@ def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sig
     it would leave run_cmd_direct no process to stop: ASH would exit 130 at once and
     the runtime, given neither its grace nor a kill, would run on.
     """
+    from automated_security_helper.core import cancellation
     from automated_security_helper.interactions import run_ash_container
     from automated_security_helper.utils import subprocess_utils
 
@@ -733,7 +758,16 @@ def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sig
 
     monkeypatch.setattr(subprocess_utils, "create_process_with_pipes", _started)
     stopped = []
-    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", stopped.append)
+
+    def _stop(handed):
+        # As the readers' stub: the stubbed real stop is the path that
+        # discards the die-now mirror record, and on a build without
+        # os.waitid the finally-net discard polls the stand-in as still
+        # running, leaving the record to the teardown guard.
+        stopped.append(handed)
+        cancellation.discard_tool_pid(handed.pid)
+
+    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", _stop)
 
     with pytest.raises(KeyboardInterrupt):
         run_ash_container.run_cmd_direct(["runtime", "build", "."])
@@ -746,6 +780,7 @@ def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sig
 @pytest.mark.unit
 def test_a_ctrl_c_while_the_nix_shell_is_started_stops_it(monkeypatch, default_sigint):
     """The Nix shell is started the same way, and had the same gap."""
+    from automated_security_helper.core import cancellation
     from automated_security_helper.interactions import run_ash_nix
 
     shell = _StartedRuntime()
@@ -756,7 +791,16 @@ def test_a_ctrl_c_while_the_nix_shell_is_started_stops_it(monkeypatch, default_s
 
     monkeypatch.setattr(run_ash_nix.subprocess, "Popen", _started)
     stopped = []
-    monkeypatch.setattr(run_ash_nix, "stop_after_interrupt", stopped.append)
+
+    def _stop(handed):
+        # As the readers' stub: run_ash_nix records the shell's pid and the
+        # stubbed real stop is the path that discards the die-now mirror
+        # record; on a build without os.waitid the finally-net discard polls
+        # the stand-in as still running.
+        stopped.append(handed)
+        cancellation.discard_tool_pid(handed.pid)
+
+    monkeypatch.setattr(run_ash_nix, "stop_after_interrupt", _stop)
 
     with pytest.raises(KeyboardInterrupt):
         run_ash_nix._enter_shell(["nix", "develop"], env={})
