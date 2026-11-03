@@ -25,6 +25,7 @@ from __future__ import annotations
 import builtins
 import itertools
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -721,10 +722,12 @@ def test_a_warning_of_an_ash_logger_of_another_class_is_shown(case):
 
 @pytest.mark.integration
 def test_any_other_logger_keeps_logging_last_resort():
-    assert _fresh_process_stderr("not-ash") == "plain text\n"
+    # The child's text-mode stderr writes the platform line ending for "\n".
+    assert _fresh_process_stderr("not-ash") == f"plain text{os.linesep}"
 
 
 @pytest.mark.integration
 def test_a_child_logger_with_its_own_handler_is_printed_once():
     """Its own handler takes the record, so the stand-in does not write it too."""
-    assert _fresh_process_stderr("child-with-a-handler") == "child: plain\n"
+    # The child's text-mode stderr writes the platform line ending for "\n".
+    assert _fresh_process_stderr("child-with-a-handler") == f"child: plain{os.linesep}"
