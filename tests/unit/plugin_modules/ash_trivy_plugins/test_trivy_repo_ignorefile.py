@@ -480,7 +480,10 @@ def test_env_read_input_paths_masked_in_command_records(tmp_path, monkeypatch):
     report, running, argv = _scan_recording_command_lines(tmp_path)
 
     assert running, "the scan did not reach the Running command log call"
-    assert any(str(ignore.resolve()) in a for a in argv), argv
+    # The command line carries the path as_posix (_trivy_scanner_base returns
+    # path.as_posix()), so the membership test uses that spelling; str() on
+    # Windows would spell backslashes and never match.
+    assert any(ignore.resolve().as_posix() in a for a in argv), argv
     report_text = report.model_dump_json()
     for marker in ("marker-ignore-path-value", "marker-secret-config-value"):
         assert not any(marker in m for m in running), (marker, running)
