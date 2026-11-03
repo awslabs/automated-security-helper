@@ -7893,6 +7893,9 @@ def run_ash_scan(
         )
     for name, value, workspace_ok in (
         ("untrusted_config", opts.untrusted_config, False),
+        # Workspace mode resolves each project's own config (the comment
+        # above), so the gate would be dropped there without a word too.
+        ("config_base_gate", opts.config_base_gate, False),
         # Workspace mode carries these to every project through the settings
         # builder.
         ("client_config_policy", opts.client_config_policy, True),
