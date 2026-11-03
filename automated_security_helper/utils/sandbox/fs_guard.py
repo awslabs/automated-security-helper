@@ -1768,6 +1768,11 @@ def _guarded_read_fd(path: Path) -> int:
     """
     anchored = _registered_anchor(path) if hasattr(os, "fwalk") else None
     if anchored is None or path == anchored[1]:
+        if not _NOFOLLOW and os.path.islink(path):
+            # Where the platform has no O_NOFOLLOW (Windows) the open itself
+            # cannot refuse a link at the name, so an lstat refuses it here;
+            # the last component is still not followed, as promised above.
+            raise OSError(errno.ELOOP, f"{path} was not read: a symlink at the name")
         return os.open(path, _READ_FLAGS)
     root, anchor = anchored
     relative = path.relative_to(anchor).parts
