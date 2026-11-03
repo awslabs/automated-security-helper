@@ -26,6 +26,7 @@ ScannerExecutor turns a raise from scan() into an ERROR row too.
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, List
@@ -44,6 +45,7 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.sandbox import scope as sandbox_scope_module
+from automated_security_helper.utils.sandbox.backends import AUTO_ORDER
 from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
     clear_backend_cache,
@@ -188,7 +190,14 @@ def test_an_auto_sandbox_with_no_backend_is_missing_naming_the_backend(
     assert container.exit_code is None, container.exit_code
     assert "exit_code" not in container.model_fields_set, container.exit_code
     reason = container.missing_reason or ""
-    assert "bwrap" in reason, reason
+    order = AUTO_ORDER.get(platform.system().lower(), ())
+    if order:
+        # The auto-missing reason enumerates THIS platform's candidate backends
+        # (bwrap on Linux, sandbox-exec on macOS), so the name to expect is the
+        # platform's own, never a literal from another platform's list.
+        assert any(name in reason for name in order), (order, reason)
+    else:
+        assert "no scanner sandbox is available" in reason, reason
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the planted refusal is a POSIX symlink")
@@ -211,6 +220,11 @@ def test_a_refusal_that_is_not_availability_is_an_error(tmp_path, monkeypatch):
     _assert_error_not_missing(container, "symlink")
 
 
+@pytest.mark.skipif(
+    not AUTO_ORDER.get(platform.system().lower(), ()),
+    reason="this platform models no sandbox backend, so the faked probes are "
+    "never consulted and auto can never work here",
+)
 def test_control_a_working_auto_sandbox_lets_the_scan_run(tmp_path, monkeypatch):
     """The cells above are not met by refusing every sandboxed scan: with a working
     backend and nothing planted, the scanner's scan() is reached (and raises its

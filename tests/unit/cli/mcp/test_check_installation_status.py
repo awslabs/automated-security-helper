@@ -308,6 +308,11 @@ def own_home(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.runs_real_tools(
+    reason="the real installation checks probe whatever this host has installed; "
+    "their --version probes are tool starts by design, so the guard's zero-starts "
+    "teardown is not this test's contract"
+)
 async def test_on_this_host(own_home, monkeypatch):
     """No doubles: the real checks, for the real built-in scanners.
 
