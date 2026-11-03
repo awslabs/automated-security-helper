@@ -4451,7 +4451,10 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
     from automated_security_helper.config.resolve_config import resolve_config
 
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    # Git-shaped, as _mark_git_checkout says: a bare empty .git bounds nothing
+    # (sandbox_grants._git_shaped), so the base below would be outside every
+    # checkout and no judgment could mark it.
+    _mark_git_checkout(repo)
     source = repo / "app"
     source.mkdir()
     (source / "main.py").write_text("x = 1\n", encoding="utf-8")
