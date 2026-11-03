@@ -9728,6 +9728,25 @@ def _wait_for_file(path: Path, what: str) -> None:
         time.sleep(0.05)
 
 
+def _read_pid(path: Path, what: str) -> int:
+    """The pid in ``path``, once the file exists and holds one.
+
+    The stand-in tool creates the file and then writes its pid (``write_text``
+    opens, then writes), so a read right after the file appears can see it
+    empty; wait until it parses instead of reading once.
+    """
+    _wait_for_file(path, what)
+    deadline = time.monotonic() + _MCP_CHILD_SECONDS
+    while True:
+        text = path.read_text(encoding="utf-8").strip()
+        if text.isdigit():
+            return int(text)
+        assert time.monotonic() < deadline, (
+            f"{what}, but {path.name} never held a pid: {text!r}"
+        )
+        time.sleep(0.05)
+
+
 def _wait_until_stopped(pid: int, held: Path) -> None:
     """Until the stand-in tool with ``pid`` is gone and nothing is set aside in
     ``held``: the scan has stopped and put back what it was going to put back."""
@@ -9874,8 +9893,7 @@ def test_a_signal_stops_a_stdio_scan_while_the_client_keeps_the_connection_open(
     try:
         begun = client.tool("run_ash_scan", source_dir=str(setup.project))
         assert begun.get("success") is True, begun
-        _wait_for_file(setup.control / "tool.pid", "the scanner's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the scanner's tool starting")
         assert client.process.poll() is None and _process_alive(pid)
         if stop == "ctrl-c":
             go.write_text("now", encoding="utf-8")
@@ -10029,9 +10047,7 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
             assert "ash.sarif" in written and "ash.unused-suppressions.md" in written, (
                 written
             )
-        else:
-            _wait_for_file(setup.control / "tool.pid", "the scanner's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the scanner's tool starting")
         cancelled = client.tool("cancel_scan", scan_id=begun["scan_id"])
         assert cancelled.get("success") is True, cancelled
         (setup.control / "go").write_text("", encoding="utf-8")
@@ -10277,8 +10293,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
         client = _McpHttpClient(port)
         begun = client.tool("run_ash_scan", source_dir=str(setup.project))
         assert begun.get("success") is True, begun
-        _wait_for_file(setup.control / "tool.pid", "the scanner's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the scanner's tool starting")
         if held_open:
             held = _hold_a_request_open(client)
         assert process.poll() is None and _process_alive(pid)
@@ -10375,8 +10390,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     try:
         begun = nextscan.tool("run_ash_scan", source_dir=str(setup.project))
         assert begun.get("success") is True, begun
-        _wait_for_file(setup.control / "tool.pid", "the next scan's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the next scan's tool starting")
         cancelled = nextscan.tool("cancel_scan", scan_id=begun["scan_id"])
         assert cancelled.get("success") is True, cancelled
         _wait_until_stopped(pid, held_dir)
@@ -11240,23 +11254,26 @@ def _mcp_page_host() -> str:
         ),
         pytest.param(
             ["--host", _PAGE_HOST],
-            {"ASH.example.com": 200, "other.example.com": 200},
+            None,
             id="control-the-page-host-without-the-option",
         ),
     ],
 )
 @pytest.mark.unit
 def test_allowed_host_accepts_exactly_the_host_headers_the_mcp_page_says(
-    _mcp_cli: Callable[..., Any], options: List[str], expected: Dict[str, int]
+    _mcp_cli: Callable[..., Any], options: List[str], expected: Optional[Dict[str, int]]
 ) -> None:
     """mcp-server.md (Serve clients on another host).
 
     The app ``ash mcp --transport streamable-http`` would serve is taken from the
     command, without binding a port, and sent an ``initialize`` request with each Host
     header: 200 is accepted and 421 refused. The non-loopback cases listen where the
-    page's own command does, on its ``--host``. The controls are the same server
-    without the option, which accepts the loopback names on loopback and any name on
-    the page's address, so the refusals come from the option.
+    page's own command does, on its ``--host``. The loopback control is the same
+    server without the option, which accepts the loopback names, so the refusals
+    come from the option. The page-host control (``expected`` None) is the page's
+    non-loopback ``--host`` with neither option, which ``_validate_bind``
+    (cli/mcp) refuses before a server starts: exit 5, naming ``--allowed-host``
+    and ``--trust-upstream-host-check``.
     """
     assert_on_page(
         MCP_SERVER,
@@ -11283,6 +11300,12 @@ def test_allowed_host_accepts_exactly_the_host_headers_the_mcp_page_says(
     result, served = _mcp_cli(
         "--transport", "streamable-http", "--stateless-http", "--quiet", *options
     )
+    if expected is None:
+        assert result.exit_code == 5, result.output[-1500:]
+        assert "--allowed-host" in result.output, result.output[-1500:]
+        assert "--trust-upstream-host-check" in result.output, result.output[-1500:]
+        assert served == [], served
+        return
     assert result.exit_code == 0, result.output[-1500:]
     [(kind, app)] = served
     assert kind == "http"
@@ -16480,13 +16503,14 @@ def test_a_container_scan_passes_only_the_aws_settings_the_operators_config_read
     assert names == passed, names
     if not names:
         return
-    directory, env_file = container._write_env_file(
+    # _env_file, not _write_env_file plus an rmtree of our own: the writer puts
+    # the file on the die-now cleanup record, and the context manager both
+    # removes the directory and drops that record, which the die-now guard in
+    # tests/conftest.py checks is empty when a test ends.
+    with container._env_file(
         names, dict(os.environ), "docker", source, tmp_path / "output"
-    )
-    try:
+    ) as (_directory, env_file):
         written = env_file.read_text(encoding="utf-8").splitlines()
-    finally:
-        shutil.rmtree(directory, ignore_errors=True)
     assert written == [f"{name}={set_here[name]}" for name in passed], written
 
 
@@ -17676,12 +17700,25 @@ def _workflow_inputs(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _workflow_value(value: Any, inputs: Dict[str, Any], given: Dict[str, Any]) -> Any:
-    """``value`` with a whole-value ``${{ inputs.<name> }}`` resolved: the caller's
-    ``with:`` value, else the input's default."""
+    """``value`` with a whole-value ``${{ inputs.<name> }}``, or a whole-value
+    ``${{ steps.inputs.outputs.<name> }}``, resolved: the caller's ``with:`` value,
+    else the input's default.
+
+    The scan workflow's ``inputs`` step (the workflow-command refusal) writes each
+    string input back out unchanged as ``<name with - as _>``, so a step reading
+    ``steps.inputs.outputs.artifact_name`` reads ``inputs.artifact-name``.
+    """
     match = re.fullmatch(r"\$\{\{\s*inputs\.([\w-]+)\s*\}\}", str(value))
-    if not match:
-        return value
-    return given.get(match[1], (inputs.get(match[1]) or {}).get("default"))
+    if match:
+        name = match[1]
+    else:
+        passed = re.fullmatch(
+            r"\$\{\{\s*steps\.inputs\.outputs\.(\w+)\s*\}\}", str(value)
+        )
+        if not passed:
+            return value
+        name = passed[1].replace("_", "-")
+    return given.get(name, (inputs.get(name) or {}).get("default"))
 
 
 def _workflow_called(uses: str) -> str:
@@ -17722,9 +17759,10 @@ def test_the_ci_tutorial_names_the_job_check_and_artifact_ci_creates() -> None:
     GitHub shows is the caller's job id and the called job's name; the JUnit check is
     the ``check_name`` of the report step, which runs by default; the artifact is the
     upload step's name, and the SARIF job downloads the same name, each with an
-    ``${{ inputs.* }}`` value resolved from the block's ``with:`` or the input's
-    default. The control is that the tutorial's blocks yield one scan job and one SARIF
-    job that call workflows in this repository.
+    ``${{ inputs.* }}`` value, or a ``${{ steps.inputs.outputs.* }}`` value the scan
+    workflow's inputs step passes through, resolved from the block's ``with:`` or
+    the input's default. The control is that the tutorial's blocks yield one scan
+    job and one SARIF job that call workflows in this repository.
     """
     assert_on_page(
         CI_TUTORIAL,
