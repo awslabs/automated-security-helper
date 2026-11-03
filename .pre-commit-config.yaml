@@ -73,6 +73,64 @@ repos:
         entry: uv run --frozen --group dev ruff format --check .
         language: system
         pass_filenames: false
+      # CI's multi-project attribution gate (ash-unified-ci.yml), same script and
+      # timeout. It runs a REAL workspace scan -- four generated projects through
+      # bandit and checkov -- which takes minutes, not seconds, so unlike the ruff
+      # hooks above it must not fire on every commit. The `files:` list scopes it to
+      # the machinery the gate proves, which is what its own docstring and checks
+      # name: the workspace package end to end (plan, resolver, execution,
+      # aggregation, policy, reporting, pins, the workspace file), the sarif
+      # attribution path with the basename heuristic (#361), the workspace model
+      # whose status discriminates exit code 2, the workspace config model the
+      # --workspace run loads, the workspace path helpers, and the gate script
+      # itself. The gate needs bandit and checkov runnable, as the CI job installs
+      # them; a missing scanner fails the gate rather than passing quietly, which
+      # is the gate's own rule.
+      #
+      # --frozen for the reason given on generate-schemas: it never rewrites uv.lock.
+      - id: verify-multi-project-attribution
+        name: Multi-project attribution gate (real workspace scan, minutes)
+        entry: uv run --frozen python scripts/verify_multi_project_attribution.py --timeout 1200
+        language: system
+        verbose: true
+        pass_filenames: false
+        files: |
+          (?x)^(
+            scripts/verify_multi_project_attribution\.py
+            |automated_security_helper/workspace/.*
+            |automated_security_helper/models/workspace\.py
+            |automated_security_helper/config/ash_workspace_config\.py
+            |automated_security_helper/utils/sarif_utils\.py
+            |automated_security_helper/utils/workspace_paths\.py
+          )$
+      # CI's deploy-tree AWS helpers gate (the "moto server" job in
+      # ash-unified-ci.yml), same script and worker count: it runs the
+      # tests/unit/deploy moto suite against a real ThreadedMotoServer and asserts
+      # on the RUN (per-module floors, zero skips, both S3 parametrizations), not
+      # just the exit status. About 30 seconds at 4 workers, and the dev group's
+      # moto[server] is what provides the server, which --frozen syncs. The helpers
+      # under test are POSIX-shell commands materialized from the deploy tree (the
+      # CDK templates synthesized from deploy/cdk/lib and the Terraform modules'
+      # files/ copies), so a Linux or macOS committer gets the full value; the hook
+      # still runs elsewhere, because the suite carries its own platform guards and
+      # the gate counts a widened skip as a failure rather than hiding it. The
+      # `files:` list is the helpers' sources (the deploy tree), their behavior
+      # tests (the moto suite modules and their shared stubs under
+      # tests/unit/deploy/), and the gate script itself.
+      #
+      # --frozen for the reason given on generate-schemas: it never rewrites uv.lock.
+      - id: verify-moto-server-suite
+        name: Deploy-tree AWS helpers against a moto server (~30 s)
+        entry: uv run --frozen python scripts/verify_moto_server_suite.py --workers 4
+        language: system
+        verbose: true
+        pass_filenames: false
+        files: |
+          (?x)^(
+            scripts/verify_moto_server_suite\.py
+            |tests/unit/deploy/.*
+            |deploy/.*
+          )$
       # The commit-msg half of the Snapshot-Update convention. CI's
       # .github/scripts/check-snapshot-trailers.py fails a pull request whose golden
       # files changed without a `Snapshot-Update: <reason>` trailer on the commit

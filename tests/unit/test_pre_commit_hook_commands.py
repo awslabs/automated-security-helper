@@ -15,6 +15,7 @@ hook runs it with ``--no-project``.
 from __future__ import annotations
 
 import ast
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -169,62 +170,6 @@ def test_the_ruff_hooks_run_what_the_ci_lint_gate_runs():
         )
 
 
-def test_the_trailer_hook_reads_the_message_at_commit_msg_time():
-    (hook,) = [h for h in _local_hooks() if h["id"] == "check-snapshot-trailer"]
-    argv = shlex.split(hook["entry"])
-    expected = ["uv", "run", "--no-project", "python"]
-    assert argv == [*expected, "scripts/check_snapshot_trailer.py"], argv
-    assert hook["stages"] == ["commit-msg"], hook
-    assert hook.get("pass_filenames", True) is True, (
-        "at the commit-msg stage the filename pre-commit passes IS the commit "
-        "message file; pass_filenames: false would run the script with no argv[1]"
-    )
-
-
-def _trailer_key(path: Path) -> str:
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "TRAILER_KEY":
-                    assert isinstance(node.value, ast.Constant), ast.dump(node)
-                    return node.value.value
-    raise AssertionError(f"{path} defines no TRAILER_KEY")
-
-
-def test_the_trailer_hook_and_the_ci_gate_require_the_same_trailer():
-    """The commit-msg script and CI's checker must name one trailer key.
-
-    The hook is the early warning for the gate; if either renames the trailer, a
-    commit the hook passes fails CI (or the hook demands a line CI ignores).
-    """
-    assert (
-        _trailer_key(TRAILER_SCRIPT)
-        == _trailer_key(CI_TRAILER_SCRIPT)
-        == "Snapshot-Update"
-    )
-
-
-def test_the_trailer_script_needs_only_the_standard_library():
-    """What makes --no-project safe for it, same as the sync script below.
-
-    No guarded imports are pinned here because the script has none: unlike the
-    sync script's tomllib fallback, nothing in it is version-conditional.
-    """
-    tree = ast.parse(TRAILER_SCRIPT.read_text(encoding="utf-8"))
-    imported: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            imported.add(node.module.split(".")[0])
-    assert imported, f"parsed the wrong script: {TRAILER_SCRIPT}"
-    outside = sorted(imported - set(sys.stdlib_module_names) - {"__future__"})
-    assert not outside, (
-        f"{TRAILER_SCRIPT.name} imports {outside}, which "
-        "`uv run --no-project` cannot see"
-    )
-
-
 def _catches_an_import_failure(handler: ast.ExceptHandler) -> bool:
     guards = ("ImportError", "ModuleNotFoundError")
     if handler.type is None:
@@ -330,3 +275,162 @@ def test_the_drift_workflow_caches_nothing_it_does_not_use():
     assert any(u.startswith("astral-sh/setup-uv@") for u in uses), uses
     cached = [u for u in uses if u.startswith("actions/cache")]
     assert not cached, cached
+
+
+# ---------------------------------------------------------------------------
+# The two CI gate scripts and the Snapshot-Update trailer hook (the local ruff
+# pair is pinned next to the sync-hook tests above). Each gets the same
+# treatment -- the exact command is pinned, and what makes it safe (--frozen,
+# --no-project, check-only, the stage, the file scope) is asserted rather than
+# described in a comment.
+# ---------------------------------------------------------------------------
+
+
+def _hook(hook_id: str) -> dict:
+    (hook,) = [h for h in _local_hooks() if h["id"] == hook_id]
+    return hook
+
+
+def _ci_run_lines() -> list[str]:
+    workflow = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+    return [
+        line.strip()
+        for job in workflow["jobs"].values()
+        for step in job.get("steps") or []
+        for line in str(step.get("run", "")).splitlines()
+        if line.strip()
+    ]
+
+
+def _tail_from(argv: "list[str]", script: str) -> "list[str]":
+    assert script in argv, argv
+    return argv[argv.index(script) :]
+
+
+def test_the_gate_hooks_run_the_ci_gate_scripts_with_the_ci_arguments():
+    """Same script, same arguments, as the CI job that owns each gate.
+
+    The prefixes legitimately differ (one CI job invokes bare `python` after its
+    own setup, the hooks go through `uv run --frozen` so the committer's
+    environment matches the lock), so the pinned equality runs from the script
+    path to the end of the command -- which is where a drifted --timeout or
+    --workers would hide.
+    """
+    ci_argvs = [shlex.split(line) for line in _ci_run_lines()]
+    for hook_id, script in (
+        (
+            "verify-multi-project-attribution",
+            "scripts/verify_multi_project_attribution.py",
+        ),
+        ("verify-moto-server-suite", "scripts/verify_moto_server_suite.py"),
+    ):
+        hook = _hook(hook_id)
+        argv = shlex.split(hook["entry"])
+        assert argv[:4] == ["uv", "run", "--frozen", "python"], argv
+        assert hook["pass_filenames"] is False, hook
+        assert hook["verbose"] is True, hook
+        assert hook["language"] == "system", hook
+        matching = [a for a in ci_argvs if script in a]
+        assert matching, f"no CI run line invokes {script}; is the gate gone?"
+        for ci_argv in matching:
+            assert _tail_from(argv, script) == _tail_from(ci_argv, script), (
+                f"{hook_id} passes {_tail_from(argv, script)} but CI passes "
+                f"{_tail_from(ci_argv, script)}"
+            )
+
+
+def test_the_gate_hooks_fire_only_on_what_each_gate_proves():
+    """The slow gates are scoped by `files:`, and the scope must be real paths.
+
+    Each regex is compiled the way pre-commit compiles it; every path meant to be
+    in scope must exist in the tree, because a rename would otherwise quietly
+    unscope the hook while the pattern kept compiling; and a path outside the
+    machinery must stay out, or the attribution gate's minutes land on every
+    commit.
+    """
+    cases = {
+        "verify-multi-project-attribution": (
+            [
+                "scripts/verify_multi_project_attribution.py",
+                "automated_security_helper/workspace/aggregation.py",
+                "automated_security_helper/models/workspace.py",
+                "automated_security_helper/config/ash_workspace_config.py",
+                "automated_security_helper/utils/sarif_utils.py",
+                "automated_security_helper/utils/workspace_paths.py",
+            ],
+            ["automated_security_helper/cli/main.py", "README.md"],
+        ),
+        "verify-moto-server-suite": (
+            [
+                "scripts/verify_moto_server_suite.py",
+                "tests/unit/deploy/test_deploy_s3_sync_moto_server.py",
+                "tests/unit/deploy/codepipeline_stub.py",
+                "deploy/terraform/modules/codepipeline-executor/files/ash_s3_sync.py",
+                "deploy/cdk/lib/ash-container-scripts.ts",
+            ],
+            [
+                "tests/unit/test_pre_commit_hook_commands.py",
+                "automated_security_helper/cli/main.py",
+            ],
+        ),
+    }
+    for hook_id, (in_scope, out_of_scope) in cases.items():
+        pattern = re.compile(_hook(hook_id)["files"])
+        for path in in_scope:
+            assert (REPO_ROOT / path).is_file(), f"{path} is gone; rescope {hook_id}"
+            assert pattern.search(path), f"{hook_id} would not fire on {path}"
+        for path in out_of_scope:
+            assert not pattern.search(path), f"{hook_id} would fire on {path}"
+
+
+def test_the_trailer_hook_reads_the_message_at_commit_msg_time():
+    hook = _hook("check-snapshot-trailer")
+    argv = shlex.split(hook["entry"])
+    assert argv == [
+        "uv",
+        "run",
+        "--no-project",
+        "python",
+        "scripts/check_snapshot_trailer.py",
+    ], argv
+    assert hook["stages"] == ["commit-msg"], hook
+    assert hook.get("pass_filenames", True) is True, (
+        "at the commit-msg stage the filename pre-commit passes IS the message "
+        "file the script reads as argv[1]; pass_filenames: false would starve it"
+    )
+
+
+def test_the_trailer_script_needs_only_the_standard_library():
+    """What makes --no-project safe for it, as for the sync script above."""
+    tree = ast.parse(TRAILER_SCRIPT.read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+    assert imported, "parsed the wrong script"
+    outside = sorted(imported - set(sys.stdlib_module_names) - {"__future__"})
+    assert not outside, (
+        f"{TRAILER_SCRIPT.name} imports {outside} unconditionally, which "
+        "`uv run --no-project` cannot see"
+    )
+
+
+def _assigned_trailer_key(path: Path) -> str:
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "TRAILER_KEY" for t in node.targets
+        ):
+            assert isinstance(node.value, ast.Constant), ast.dump(node.value)
+            return node.value.value
+    raise AssertionError(f"{path} assigns no TRAILER_KEY")
+
+
+def test_the_trailer_hook_and_the_ci_gate_require_the_same_trailer():
+    """One convention, two enforcement points; the key must not drift apart."""
+    assert (
+        _assigned_trailer_key(TRAILER_SCRIPT)
+        == _assigned_trailer_key(CI_TRAILER_SCRIPT)
+        == "Snapshot-Update"
+    )
