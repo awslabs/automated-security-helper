@@ -125,18 +125,15 @@ CASES = [
         lambda c: c.ash_plugin_modules,
         ["json"],
     ),
-    (
-        "unread spelling of an option",
-        {"scanners": {"cdk-nag": {"options": {"nag-packs": {}}}}},
-        {
-            "scanners": {
-                "cdk-nag": {"options": {"nag_packs": {"HIPAASecurityChecks": True}}}
-            }
-        },
-        lambda c: c.scanners.cdk_nag.options.nag_packs.HIPAASecurityChecks,
-        True,
-    ),
 ]
+
+#: An options-level key spelled with '-' is refused outright by the strict
+#: unknown-plugin-option-key check, before any merge; see the dedicated tests
+#: below instead of a CASES row.
+SWAP_SPELLED_OPTION = {"scanners": {"cdk-nag": {"options": {"nag-packs": {}}}}}
+READ_SPELLED_OPTION = {
+    "scanners": {"cdk-nag": {"options": {"nag_packs": {"HIPAASecurityChecks": True}}}}
+}
 
 
 @pytest.mark.parametrize(
@@ -159,6 +156,30 @@ def test_a_child_wins_over_its_base_whatever_the_bases_spelling(
     tmp_path, lower, upper, read, expected
 ):
     assert read(_extended(tmp_path, lower, upper)) == expected
+
+
+def test_a_swap_spelled_option_key_is_refused_in_a_layered_project_file(tmp_path):
+    """Options-level keys are strict by design: a project file spelling an
+    OPTION key as 'nag-packs' is refused with the did-you-mean wording before
+    any merge, not merged under the operator's 'nag_packs'."""
+    from automated_security_helper.config.resolve_config import ConfigFileRefused
+
+    with pytest.raises(ConfigFileRefused) as refusal:
+        _layered(tmp_path, SWAP_SPELLED_OPTION, READ_SPELLED_OPTION)
+
+    assert "nag-packs" in str(refusal.value)
+    assert "nag_packs" in str(refusal.value)
+
+
+def test_a_swap_spelled_option_key_is_refused_in_an_extends_base(tmp_path):
+    """The same strict refusal through the extends route."""
+    from automated_security_helper.config.resolve_config import ConfigFileRefused
+
+    with pytest.raises(ConfigFileRefused) as refusal:
+        _extended(tmp_path, SWAP_SPELLED_OPTION, READ_SPELLED_OPTION)
+
+    assert "nag-packs" in str(refusal.value)
+    assert "nag_packs" in str(refusal.value)
 
 
 def test_the_upper_documents_other_spelling_reaches_the_lower_setting(tmp_path):
