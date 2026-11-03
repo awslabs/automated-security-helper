@@ -179,7 +179,10 @@ For each scanner, converter, and reporter that has an install step, it:
 --tool grype --tool syft`, and `--bin-path` chooses the directory they are
 installed into. A relative `--bin-path` is read against the directory you run the
 command in. A scan looks for tools in a `--bin-path` directory only when
-`ASH_BIN_PATH` names it, and the command prints how to set that.
+`ASH_BIN_PATH` names it, and the command prints how to set that. The command records
+each install in a receipt under `~/.ash`, which a later install checks the tool
+against, so with no usable home directory it installs nothing, even with `--bin-path`,
+and exits with code 3, saying why.
 
 An unknown name stops the command with exit code 2: it names the unknown tool and
 lists the ones it knows, installs nothing, and starts no program.

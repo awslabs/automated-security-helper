@@ -70,6 +70,7 @@ from automated_security_helper.plugins.loader import (
 )
 from automated_security_helper.utils.download_utils import (
     NO_BIN_DIRECTORY,
+    NO_RECEIPT_STORE,
     pinned_install_already_satisfied,
 )
 from automated_security_helper.utils.error_text import error_text, text_without_values
@@ -1064,6 +1065,16 @@ def install_dependencies(
     # would answer it with the default configuration, and the installs that follow
     # would be for a configuration other than the one named.
     _refuse_a_named_config_that_does_not_exist(config)
+
+    # With no usable home directory there is nowhere to keep install receipts
+    # (download_utils.receipt_root), which every install writes and a later
+    # install checks the tool against, so nothing is installed, whatever
+    # --bin-path says. Refused before anything is printed, installed or
+    # created, with a scan's invalid-configuration code, as the
+    # no-bin-directory refusal below is.
+    if usable_home() is None:
+        print(f"[red]{escape(NO_RECEIPT_STORE)}[/red]")
+        raise typer.Exit(EXIT_INVALID_CONFIG)
 
     # Read before set_environ below overwrites it: a --bin-path that came from the
     # environment already reaches every scan that inherits it. Blank is unset.
