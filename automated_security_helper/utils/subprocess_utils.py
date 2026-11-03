@@ -95,6 +95,7 @@ from automated_security_helper.core.cancellation import (
     current_cancel_event,
     discard_tool_group,
     discard_tool_pid,
+    interrupt_stop_in_progress,
     raise_if_cancelled,
     record_tool_group,
     stop_grace_in_progress,
@@ -1769,24 +1770,33 @@ def stop_after_interrupt(
                 process.send_signal(signal.SIGINT)
         except OSError:
             pass  # it has already exited
-    try:
-        _wait_out(process, grace)
-    except KeyboardInterrupt:
-        discard_tool_pid_once_exited(process)
-        if _kill_unless_refused(process):
-            # Observed, discarded, then reaped: the die-now record must not
-            # outlive the reap (discard_tool_pid_before_reap). The reap is
-            # bounded: a child SIGKILL did not end, in uninterruptible sleep
-            # say, is not waited for without end (_wait_after_kill).
+    # Inside interrupt_stop_in_progress: a second Ctrl-C during this wait must
+    # land HERE as KeyboardInterrupt, so the arm below kills the child at once
+    # with no further interrupt delivered to it, as exit-codes.md promises
+    # ("a second Ctrl-C during the wait kills it at once"). Without the
+    # registration the SIGINT handler's die-now branch would take it: that
+    # branch interrupts a recorded launcher child once more and leaves one
+    # that ignores the interrupt running, and the process died of raw SIGINT
+    # with no interrupted-scan message instead of the documented 130.
+    with interrupt_stop_in_progress():
+        try:
+            _wait_out(process, grace)
+        except KeyboardInterrupt:
+            discard_tool_pid_once_exited(process)
+            if _kill_unless_refused(process):
+                # Observed, discarded, then reaped: the die-now record must not
+                # outlive the reap (discard_tool_pid_before_reap). The reap is
+                # bounded: a child SIGKILL did not end, in uninterruptible sleep
+                # say, is not waited for without end (_wait_after_kill).
+                discard_tool_pid_before_reap(process)
+                _wait_after_kill(process)
+            raise
+        except Exception:
+            discard_tool_pid_once_exited(process)
+            if not _kill_unless_refused(process):
+                return False
             discard_tool_pid_before_reap(process)
             _wait_after_kill(process)
-        raise
-    except Exception:
-        discard_tool_pid_once_exited(process)
-        if not _kill_unless_refused(process):
-            return False
-        discard_tool_pid_before_reap(process)
-        _wait_after_kill(process)
     return True
 
 

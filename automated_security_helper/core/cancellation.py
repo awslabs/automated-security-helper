@@ -575,6 +575,80 @@ def discard_die_now_cleanup(path: "str | os.PathLike[str]") -> None:
             _CLEANUP_FILES = tuple(p for p in _CLEANUP_FILES if p != name)
 
 
+#: What the die-now SIGINT ending writes to standard error before it exits, as
+#: pre-encoded bytes so the signal frame only loads one reference and makes one
+#: ``os.write`` -- no logger, no lock, no encoding work (the same rules as
+#: ``_TOOL_GROUPS``). None, the default, keeps the SIG_DFL re-raise for a
+#: command that registered nothing. Registered by the commands whose
+#: interrupted ending the docs pin (``record_die_now_message``): exit-codes.md
+#: says of the 130 row that "a second Ctrl-C during the wait kills it at once"
+#: and "A scan prints the interrupted-scan message above", so the die-now
+#: ending of such a command has to say how the run ended and exit 130, not die
+#: of raw SIGINT with nothing printed.
+_DIE_NOW_MESSAGE: Optional[bytes] = None
+
+#: The exit status of a die-now ending that prints a recorded message: the 130
+#: a shell reports for an interrupted process, and the status exit-codes.md
+#: pins for Ctrl-C in every mode (core/constants.ASH_EXIT_INTERRUPTED; not
+#: imported here, so this module keeps its no-ASH-imports rule for code the
+#: signal frame runs).
+_DIE_NOW_EXIT = 130
+
+
+def record_die_now_message(text: str) -> None:
+    """Record what the die-now SIGINT ending says on stderr before exiting 130.
+
+    For a command whose interrupted ending the docs pin (``ash scan``'s
+    "ASH scan interrupted before it finished: ...", ``ash build-image``'s own
+    line): its first Ctrl-C unwinds to the command's interrupt arm, which
+    prints the message and exits 130, but a second Ctrl-C lands in the
+    handler's die-now arm, which never returns to that arm. With a message
+    recorded, that arm writes it to stderr and exits 130
+    (``os._exit``: no ``finally`` runs, as under the SIG_DFL re-raise it
+    replaces); with none, the arm re-raises under SIG_DFL as before. The text
+    is encoded here, with a trailing newline added when it has none, so the
+    handler does no string work.
+    """
+    global _DIE_NOW_MESSAGE
+    data = text.encode("utf-8", "backslashreplace")
+    if not data.endswith(b"\n"):
+        data += b"\n"
+    with _TOOL_GROUPS_WRITE_LOCK:
+        _DIE_NOW_MESSAGE = data
+
+
+def discard_die_now_message() -> None:
+    """Forget the recorded die-now message once the command's run is over.
+
+    The registrar's ``finally``: in a process that goes on living after the
+    command returns (a test that runs the command in-process, a caller using
+    the CLI as a library), a stale message would turn a later die-now into
+    this command's ending, and would print a word about a run that is not the
+    one being interrupted.
+    """
+    global _DIE_NOW_MESSAGE
+    with _TOOL_GROUPS_WRITE_LOCK:
+        _DIE_NOW_MESSAGE = None
+
+
+def _exit_with_die_now_message(message: bytes) -> None:
+    """Say how the run ended and exit 130, for the die-now SIGINT ending.
+
+    One ``os.write`` to fd 2 and one ``os._exit``, both single syscalls the
+    signal frame may make: no logger, no lock, no stream object, whose locks
+    the interrupted frame may hold. ``os._exit`` runs no ``finally`` and no
+    ``atexit``, so everything the SIG_DFL death was chosen for still holds
+    (the cleanup the operator gave up on by pressing Ctrl-C twice stays
+    skipped); what changes is the word on stderr and the exit status, which
+    exit-codes.md pins as the interrupted-scan message and 130.
+    """
+    try:
+        os.write(2, message)
+    except OSError:
+        pass
+    os._exit(_DIE_NOW_EXIT)
+
+
 def _remove_die_now_cleanups() -> None:
     """Remove the recorded values-holding files, for the default-kill endings.
 
@@ -726,6 +800,48 @@ def stop_grace_in_progress() -> Iterator[None]:
                 _GRACE_WAITS -= 1
 
 
+#: How many interrupt stops are passing a Ctrl-C on and waiting the child out
+#: right now (``utils/subprocess_utils.stop_after_interrupt``). Written under
+#: its lock on normal thread frames; read without the lock by the SIGINT
+#: handler, one integer load, as the signal frame allows. While it is raised, a
+#: second Ctrl-C chains the interrupt instead of taking the die-now death:
+#: ``stop_after_interrupt``'s KeyboardInterrupt arm is what kills the waited-out
+#: child at once, which is the behavior exit-codes.md pins for a second Ctrl-C
+#: during the wait, and the unwinding then prints the interrupted-scan message
+#: and exits 130 at the command's own arm.
+_INTERRUPT_STOP_WAITS = 0
+_INTERRUPT_STOP_WAITS_WRITE_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def interrupt_stop_in_progress() -> Iterator[None]:
+    """While inside, a second Ctrl-C stays an interrupt instead of dying now.
+
+    For the subprocess layer's interrupt stop
+    (``utils/subprocess_utils.stop_after_interrupt``): the first Ctrl-C has
+    unwound to the arm that passes the interrupt on and waits the child out,
+    and that wait's own ``except KeyboardInterrupt`` is the documented second
+    Ctrl-C ("a second Ctrl-C during the wait kills it at once",
+    exit-codes.md): it kills the child, with no second interrupt delivered to
+    it, and re-raises, so the command's interrupt arm still prints the
+    interrupted-scan message and exits 130. The die-now branch would instead
+    interrupt the child once more and leave one that ignores it running. The
+    same raise-inside-the-try shape, with the same one-boundary window, as
+    :func:`stop_grace_in_progress`.
+    """
+    global _INTERRUPT_STOP_WAITS
+    entered = False
+    try:
+        with _INTERRUPT_STOP_WAITS_WRITE_LOCK:
+            _INTERRUPT_STOP_WAITS += 1
+            entered = True
+        yield
+    finally:
+        if entered:
+            with _INTERRUPT_STOP_WAITS_WRITE_LOCK:
+                _INTERRUPT_STOP_WAITS -= 1
+
+
 def shutdown_requested() -> bool:
     """Whether a shutdown signal has asked this process's registered scans to stop.
 
@@ -734,6 +850,18 @@ def shutdown_requested() -> bool:
     signal is cancelled at once (:func:`shutdown_cancels`).
     """
     return _SHUTDOWN_REQUESTED
+
+
+def sigint_seen() -> bool:
+    """Whether a SIGINT has reached this process's Ctrl-C handler.
+
+    One boolean load of the latch :func:`_handle_sigint` sets, for a caller
+    that has to tell what an exception that lost its type on the way means:
+    the MCP stdio server reads it when a bare cancellation escapes the
+    serving, because on Windows under Python 3.10 that is how asyncio hands
+    back the Ctrl-C the handler chained (cli/mcp_server._interrupted).
+    """
+    return _SIGINT_SEEN
 
 
 def shutdown_scopes_registered() -> bool:
@@ -832,17 +960,38 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
 
     A second shutdown signal of either kind -- another Ctrl-C, or a Ctrl-C
     after a SIGTERM already started the cooperative stop -- means the
-    operator wants the process gone more than they want the cleanup. The recorded
-    tool groups are killed -- each scanner tool leads a session and group of
-    its own, so another interrupt alone would orphan the tool the first stop
-    was still waiting out -- and the recorded launcher children are
+    operator wants the process gone more than they want the cleanup. While an
+    interrupt stop is waiting its child out
+    (:func:`interrupt_stop_in_progress`), the signal is chained instead: that
+    wait's own KeyboardInterrupt arm is the documented second Ctrl-C, which
+    kills the child at once and re-raises, and the command's interrupt arm
+    then says how the run ended and exits 130 (exit-codes.md). Otherwise the
+    recorded tool groups are killed -- each scanner tool leads a session and
+    group of its own, so another interrupt alone would orphan the tool the
+    first stop was still waiting out -- and the recorded launcher children are
     interrupted, which is the second interrupt of the inner ASH they run and
-    so ends its own tools. The process then dies as an interrupted process
-    does, by SIGINT under the default disposition, which a shell reports as
-    130.
+    so ends its own tools. A command that recorded its interrupted ending
+    (:func:`record_die_now_message`) then says it on stderr and exits 130
+    without running any cleanup (``os._exit``); any other process dies as an
+    interrupted one does, by SIGINT under the default disposition, which a
+    shell reports as 130.
     """
     global _SIGINT_SEEN, _SHUTDOWN_REQUESTED
     if _SIGINT_SEEN or _SIGTERM_SEEN:
+        if _INTERRUPT_STOP_WAITS > 0:
+            # An interrupt stop is passing the Ctrl-C on and waiting the child
+            # out (stop_after_interrupt): its own KeyboardInterrupt arm is the
+            # documented second Ctrl-C, which kills that child at once with no
+            # further interrupt delivered to it, and re-raises so the
+            # command's interrupt arm prints the interrupted-scan message and
+            # exits 130 (exit-codes.md, the Ctrl-C rows). The die-now kills
+            # below would interrupt the child once more and leave one that
+            # ignores it running, so the interrupt is chained instead.
+            previous = _PREVIOUS_SIGINT
+            if not callable(previous):
+                previous = signal.default_int_handler
+            previous(signum, frame)
+            return
         # Either latch: a Ctrl-C inside a SIGTERM stop's grace is the
         # operator's second shutdown signal, and chaining the interrupt
         # instead would land KeyboardInterrupt in the main thread's grace
@@ -852,6 +1001,14 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
         # SIG_DFL, so the launcher's own removal never would.
         _kill_recorded_groups()
         _remove_die_now_cleanups()
+        message = _DIE_NOW_MESSAGE
+        if message is not None:
+            # A command that recorded its interrupted ending still says how the
+            # run ended and exits 130, as exit-codes.md pins for a second
+            # Ctrl-C ("a second Ctrl-C during the wait kills it at once" ...
+            # "A scan prints the interrupted-scan message above"); os._exit
+            # keeps the no-cleanup property of the SIG_DFL death it replaces.
+            _exit_with_die_now_message(message)
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.raise_signal(signal.SIGINT)
         return

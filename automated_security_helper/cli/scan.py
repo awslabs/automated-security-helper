@@ -23,6 +23,8 @@ from automated_security_helper.core.cancellation import (
     CancelEvent,
     ScanCancelled,
     cancel_scope,
+    discard_die_now_message,
+    record_die_now_message,
     shutdown_cancels,
     shutdown_requested,
 )
@@ -98,6 +100,17 @@ from automated_security_helper.workspace.resolver import resolve_workspace
 from automated_security_helper.workspace.workspace_file import (
     WORKSPACE_AUTO,
     discover_workspace_file,
+)
+
+#: The only word on how an interrupted scan ended, as exit-codes.md quotes it
+#: (the 130 row). Printed by the scan command's KeyboardInterrupt arm for the
+#: first Ctrl-C, and registered with the die-now ending for the second
+#: (``record_die_now_message``): exit-codes.md says "a second Ctrl-C during the
+#: wait kills it at once" and "A scan prints the interrupted-scan message
+#: above", so both endings say it and both exit 130.
+_SCAN_INTERRUPTED_MESSAGE = (
+    "ASH scan interrupted before it finished: there is no verdict, and the "
+    "output directory may hold partial results."
 )
 
 
@@ -1763,6 +1776,11 @@ def run_ash_scan_cli_command(
     # run_ash_scan inside a scope of its own, whose event its registry stops; a
     # scope installed below the shared frame would shadow it.
     cancel_event = CancelEvent()
+    # A second Ctrl-C takes the die-now ending, which never returns to the
+    # interrupt arm below, so the word on how the run ended is registered with
+    # it: exit-codes.md pins that a second Ctrl-C still prints the
+    # interrupted-scan message and exits 130.
+    record_die_now_message(_SCAN_INTERRUPTED_MESSAGE)
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
             run_ash_scan(
@@ -1830,11 +1848,7 @@ def run_ash_scan_cli_command(
         # real set calls are safe here where the signal handler's are not.
         cancel_event.stop_promptly = True
         cancel_event.set()
-        echo(
-            "ASH scan interrupted before it finished: there is no verdict, and the "
-            "output directory may hold partial results.",
-            err=True,
-        )
+        echo(_SCAN_INTERRUPTED_MESSAGE, err=True)
         raise typer.Exit(ASH_EXIT_INTERRUPTED) from None
     except ScanCancelled as error:
         if not shutdown_requested():
@@ -1860,3 +1874,8 @@ def run_ash_scan_cli_command(
             message += f" A tool the stop could not end may still be running: {names}."
         echo(message, err=True)
         raise typer.Exit(ASH_EXIT_TERMINATED) from None
+    finally:
+        # The die-now ending speaks for this run only while this run exists: a
+        # process that goes on living (a test running the command in-process)
+        # must not keep a stale word for a later interrupt.
+        discard_die_now_message()
