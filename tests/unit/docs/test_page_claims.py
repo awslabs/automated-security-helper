@@ -19406,11 +19406,19 @@ def test_ash_report_writes_the_reporters_output_unless_a_color_terminal_renders_
     assert json.loads(shown) == json.loads(document)
 
 
+#: read-results.md on what the human reporters do as they build the document.
+_HUMAN_REPORTS_NEUTRALIZE_AT_BUILD = (
+    "The text, Markdown and HTML reporters neutralize a finding's scanner text as "
+    "they build the document: a control character is written as a visible escape, "
+    "and a CI command form is broken where it stands, so no line of the document is "
+    "one a CI runner reads as a command."
+)
 #: read-results.md on the report a regular file gets.
 _REPORT_TO_A_FILE_AS_WRITTEN = (
-    "To get the report exactly as the reporter wrote it, command lines included, "
-    "redirect standard output to a file, as in the command above: ASH then writes the "
-    "reporter's output unchanged, so the command above writes a SARIF file."
+    "A JSON report, such as SARIF, carries scanner text as data, command forms "
+    "included. To get the report exactly as the reporter wrote it, redirect standard "
+    "output to a file, as in the command above: ASH then writes the reporter's output "
+    "unchanged, so the command above writes a SARIF file."
 )
 #: read-results.md on a report's CI command lines on a pipe.
 _REPORT_CHANGES_COMMAND_LINES_ON_A_PIPE = (
@@ -19492,15 +19500,19 @@ def test_ash_report_writes_ci_command_lines_as_written_only_to_a_file(
     """read-results.md (Print a report in the terminal with ``ash report``).
 
     ``ash report`` over a stored scan whose file names hold every CI command form,
-    with the child recording the document the reporter returned in the same run. To a
-    regular file, with and without ``GITHUB_ACTIONS``, standard output is that document
-    byte for byte, command lines included. To a pipe, with and without
+    with the child recording the document the reporter returned in the same run. A
+    SARIF document carries the command forms as data; a text or Markdown document
+    holds none, since the #830 hardening has the reporter break each form as it
+    builds the document (``commands_broken`` in utils/terminal_text.py), the names
+    still in it. To a regular file, with and without ``GITHUB_ACTIONS``, standard
+    output is the recorded document byte for byte. To a pipe, with and without
     ``GITHUB_ACTIONS``, and, on POSIX, to a terminal with ``GITHUB_ACTIONS``,
-    ``TF_BUILD`` or ``TEAMCITY_VERSION`` set, no line of it is one a runner reads as a
-    command, and the names are still there. The control is the document itself: the
-    reporter wrote command lines into it. A terminal with no CI variable is no page
-    claim and has no case here.
+    ``TF_BUILD`` or ``TEAMCITY_VERSION`` set, no line written is one a runner reads
+    as a command, and the names are still there. The control is the SARIF document:
+    the reporter wrote command lines into it, so the probe names do reach the
+    reporters. A terminal with no CI variable is no page claim and has no case here.
     """
+    assert_on_page(READ_RESULTS, _HUMAN_REPORTS_NEUTRALIZE_AT_BUILD)
     assert_on_page(READ_RESULTS, _REPORT_TO_A_FILE_AS_WRITTEN)
     assert_on_page(READ_RESULTS, _REPORT_CHANGES_COMMAND_LINES_ON_A_PIPE)
     if sink == "terminal":
@@ -19524,7 +19536,17 @@ def test_ash_report_writes_ci_command_lines_as_written_only_to_a_file(
         f"{len(documents)} documents recorded:\n{stderr[-2000:]}"
     )
     document = documents[0]
-    assert _ci_command_lines(document), document[:2000]
+    if report_format == "sarif":
+        # The control: the SARIF reporter carries the names as data, command
+        # forms included, so any neutralizing on this format is a sink's.
+        assert _ci_command_lines(document), document[:2000]
+    else:
+        # The text and Markdown reporters neutralize the forms at document
+        # build: the "#" of a "##name[" form is written as "\x23" and a
+        # path's line feed as "\x0a", so no line of the document is one a
+        # runner reads as a command, and the names are still in it.
+        assert _ci_command_lines(document) == [], _ci_command_lines(document)
+        assert "add-mask" in document and "teamcity" in document, document[:2000]
     if expected == "as-written":
         assert out == document.replace("\n", os.linesep).encode("utf-8"), out.decode(
             "utf-8", "replace"
@@ -19588,9 +19610,10 @@ def test_a_json_report_on_a_pipe_parses_to_the_reporters_document(
 #: read-results.md on what a terminal shows of the characters it acts on.
 _A_TERMINAL_SHOWS_CONTROLS_AS_ESCAPES = (
     "On a terminal, with or without color, no character a terminal acts on is written "
-    "as it is: it is shown as an escape, such as `\\x1b` for an escape character in a "
-    "file name, or in a JSON report as JSON's own escape, such as `\\u001b`. Rendered "
-    "Markdown leaves such characters out."
+    "as it is: a text or Markdown report already holds it as the escape the reporter "
+    "wrote, such as `\\x1b` for an escape character in a file name, and a JSON report "
+    "shows it as JSON's own escape, such as `\\u001b`. A Markdown report that holds "
+    "such escape text is written as that text, not rendered."
 )
 #: A scanned file name holding an escape character and a bell: a terminal would read
 #: them as a sequence that sets its title, one no console styling writes.
@@ -19601,15 +19624,9 @@ _ESCAPE_IN_A_NAME = "title\x1b]0;page-claims\x07.txt"
 @pytest.mark.parametrize(
     "how, report_format, shown_as",
     [
-        pytest.param(
-            "no-color", "text", "\\x1b]0;page-claims\\x07", id="no-color-text"
-        ),
-        pytest.param(
-            "no-color", "markdown", "\\x1b]0;page-claims\\x07", id="no-color-markdown"
-        ),
-        pytest.param(
-            "color-on", "text", "\\x1b]0;page-claims\\x07", id="color-on-text"
-        ),
+        pytest.param("no-color", "text", None, id="no-color-text"),
+        pytest.param("no-color", "markdown", None, id="no-color-markdown"),
+        pytest.param("color-on", "text", None, id="color-on-text"),
         pytest.param(
             "no-color", "sarif", "\\u001b]0;page-claims\\u0007", id="no-color-json"
         ),
@@ -19627,10 +19644,14 @@ def test_a_terminal_shows_the_characters_it_acts_on_as_escapes(
 
     ``ash report`` over a stored scan whose file name holds an escape character, ``]0;``
     and a bell, to a terminal of the test's own, with ``--no-color`` and with color on.
-    No escape character may start ``]0;`` and no bell may be written. A text or Markdown
-    report must show the two as ``\\x1b`` and ``\\x07``, and a JSON report as JSON's
-    ``\\u001b`` and ``\\u0007``; rendered Markdown shows neither. The control is the
-    document the reporter returned: it holds the raw characters.
+    No escape character may start ``]0;`` and no bell may be written. Since the #830
+    hardening the text and Markdown reporters write the two as the escapes ``\\x1b``
+    and ``\\x07`` in the document itself (``shown_on_one_line`` in
+    utils/terminal_text.py), and that escape text is what reaches the terminal: a
+    Markdown report that holds it is written unrendered (cli/report.py), and the
+    terminal sink doubles the backslash of text that reads as an escape, so only the
+    escapes' letters are pinned on the shown side. A JSON document holds the raw
+    characters as data, shown on the terminal as JSON's ``\\u001b`` and ``\\u0007``.
     """
     assert_on_page(READ_RESULTS, _A_TERMINAL_SHOWS_CONTROLS_AS_ESCAPES)
     workdir = tmp_path / "work"
@@ -19657,15 +19678,25 @@ def test_a_terminal_shows_the_characters_it_acts_on_as_escapes(
     if report_format == "sarif":
         # The reporter's JSON holds the name as JSON escapes: look in its strings.
         document = "\n".join(_json_strings(json.loads(document)))
-    assert "\x1b]0;page-claims\x07" in document, repr(document[:2000])
+        assert "\x1b]0;page-claims\x07" in document, repr(document[:2000])
+    else:
+        # The text and Markdown reporters wrote the two as escapes at document
+        # build, so the document holds the escape text and no raw control.
+        assert "\x1b" not in document and "\x07" not in document, repr(
+            document[:2000]
+        )
+        assert "x1b" in document and "x07" in document, repr(document[:2000])
+        assert "page-claims" in document, repr(document[:2000])
     shown = out.decode("utf-8", "replace")
     # Rendered Markdown's own links are OSC 8 sequences, so only the name's are looked for.
     assert "\x1b]0;" not in shown and "\x07" not in shown, repr(shown[:2000])
     plain = _CSI_SEQUENCE.sub("", shown)
+    assert "page-claims" in plain, repr(plain[:2000])
     if shown_as is None:
-        # "rendered Markdown shows neither": not the escape, and not the bell.
-        assert "page-claims" in plain, repr(plain[:2000])
-        assert "\\x1b" not in plain and "\\x07" not in plain, repr(plain[:2000])
+        # A text or Markdown report reaches the terminal as the escape text the
+        # reporter wrote; the sink doubles the backslash of text that reads as
+        # an escape, so only the escapes' letters are pinned.
+        assert "x1b" in plain and "x07" in plain, repr(plain[:2000])
     else:
         assert shown_as in plain, repr(plain[:2000])
 
