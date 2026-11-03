@@ -19346,7 +19346,10 @@ def test_ash_report_writes_the_reporters_output_unless_a_color_terminal_renders_
         headings = re.findall(r"^#{1,6} (.+)$", document, re.MULTILINE)
         assert headings, document[:2000]
         assert not re.findall(r"^#{1,6} \S", shown, re.MULTILINE), shown[:3000]
-        assert "ASH Security Scan Report" in shown, shown[:3000]
+        # The live heading is sentence case since the #830 restyle
+        # (markdown_reporter.py writes "# ASH security scan report"); the page
+        # claims only that Markdown is rendered, not the heading's case.
+        assert "ASH security scan report" in shown, shown[:3000]
         return
     # The control: the reporter wrote the JSON on one line.
     assert "\n  " not in document, document[:500]
