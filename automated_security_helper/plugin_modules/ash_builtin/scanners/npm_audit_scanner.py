@@ -156,7 +156,7 @@ def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
 
     Redacted of ``values`` (the env-read values, ``shown_tool_stderr``) and
     then with any URL's userinfo masked whole. A registry URL a tool quotes
-    can carry its credentials inline (``https://user:token@host/``), and the
+    can carry its credentials inline (``https://user:token@host/``), and the  # pragma: allowlist secret
     user part is not one of the env-read values, so the redaction alone showed
     it. The mask ran on the debug summary's first stderr line only; the audit
     failure's reason, the yarn error detail and a raised exception's text

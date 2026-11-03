@@ -545,8 +545,8 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         scanner's rule identifier and the location, so their distinct ids do not
         by themselves keep both in GitLab."""
         model = _model(
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
         )
 
         first, second = json.loads(reporter.report(model))["vulnerabilities"]

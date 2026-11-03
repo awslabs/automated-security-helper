@@ -712,7 +712,7 @@ class TestRunAshNix:
             for m in logged
         )
         # The shell is given the reference as the operator wrote it.
-        assert "git+https://user:token-1@host/org/repo" in entered_shell.cmd
+        assert "git+https://user:token-1@host/org/repo" in entered_shell.cmd  # pragma: allowlist secret
 
     def test_the_operators_pythonpath_is_handed_to_the_inner_command(
         self, monkeypatch, entered_shell

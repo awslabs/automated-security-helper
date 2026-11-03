@@ -55,7 +55,7 @@ def _secret(filename: str, value, line: int = 1, kind: str = "Secret Keyword"):
         # key and its operator do not make the key a value.
         ("password = password", "password", 11),
         ('{"password": "password"}', "password", 14),  # pragma: allowlist secret
-        ('"password" = "password"', "password", 14),
+        ('"password" = "password"', "password", 14),  # pragma: allowlist secret
         ("'password' => 'password'", "password", 15),
         # A quoted value followed by a comma or a bracket is still the value.
         ('["password", "other"]', "password", 2),

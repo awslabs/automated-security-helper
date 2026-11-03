@@ -556,7 +556,7 @@ class TestAResourceLevelCredentialFinding:
                 5,
                 3,
                 [
-                    "password = 'placeholder-example-value'\n",
+                    "password = 'placeholder-example-value'\n",  # pragma: allowlist secret
                     "x = 1\n",
                     "y = 2\n",
                     "run()\n",

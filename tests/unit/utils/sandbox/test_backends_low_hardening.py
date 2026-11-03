@@ -1749,7 +1749,7 @@ def test_a_listed_name_passes_the_callers_value_and_an_entry_with_a_value_sets_o
     [
         "HTTPS_PROXY=http://MARKER-user:MARKER-pw@proxy:3128",  # pragma: allowlist secret
         "https_proxy=https://MARKER-user@proxy",
-        "MY_TOOL_URL=socks5://MARKER-user:MARKER-pw@host:1080",
+        "MY_TOOL_URL=socks5://MARKER-user:MARKER-pw@host:1080",  # pragma: allowlist secret
     ],
 )
 def test_an_entry_that_sets_a_url_with_a_user_name_is_refused_not_dropped(

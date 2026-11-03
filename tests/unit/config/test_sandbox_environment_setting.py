@@ -369,7 +369,7 @@ def test_a_delivered_entry_that_starts_with_no_name_is_refused_by_position_only(
             "environment": [
                 "HTTP_PROXY",
                 "MARKER-not-a-name=MARKER-value",
-                "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+                "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",  # pragma: allowlist secret
                 "LD_PRELOAD=MARKER-path",
                 7,
             ]

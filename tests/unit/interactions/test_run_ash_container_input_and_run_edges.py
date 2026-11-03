@@ -199,7 +199,7 @@ def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
     body is still hidden, line by line and whole."""
     lines = rac._value_lines((_PEM,))
 
-    assert "-----BEGIN PRIVATE KEY-----" not in lines  #gitleaks:allow
+    assert "-----BEGIN PRIVATE KEY-----" not in lines  #gitleaks:allow  # pragma: allowlist secret
     assert "-----END PRIVATE KEY-----" not in lines
     assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" in lines
     assert _PEM in lines
@@ -244,7 +244,7 @@ def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
     assert '"version": 2,' not in lines
     assert '"enabled": true,' not in lines
     assert '"aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",' in lines
-    assert '"password": "not-a-real-password",' in lines
+    assert '"password": "not-a-real-password",' in lines  # pragma: allowlist secret
     assert '"pin": 123456' in lines
     assert value in lines
 

@@ -136,7 +136,7 @@ def _names_a_key(line: str, before: str, end: int) -> bool:
     closes it when *before*, the character ahead of the token, opened one, and
     past spaces and tabs. Reading only the one character after the token took
     ``password = password``, ``{"password": "password"}``, ``"password" =  # pragma: allowlist secret
-    "password"`` and ``'password' => 'password'`` for values, so the column
+    "password"`` and ``'password' => 'password'`` for values, so the column  # pragma: allowlist secret
     pointed at the key, and two secrets on one such line could share it.
     """
     cursor = end
