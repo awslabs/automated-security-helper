@@ -717,7 +717,11 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
 
     Raises:
         ASHConfigValidationError: A project or ``--ash-plugin-modules`` names a
-            module outside the plugin namespace; nothing has been imported.
+            module outside the plugin namespace (nothing has been imported), a
+            named module failed to import, or two plugins of one type the run
+            loads have the same name or names the config lookup reads as one
+            (``plugins.loader.refuse_plugin_name_clashes``), each before any
+            project starts.
     """
     from automated_security_helper.config.plugin_module_trust import (
         environment_only_plugin_modules,
@@ -834,6 +838,27 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
     # the environment is named by its mask there too, inside a longer module
     # name as well.
     with _masked_modules_of_run(plan):
+        # With every module the run loads imported: two plugins of one type
+        # whose names are the same or that the config lookup reads as one are
+        # refused here, before any project starts, with the run's exit 3 and
+        # message (plugins/index.md "Package a third-party plugin";
+        # exit-codes.md's Workspace mode row). Every workspace entry point
+        # comes through this prewarm -- the run (execute_workspace), the CLI's
+        # --dry-run (_exit_with_workspace_dry_run, whose
+        # ASHConfigValidationError arm exits 3 with no plan printed, which is
+        # what scale-large-repos.md's "refuses what the run refuses before any
+        # project starts" pins) and the MCP run_ash_workspace_scan tool's
+        # selection preflight, whose handler maps the refusal to exit_code 3 --
+        # so the three answer with one check. mcp_resolve_workspace does not
+        # prewarm and so does not check plugin names, by that page's contract.
+        # Judged over this run's plugins (the built-ins plus `modules`), never
+        # the whole process-wide registry.
+        from automated_security_helper.plugins.loader import (
+            plugins_of,
+            refuse_plugin_name_clashes,
+        )
+
+        refuse_plugin_name_clashes(plugins_of(modules))
         for plugin_type in ("converter", "scanner", "reporter"):
             found = ash_plugin_manager.plugin_modules(plugin_type)
             if plugin_type == "scanner":
