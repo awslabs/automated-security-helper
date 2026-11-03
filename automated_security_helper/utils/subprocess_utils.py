@@ -20,9 +20,12 @@ one string, which the spawn helpers, the sandbox plan and the callers of
 :func:`resolve_command` do not carry, so an argument that ``list2cmdline`` would not
 quote is refused instead of rewritten.
 
-When the lookup resolves the program to a batch file, :func:`_resolve_for_spawn` checks
-the argument list once, so every helper below applies the same rule and hands ``Popen``
-the list as it was:
+When the lookup resolves the program to a batch file, :func:`_resolve_for_spawn` first
+replaces it with a launch the batch interpreter never sees, when one exists: the
+``.exe`` beside the shim, or the running interpreter with ``-m <name>`` for a shim
+whose name is importable here (:func:`_non_batch_substitute`). The arguments are not
+touched. Only with no substitute does it check the argument list, once, so every
+helper below applies the same rule and hands ``Popen`` the list as it was:
 
 * an argument that ``list2cmdline`` puts in double quotes (it is empty or holds a space
   or tab) is passed as it is: inside double quotes cmd.exe reads ``< > | & ^ ( )`` as
@@ -54,6 +57,7 @@ import contextvars
 import enum
 import errno
 import gc
+import importlib.util
 import locale
 import logging
 import ntpath
@@ -2074,6 +2078,43 @@ def _starts_through_cmd_exe(program: str) -> bool:
     )
 
 
+def _non_batch_substitute(program: str) -> Optional[List[str]]:
+    """How to start ``program``, a batch file, without cmd.exe, or None.
+
+    Windows starts a ``.bat``/``.cmd`` file by running cmd.exe on it, and cmd.exe
+    re-reads the whole command line (module docstring), so a regex-shaped
+    argument stops being one argument: checkov's ``--skip-path`` values launched
+    through a ``checkov.cmd`` shim ended with cmd.exe printing that a fragment of
+    one value "is not recognized as an internal or external command" and the
+    launch returning 255 before checkov ever started. A batch shim is therefore
+    replaced with a launch the batch interpreter never sees, the arguments left
+    exactly as they are:
+
+    * the ``.exe`` beside the shim, when one exists: an installer that writes a
+      batch wrapper usually writes the real program next to it;
+    * else the running interpreter with ``-m <name>``, when the shim's name is
+      importable here: a pip-installed console script such as checkov is, and
+      runs the same code the shim would have started.
+
+    None when neither exists; the caller then keeps the cmd.exe argument check
+    as the last line of defense. The shim's path is read with ``ntpath``: it is
+    a Windows path by construction (``_starts_through_cmd_exe``), whatever host
+    the tests run this on.
+    """
+    root, _suffix = ntpath.splitext(os.fspath(program))
+    exe = root + ".exe"
+    if _is_executable_file(exe):
+        return [exe]
+    name = ntpath.basename(root)
+    try:
+        importable = bool(name) and importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        importable = False
+    if importable:
+        return [sys.executable, "-m", name]
+    return None
+
+
 def _text_of_argument(argument: Any) -> Optional[str]:
     """The text ``subprocess`` writes for ``argument``, or None when it is not text.
 
@@ -2147,10 +2188,15 @@ def _resolve_for_spawn(
 ) -> Optional[OSError]:
     """Point ``args[0]`` at the file :func:`find_executable` finds for it.
 
-    When that file is a batch file on Windows, the arguments are checked for cmd.exe
-    (see the module docstring), once, here, so every helper that starts a process
-    applies the same rule. Only ``args[0]`` is ever rewritten. An argument cmd.exe
-    would read differently is returned as an ``OSError`` with ``errno.EINVAL``.
+    When that file is a batch file on Windows it is replaced with the non-batch
+    launch :func:`_non_batch_substitute` finds (the ``.exe`` beside the shim, or
+    the interpreter with ``-m``), so cmd.exe never re-reads the arguments; only
+    with no substitute are the arguments checked for cmd.exe (see the module
+    docstring), once, here, so every helper that starts a process applies the
+    same rule. Only the program's element is ever rewritten (the ``-m`` form
+    replaces it with the interpreter, ``-m`` and the name); the arguments after
+    it are never touched. An argument cmd.exe would read differently is returned
+    as an ``OSError`` with ``errno.EINVAL``.
 
     Returned, for the caller to raise where it reports a command that could not
     start, as the ``FileNotFoundError`` ``subprocess`` raises for a missing
@@ -2186,6 +2232,10 @@ def _resolve_for_spawn(
     if found:
         args[0] = found
         if _starts_through_cmd_exe(found):
+            substitute = _non_batch_substitute(found)
+            if substitute is not None:
+                args[:1] = substitute
+                return None
             return _refusal_for_cmd_exe(args)
         return None
     refusal = in_tree_refusal(name)
@@ -2261,8 +2311,9 @@ def resolve_command(
     """A copy of ``args`` with its program resolved as the spawn helpers resolve it.
 
     For a caller that starts the process itself. When the program is a batch file on
-    Windows the arguments have been checked for cmd.exe (see the module docstring),
-    and the copy goes to ``subprocess`` as it is. A string is the program's name,
+    Windows it has been replaced with the non-batch launch
+    :func:`_non_batch_substitute` finds, or the arguments have been checked for
+    cmd.exe (see the module docstring), and the copy goes to ``subprocess`` as it is. A string is the program's name,
     as the spawn helpers read one (``_argv_list``); ``list()`` of it made it its
     characters.
 
