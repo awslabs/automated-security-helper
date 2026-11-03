@@ -11562,8 +11562,12 @@ _SANDBOX_HOW_TO = "docs/scanner-sandbox.md"
 
 _SANDBOX_MODES_SENTENCE = (
     "The values are `off`, `auto`, `bwrap`, `firejail`, `landlock`, and `sandbox-exec`, "
-    'lowercase. Quote `"off"`. YAML reads an unquoted `off` as the boolean false, which a '
-    "scan refuses with exit code 3:"
+    "lowercase. YAML reads an unquoted `off` as the boolean false, which ASH reads as "
+    "the mode `off`; an unquoted `on`, `yes` or `true` names no mode, so a scan "
+    "refuses it with exit code 3 and a hint to quote the value."
+)
+_SANDBOX_VALIDATE_SENTENCE = (
+    "`ash config validate` gives the same verdict, with the same exit code."
 )
 
 
@@ -11578,21 +11582,23 @@ def _sandbox_config_file(parent: Path, mode_line: str) -> Path:
 @pytest.mark.parametrize(
     "mode_line, expected",
     [
-        pytest.param("mode: off", 3, id="unquoted-off"),
+        pytest.param("mode: off", 0, id="unquoted-off"),
+        pytest.param("mode: on", 3, id="unquoted-on"),
         pytest.param("mode: AUTO", 3, id="not-lowercase"),
         pytest.param('mode: "off"', 0, id="control-quoted-off"),
     ],
 )
 @pytest.mark.integration
-def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
+def test_an_unquoted_off_sandbox_mode_is_read_as_the_mode_off(
     tmp_path: Path, mode_line: str, expected: int
 ) -> None:
-    """scanner-sandbox.md (Turn it on in a config file).
+    """scanner-sandbox.md (the config-file paragraph).
 
     The modes the page lists must be the ones the config model allows. A detect-secrets
-    scan run with a config file whose ``sandbox.mode`` is an unquoted ``off`` or not
-    lowercase must exit 3. The control is the same file with ``"off"`` quoted, which
-    scans a tree with nothing to find and exits 0.
+    scan run with a config file whose ``sandbox.mode`` is an unquoted ``off`` must exit
+    0, like the quoted ``"off"`` control: YAML hands the loader the boolean false,
+    which ASH reads as the mode ``off``. An unquoted ``on``, which YAML reads as true
+    and so names no mode, and a mode that is not lowercase must exit 3.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
     from automated_security_helper.config.ash_config import SandboxConfig
@@ -11628,7 +11634,8 @@ def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
 @pytest.mark.parametrize(
     "mode_line, expected",
     [
-        pytest.param("mode: off", 3, id="unquoted-off"),
+        pytest.param("mode: off", 0, id="unquoted-off"),
+        pytest.param("mode: on", 3, id="unquoted-on"),
         pytest.param('mode: "off"', 0, id="control-quoted-off"),
     ],
 )
@@ -11636,18 +11643,16 @@ def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
 def test_ash_config_validate_gives_an_unquoted_off_sandbox_mode_the_scan_verdict(
     tmp_path: Path, mode_line: str, expected: int
 ) -> None:
-    """scanner-sandbox.md (Turn it on in a config file).
+    """scanner-sandbox.md (the config-file paragraph).
 
     ``ash config validate`` of a config file whose ``sandbox.mode`` is an unquoted
-    ``off`` must exit 3, as the scan does. The control is the same file with ``"off"``
-    quoted, which validates with 0. Both files set ``project_name``, so the verdict is
-    the mode's.
+    ``off`` must exit 0, as the scan does: the boolean false YAML hands the loader is
+    read as the mode ``off``. An unquoted ``on`` must exit 3, as a scan refuses it.
+    The control is the same file with ``"off"`` quoted, which validates with 0. All
+    three files set ``project_name``, so the verdict is the mode's.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
-    assert_on_page(
-        _SANDBOX_HOW_TO,
-        "`ash config validate` gives the same verdict, with the same exit code:",
-    )
+    assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_VALIDATE_SENTENCE)
     result = _ash(
         [
             "config",
