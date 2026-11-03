@@ -37,7 +37,8 @@ concurrency:
 jobs:
   check-pinned-tool-versions:
     name: Pinned tools are at their latest upstream release
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 16s on 4-vCPU ubuntu-latest (run 41401106895) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       contents: read
