@@ -3663,10 +3663,15 @@ def _ends_refused_operator_config(output: str, where: str, place: Path) -> bool:
 
 def _granting_config(directory: Path, checkout: bool = False) -> Path:
     """``directory/ash.yaml`` holding ``_GRANTING_ROOT``, with its base beside it, and
-    ``directory`` a git checkout of its own if ``checkout``."""
+    ``directory`` a git checkout of its own if ``checkout``.
+
+    A git-shaped checkout (``_mark_git_checkout``): a bare empty ``.git``
+    directory bounds nothing, so a fixture that planted one made no checkout
+    and every cell that rests on one tested a tree without it.
+    """
     directory.mkdir(parents=True)
     if checkout:
-        (directory / ".git").mkdir()
+        _mark_git_checkout(directory)
     (directory / "base.yaml").write_text(
         yaml.safe_dump(_GRANTING_BASE), encoding="utf-8"
     )
@@ -3678,11 +3683,18 @@ def _granting_config(directory: Path, checkout: bool = False) -> Path:
 def _workspace_in_a_checkout(tmp_path: Path, checkout: bool = True) -> Path:
     """The workspace file of ``repo/ws``, inside the git checkout ``repo``, or in no
     checkout unless ``checkout``. It lists ``api``, which has no config of its own, and
-    ``web``, which has one."""
+    ``web``, which has one.
+
+    The checkout is git-shaped (``_mark_git_checkout``): with the bare empty
+    ``.git`` an earlier cut planted, ``scanned_trees`` saw no checkout around
+    the workspace root, so a ``--config`` in the checkout outside the root, or
+    reached through a link, was never the repository's, and the refusals these
+    cells pin named "the scanned directory" instead of the checkout.
+    """
     repo = tmp_path / "repo"
     repo.mkdir()
     if checkout:
-        (repo / ".git").mkdir()
+        _mark_git_checkout(repo)
     root = repo / "ws"
     for name in ("api", "web"):
         (root / name).mkdir(parents=True)
