@@ -46,6 +46,7 @@ from automated_security_helper.utils.symbol_spans import is_valid_symbol
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
     tolerated_notes,
+    warned_notes,
 )
 
 if TYPE_CHECKING:
@@ -78,6 +79,7 @@ def _warn_expiration_spelling() -> None:
     caller is pydantic's validator machinery, so no user frame is nearer.
     """
     warnings.warn(EXPIRATION_SPELLING_DEPRECATION, DeprecationWarning)
+
 
 #: What an entry's expiration that is not a YYYY-MM-DD date records under
 #: TOLERATE_STORED_CONFIG. No value: the reader of a results file names where the
@@ -347,6 +349,15 @@ class IgnorePathWithReason(RedactedSection):
             # A config an author wrote, not a stored results file (which this
             # version and earlier ones wrote under the old spelling themselves).
             _warn_expiration_spelling()
+            # The Python warning is dropped by the default filters outside
+            # __main__, so an `ash` run never showed it. A config load binds
+            # the warn-unknown-keys list (resolve_config), whose contents land
+            # on the config's _resolution_warnings and are printed at scan
+            # start, so the operator sees the deprecation once per entry; the
+            # rebuild-after-overrides dedup subtracts repeats by count there.
+            warned = warned_notes(info)
+            if warned is not None:
+                warned.append(f"In {cls.ENTRY_KIND}: {EXPIRATION_SPELLING_DEPRECATION}")
         if "expires" not in data:
             return data
         if data["expiration"] == data["expires"]:
@@ -420,6 +431,19 @@ class IgnorePathWithReason(RedactedSection):
         until then. New code reads ``expires``.
         """
         return self.expires
+
+    @expiration.setter
+    def expiration(self, value: Optional[str]) -> None:
+        """Assignment under the deprecated name writes the ``expires`` field.
+
+        Before the rename, ``entry.expiration = x`` set the field; a read-only
+        property turned that into ``AttributeError``. Note that
+        ``model_copy(update={"expiration": ...})`` does NOT go through this
+        setter: pydantic writes update keys directly, and with ``extra="allow"``
+        an ``expiration`` update key lands as an extra (marking the entry
+        ``has_unknown_keys``); such callers pass ``expires`` instead.
+        """
+        self.expires = value
 
     @property
     def is_expired(self) -> bool:

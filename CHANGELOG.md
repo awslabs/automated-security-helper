@@ -409,8 +409,10 @@
   swap reverses the earlier shape, where `expiration` was the field and
   `expires` the alias. Both spellings are still read from a config or a stored
   results file; reading `expiration` from a config warns with a
-  `DeprecationWarning` naming `expires` and the v4 removal, and an entry that
-  sets both spellings to different values is still refused. Entries are now
+  `DeprecationWarning` naming `expires` and the v4 removal, records the same
+  notice on the configuration's resolution warnings (printed at scan start),
+  and `ash config lint` reports the spelling as a `deprecated-spelling` issue;
+  an entry that sets both spellings to different values is still refused. Entries are now
   written, stored and documented as `expires`, so results files, `ash config
   get` output and the suppression entries `ash inspect findings` or the MCP
   `suggest_suppression` tool add change their key from `expiration` to
