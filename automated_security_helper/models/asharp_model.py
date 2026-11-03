@@ -1415,12 +1415,14 @@ class AshAggregatedResults(RecordModel):
                 "configuration file with it is refused."
             )
         for field, reference in unreadable:
+            # In configure.md's words (Read values from the environment): the
+            # command warns that the field reads as its default, then a command
+            # that acts on it refuses or takes its own value.
             ASH_LOGGER.warning(
-                f"The configuration stored in these results records {field} as "
-                f"{reference}, a reference read from the environment where the "
-                "scan ran, which that field cannot hold. It is read with the "
-                "field's default; a command that acts on it takes the value from "
-                "its own configuration.",
+                f"The recorded configuration holds {reference} for {field}, a "
+                "value the scan read from the environment, and the field cannot "
+                "hold a reference, so it reads as its default. A command that "
+                "acts on it takes the value from its own configuration.",
                 extra={"markup": False},
             )
         config._unreadable_references = unreadable

@@ -2793,7 +2793,7 @@ def _named_with_shards(
             f"{_shard_label(results)} ({path.as_posix()})"
         )
     return "; ".join(
-        f"{field} is recorded as {reference} in {_listed(places)}"
+        f"{field} holds {reference} in {_listed(places)}"
         for (field, reference), places in recorded_in.items()
     )
 
