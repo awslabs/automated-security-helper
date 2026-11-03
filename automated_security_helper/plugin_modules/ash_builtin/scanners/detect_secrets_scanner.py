@@ -35,6 +35,7 @@ from automated_security_helper.utils.redacted_model import (
     environment_strings,
 )
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.client_scanner_exclusions import (
     evaluated_within,
     files_kept_by_patterns,
@@ -310,8 +311,7 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
                 "costs about three times its size in memory (1024 MiB of output "
                 "needs about 3 GiB). A scan whose output is larger fails and "
                 "records no findings, with an error that names this option. "
-                "Honored only from --config-overrides or a config file outside "
-                "the scanned tree."
+                f"{SET_BY_THE_OPERATOR}"
             ),
         ),
     ] = DEFAULT_WORKER_OUTPUT_MIB
