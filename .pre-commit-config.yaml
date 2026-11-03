@@ -6,8 +6,8 @@
 # output ends with a second block of the same hooks reading "(no files to
 # check) Skipped". The skip is correct and the gate is intact either way; the
 # block just reads like the hooks skipped the commit. Hooks that mean another
-# stage say so themselves (commitizen at commit-msg, the ash hook at
-# manual), and a per-hook stages key still overrides this default.
+# stage say so themselves (commitizen and check-snapshot-trailer at commit-msg,
+# the ash hook at manual), and a per-hook stages key still overrides this default.
 default_stages: [pre-commit]
 
 repos:
@@ -46,6 +46,57 @@ repos:
         verbose: true
         pass_filenames: false
         files: ^(pyproject\.toml|automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner\.py|scripts/sync_cdk_extra_fallback\.py)$
+      # The CI lint gate (ash-unified-ci.yml) runs `uv run --group dev ruff check .`
+      # and `uv run --group dev ruff format --check .` over the whole tree, and these
+      # two run the same commands here, so a commit that would fail that gate fails
+      # before it is made. They complement rather than repeat the ruff-pre-commit
+      # hooks below: those run ruff-pre-commit's own pinned binary in --fix mode over
+      # the staged files, these run the ruff uv.lock resolves, in check-only mode,
+      # over the whole tree -- a tree that fails `ruff check` fails CI whichever
+      # commit introduced the violation, so the file set is the gate's, not the
+      # commit's (pass_filenames: false, and the explicit `.`).
+      #
+      # --frozen for the reason given on generate-schemas: these run under the
+      # committer's own uv, and without it a uv that disagrees with uv.lock
+      # re-resolves and rewrites the lockfile as part of the commit. --frozen reads
+      # the lock as committed, which is also what makes "the same ruff as CI" true:
+      # both sides resolve ruff from uv.lock, not from whatever is newest.
+      # tests/unit/test_pre_commit_hook_commands.py holds these entries equal to the
+      # gate's commands.
+      - id: ruff-check-project
+        name: ruff check (the locked ruff, whole tree, as CI runs it)
+        entry: uv run --frozen --group dev ruff check .
+        language: system
+        pass_filenames: false
+      - id: ruff-format-check-project
+        name: ruff format --check (the locked ruff, whole tree, as CI runs it)
+        entry: uv run --frozen --group dev ruff format --check .
+        language: system
+        pass_filenames: false
+      # The commit-msg half of the Snapshot-Update convention. CI's
+      # .github/scripts/check-snapshot-trailers.py fails a pull request whose golden
+      # files changed without a `Snapshot-Update: <reason>` trailer on the commit
+      # that changed them -- a rule that is per commit, so by the time CI reports it
+      # the fix is a rebase with --exec amends. This hook says the same thing while
+      # the message is still being written: when the staged files include snapshot
+      # output (a path inside a __snapshots__/ directory, or a .ambr file) and the
+      # message carries no such trailer, it fails and prints the exact line to add.
+      # The CI script stays the authority and checks the wider golden set (schemas,
+      # MCP goldens, generated reference pages); this covers the subset a
+      # contributor regenerates routinely with syrupy's --snapshot-update.
+      #
+      # --no-project for the reason given on sync-cdk-extra-fallback: the script is
+      # standard library only, and `uv run` inside the project would sync the
+      # committer's environment just to read a commit message. No --python pin:
+      # unlike the sync script, nothing here wants a particular parser, so any
+      # interpreter uv finds will do. pass_filenames stays on (the default) because
+      # at the commit-msg stage the "filename" pre-commit passes IS the message
+      # file the script reads as argv[1].
+      - id: check-snapshot-trailer
+        name: Snapshot changes carry a Snapshot-Update trailer
+        entry: uv run --no-project python scripts/check_snapshot_trailer.py
+        language: system
+        stages: [commit-msg]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

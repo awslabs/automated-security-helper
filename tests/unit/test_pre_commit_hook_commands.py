@@ -26,6 +26,9 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync_cdk_extra_fallback.py"
+TRAILER_SCRIPT = REPO_ROOT / "scripts" / "check_snapshot_trailer.py"
+CI_TRAILER_SCRIPT = REPO_ROOT / ".github" / "scripts" / "check-snapshot-trailers.py"
+UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
 
 
 def _local_hooks() -> list[dict]:
@@ -105,6 +108,121 @@ def test_the_sync_hook_runs_its_script_on_python_3_13_with_fix():
     assert argv[:3] == ["uv", "run", "--no-project"], argv
     assert argv[argv.index("--python") + 1] == "3.13", argv
     assert "scripts/sync_cdk_extra_fallback.py" in argv and argv[-1] == "--fix", argv
+
+
+def test_the_ruff_hooks_judge_the_whole_tree_without_mutating_it():
+    """The local ruff pair is the lint gate's command, not another --fix hook.
+
+    The ruff-pre-commit hooks repair the staged files; this pair exists to fail a
+    commit CI's check-only gate would fail, so it must stay check-only (`--fix`
+    would repair and exit 0 over its own edits, the defect the config's ruff-check
+    comment measures) and whole-tree (the gate lints `.`, not the staged set).
+    """
+    expected = {
+        "ruff-check-project": [
+            *("uv", "run", "--frozen", "--group", "dev"),
+            *("ruff", "check", "."),
+        ],
+        "ruff-format-check-project": [
+            *("uv", "run", "--frozen", "--group", "dev"),
+            *("ruff", "format", "--check", "."),
+        ],
+    }
+    for hook_id, argv_expected in expected.items():
+        (hook,) = [h for h in _local_hooks() if h["id"] == hook_id]
+        assert shlex.split(hook["entry"]) == argv_expected, hook["entry"]
+        assert hook["language"] == "system", hook
+        assert hook["pass_filenames"] is False, (
+            f"{hook_id} must lint the whole tree; with filenames passed, ruff would "
+            "also receive non-Python staged files and skip everything unstaged"
+        )
+        assert "--fix" not in argv_expected
+
+
+def test_the_ruff_hooks_run_what_the_ci_lint_gate_runs():
+    """Drift gate: each hook's command, minus --frozen, is a line of the CI gate.
+
+    `--frozen` is the one deliberate difference (CI's uv and uv.lock cannot
+    disagree in a fresh checkout; a committer's can). Anything else differing --
+    the group, the subcommand, the scope -- recreates the version-skew defect the
+    ruff-pre-commit comment in .pre-commit-config.yaml documents, where the hook
+    enforced a fraction of what CI enforced while looking like it enforced all of it.
+    """
+    workflow = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+    ci_lines = {
+        line.strip()
+        for job in workflow["jobs"].values()
+        for step in job.get("steps") or []
+        for line in str(step.get("run", "")).splitlines()
+    }
+    assert "uv run --group dev ruff check ." in ci_lines, (
+        "read the wrong workflow, or the lint gate moved; update this test with it"
+    )
+    for hook_id in ("ruff-check-project", "ruff-format-check-project"):
+        (hook,) = [h for h in _local_hooks() if h["id"] == hook_id]
+        argv = shlex.split(hook["entry"])
+        assert "--frozen" in argv, argv
+        gate_command = " ".join(a for a in argv if a != "--frozen")
+        assert gate_command in ci_lines, (
+            f"{hook_id} runs {hook['entry']!r}, but no CI run line reads "
+            f"{gate_command!r}; the hook and the lint gate must run the same command"
+        )
+
+
+def test_the_trailer_hook_reads_the_message_at_commit_msg_time():
+    (hook,) = [h for h in _local_hooks() if h["id"] == "check-snapshot-trailer"]
+    argv = shlex.split(hook["entry"])
+    expected = ["uv", "run", "--no-project", "python"]
+    assert argv == [*expected, "scripts/check_snapshot_trailer.py"], argv
+    assert hook["stages"] == ["commit-msg"], hook
+    assert hook.get("pass_filenames", True) is True, (
+        "at the commit-msg stage the filename pre-commit passes IS the commit "
+        "message file; pass_filenames: false would run the script with no argv[1]"
+    )
+
+
+def _trailer_key(path: Path) -> str:
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "TRAILER_KEY":
+                    assert isinstance(node.value, ast.Constant), ast.dump(node)
+                    return node.value.value
+    raise AssertionError(f"{path} defines no TRAILER_KEY")
+
+
+def test_the_trailer_hook_and_the_ci_gate_require_the_same_trailer():
+    """The commit-msg script and CI's checker must name one trailer key.
+
+    The hook is the early warning for the gate; if either renames the trailer, a
+    commit the hook passes fails CI (or the hook demands a line CI ignores).
+    """
+    assert (
+        _trailer_key(TRAILER_SCRIPT)
+        == _trailer_key(CI_TRAILER_SCRIPT)
+        == "Snapshot-Update"
+    )
+
+
+def test_the_trailer_script_needs_only_the_standard_library():
+    """What makes --no-project safe for it, same as the sync script below.
+
+    No guarded imports are pinned here because the script has none: unlike the
+    sync script's tomllib fallback, nothing in it is version-conditional.
+    """
+    tree = ast.parse(TRAILER_SCRIPT.read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+    assert imported, f"parsed the wrong script: {TRAILER_SCRIPT}"
+    outside = sorted(imported - set(sys.stdlib_module_names) - {"__future__"})
+    assert not outside, (
+        f"{TRAILER_SCRIPT.name} imports {outside}, which "
+        "`uv run --no-project` cannot see"
+    )
 
 
 def _catches_an_import_failure(handler: ast.ExceptHandler) -> bool:
