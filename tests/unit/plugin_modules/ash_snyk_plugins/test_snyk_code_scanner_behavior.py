@@ -2159,6 +2159,11 @@ def test_a_file_listed_below_a_symlinked_directory_is_not_copied(
     assert any("vendor/lib/dep.js" in m and "not copied" in m for m in debug), debug
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Win32 strips a trailing space from a created name, so the "
+    "filesystem cannot hold 'a.js ' and the setup writes 'a.js' twice",
+)
 @pytest.mark.unit
 def test_a_name_ending_in_whitespace_is_copied_under_its_own_name(
     scanner, snyk_on_path, plugin_context, subprocess_double, caplog

@@ -91,6 +91,12 @@ def test_control_each_layer_reads_a_file_held_to_its_own_identity(
     LAYERS[layer](config, config_sources.file_identity(config))
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="os.replace over the checked file is refused while _HeldConfigFiles "
+    "keeps it open (sharing violation): on Windows the held handle is itself "
+    "the guard, and the mid-check swap this simulation makes cannot run",
+)
 def test_the_tool_holds_the_resolved_read_to_the_file_its_check_returned(
     tmp_path, monkeypatch
 ) -> None:
