@@ -59,21 +59,42 @@ def roots(tmp_path, monkeypatch) -> Dict[str, Path]:
     return {"tmp": tmp_path, "root": root, "project": project, "ws": workspace_file}
 
 
+def _link(link: Path, target: Path) -> None:
+    """``link`` as a symbolic link to the directory ``target``, or skip the cell.
+
+    Windows makes a symbolic link only for an account that holds the privilege;
+    without it there is no link to look at.
+    """
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"cannot make a symbolic link here: {error}")
+
+
 def _linked_out(directory: Path, tmp: Path, name: str, text: str, held: bool) -> Path:
     """``directory/.ash`` linked to an outside directory holding ``name`` or not."""
     outside = tmp / ("outside-holding" if held else "outside-empty")
     outside.mkdir()
     if held:
         (outside / name).write_text(text, encoding="utf-8")
-    (directory / ".ash").symlink_to(outside, target_is_directory=True)
+    _link(directory / ".ash", outside)
     return outside
 
 
 def _without(response: Any, *paths: Path) -> str:
-    """The response as text, with the tree paths that differ between runs out."""
+    """The response as text, with the tree paths that differ between runs out.
+
+    A path is taken out as the text writes it, which depends on the platform: as
+    ``str(path)``, as ``path.as_posix()`` (a refusal names a source as found with
+    it, forward slashes on Windows too), and either of those as json.dumps writes
+    it (a Windows path with its backslashes doubled). On POSIX all four are one
+    spelling.
+    """
     text = json.dumps(response, default=str, sort_keys=True)
     for path in paths:
-        text = text.replace(str(path), "<tree>")
+        for spelling in (str(path), path.as_posix()):
+            for written in (spelling, json.dumps(spelling)[1:-1]):
+                text = text.replace(written, "<tree>")
     return text
 
 
@@ -176,7 +197,7 @@ def test_control_a_ash_linked_inside_the_roots_is_read(
     inside.mkdir()
     if where == "scan target":
         (inside / ".ash.yaml").write_text(OUTSIDE_CONFIG, encoding="utf-8")
-        (roots["project"] / ".ash").symlink_to(inside, target_is_directory=True)
+        _link(roots["project"] / ".ash", inside)
         assert validate_discovered_config(roots["project"], SESSION) is None
     else:
         # A workspace policy is used only from a directory
@@ -184,7 +205,7 @@ def test_control_a_ash_linked_inside_the_roots_is_read(
         # paths for every project); the control reads one the operator keeps.
         monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(roots["root"]))
         (inside / "ash-workspace.yaml").write_text(OUTSIDE_POLICY, encoding="utf-8")
-        (roots["root"] / ".ash").symlink_to(inside, target_is_directory=True)
+        _link(roots["root"] / ".ash", inside)
         response = asyncio.run(
             mcp_resolve_workspace(workspace_file=str(roots["ws"]), session_id=SESSION)
         )

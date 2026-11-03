@@ -737,6 +737,8 @@ def _kind(pins: Any, tool: str) -> str:
     entry = pins.THIRD_PARTY_LICENSES.get(tool)
     if entry is not None and entry.distribution:
         return "uv-tool"
+    if entry is not None and getattr(entry, "bundled_in", None):
+        return "bundled-library"
     return "unknown"
 
 
@@ -954,8 +956,11 @@ class TestBumpStepsNameEveryValueABumpChanges:
             "uv-tool",
         }
         # The script's own list: each kind it knows has a real pin above, so the
-        # parametrized test covers it, and each has its own steps.
-        assert set(checker.PIN_KINDS) == set(kinds.values())
+        # parametrized test covers it, and each has its own steps. The one kind with
+        # no shipped pin today is the bundled library (its entries left with the
+        # GuardDog plugin and return with it); TestBundledLibrariesAreListedButNotLookedUp
+        # covers that kind on planted entries until then.
+        assert set(checker.PIN_KINDS) == set(kinds.values()) | {checker.BUNDLED_LIBRARY}
         assert set(checker._KIND_STEPS) == set(checker.PIN_KINDS)
 
     @pytest.mark.unit
@@ -1215,33 +1220,104 @@ class TestOnlyAllowlistedHttpsUrlsAreFetched:
 class TestBundledLibrariesAreListedButNotLookedUp:
     """A library a wheel bundles cannot be bumped on its own (its version is the
     wheel's), so comparing it with its project's latest release would make the
-    scheduled check red with a bump nobody can make. It is listed as held instead."""
+    scheduled check red with a bump nobody can make. It is listed as held instead.
+
+    The shipped inventory carries no such entry today. The entries this class once
+    named by hand (pygit2 and the libraries its wheel bundles: libgit2, libssh2,
+    OpenSSL and PCRE) arrived with the GuardDog community plugin and left with it
+    when that plugin moved to its own pull request for licensing review (the
+    "refactor(plugins): move the hadolint and guarddog scanner plugins to a
+    separate PR" step of the #727 squash), while ``ThirdPartyLicense.bundled_in``
+    and the checker's held arm stayed. So each test plants an entry of the shape it
+    checks into its own copy of the pins module, and reads the shipped table only
+    for whatever bundled entries it does carry, so the tests hold whether or not
+    those pins are back.
+    """
+
+    WHEEL = "planted-wheel"
+    LIBRARY = "planted-library"
+
+    @staticmethod
+    def _plant(pins: Any, tool: str, **fields: Any) -> Any:
+        """Add a license entry for ``tool`` to this test's copy of the module."""
+        entry = pins.ThirdPartyLicense(
+            tool=tool,
+            version=fields.pop("version", "1.2.3"),
+            license="MIT",
+            repository=f"https://github.com/example/{tool}",
+            commit="0" * 40,
+            files=(pins.LicenseFile("LICENSE"),),
+            **fields,
+        )
+        pins.THIRD_PARTY_LICENSES[tool] = entry
+        return entry
 
     def test_each_bundled_entry_enumerates_as_bundled(self, pins):
+        self._plant(pins, self.LIBRARY, bundled_in=self.WHEEL)
         bundled = {
-            tool
+            tool: entry
             for tool, entry in pins.THIRD_PARTY_LICENSES.items()
             if getattr(entry, "bundled_in", None)
         }
-        assert {"libgit2", "libssh2", "openssl", "openssl-1.1", "pcre"} <= bundled
+        assert self.LIBRARY in bundled
         by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
-        for tool in bundled:
+        for tool, entry in bundled.items():
             assert by_tool[tool].ecosystem == checker.BUNDLED, tool
+            assert by_tool[tool].project == entry.bundled_in, tool
+            assert by_tool[tool].kind == checker.BUNDLED_LIBRARY, tool
+            assert by_tool[tool].kind == _kind(pins, tool), tool
+
+    def test_a_bump_of_the_wheel_names_the_library_as_following_it(
+        self, pins, monkeypatch
+    ):
+        """bump_steps has steps for the bundled kind, and they name the wheel."""
+        self._plant(pins, self.LIBRARY, bundled_in=self.WHEEL)
+        monkeypatch.setattr(checker, "_copy_steps", lambda *a, **k: [])
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}[self.LIBRARY]
+        steps = checker.bump_steps(pins, checker.Result(pin, "9.9.9", "outdated"))
+        assert steps, "a bundled-library pin has no steps"
+        assert (
+            self.WHEEL in steps[0]
+            and f'THIRD_PARTY_LICENSES["{self.LIBRARY}"]' in steps[0]
+        )
+        assert "gh api" not in " ".join(steps)
 
     def test_a_bundled_pin_is_held_and_never_fetched(self, pins):
+        self._plant(pins, self.LIBRARY, bundled_in=self.WHEEL)
         bundled = [
             p for p in checker.enumerate_pins(pins) if p.ecosystem == checker.BUNDLED
         ]
-        assert bundled
+        assert [p.tool for p in bundled if p.tool == self.LIBRARY] == [self.LIBRARY]
 
         def refuse(project):
             raise AssertionError(f"looked up {project}")
 
         results = checker.check(bundled, {checker.GITHUB: refuse, checker.PYPI: refuse})
         assert {r.status for r in results} == {"held"}
+        assert {r.latest for r in results} == {None}
+        planted = [r for r in results if r.pin.tool == self.LIBRARY]
+        assert planted and self.WHEEL in planted[0].note
         assert checker.exit_code(results, fail_on_outdated=True) == checker.EXIT_OK
 
-    def test_pygit2_itself_is_still_checked(self, pins):
-        """The wheel that sets the bundled versions is an ordinary pin."""
+    def test_the_wheel_that_bundles_it_is_an_ordinary_pin(self, pins):
+        """The wheel that sets the bundled versions is looked up like any uv-tool pin."""
+        self._plant(pins, self.WHEEL, distribution=self.WHEEL)
+        self._plant(pins, self.LIBRARY, bundled_in=self.WHEEL)
         by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
-        assert by_tool["pygit2"].ecosystem == checker.GITHUB
+        assert by_tool[self.WHEEL].ecosystem == checker.PYPI
+        assert by_tool[self.LIBRARY].ecosystem == checker.BUNDLED
+
+        def refuse(project):
+            raise AssertionError(f"looked up {project} on GitHub")
+
+        looked_up: list[str] = []
+
+        def newest(project):
+            looked_up.append(project)
+            return "9.9.9"
+
+        results = checker.check(
+            [by_tool[self.WHEEL]], {checker.GITHUB: refuse, checker.PYPI: newest}
+        )
+        assert looked_up == [self.WHEEL]
+        assert [(r.status, r.latest) for r in results] == [("outdated", "9.9.9")]

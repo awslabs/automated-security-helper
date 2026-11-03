@@ -1,6 +1,6 @@
 # ASH security scan analysis
 
-> [!WARNING]
+> [!CAUTION]
 > **Scan incomplete**
 >
 > 6 actionable findings. Some inputs or scanners were not evaluated.
@@ -67,14 +67,14 @@ Generated with Amazon Bedrock. Verify suggestions against the source findings.
 | Index | Rule ID | Severity | File | Line range | Description |
 |-------|---------|----------|------|------------|-------------|
 | 1 | B602 | HIGH | app/app.py | 9 | subprocess call with shell=True identified, sec... |
-| 2 | B105 | LOW | app/app.py | 5 | Possible hardcoded password: 'hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*... |
+| 2 | B105 | LOW (below threshold) | app/app.py | 5 | Possible hardcoded password: 'hu\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*... |
 | 3 | CKV\_AWS\_20 | HIGH | infra/main.tf | 6-9 | S3 Bucket has an ACL defined which allows publi... |
 | 4 | CKV\_AWS\_18 | MEDIUM | infra/main.tf | 2-4 | Ensure the S3 bucket has access logging enabled |
 | 5 | CKV\_DOCKER\_8 | MEDIUM | Dockerfile | 5 | Ensure the last USER is not root |
-| 6 | CKV\_DOCKER\_2 | LOW | Dockerfile | 1-6 | Ensure that HEALTHCHECK instructions have been ... |
-| 7 | dockerfile.security.last-user-is-root.last-user-is-root | LOW | Dockerfile | 5 | The last user in the container is 'root'. Switc... |
-| 8 | python.lang.best-practice.unpinned-shell-command | INFO | app/app.py | 9 | Command string built with an f-string; prefer a... |
-| 9 | SECRET-SECRET-KEYWORD | HIGH | app/app.py | 5 | Secret of type Secret Keyword detected in file ... |
+| 6 | CKV\_DOCKER\_2 | LOW (below threshold) | Dockerfile | 1-6 | Ensure that HEALTHCHECK instructions have been ... |
+| 7 | dockerfile.security.last-user-is-root.last-user-is-root | LOW (below threshold) | Dockerfile | 5 | The last user in the container is 'root'. Switc... |
+| 8 | python.lang.best-practice.unpinned-shell-command | INFO (below threshold) | app/app.py | 9 | Command string built with an f-string; prefer a... |
+| 9 | SECRET-SECRET-KEYWORD | HIGH (suppressed) | app/app.py | 5 | Secret of type Secret Keyword detected in file ... |
 | 10 | CVE-2018-18074-requests | CRITICAL | requirements.txt | 1 | A critical vulnerability in requests 2.19.1 (fi... |
 | 11 | CVE-2023-32681-requests | MEDIUM | requirements.txt | 1 | A medium vulnerability in requests 2.19.1 (fixe... |
 
@@ -125,10 +125,10 @@ subprocess call with shell=True identified, security issue.
       "tool_name": "bandit",
       "tool_version": "1.8.6",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 1.25,
         "start_time": "2026-01-15T12:00:00+00:00",
-        "end_time": "2026-01-15T12:00:01.250000+00:00"
+        "end_time": "2026-01-15T12:00:01.250000+00:00",
+        "exit_code": 0,
+        "duration": 1.25
       }
     },
     "ash_occurrence_context": {
@@ -208,10 +208,10 @@ S3 Bucket has an ACL defined which allows public READ access.
       "tool_name": "checkov",
       "tool_version": "3.2.469",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
-        "end_time": "2026-01-15T12:00:08.750000+00:00"
+        "end_time": "2026-01-15T12:00:08.750000+00:00",
+        "exit_code": 0,
+        "duration": 7.5
       }
     },
     "ash_occurrence_context": {
@@ -279,10 +279,10 @@ Ensure the S3 bucket has access logging enabled
       "tool_name": "checkov",
       "tool_version": "3.2.469",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
-        "end_time": "2026-01-15T12:00:08.750000+00:00"
+        "end_time": "2026-01-15T12:00:08.750000+00:00",
+        "exit_code": 0,
+        "duration": 7.5
       }
     },
     "ash_occurrence_context": {
@@ -351,10 +351,10 @@ Ensure the last USER is not root
       "tool_name": "checkov",
       "tool_version": "3.2.469",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
-        "end_time": "2026-01-15T12:00:08.750000+00:00"
+        "end_time": "2026-01-15T12:00:08.750000+00:00",
+        "exit_code": 0,
+        "duration": 7.5
       }
     },
     "ash_occurrence_context": {
@@ -468,10 +468,10 @@ A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requi
       "tool_name": "grype",
       "tool_version": "0.100.0",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 3.0,
         "start_time": "2026-01-15T12:00:13.250000+00:00",
-        "end_time": "2026-01-15T12:00:16.250000+00:00"
+        "end_time": "2026-01-15T12:00:16.250000+00:00",
+        "exit_code": 0,
+        "duration": 3.0
       }
     },
     "ash_occurrence_context": {
@@ -539,10 +539,10 @@ A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at require
       "tool_name": "grype",
       "tool_version": "0.100.0",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 3.0,
         "start_time": "2026-01-15T12:00:13.250000+00:00",
-        "end_time": "2026-01-15T12:00:16.250000+00:00"
+        "end_time": "2026-01-15T12:00:16.250000+00:00",
+        "exit_code": 0,
+        "duration": 3.0
       }
     },
     "ash_occurrence_context": {

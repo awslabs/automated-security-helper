@@ -323,6 +323,22 @@ class TestAPrunedLinkIsNotFollowed:
         ] == outside
         assert gss._count_templates(str(outside)) == 1
 
+    def test_a_template_under_a_template_named_directory_is_not_counted(self, tmp_path):
+        """The scan set does not force in a template below a directory that is itself
+        named ``*.template.json`` (``_forced_in``), so a count of what a pruned
+        ``.git`` or asset directory gives back leaves it out too."""
+        root = _build(
+            tmp_path / "src",
+            {
+                "build/.git/ok.template.json": "{}\n",
+                "build/.git/dir.template.json/inner.template.json": "{}\n",
+                "build/.git/dir.template.json/deeper/more.template.json": "{}\n",
+            },
+        )
+
+        assert gss._count_templates(str(root / "build" / ".git"), str(root)) == 1
+        assert gss._count_templates(str(root / "build" / ".git")) == 1
+
     def test_a_link_inside_the_tree_is_not_counted_twice(self, tmp_path):
         root = _build(
             tmp_path / "src",
@@ -339,6 +355,32 @@ class TestAPrunedLinkIsNotFollowed:
         assert {"data/a.txt", "data/b.txt", "data/c.txt"} <= _names(
             root, scan_set(source=str(root))
         )
+
+    def test_a_directory_with_no_files_is_not_listed_again_for_links(
+        self, tmp_path, monkeypatch
+    ):
+        """The link names come from one more listing of a directory, which only a file
+        can use. A pruned ``node_modules`` is mostly directories that hold no file
+        (``@scope/``, nested levels), and each paid that second listing for nothing."""
+        root = _build(
+            tmp_path / "src",
+            {
+                "build/@scope/pkg/a.txt": "a\n",
+                "build/@scope/pkg/b.txt": "b\n",
+                "build/only/dirs/x/y.txt": "y\n",
+            },
+        )
+        real = gss._names_of_links_in
+        listed = []
+
+        def spy(directory):
+            listed.append(Path(directory).relative_to(root).as_posix())
+            return real(directory)
+
+        monkeypatch.setattr(gss, "_names_of_links_in", spy)
+
+        assert gss._count_files_ash_would_scan(root / "build", str(root)) == 3
+        assert sorted(listed) == ["build/@scope/pkg", "build/only/dirs/x"], listed
 
 
 class TestIgnoreFileTextCannotRewriteTheRecord:
@@ -548,6 +590,8 @@ class TestAshsOwnExclusionsByName:
         "node_modules/aws-cdk/t.template.json",
         "src/node_modules/aws-cdkmine/y.py",
         "node_modules/aws/cdk.py",
+        ".git/y.template.json/a",
+        ".git/a.template.json/b.template.json",
     ]
 
     def test_the_restated_rules_are_ash_inclusions(self):
@@ -561,6 +605,7 @@ class TestAshsOwnExclusionsByName:
         for entry in gss.ASH_INCLUSIONS:
             own_spec.add_rule(entry, base_path=root)
         forced = gss._forced_inclusion_spec(root)
+        forced_directories = {}
         disagree = []
         for path in self.PATHS:
             if sys.platform == "win32" and path.endswith("."):
@@ -569,7 +614,8 @@ class TestAshsOwnExclusionsByName:
                 continue
             full = root / path
             by_parser = gss._is_bundled_cdk_path(str(full)) or (
-                own_spec.match(full) and not forced.match(full)
+                own_spec.match(full)
+                and not gss._forced_in(forced, str(root), full, forced_directories)
             )
             by_name = gss._excluded_by_ash_itself(str(full), tuple(path.split("/")))
             if by_parser != by_name:
@@ -593,14 +639,16 @@ class TestTheBundledCdkTreeIsAshsOwnExclusion:
         record = _record(root)
         assert record["by_ignore_file"] == {"pkg/.gitignore": 1}, record
 
-    def test_a_source_dir_inside_the_bundled_tree_counts_nothing_as_ignored(
+    def test_a_source_dir_inside_the_bundled_tree_is_scanned_like_any_other(
         self, tmp_path
     ):
-        """The bundled-tree test reads the walked path, so the record has to as well.
+        """The carve-out is for the aws-cdk tree inside the scanned code, judged by
+        the path below the scan root.
 
-        A source directory below ``node_modules/aws-cdk*`` leaves every file out of
-        the scan set, with the ignore files or without them. None of that is an
-        ignore file's doing, so the total is what turning them off adds back: 0.
+        A source directory that itself lies below ``node_modules/aws-cdk*`` was left
+        out of the scan set whole, with the ignore files or without them, and only
+        when the source was spelled as an absolute path. Scanned like any other, the
+        ignore files remove what they name, and the record counts it.
         """
         root = _build(
             tmp_path / "node_modules" / "aws-cdk-lib" / "proj",
@@ -614,12 +662,26 @@ class TestTheBundledCdkTreeIsAshsOwnExclusion:
         honored = _names(root, scan_set(source=str(root)))
         unhonored = _names(root, scan_set(source=str(root), honor_ignore_files=False))
         record = _record(root)
-        assert record["excluded_file_count"] == len(unhonored - honored) == 0, (
-            record,
+        assert "app.py" in honored, sorted(honored)
+        assert unhonored - honored == {"a.log", "build/x.txt"}, (
             sorted(honored),
             sorted(unhonored),
         )
-        assert record["by_ignore_file"] == {".gitignore": 0}, record
+        assert record["excluded_file_count"] == 2, record
+        assert record["by_ignore_file"] == {".gitignore": 2}, record
+
+    def test_a_relative_and_an_absolute_source_inside_it_agree(
+        self, tmp_path, monkeypatch
+    ):
+        root = _build(
+            tmp_path / "node_modules" / "aws-cdk-lib" / "proj",
+            {"app.py": "x = 1\n", "other.py": "y = 2\n"},
+        )
+        absolute = _names(root, scan_set(source=str(root)))
+        monkeypatch.chdir(root)
+        relative = {os.path.relpath(name, root) for name in scan_set(source=".")}
+
+        assert absolute == relative == {"app.py", "other.py"}
 
 
 class TestNotHonored:

@@ -481,7 +481,7 @@ def _partial_clone_then(returncode: int, stderr: str = ""):
     answers ``returncode``. The checkout fails, and any other git command (the
     fetch) answers 0, so the checkout that fails is the one of ``FETCH_HEAD``."""
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if "clone" in cmd:
             target = Path(cmd[-1])
             target.mkdir(parents=True, exist_ok=True)
@@ -496,7 +496,7 @@ def _partial_clone_then(returncode: int, stderr: str = ""):
     return run_git
 
 
-def _a_clone_that_works(cmd, *, env):
+def _a_clone_that_works(cmd, *, env, grows_in=None):
     """A ``_run_git`` double: ``git clone`` writes ``cloned.txt`` into the target."""
     if "clone" in cmd:
         target = Path(cmd[-1])
@@ -620,7 +620,7 @@ class TestAGitDeliveryThatCannotDeleteScratch:
         in the staging directory, logged once, and the previous tree is untouched."""
         _a_delivered_tree(tmp_path)
 
-        def git_that_cannot_start(cmd, *, env):
+        def git_that_cannot_start(cmd, *, env, grows_in=None):
             (Path(cmd[-1]) / "partial.txt").write_text("partial\n")
             raise OSError(errno.ENOEXEC, "exec format error")
 

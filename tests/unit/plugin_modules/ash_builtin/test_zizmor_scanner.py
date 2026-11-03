@@ -14,10 +14,16 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
+import os
 import shutil
+import sys
+import threading
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 import pytest
+from packaging.specifiers import SpecifierSet
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
@@ -40,6 +46,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanne
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
@@ -207,10 +214,15 @@ def test_the_scanner_reads_the_tool_version_it_is_given(repo):
 
 
 def test_install_command_carries_the_version_constraint(repo):
-    scanner = _scanner(repo)
-    assert scanner.uv_tool_install_commands == [
-        f"uv tool install zizmor{ZIZMOR_DEFAULT_VERSION_CONSTRAINT}"
-    ]
+    """The stored command carries the default constraint. Its clauses are
+    compared as a specifier set: the command builder spells the requirement the
+    way packaging prints it, which orders the clauses, not as the constant does."""
+    (command,) = _scanner(repo).uv_tool_install_commands
+    prefix = "uv tool install zizmor"
+    assert command.startswith(prefix)
+    assert SpecifierSet(command[len(prefix) :]) == SpecifierSet(
+        ZIZMOR_DEFAULT_VERSION_CONSTRAINT
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -232,6 +244,9 @@ def test_install_command_carries_the_version_constraint(repo):
         ("1.30.2", "~=1.30.0", True),
         ("1.31.0", "~=1.30.0", False),
         ("1.31.0", "~=1.30", True),
+        # A shorter version is zero-padded for the prefix too: "1" is 1.0.0.
+        ("1", "~=1.0.0", True),
+        ("1.0", "~=1.0.0", True),
         ("1.30.7", "==1.30.*", True),
         ("1.31.0", "==1.30.*", False),
         ("1.30.1", None, True),
@@ -289,6 +304,12 @@ def test_map_zizmor_severity(severity, confidence, level, expected):
         ("workflows/ci.yml", False),
         ("github/workflows/ci.yml", False),
         ("actions/x/my-action.yml", False),
+        # GitHub and zizmor key on the exact spellings; handed these, zizmor
+        # rejected them and they read as failed targets.
+        ("Action.yml", False),
+        ("actions/x/ACTION.YAML", False),
+        (".github/workflows/ci.YAML", False),
+        (".github/workflows/ci.YML", False),
     ],
 )
 def test_is_zizmor_input(path, expected):
@@ -505,6 +526,50 @@ def test_gitignored_and_output_dir_files_are_not_inputs(repo):
     ]
 
 
+def test_the_workspace_output_directory_is_named_to_the_scan_set(repo, monkeypatch):
+    """In a workspace scan the workspace's output directory holds every project's
+    output. The scan set leaves it out only when it is named; a project at the
+    workspace root otherwise audits other projects' output as its own source."""
+    seen: list = []
+    monkeypatch.setattr(
+        zizmor_module, "scan_set", lambda **kwargs: seen.append(kwargs) or []
+    )
+    workspace_output = repo.parent / "workspace-out"
+    scanner = ZizmorScanner(
+        context=PluginContext(
+            source_dir=repo,
+            output_dir=workspace_output / "src",
+            work_dir=workspace_output / "src" / "converted",
+            workspace_output_dir=workspace_output,
+            config=get_default_config(),
+        ),
+        config=ZizmorScannerConfig(),
+    )
+
+    scanner._collect_inputs(repo, "source", [])
+
+    assert [call["workspace_output_dir"] for call in seen] == [str(workspace_output)]
+
+
+def test_an_action_git_tracks_under_the_output_directory_is_an_input(repo, monkeypatch):
+    """The scan set leaves ASH's output directory out but keeps the files git
+    tracks there, since a repository can commit a composite action at that
+    path. The scanner must not drop them a second time."""
+    committed = repo / ".ash" / "ash_output" / "sample" / "action.yml"
+    committed.parent.mkdir(parents=True)
+    committed.write_text((repo / "actions/greet/action.yml").read_text())
+    kept_by_the_scan_set = [str(repo / "actions/greet/action.yml"), str(committed)]
+    monkeypatch.setattr(
+        zizmor_module, "scan_set", lambda **_: list(kept_by_the_scan_set)
+    )
+    scanner = _scanner(repo)
+    inputs = scanner._collect_inputs(repo, "source", [])
+    assert _relative(inputs, repo) == [
+        ".ash/ash_output/sample/action.yml",
+        "actions/greet/action.yml",
+    ]
+
+
 @pytest.mark.parametrize("honor", [True, False])
 def test_the_gitignore_applies_as_the_config_says(repo, honor):
     """A scan set zizmor computes itself follows ``honor_ignore_files``."""
@@ -542,6 +607,9 @@ def test_default_argv_is_offline_sarif_with_inputs_after_double_dash(repo):
         assert flag in final_args
     assert final_args[final_args.index("--format") + 1] == "sarif"
     assert final_args[final_args.index("--persona") + 1] == "regular"
+    # The SARIF on stdout is parsed as JSON: a colored run would put escape
+    # sequences into it, so the flag that turns color off is part of the argv.
+    assert final_args[final_args.index("--color") + 1] == "never"
     separator = final_args.index("--")
     # Inputs are relative to source_dir, the subprocess cwd.
     assert final_args[separator + 1 :] == EXPECTED_INPUTS
@@ -553,7 +621,14 @@ def test_default_argv_is_offline_sarif_with_inputs_after_double_dash(repo):
 #: read from the scanner, so a name dropped from its list fails these tests.
 TOKEN_VARIABLES = ["GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_GITHUB_TOKEN"]
 #: The variables that change zizmor's behavior, removed whatever online_audits is.
-BEHAVIOR_VARIABLES = ["ZIZMOR_CONFIG", "ZIZMOR_OFFLINE", "ZIZMOR_NO_ONLINE_AUDITS"]
+#: RUST_LOG is zizmor's log filter: one from the caller's shell that hides WARN
+#: lines hides the rejected-input warnings the per-target counters are read from.
+BEHAVIOR_VARIABLES = [
+    "ZIZMOR_CONFIG",
+    "ZIZMOR_OFFLINE",
+    "ZIZMOR_NO_ONLINE_AUDITS",
+    "RUST_LOG",
+]
 
 
 def test_the_scanner_strips_exactly_the_documented_variables():
@@ -649,6 +724,21 @@ def test_ash_offline_mode_overrides_online_audits(repo, monkeypatch):
     )
     assert "--offline" in final_args
     assert "GITHUB_TOKEN" not in env
+
+
+def test_the_scanners_own_offline_option_keeps_zizmor_offline(repo, monkeypatch):
+    """options.offline is the per-scanner switch every scanner honors through the
+    base class. zizmor consulted only ASH's global mode, so an operator who set
+    online_audits and offline on this scanner got online audits and the token.
+    ASH's global mode is cleared first: set in the shell, it alone would produce
+    --offline and strip the token, and the scanner's own option would stay
+    untested."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setenv("GH_TOKEN", "token-value")
+    scanner = _scanner(repo, operator=True, online_audits=True, offline=True)
+    final_args, _, env = _argv_and_env(scanner, repo)
+    assert "--offline" in final_args
+    assert "GH_TOKEN" not in env
 
 
 def test_an_operator_config_file_is_passed_resolved_and_a_missing_one_fails(repo):
@@ -921,6 +1011,9 @@ def test_no_workflows_or_actions_completes_with_zero_findings_without_zizmor(tmp
     assert report.runs[0].tool.driver.name == "zizmor"
     # 0 attempted is how ASH says "nothing to evaluate": SKIPPED, not PASSED.
     assert scanner.targets_attempted == 0
+    # zizmor was skipped by design, which the invocation record reads as a 0;
+    # a declined run, where the tool did not run, leaves None instead.
+    assert scanner.exit_code == 0
 
 
 NOT_AN_ACTION = (
@@ -985,14 +1078,103 @@ def test_exit_3_with_every_input_rejected_is_zero_findings(repo):
 
 
 def test_exit_3_with_only_non_actions_attempts_nothing(tmp_path):
+    # The file is the one zizmor's rejection line quotes (other/action.yml), so
+    # the probe reads it and finds another tool's file, not a path it cannot
+    # open (which counts as a failed target).
     source = tmp_path / "src"
-    (source / "x").mkdir(parents=True)
-    (source / "x" / "action.yml").write_text("tool: other\n")
+    (source / "other").mkdir(parents=True)
+    (source / "other" / "action.yml").write_text("tool: other\n")
     scanner = _scanner(source)
     _fake_run(scanner, stdout=None, returncode=3, stderr=NOT_AN_ACTION + NO_INPUTS)
     report = scanner.scan(source, "source", [])
     assert report.runs[0].results == []
     assert scanner.targets_attempted == 0
+
+
+def test_a_non_action_whose_path_holds_a_space_is_not_counted(repo):
+    """zizmor quotes the path as given; a space in it must not turn an
+    inapplicable file into a failed target. The quoted file is in the tree (a
+    sixth input, another tool's action.yml), so the count it leaves is the five
+    real inputs, not one of them dropped for a file zizmor was never given."""
+    other = repo / "my tools" / "other" / "action.yml"
+    other.parent.mkdir(parents=True)
+    other.write_text("tool: some-other-tool\nsteps:\n  - build\n")
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        "file://my tools/other/action.yml as action: input does not match "
+        "expected validation schema\n"
+    )
+    scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == 0
+
+
+@pytest.mark.parametrize(
+    "quoted",
+    [".github/workflows/action.yml", "file://sub/.github/workflows/action.yaml"],
+)
+def test_a_workflow_rejected_as_not_an_action_is_a_failed_target(repo, quoted):
+    """A file directly in .github/workflows is a workflow GitHub runs whatever its
+    name. One named action.yml is handed to zizmor as a composite action and
+    rejected as not an action: that is a target ASH meant to audit and could
+    not, never an inapplicable file to drop from the counts. The quoted file is
+    in the tree, a sixth input, so the counts include it."""
+    workflow = repo / quoted.removeprefix("file://")
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text("on: push\n")
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        f"{quoted} as action: input does not match expected validation schema\n"
+    )
+    scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS) + 1
+    assert scanner.targets_failed == 1
+
+
+def test_a_rejected_workflow_is_counted_when_the_source_dir_is_the_workflows_dir(
+    repo,
+):
+    """The source dir may itself be ``.github/workflows`` (a supported shape).
+    zizmor then quotes a rejected file by its bare name, relative to that cwd:
+    the name alone says nothing about where it sits, so the quoted path is read
+    against the source dir, and the file counts as a failed workflow rather than
+    being dropped as an inapplicable action."""
+    source = repo / ".github" / "workflows"
+    (source / "action.yml").write_text("on: push\n")
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        "action.yml as action: input does not match expected validation schema\n"
+    )
+    empty_sarif = json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "zizmor"}}, "results": []}],
+        }
+    )
+    scanner = _scanner(source)
+    _fake_run(scanner, stdout=empty_sarif, stderr=rejected)
+    scanner.scan(source, "source", [])
+    # clean.yml, vulnerable.yml and action.yml were collected; the rejected
+    # workflow is one of the three attempted targets, and it failed, rather than
+    # a target removed from the count.
+    assert scanner.targets_attempted == 3
+    assert scanner.targets_failed == 1
+
+
+def test_exit_3_counts_every_remaining_input_as_failed(repo):
+    """Exit 3 says zizmor audited nothing. When its rejection lines use words the
+    parser does not read, the inputs must still count as not audited, never as
+    audited with zero findings."""
+    unread_wording = (
+        " WARN collect_inputs: zizmor::registry::input: skipping x.yml: not a "
+        "workflow\n"
+    )
+    scanner, report = _scan_with_output(
+        repo, None, returncode=3, stderr=unread_wording + NO_INPUTS
+    )
+    assert report.runs[0].results == []
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == scanner.targets_attempted
 
 
 @pytest.mark.parametrize("returncode", [1, 2, 3])
@@ -1084,6 +1266,55 @@ def test_each_target_starts_from_a_clean_exit_code(repo):
         scanner.scan(repo, "source", [])
 
 
+def test_a_target_with_nothing_to_audit_does_not_inherit_the_previous_exit_code(
+    tmp_path,
+):
+    """The converted target follows the source target on one instance. When it
+    holds nothing zizmor audits, scan() returns before _execute_scan resets the
+    exit code, so the source target's code read as the converted target's."""
+    converted = tmp_path / "converted"
+    (converted / "archive.zip").mkdir(parents=True)
+    (converted / "archive.zip" / "app.py").write_text("print(1)\n")
+    source = tmp_path / "src"
+    source.mkdir()
+    scanner = _scanner(source)
+    _fake_run(scanner, stdout="never read")
+    scanner.exit_code = 3
+
+    report = scanner.scan(converted, "converted", [])
+
+    assert report.runs[0].results == []
+    assert scanner.targets_attempted == 0
+    assert scanner.exit_code == 0
+
+
+def test_a_target_with_nothing_to_audit_does_not_inherit_the_previous_timing(
+    tmp_path,
+):
+    """The same early return skips the template's per-target reset of the
+    times and the stream lines: the source target's start paired with the
+    converted target's end, and its stderr lines led this target's record."""
+    converted = tmp_path / "converted"
+    converted.mkdir()
+    (converted / "app.py").write_text("print(1)\n")
+    source = tmp_path / "src"
+    source.mkdir()
+    scanner = _scanner(source)
+    _fake_run(scanner, stdout="never read")
+    earlier = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    scanner.start_time = earlier
+    scanner.end_time = earlier
+    scanner.errors = ["the source target's stderr"]
+    scanner.output = ["the source target's stdout"]
+
+    scanner.scan(converted, "converted", [])
+
+    assert scanner.start_time is not None and scanner.start_time != earlier
+    assert scanner.end_time is not None and scanner.end_time >= scanner.start_time
+    assert "the source target's stderr" not in scanner.errors
+    assert scanner.output == []
+
+
 # --------------------------------------------------------------------------- #
 # Dependency resolution
 # --------------------------------------------------------------------------- #
@@ -1118,6 +1349,92 @@ def test_a_satisfying_binary_on_path_runs_directly(repo, monkeypatch):
     assert "GH_TOKEN" not in seen[0][1]
 
 
+def test_a_satisfying_binary_on_path_clears_a_stale_unavailable_reason(
+    repo, monkeypatch
+):
+    """An earlier check recorded why zizmor was unavailable; a satisfying binary
+    on PATH now answers the check, and the stale reason goes with it, so the
+    scanner never reads as satisfied and unavailable at once."""
+    _with_executable(monkeypatch, "zizmor 1.29.0\n")
+    scanner = _scanner(repo)
+    scanner.dependency_unavailable_reason = "zizmor is not available: none was found"
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.dependencies_satisfied is True
+    assert scanner.dependency_unavailable_reason is None
+
+
+def test_a_satisfying_binary_on_path_is_checked_before_the_uv_probe(repo, monkeypatch):
+    """The docstring's order: a zizmor on PATH that satisfies the constraint runs
+    directly, and the uv probe the construction deferred is not owed then. Sent
+    first, the probe started uv for nothing, and a probe that is refused or
+    fails could decide the check before PATH was ever looked at."""
+    _with_executable(monkeypatch, "zizmor 1.29.0\n")
+
+    def must_not_run(self, *_):
+        raise AssertionError("the uv probe ran although PATH satisfies")
+
+    monkeypatch.setattr(ZizmorScanner, "_get_uv_tool_version", must_not_run)
+    scanner = _scanner(repo)
+    assert scanner._deferred_tool_version_probe is not None
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.tool_version == "1.29.0"
+    assert scanner._deferred_tool_version_probe is None
+    # Nothing left for the SARIF step or the inventory to run, so the version the
+    # binary reported stands.
+    scanner.resolve_deferred_tool_version()
+    assert scanner.tool_version == "1.29.0"
+
+
+def test_without_a_binary_on_path_the_deferred_probe_runs_for_the_uv_route(
+    repo, monkeypatch
+):
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+    probed = []
+    monkeypatch.setattr(
+        ZizmorScanner,
+        "_get_uv_tool_version",
+        lambda self, *args: probed.append(args) or "1.30.1",
+    )
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_resolve_through_uv", lambda *_: True)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert len(probed) == 1
+    assert scanner.tool_version == "1.30.1"
+    assert scanner._deferred_tool_version_probe is None
+
+
+def test_a_scanner_already_missing_does_not_start_the_uv_probe(repo, monkeypatch):
+    """A scanner whose dependency check already recorded MISSING keeps that
+    answer without a uv call: probed first, the deferred version probe started uv
+    for a tool the check was about to refuse anyway."""
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+
+    def must_not_run(self, *_):
+        raise AssertionError("the uv probe ran for a scanner already MISSING")
+
+    monkeypatch.setattr(ZizmorScanner, "_get_uv_tool_version", must_not_run)
+    scanner = _scanner(repo)
+    assert scanner._deferred_tool_version_probe is not None
+    scanner.dependency_unavailable_reason = "zizmor is not available: uv refused"
+
+    def must_not_resolve(*_):
+        raise AssertionError("the uv route ran for a scanner already MISSING")
+
+    object.__setattr__(scanner, "_resolve_through_uv", must_not_resolve)
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    assert scanner.dependency_unavailable_reason == (
+        "zizmor is not available: uv refused"
+    )
+
+
 @pytest.mark.parametrize("output", ["zizmor 1.28.0\n", "zizmor 2.0.0\n", "garbage\n"])
 def test_an_unsatisfying_binary_offline_is_missing_with_a_reason(
     repo, monkeypatch, output
@@ -1125,7 +1442,7 @@ def test_an_unsatisfying_binary_offline_is_missing_with_a_reason(
     monkeypatch.setenv("ASH_OFFLINE", "true")
     _with_executable(monkeypatch, output)
     scanner = _scanner(repo)
-    object.__setattr__(scanner, "_resolve_through_uv", lambda: False)
+    object.__setattr__(scanner, "_resolve_through_uv", lambda *_: False)
     assert scanner.validate_plugin_dependencies() is False
     assert scanner.dependencies_satisfied is False
     reason = scanner.dependency_unavailable_reason
@@ -1139,7 +1456,7 @@ def test_an_unsatisfying_binary_offline_is_missing_with_a_reason(
 def test_no_binary_falls_back_to_uv(repo, monkeypatch):
     monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
     scanner = _scanner(repo)
-    object.__setattr__(scanner, "_resolve_through_uv", lambda: True)
+    object.__setattr__(scanner, "_resolve_through_uv", lambda *_: True)
     assert scanner.validate_plugin_dependencies() is True
 
 
@@ -1147,6 +1464,7 @@ def test_offline_without_any_zizmor_does_not_try_to_install(repo, monkeypatch):
     monkeypatch.setenv("ASH_OFFLINE", "true")
     monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
     scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
     object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
     object.__setattr__(
         scanner, "_get_tool_installation_info", lambda: {"available": False}
@@ -1158,6 +1476,27 @@ def test_offline_without_any_zizmor_does_not_try_to_install(repo, monkeypatch):
     object.__setattr__(scanner, "_install_uv_tool", refuse)
     assert scanner.validate_plugin_dependencies() is False
     assert "no zizmor executable was found" in scanner.dependency_unavailable_reason
+
+
+def test_the_scanners_own_offline_option_does_not_install_either(repo, monkeypatch):
+    """One offline reading for the class, the scanner's own (_scanner_offline):
+    ASH online, this scanner's options.offline true. The uv route installs
+    nothing and the MISSING reason says "while offline", as under ASH_OFFLINE."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+    scanner = _scanner(repo, operator=True, offline=True)
+    _constrained_probe_answers(scanner, None)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner, "_get_tool_installation_info", lambda: {"available": False}
+    )
+
+    def refuse(**_):
+        raise AssertionError("must not install when the scanner is offline")
+
+    object.__setattr__(scanner, "_install_uv_tool", refuse)
+    assert scanner.validate_plugin_dependencies() is False
+    assert "while offline" in scanner.dependency_unavailable_reason
 
 
 def test_post_process_leaves_the_input_report_intact_for_other_runs(repo):
@@ -1189,3 +1528,887 @@ def test_a_tool_version_that_is_not_a_specifier_set_is_replaced_by_the_default(v
 @pytest.mark.parametrize("value", [">=1.29.0,<2.0.0", "==1.30.1", None])
 def test_a_specifier_set_tool_version_is_accepted(value):
     assert ZizmorScannerConfigOptions(tool_version=value).tool_version == value
+
+
+# --------------------------------------------------------------------------- #
+# The version probe, the uv route, the inputs and the report's logical paths
+# --------------------------------------------------------------------------- #
+
+
+def test_the_version_probe_keeps_a_prerelease_suffix(repo, monkeypatch):
+    """A pre-release zizmor is not the release it precedes: the probe keeps the
+    suffix, and version_satisfies then answers "cannot verify" rather than
+    accepting 1.30.0-rc.1 as 1.30.0."""
+    _with_executable(monkeypatch, "zizmor 1.30.0-rc.1\n")
+    scanner = _scanner(repo)
+
+    version = scanner._probe_executable_version("/opt/bin/zizmor")
+
+    assert version == "1.30.0-rc.1"
+    assert version_satisfies(version, ZIZMOR_DEFAULT_VERSION_CONSTRAINT) is None
+
+
+def _constrained_probe_answers(scanner, version):
+    """What the constrained version probe (``uv tool run --from <requirement>
+    zizmor --version``) answers for this scanner: a version, or None when uv
+    resolved nothing. The autouse fixture answers 1.30.1 for every scanner."""
+    object.__setattr__(scanner, "_get_uv_tool_version", lambda *_, **__: version)
+
+
+def _rejected_on_path_with_uv_available(repo, monkeypatch, source):
+    """A zizmor on PATH the version check rejects, and a uv runner that reports
+    the tool available from *source*; selecting that answer unprobed is a test
+    failure, since the runner's answer may be the rejected binary itself."""
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    scanner = _scanner(repo)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {
+            "available": True,
+            "preferred_source": source,
+            "pre_installed_path": "/opt/bin/zizmor",
+        },
+    )
+
+    def must_not_select(info):
+        raise AssertionError("the runner's answer was selected unprobed")
+
+    def must_not_install(**_):
+        raise AssertionError("uv installed although the probe's release satisfies")
+
+    object.__setattr__(scanner, "_select_tool_execution", must_not_select)
+    object.__setattr__(scanner, "_install_uv_tool", must_not_install)
+    return scanner
+
+
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "online"])
+@pytest.mark.parametrize("source", ["pre_installed", "uv"])
+def test_a_satisfying_release_the_probe_resolved_runs_through_uv(
+    repo, monkeypatch, offline, source
+):
+    """An old zizmor earlier on PATH and the right release installed through uv:
+    the constrained probe resolves the right one, so the uv route is accepted
+    and runs it, offline and online alike, with nothing installed. Refusing
+    every uv answer once the PATH binary was rejected read this machine as
+    MISSING offline and installed on every check online."""
+    if offline:
+        monkeypatch.setenv("ASH_OFFLINE", "true")
+    else:
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    scanner = _rejected_on_path_with_uv_available(repo, monkeypatch, source)
+    _constrained_probe_answers(scanner, "1.30.1")
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.dependencies_satisfied is True
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version == "1.30.1"
+    assert scanner.dependency_unavailable_reason is None
+
+
+def test_a_release_the_probe_resolved_that_does_not_satisfy_is_not_accepted(
+    repo, monkeypatch
+):
+    """The probe's own answer is held to the constraint too: a uv route that
+    resolves an old release is no better than the rejected binary."""
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    scanner = _rejected_on_path_with_uv_available(repo, monkeypatch, "uv")
+    _constrained_probe_answers(scanner, "1.28.0")
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "does not satisfy" in scanner.dependency_unavailable_reason
+
+
+def test_a_probe_that_resolves_a_release_spares_the_install(repo, monkeypatch):
+    """No zizmor on PATH and none the runner lists, but the constrained probe
+    resolves the release from uv's cache: that is the uv route, and installing
+    first would spend a network round trip on what uv already has."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setattr(zizmor_module, "find_executable", lambda _: None)
+    scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, "1.30.1")
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {"available": False, "preferred_source": "none"},
+    )
+
+    def must_not_install(**_):
+        raise AssertionError("uv installed although the probe's release satisfies")
+
+    object.__setattr__(scanner, "_install_uv_tool", must_not_install)
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.use_uv_tool is True
+
+
+def test_an_earlier_checks_path_version_is_not_read_as_the_probes_answer(
+    repo, monkeypatch
+):
+    """The first check found a satisfying zizmor on PATH and recorded its version;
+    by the second check that binary reports an old release and the probe
+    resolves nothing. The version the first check recorded is not the probe's
+    answer, so the second check is MISSING, not satisfied by a stale number."""
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    _with_executable(monkeypatch, "zizmor 1.29.0\n")
+    scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.tool_version == "1.29.0"
+
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {"available": False, "preferred_source": "none"},
+    )
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "does not satisfy" in scanner.dependency_unavailable_reason
+
+
+@pytest.mark.parametrize("source", ["pre_installed", "uv"])
+def test_a_rejected_path_binary_is_not_handed_back_through_uv_offline(
+    repo, monkeypatch, source
+):
+    """Offline, the only zizmor the uv runner sees on PATH is the one the version
+    probe just rejected, and the constrained probe resolves nothing, so the
+    scanner is MISSING with the probe's reason, never run to fail later. The
+    runner may report that binary as pre-installed or, when it is a uv tool
+    install's own shim, as the uv source; whatever the source, a rejected
+    zizmor is never selected unprobed."""
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    scanner = _rejected_on_path_with_uv_available(repo, monkeypatch, source)
+    _constrained_probe_answers(scanner, None)
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert scanner.dependencies_satisfied is False
+    assert "does not satisfy" in scanner.dependency_unavailable_reason
+
+
+@pytest.mark.parametrize(
+    ("resolved", "satisfies"),
+    [
+        (["/opt/bin/zizmor"], False),
+        (["uv", "tool", "run", "zizmor"], True),
+        (["/opt/uv/bin/uv", "tool", "run", "zizmor"], True),
+        (["C:\\Users\\me\\.local\\bin\\uv.exe", "tool", "run", "zizmor"], True),
+        (["UV.EXE", "tool", "run", "zizmor"], True),
+        # The form the resolver returns when it probed under a --from spec: the
+        # route is read from the first word and the two after it, so the spec
+        # at the fourth position is no bare binary.
+        (["uv", "tool", "run", "--from", "zizmor>=1.30.1", "zizmor"], True),
+    ],
+    ids=[
+        "bare-binary",
+        "uv-bare",
+        "uv-absolute",
+        "uv-windows",
+        "uv-upper-case",
+        "uv-from",
+    ],
+)
+def test_after_a_failed_install_only_a_uv_route_the_probe_resolves_satisfies(
+    repo, monkeypatch, resolved, satisfies
+):
+    """After the constrained install fails, a zizmor the resolver finds by name
+    would be the PATH binary the probe rejected: the dependency is MISSING,
+    not satisfied. The one answer that still counts is uv's own route, whatever
+    name the resolver found uv under: a bare word, an absolute path, or uv.exe.
+    Comparing the argv text with the bare word refused the others.
+
+    The resolver answers a uv route only after its own `uv tool run [--from
+    <spec>] zizmor --version` succeeded (uv_tool_runner.get_uv_tool_command,
+    resolution order 1), so the route is uv's fresh answer that the release
+    resolves, whatever the earlier constrained probe (None here) said: the
+    scan's `uv tool run` resolves the same way. The rejected binary's version
+    is never what a satisfied scanner reports."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    _with_executable(monkeypatch, "zizmor 1.28.0\n")
+    scanner = _scanner(repo)
+    _constrained_probe_answers(scanner, None)
+    object.__setattr__(scanner, "_validate_uv_tool_availability", lambda: True)
+    object.__setattr__(
+        scanner,
+        "_get_tool_installation_info",
+        lambda: {"available": False, "preferred_source": "none"},
+    )
+    object.__setattr__(scanner, "_install_uv_tool", lambda **_: False)
+    monkeypatch.setattr(
+        zizmor_module, "get_uv_tool_command", lambda *args, **kwargs: resolved
+    )
+
+    assert scanner.validate_plugin_dependencies() is satisfies
+    assert scanner.dependencies_satisfied is satisfies
+    if satisfies:
+        assert scanner.tool_version != "1.28.0"
+    else:
+        assert "could not provide" in scanner.dependency_unavailable_reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["/opt/bin/zizmor"],
+        ["/opt/uv/bin/uv", "tool", "install", "zizmor"],
+        ["/opt/uv/bin/uv", "tool"],
+        ["/opt/tools/uv-wrapper", "tool", "run", "zizmor"],
+        # The resolver never returns uvx; a command of that shape is not its route.
+        ["uvx", "zizmor"],
+        [],
+        None,
+    ],
+    ids=["bare-binary", "other-verb", "short", "other-name", "uvx", "empty", "none"],
+)
+def test_a_command_that_is_not_a_uv_route_is_read_as_false(command):
+    assert zizmor_module._is_a_uv_route(command) is False
+
+
+def test_a_uv_route_with_a_from_spec_is_read_as_one():
+    """`get_uv_tool_command` puts `--from <spec>` between `run` and the tool
+    when it probed under a spec; the route is read from the first three words,
+    so the spec changes nothing."""
+    assert zizmor_module._is_a_uv_route(
+        ["uv", "tool", "run", "--from", "zizmor>=1.30.1", "zizmor"]
+    )
+    assert zizmor_module._is_a_uv_route(
+        ["/opt/uv/bin/uv", "tool", "run", "--from", "zizmor==1.30.1", "zizmor"]
+    )
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX named pipes")
+def test_a_named_pipe_named_like_an_action_is_skipped_without_blocking(repo, caplog):
+    """Reading a FIFO blocks until a writer appears, outside any scan timeout,
+    for ASH's own probes and for zizmor. Only a regular file is an input. The
+    writer thread makes a read that does happen return instead of hanging the
+    test: a collection that reads the pipe then lists it, which the assertion
+    catches."""
+    pipe = repo / "pipes" / "action.yml"
+    pipe.parent.mkdir()
+    os.mkfifo(pipe)
+    done = threading.Event()
+
+    def feed():
+        # Serve every open for reading until released: a collection that opens
+        # the pipe twice (a sniff, then a content read) then fails on the
+        # listing instead of hanging the run on the second open.
+        while not done.is_set():
+            with open(pipe, "w") as writer:
+                writer.write("name: x\nruns:\n  using: composite\n  steps: []\n")
+
+    writer_thread = threading.Thread(target=feed, daemon=True)
+    writer_thread.start()
+    try:
+        scanner = _scanner(repo)
+
+        with caplog.at_level(logging.WARNING):
+            inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+
+        assert inputs == EXPECTED_INPUTS
+        assert "Not auditing pipes/action.yml" in caplog.text
+        assert "not a regular file" in caplog.text
+    finally:
+        # Release the writer: when the collection behaves it never opens the
+        # pipe, and the thread would otherwise stay blocked in open() for the
+        # rest of the session.
+        done.set()
+        reader = os.open(pipe, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            writer_thread.join(timeout=5)
+        finally:
+            os.close(reader)
+        assert not writer_thread.is_alive()
+
+
+def test_a_link_whose_target_cannot_be_stated_is_skipped_not_raised(
+    repo, monkeypatch, caplog
+):
+    """A link whose target sits in a directory this user cannot search cannot be
+    stat'ed through: before Python 3.13 Path.is_file() raises PermissionError
+    there instead of answering. One such input must not end the collection.
+    The denial is real (the target directory is made unsearchable), so the
+    test holds whichever stat call the probe makes."""
+    if os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0:
+        pytest.skip("directory modes do not deny this user")
+    link = repo / "linked" / "action.yml"
+    link.parent.mkdir()
+    target_dir = repo / "actions" / "greet"
+    _symlink_or_skip(link, target_dir / "action.yml")
+    kept = repo / "actions" / "clean" / "action.yaml"
+    monkeypatch.setattr(
+        zizmor_module, "scan_set", lambda **kwargs: [str(link), str(kept)]
+    )
+    scanner = _scanner(repo)
+    target_dir.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING):
+            inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+    finally:
+        target_dir.chmod(0o755)
+
+    assert inputs == ["actions/clean/action.yaml"]
+    assert "Not auditing linked/action.yml" in caplog.text
+
+
+def test_an_action_under_a_vendored_directory_is_named_in_the_debug_log(repo, caplog):
+    scanner = _scanner(repo)
+
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
+        inputs = _relative(scanner._collect_inputs(repo, "source", []), repo)
+
+    assert "node_modules/vendored-action/action.yml" not in inputs
+    # The line that says WHY it was left out, not any debug line naming the path.
+    assert (
+        "node_modules/vendored-action/action.yml is under a directory ASH never "
+        "audits" in caplog.text
+    )
+
+
+_REJECTED_BROKEN_ACTION = (
+    " WARN collect_inputs: zizmor::registry::input: failed to validate "
+    "file://broken/action.yml as action: input does not match expected "
+    "validation schema\n"
+)
+
+
+def test_a_file_written_as_an_action_that_zizmor_rejects_is_a_failed_target(repo):
+    """zizmor words a schema rejection of a real composite action like the
+    rejection of another tool's action.yml; the file itself tells them apart
+    (an action has a top-level ``runs`` key), and a real action ASH meant to
+    audit and could not is a failed target, not an inapplicable file."""
+    broken = repo / "broken" / "action.yml"
+    broken.parent.mkdir()
+    broken.write_text("name: broken\nruns:\n  using: nothing-zizmor-knows\n")
+
+    scanner, _ = _scan_with_output(
+        repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
+    )
+
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS) + 1
+    assert scanner.targets_failed == 1
+
+
+def _rejected_action_counts(repo, monkeypatch, body: bytes, limit=None):
+    """zizmor rejected ``broken/action.yml`` holding *body*; what the counters say."""
+    broken = repo / "broken" / "action.yml"
+    broken.parent.mkdir()
+    broken.write_bytes(body)
+    if limit is not None:
+        monkeypatch.setattr(zizmor_module, "_ACTION_PROBE_LIMIT", limit)
+    scanner, _ = _scan_with_output(
+        repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
+    )
+    return scanner.targets_attempted, scanner.targets_failed
+
+
+def test_an_action_longer_than_the_probe_reads_is_a_failed_target(repo, monkeypatch):
+    """A real action whose "runs" key sits past the read limit: the partial
+    text parses as a mapping without it, or does not parse at all. Either way
+    the file was not read whole, so it is not written off as inapplicable."""
+    body = b"name: broken\ndescription: " + b"x" * 64 + b"\nruns:\n  using: node20\n"
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body, limit=48)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS) + 1, 1)
+
+
+def test_a_cut_off_action_whose_runs_key_was_read_is_a_failed_target(repo, monkeypatch):
+    """The read stopped inside the document, but the "runs" key is in the part
+    that was read: an action, and a failed target."""
+    body = b"runs:\n  using: composite\n  steps:\n" + b"    - run: echo\n" * 40
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body, limit=48)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS) + 1, 1)
+
+
+def test_an_action_the_safe_loader_refuses_is_a_failed_target(repo, monkeypatch):
+    """PyYAML's safe loader refuses an unknown tag that zizmor's parser read; the
+    raw text still shows the action's "runs" key, so the file is an action ASH
+    meant to audit and could not, not another tool's file."""
+    body = b"name: !custom broken\nruns:\n  using: composite\n  steps: []\n"
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS) + 1, 1)
+
+
+def test_a_rejection_line_that_names_no_input_is_a_failed_target(repo):
+    """A rejection line that names no input of the run (here, the quoted path
+    names no file zizmor was given) is not known to be another tool's file: fail
+    closed, one failed target, and nothing is opened on its account. The
+    attempted count stays the inputs zizmor was given; a quoted path that was
+    never an input adds nothing to it."""
+    scanner, _ = _scan_with_output(
+        repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
+    )
+
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+def test_an_input_the_probe_cannot_read_is_a_failed_target(repo):
+    """The input zizmor rejected was collected (a regular file, inside the
+    root) but cannot be read when the probe runs: not known to be another
+    tool's file, so fail closed, counted attempted and failed. Distinct from a
+    line that names no input: here the file is one of the six inputs."""
+    broken = repo / "broken" / "action.yml"
+    broken.parent.mkdir()
+    broken.write_text("tool: other\n")
+    broken.chmod(0)
+    if os.access(broken, os.R_OK):
+        broken.chmod(0o644)
+        pytest.skip("file modes do not deny this user")
+    try:
+        scanner, _ = _scan_with_output(
+            repo, CAPTURED_SARIF.read_text(), stderr=_REJECTED_BROKEN_ACTION
+        )
+    finally:
+        broken.chmod(0o644)
+
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS) + 1
+    assert scanner.targets_failed == 1
+
+
+def test_a_rejection_line_is_matched_to_an_input_never_read_as_a_path(
+    repo, monkeypatch
+):
+    """zizmor rejected an action under a directory whose name holds the words
+    " as action ", so a lazy read of the path out of the line ended at `x` and
+    opened <source>/x, whatever that was (a committed link to a FIFO blocked the
+    scan). The line is matched against the run's inputs instead: the action
+    under that directory is the input it names, read whole as another tool's
+    file and dropped from the attempted count, and <source>/x is never opened."""
+    other = repo / "x as action y" / "action.yml"
+    other.parent.mkdir()
+    other.write_text("tool: other\n")
+    decoy = repo / "x"
+    decoy.write_text("never read\n")
+    opened: list = []
+    real_read = zizmor_module.read_bytes_at_most
+
+    def recording_read(path, limit):
+        opened.append(Path(path))
+        return real_read(path, limit)
+
+    monkeypatch.setattr(zizmor_module, "read_bytes_at_most", recording_read)
+    rejected = (
+        " WARN collect_inputs: zizmor::registry::input: failed to validate "
+        "file://x as action y/action.yml as action: input does not match "
+        "expected validation schema\n"
+    )
+
+    scanner, _ = _scan_with_output(repo, CAPTURED_SARIF.read_text(), stderr=rejected)
+
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == 0
+    assert decoy.resolve() not in {path.resolve() for path in opened}
+    assert other.resolve() in {path.resolve() for path in opened}
+
+
+def test_the_rejected_input_is_the_longest_argument_the_line_names(repo):
+    """Matched against the run's arguments spelled with and without the file://
+    prefix, the longest first; a line that names none is None."""
+    scanner = _scanner(repo)
+    short = repo / "x"
+    long = repo / "x as action y" / "action.yml"
+    scanner._last_inputs = [short, long]
+    line = "failed to validate file://x as action y/action.yml as action: schema"
+
+    assert scanner._rejected_input_named(line) == long
+    assert scanner._rejected_input_named("failed to validate x as action: s") == short
+    assert scanner._rejected_input_named("failed to validate x as actions") is None
+    assert scanner._rejected_input_named("failed to validate other as action") is None
+
+
+def test_another_tools_file_read_whole_is_still_inapplicable(repo, monkeypatch):
+    """The decision the probe exists for: a file named action.yml that parses
+    whole as something without a top-level "runs" key is dropped from the
+    attempted count, not counted as failed."""
+    body = b"name: broken\nversion: 2\nsteps:\n  - run: echo\n"
+
+    attempted, failed = _rejected_action_counts(repo, monkeypatch, body)
+
+    assert (attempted, failed) == (len(EXPECTED_INPUTS), 0)
+
+
+@pytest.mark.parametrize(
+    ("body", "answer"),
+    [
+        (b"name: x\nruns:\n  using: composite\n", True),
+        (b"name: x\nsteps: []\n", False),
+        (b"- a\n- b\n", False),
+        (b"name: !custom x\nruns:\n  using: composite\n", True),
+        (b"name: !custom x\nsteps: []\n", None),
+        (b"", False),
+    ],
+    ids=[
+        "action",
+        "other-mapping",
+        "sequence",
+        "tagged-action",
+        "tagged-other",
+        "empty",
+    ],
+)
+def test_the_action_probe_answers_in_three_ways(tmp_path, body, answer):
+    path = tmp_path / "action.yml"
+    path.write_bytes(body)
+    assert zizmor_module._declares_a_github_action(path) is answer
+
+
+def test_the_action_probe_cannot_decide_what_it_could_not_read(tmp_path):
+    assert zizmor_module._declares_a_github_action(tmp_path / "missing.yml") is None
+    assert zizmor_module._declares_a_github_action(tmp_path) is None
+
+
+def test_a_converted_inputs_absolute_path_does_not_stay_in_the_logical_location(
+    repo,
+):
+    """A converted input is passed by absolute path, which zizmor copies into
+    the logical-location properties ASH's sanitizer does not rewrite; after the
+    URI is rebased the property is made relative to the target."""
+    scanner = _scanner(repo)
+    converted = repo / ".ash" / "ash_output" / "converted"
+    action = converted / "x" / "action.yml"
+    action.parent.mkdir(parents=True)
+    action.write_text("name: x\nruns:\n  using: composite\n  steps: []\n")
+    scanner._last_inputs = [action]
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "zizmor"}},
+                    "results": [
+                        {
+                            "ruleId": "zizmor/x",
+                            "level": "warning",
+                            "message": {"text": "m"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "x/action.yml"},
+                                        "region": {"startLine": 1},
+                                    },
+                                    "logicalLocations": [
+                                        {
+                                            "properties": {
+                                                "symbolic": {
+                                                    "key": {
+                                                        "Local": {
+                                                            "verbatim_path": str(action)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    out = scanner._post_process_sarif(report, [], converted)
+
+    logical = out.runs[0].results[0].locations[0].logicalLocations[0]
+    local = logical.properties.model_extra["symbolic"]["key"]["Local"]
+    assert local["verbatim_path"] == "x/action.yml"
+    assert str(repo) not in json.dumps(local)
+
+
+#: An argv budget that puts one input per batch for every fixture input, clear of
+#: the 24+16 boundary two adjacent inputs' lengths add up to, whether or not a
+#: separator byte is counted.
+_ONE_INPUT_PER_BATCH = 36
+
+
+def test_many_inputs_are_audited_in_several_runs_and_one_report(repo, monkeypatch):
+    """A tree with more inputs than one command line holds is audited in several
+    zizmor runs; the counters are summed and the findings joined. Each run
+    answers with the findings of its own inputs only, so the joined report must
+    hold every expected finding exactly once, rebased and joined per batch."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    scanner = _scanner(repo)
+    calls = _fake_runs_per_batch(scanner, CAPTURED_SARIF.read_text())
+
+    report = scanner.scan(repo, "source", [])
+
+    inputs_per_call = [
+        call["command"][call["command"].index("--") + 1 :] for call in calls
+    ]
+    assert inputs_per_call == [[path] for path in EXPECTED_INPUTS]
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == 0
+    assert sorted(_summarize(report)) == EXPECTED_FINDINGS
+
+
+def _fake_runs_per_batch(scanner, sarif_text: str) -> list:
+    """Like ``_fake_run``, answering each run with the captured SARIF reduced to
+    the results whose file is among that run's inputs (the arguments after
+    ``--``); returns the recorded calls."""
+    calls: list = []
+    whole = json.loads(sarif_text)
+
+    def run(command, results_dir=None, env=None, timeout=None, **_):
+        calls.append({"command": list(command), "env": env, "timeout": timeout})
+        inputs = set(command[command.index("--") + 1 :])
+        part = copy.deepcopy(whole)
+        part["runs"][0]["results"] = [
+            result
+            for result in whole["runs"][0]["results"]
+            if result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            in inputs
+        ]
+        name = scanner.__class__.__name__
+        Path(results_dir, f"{name}.stdout.log").write_text(json.dumps(part))
+        response = {"returncode": 0}
+        scanner._process_command_response(response)
+        return response
+
+    object.__setattr__(scanner, "_run_subprocess", run)
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: True)
+    return calls
+
+
+def _fake_runs(scanner, stdouts: list) -> list:
+    """Like ``_fake_run``, with one stdout per run (the last one repeats);
+    returns the recorded calls."""
+    calls: list = []
+    remaining = list(stdouts)
+
+    def run(command, results_dir=None, env=None, timeout=None, **_):
+        calls.append({"command": list(command), "env": env, "timeout": timeout})
+        stdout = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+        name = scanner.__class__.__name__
+        Path(results_dir, f"{name}.stdout.log").write_text(stdout)
+        response = {"returncode": 0}
+        scanner._process_command_response(response)
+        return response
+
+    object.__setattr__(scanner, "_run_subprocess", run)
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: True)
+    return calls
+
+
+def _later_batch_sarif() -> str:
+    """The captured SARIF with one rule renamed, so it fires only in a later
+    batch, every result carrying its rule's index in THIS report's rules array,
+    and an invocation that names the batch."""
+    data = json.loads(CAPTURED_SARIF.read_text())
+    run = data["runs"][0]
+    renamed = "zizmor/only-in-a-later-batch"
+    for rule in run["tool"]["driver"]["rules"]:
+        if rule["id"] == "zizmor/artipacked":
+            rule["id"] = renamed
+    rule_ids = [rule["id"] for rule in run["tool"]["driver"]["rules"]]
+    for result in run["results"]:
+        if result["ruleId"] == "zizmor/artipacked":
+            result["ruleId"] = renamed
+        result["ruleIndex"] = rule_ids.index(result["ruleId"])
+    run["invocations"] = [{"executionSuccessful": True, "commandLine": "later"}]
+    return json.dumps(data)
+
+
+def test_a_joined_report_carries_every_batchs_rules_and_invocations(repo, monkeypatch):
+    """A rule that fires only in a later batch keeps its descriptor (help URI,
+    description) in the joined report, each rule id appears once, the
+    invocations of every run are kept in order (one per batch: the base class
+    records each run's own argv as that run's invocation, replacing whatever
+    the tool wrote), and a result's ruleIndex points at its rule in the merged
+    list, not into the batch's own array."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    scanner = _scanner(repo)
+    calls = _fake_runs(scanner, [CAPTURED_SARIF.read_text(), _later_batch_sarif()])
+
+    report = scanner.scan(repo, "source", [])
+
+    run = report.runs[0]
+    assert len(calls) == len(EXPECTED_INPUTS) >= 2
+    rule_ids = [rule.id for rule in run.tool.driver.rules]
+    assert len(rule_ids) == len(set(rule_ids))
+    assert "zizmor/artipacked" in rule_ids
+    assert "zizmor/only-in-a-later-batch" in rule_ids
+    assert {result.ruleId for result in run.results} <= set(rule_ids)
+    indexed = [result for result in run.results if result.ruleIndex >= 0]
+    assert indexed, "the later batch's results carried a ruleIndex"
+    for result in indexed:
+        assert run.tool.driver.rules[result.ruleIndex].id == result.ruleId
+    assert len(run.invocations) == len(calls)
+    assert [
+        invocation.commandLine.rsplit(" -- ", 1)[-1] for invocation in run.invocations
+    ] == EXPECTED_INPUTS
+    assert len(run.results) == len(EXPECTED_INPUTS) * len(EXPECTED_FINDINGS)
+
+
+def test_a_run_declined_after_earlier_batches_keeps_their_counters(repo, monkeypatch):
+    """When the template declines a later batch (its dependency check says no),
+    the scan's answer is that refusal, and the counters account for every
+    input: the two the earlier batches audited, and the three the declined
+    batch and the ones after it never ran, counted as attempted and failed so
+    no reader sees "two audited, nothing found" beside the refusal."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    scanner = _scanner(repo)
+    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
+    checks: list = []
+
+    def dependencies_until_the_third_batch() -> bool:
+        checks.append(len(checks))
+        return len(checks) < 3
+
+    object.__setattr__(
+        scanner, "validate_plugin_dependencies", dependencies_until_the_third_batch
+    )
+
+    result = scanner.scan(repo, "source", [])
+
+    assert result is False
+    assert len(checks) == 3
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == len(EXPECTED_INPUTS) - 2
+    assert scanner.exit_code == 0
+
+
+def test_batches_that_all_declined_leave_no_exit_code(repo, monkeypatch):
+    """The template declined the first batch, so zizmor never ran: the exit
+    code stays None, the base class's "the tool did not run", not a 0 that
+    reads as a clean run, and every input counts as attempted and failed."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    scanner = _scanner(repo)
+    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: False)
+
+    result = scanner.scan(repo, "source", [])
+
+    assert result is False
+    assert scanner.targets_attempted == len(EXPECTED_INPUTS)
+    assert scanner.targets_failed == len(EXPECTED_INPUTS)
+    assert scanner.exit_code is None
+
+
+def _fake_runs_with_codes(scanner, stdout: str, returncodes: list, stderrs=None):
+    """Like ``_fake_runs``, one return code (and stderr text) per run in order,
+    the last repeating, every run answered with *stdout*; the response carries
+    the stderr text too, so it reaches the scanner's own record as the real
+    runner's does. Returns the recorded calls and the start_time the template
+    had set when each run began."""
+    calls: list = []
+    starts: list = []
+    codes = list(returncodes)
+    texts = list(stderrs or [""])
+
+    def run(command, results_dir=None, env=None, timeout=None, **_):
+        calls.append({"command": list(command), "env": env, "timeout": timeout})
+        starts.append(scanner.start_time)
+        code = codes.pop(0) if len(codes) > 1 else codes[0]
+        text = texts.pop(0) if len(texts) > 1 else texts[0]
+        name = scanner.__class__.__name__
+        Path(results_dir, f"{name}.stdout.log").write_text(stdout)
+        if text:
+            Path(results_dir, f"{name}.stderr.log").write_text(text)
+        response = {"returncode": code, "stderr": text}
+        scanner._process_command_response(response)
+        return response
+
+    object.__setattr__(scanner, "_run_subprocess", run)
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: True)
+    return calls, starts
+
+
+def test_batch_exit_codes_are_folded_by_the_scanners_own_ranking(repo, monkeypatch):
+    """The fold is the scanner's _worse_exit_code, which ranks by its accepted
+    codes {0, 3}: a code outside the set outranks an accepted one in either
+    order, a signal death outranks every code and is recorded as the shell
+    reports it, and None leaves the fold alone. The module-level fold, a plain
+    max, read 3 above 1. Only accepted codes reach the fold today (the template
+    refuses a batch outside the set before its report is read), so the scan
+    below proves the mechanism: every batch's code reaches the scanner's own
+    hook twice, once from the template's _process_command_response, which
+    folds each run's code into the 0 this scanner's _execute_scan sets per run
+    (plugin_base's _folded_exit_code reads the hook), and once from the batch
+    loop, whose current is the worst code so far."""
+    scanner = _scanner(repo)
+    assert scanner._worse_exit_code(None, 3) == 3
+    assert scanner._worse_exit_code(0, 3) == 3
+    assert scanner._worse_exit_code(3, 1) == 1
+    assert scanner._worse_exit_code(1, 3) == 1
+    assert scanner._worse_exit_code(1, -11) == 139
+    assert scanner._worse_exit_code(139, 3) == 139
+
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    calls, _ = _fake_runs_with_codes(scanner, CAPTURED_SARIF.read_text(), [3, 0, 3])
+    folded: list = []
+
+    def recording_fold(current, new):
+        folded.append((current, new))
+        return ZizmorScanner._worse_exit_code(scanner, current, new)
+
+    object.__setattr__(scanner, "_worse_exit_code", recording_fold)
+
+    report = scanner.scan(repo, "source", [])
+
+    assert isinstance(report, SarifReport)
+    assert len(calls) == len(EXPECTED_INPUTS) >= 3
+    batch_codes = [3, 0] + [3] * (len(calls) - 2)
+    # Two folds per batch: the template's per-run fold, then the loop's.
+    assert [new for _, new in folded] == [code for code in batch_codes for _ in (0, 1)]
+    per_run = folded[0::2]
+    across_batches = folded[1::2]
+    # _execute_scan resets the code to 0 for each run before the tool starts,
+    # so the template's per-run fold always starts from 0.
+    assert [current for current, _ in per_run] == [0] * len(calls), folded
+    assert [current for current, _ in across_batches] == [None, 3, 3] + [3] * (
+        len(calls) - 3
+    ), folded
+    assert scanner.exit_code == 3
+
+
+def test_a_multi_batch_scan_keeps_every_batchs_record(repo, monkeypatch):
+    """The template resets start_time, output and errors at the top of each of
+    its runs, so a target audited in several batches kept only the last batch's:
+    a duration covering one batch and the earlier batches' stderr lines, which
+    feed the reports, gone. The record now spans the batches: the first batch's
+    start, and every batch's stderr lines in run order."""
+    monkeypatch.setattr(zizmor_module, "_INPUT_ARGV_BUDGET", _ONE_INPUT_PER_BATCH)
+    scanner = _scanner(repo)
+    markers = [f"batch-{index}-marker" for index in range(len(EXPECTED_INPUTS))]
+    calls, starts = _fake_runs_with_codes(
+        scanner, CAPTURED_SARIF.read_text(), [0], stderrs=markers
+    )
+
+    report = scanner.scan(repo, "source", [])
+
+    assert isinstance(report, SarifReport)
+    assert len(calls) == len(markers)
+    assert scanner.start_time == starts[0]
+    assert scanner.end_time is not None and scanner.end_time >= starts[-1]
+    recorded = "\n".join(str(line) for line in scanner.errors)
+    assert [marker for marker in markers if marker in recorded] == markers
+
+
+def test_a_declined_single_batch_target_leaves_no_exit_code(repo):
+    """The template declined the one batch (its dependency check said no), so
+    zizmor never ran: the exit code is None, as it is when a multi-batch target
+    is declined. The template's own scan() starts every call at 0, its
+    clean-skip reading for an early return, and a declined single-batch target
+    kept that 0, which read as a clean run; the scanner restores None after a
+    declined single batch."""
+    scanner = _scanner(repo)
+    _fake_run(scanner, stdout=CAPTURED_SARIF.read_text())
+    object.__setattr__(scanner, "validate_plugin_dependencies", lambda: False)
+
+    result = scanner.scan(repo, "source", [])
+
+    assert result is False
+    assert scanner.exit_code is None

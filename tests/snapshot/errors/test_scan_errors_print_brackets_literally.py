@@ -52,10 +52,13 @@ def _logged(root: Path) -> str:
 
 def test_a_bracketed_key_in_the_repository_config(run_cli, in_tmp):
     """A key the entry does not declare is refused by name, so the name is in
-    the refusal: exit 3, the config's own code, with the key printed."""
+    the refusal: exit 3, the config's own code, with the key printed. The
+    config opts into the refusal (fail_on_unknown_keys: true): the 3.x default
+    warns and keeps loading, and this test's subject is the refusal printer."""
     _source(
         in_tmp,
         "project_name: probe\n"
+        "fail_on_unknown_keys: true\n"
         "global_settings:\n"
         "  ignore_paths:\n"
         "    - path: x\n"

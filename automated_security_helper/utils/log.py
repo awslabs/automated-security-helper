@@ -6,6 +6,7 @@ import platform
 import re
 import sys
 import threading
+import time
 import traceback
 import uuid
 from contextlib import contextmanager
@@ -32,11 +33,33 @@ from automated_security_helper.utils.threads import ash_thread as ash_thread
 from automated_security_helper.utils.process_env import setdefault_environ
 from automated_security_helper.utils.terminal_text import (
     ShownText,
+    commands_broken,
+    escape_for,
+    is_shown_as_escape,
     raw_controls_shown,
     shown_in_ascii,
     shown_not_obeyed,
     shown_on_one_line,
 )
+
+
+#: The frames a level method of ASHLogger (verbose, trace, the ones
+#: addLoggingLevel installs) adds to the stacklevel a caller asked for, so a
+#: record names the caller's file and line rather than the wrapper's. One on
+#: Python 3.11 and later, where findCaller starts at its own frame and counts
+#: outward past logging's own frames only, so the wrapper's frame is the one the
+#: extra step skips; none before 3.11, where findCaller started three frames up,
+#: at the wrapper itself, and stepped back once on its own, so the extra step
+#: named the caller's caller there.
+_WRAPPER_FRAME = 1 if sys.version_info >= (3, 11) else 0
+
+#: The same for the module-level form (``logging.trace()``, logToRoot), which goes
+#: through ``logging.log`` and the root logger's ``log`` before ``_log``. One on
+#: Python 3.11 and later; two before it, where findCaller steps out by the
+#: stacklevel first and only then skips logging's own frames, so one step ends on
+#: the wrapper (measured on 3.9 and 3.14 with a stand-in wrapper: 0 and 1 name the
+#: wrapper on 3.9, 1 names the caller on 3.14, 2 names the caller on 3.9).
+_ROOT_WRAPPER_FRAME = 1 if sys.version_info >= (3, 11) else 2
 
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
@@ -68,8 +91,21 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
     if not methodName:
         methodName = levelName.lower()
 
-    # Guard against duplicate registration (e.g. module re-import)
+    # Guard against duplicate registration (e.g. module re-import). When the
+    # attribute is there but the NAME is not registered (another library set
+    # logging.TRACE as a bare attribute), the name is registered at the number
+    # the attribute carries: get_logger reads the level's name, and an
+    # unregistered one read as "Level 5". A name that is already registered is
+    # left where it is, whatever number this call asked for: registering it at
+    # the new number re-pointed the name for the whole process, so a second
+    # addLoggingLevel("TRACE", 99) made every logger get_logger pins to TRACE
+    # take level 99 and every file handler stay empty.
     if hasattr(logging, levelName):
+        existing = getattr(logging, levelName)
+        if isinstance(existing, int) and not isinstance(
+            logging.getLevelName(levelName), int
+        ):
+            logging.addLevelName(existing, levelName)
         return
     if hasattr(logging, methodName):
         return
@@ -78,6 +114,8 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
 
     def logForLevel(self, message, *args, **kwargs):
         if self.isEnabledFor(levelNum):
+            # The caller's frame, not this wrapper's (see _WRAPPER_FRAME).
+            kwargs["stacklevel"] = kwargs.get("stacklevel", 1) + _WRAPPER_FRAME
             self._log(levelNum, message, args, **kwargs)
 
     def logToRoot(message, *args, **kwargs):
@@ -89,7 +127,9 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
         # did this')`). Pointing this at a named logger would make
         # `logging.trace()` write somewhere its stdlib counterparts do not, which
         # is the opposite of the recipe's contract. Per-logger use goes through
-        # `logForLevel`, set on the logger class just above.
+        # `logForLevel`, set on the logger class just above. The record names the
+        # caller of `logging.trace()`, not this wrapper (see _ROOT_WRAPPER_FRAME).
+        kwargs["stacklevel"] = kwargs.get("stacklevel", 1) + _ROOT_WRAPPER_FRAME
         logging.log(levelNum, message, *args, **kwargs)  # noqa: LOG015
 
     logging.addLevelName(levelNum, levelName)
@@ -111,12 +151,18 @@ class ASHLogger(logging.Logger):
     def __init__(self, name: str, level: int = logging.NOTSET):
         super().__init__(name=name, level=level)
 
+    # The wrapper's frame added to the stacklevel where findCaller counts it
+    # (_WRAPPER_FRAME): without it the record's file and line were this
+    # method's, not the caller's, on Python 3.11 and later; with it on every
+    # version they were the caller's caller before 3.11.
     def verbose(self, msg, *args, **kws):
         if self.isEnabledFor(VERBOSE_LEVEL):
+            kws["stacklevel"] = kws.get("stacklevel", 1) + _WRAPPER_FRAME
             self._log(VERBOSE_LEVEL, msg, args, **kws)
 
     def trace(self, msg, *args, **kws):
         if self.isEnabledFor(TRACE_LEVEL):
+            kws["stacklevel"] = kws.get("stacklevel", 1) + _WRAPPER_FRAME
             self._log(TRACE_LEVEL, msg, args, **kws)
 
     def callHandlers(self, record: logging.LogRecord) -> None:
@@ -146,7 +192,10 @@ class ASHLogger(logging.Logger):
         current = _RUN_LOG_SCOPE.get()
         logger: Optional[logging.Logger] = self
         while logger is not None:
-            for handler in logger.handlers:
+            # A copy of the list: another run's setup or close removes handlers
+            # while this record walks them, and a removal from the live list
+            # under the walk skips the handler after it, this run's own included.
+            for handler in list(logger.handlers):
                 scope = getattr(handler, _RUN_SCOPE_ATTR, None)
                 if scope is None or _run_takes(scope, current):
                     homed = True
@@ -195,11 +244,38 @@ def delivers(logger: logging.Logger, level: int) -> bool:
         return False
     if ash:
         return level >= _LAST_RESORT.level
+    # The handler logging's last resort hands the record to: the router this
+    # module installs sits at NOTSET and gates per branch, so its own level
+    # answered True for every level; the fallback behind it holds the gate.
     last_resort = logging.lastResort
-    return last_resort is not None and level >= last_resort.level
+    if last_resort is None:
+        return False
+    fallback = getattr(last_resort, "fallback", last_resort)
+    return level >= fallback.level
 
 
 logging.setLoggerClass(ASHLogger)
+
+
+def adopt_early_ash_loggers() -> None:
+    """Make every plain logger under "ash" made before this module an ASHLogger.
+
+    logging builds a logger with the class set at the moment it is first asked
+    for, so ``logging.getLogger("ash")`` run by a module imported before this one
+    (utils.severity_ladder takes the logger by name at import, and core.constants
+    imports it first in every CLI process) made a plain ``logging.Logger`` that
+    every later ``getLogger("ash")`` returns: ``isinstance(ASH_LOGGER, ASHLogger)``
+    was False, and :meth:`ASHLogger.callHandlers`, the run-scoped last-resort
+    walk, never ran for ASH's records. ``ASHLogger`` adds methods and no state, so
+    such a logger is given this class in place, which keeps its handlers,
+    filters, level and children. A ``Logger`` subclass another library made is
+    not touched. Run at import and at every :func:`get_logger`.
+    """
+    for name, logger in list(logging.Logger.manager.loggerDict.items()):
+        if type(logger) is not logging.Logger:
+            continue
+        if name == "ash" or name.startswith("ash."):
+            logger.__class__ = ASHLogger
 
 
 # The console handler below, and the live progress panel in rich_log_handler.py,
@@ -276,7 +352,14 @@ def escape_markup(value: object, *, one_line: bool = False) -> str:
     value is split across two segments by an empty ``[none][/none]`` after its
     first colon (:func:`_emoji_codes_split`): it shows as written, and an emoji
     code in the message's own markup renders. The tag follows a colon, so no
-    backslash of the escape stands before it.
+    backslash of the escape stands before it. A tag-shaped value holding a colon
+    (``[a:b:]``) is opened rather than escaped, its ``[`` followed by an empty
+    style, so Rich reads no tag there and a code in it is split like any other: a
+    break inside an escaped tag would have ended the tag and shown the escape's
+    backslash, and leaving the code whole rendered it as an emoji. A value
+    holding a colon is also closed off at both ends by an empty style, so a code
+    it forms with the message's text beside it (``:lock`` against ``: done``)
+    does not render as an emoji.
     """
     # Shown, not obeyed, first: every markup sink (rich.print, a progress
     # description, a MARKUP log record) prints the value to a terminal or a CI log,
@@ -300,23 +383,59 @@ _EMOJI_CODE = re.compile(r"(:(\S*?)(?:(?:\-)(emoji|text))?:)")
 _SEGMENT_BREAK = "[none][/none]"
 
 
+#: A tag Rich's escape wrote a backslash before, in escaped text, with the run
+#: of backslashes the escape doubled in front of it: the added backslash counts
+#: only while the tag behind it is whole.
+_ESCAPED_TAG = re.compile(r"(\\*)\\(\[[a-z#/@][^[]*?\])")
+
+
+def _opened_if_it_holds_a_colon(match: "re.Match[str]") -> str:
+    """The escaped tag *match* opened when a colon sits inside it.
+
+    A colon inside the tag can start an emoji code, whole inside the tag
+    (``[a:b:]``) or ending after it (``[a:b]:c``), and the split after that colon
+    would end the tag. So the tag's ``[`` is followed by an empty style instead:
+    Rich reads no tag there (a ``[`` right before another ``[`` starts none) and
+    the escape's own backslash is not needed. The backslashes the escape doubled
+    in front of the tag stay, and an empty style follows them: Rich halves an
+    even run of backslashes in front of a tag and prints the other half, which
+    gives the value's own backslashes back. Left in front of the opened ``[``
+    instead, they are read as text, and Rich turns the last ``\\[`` of that text
+    into ``[``, so a value with a backslash before the tag rendered one short.
+    A tag holding no colon is returned as it was.
+    """
+    doubled, tag = match.group(1), match.group(2)
+    if ":" not in tag:
+        return match.group(0)
+    if not doubled:
+        return "[" + _SEGMENT_BREAK + tag[1:]
+    return doubled + _SEGMENT_BREAK + "[" + _SEGMENT_BREAK + tag[1:]
+
+
 def _emoji_codes_split(text: str) -> str:
     """``text`` with ``[none][/none]`` after the first colon of each emoji code.
 
     Each search starts just after the colon the last break followed, so a code
     that overlaps the one before it (the ``:lock:`` of ``:x:lock:``) is split too:
-    no segment of the result holds two colons with a code between them.
+    no segment of the result holds two colons with a code between them. An
+    escaped tag holding a colon is opened first (:func:`_opened_if_it_holds_a_colon`),
+    so a break after that colon ends no tag and no code is left whole: a code
+    left whole in one segment rendered as its emoji, and a break inside an
+    escaped tag showed the escape's backslash.
     """
+    text = _ESCAPED_TAG.sub(_opened_if_it_holds_a_colon, text)
     pieces = []
     start = 0
+    search_from = 0
     while True:
-        code = _EMOJI_CODE.search(text, start)
+        code = _EMOJI_CODE.search(text, search_from)
         if code is None:
             break
         cut = code.start() + 1
         pieces.append(text[start:cut])
         pieces.append(_SEGMENT_BREAK)
         start = cut
+        search_from = cut
     pieces.append(text[start:])
     return "".join(pieces)
 
@@ -336,8 +455,16 @@ def _escaped_for_rich(text: str) -> str:
     body = text.rstrip("\\")
     trailing = len(text) - len(body)
     if not trailing:
-        return _emoji_codes_split(escape(text))
-    return _emoji_codes_split(escape(body) + "\\" * (2 * trailing)) + "[none][/none]"
+        escaped = _emoji_codes_split(escape(text))
+    else:
+        escaped = _emoji_codes_split(escape(body) + "\\" * (2 * trailing))
+    if ":" in text:
+        # Closed off at both ends, so no emoji code forms across the value's
+        # edge with the message's own text.
+        escaped = f"{_SEGMENT_BREAK}{escaped}{_SEGMENT_BREAK}"
+    if trailing:
+        escaped += _SEGMENT_BREAK
+    return escaped
 
 
 def console_text(record: logging.LogRecord, message: str) -> str:
@@ -379,6 +506,12 @@ def _show_trace(trace) -> None:
     frame's file name, where an error raised over a repository path or a tool's
     output put its controls on the console raw. Locals are reprs, which show
     controls already, and the source lines are the code that ran.
+
+    A frame's file name is the one Rich reads the source lines from, so it is
+    rewritten only when it holds something that must be shown (a control, a
+    command form): shown whatever it held, a Windows path with a segment that
+    reads as an escape (``...\\x64\\...``) had its backslash doubled, Rich found
+    no file of that name, and the frame lost its source lines.
     """
     for stack in trace.stacks:
         stack.exc_type = shown_not_obeyed(stack.exc_type)
@@ -386,16 +519,27 @@ def _show_trace(trace) -> None:
         stack.notes = [shown_not_obeyed(note) for note in stack.notes]
         error = stack.syntax_error
         if error is not None:
-            error.filename = shown_not_obeyed(error.filename)
+            error.filename = _shown_file_name(error.filename)
             error.line = shown_not_obeyed(error.line)
             error.msg = shown_not_obeyed(error.msg)
             error.notes = [shown_not_obeyed(note) for note in error.notes]
         for frame in stack.frames:
-            frame.filename = shown_not_obeyed(frame.filename)
+            frame.filename = _shown_file_name(frame.filename)
             frame.name = shown_not_obeyed(frame.name)
             frame.line = shown_not_obeyed(frame.line)
         for group_trace in stack.exceptions:
             _show_trace(group_trace)
+
+
+def _shown_file_name(filename: str) -> str:
+    """*filename* as given when nothing in it must be shown, else shown."""
+    if not isinstance(filename, str):
+        return filename
+    if any(is_shown_as_escape(character) for character in filename):
+        return shown_not_obeyed(filename)
+    if commands_broken(filename) != filename:
+        return shown_not_obeyed(filename)
+    return filename
 
 
 class ShownHandlerErrors:
@@ -481,6 +625,18 @@ class ConsoleHandler(ShownHandlerErrors, RichHandler):
             self.handleError(record)
 
     def render_message(self, record: logging.LogRecord, message: str):
+        markup = getattr(record, "markup", self.markup)
+        if markup:
+            # Without rich_tracebacks the formatter appends the traceback and
+            # the stack after the message; neither is markup, so only the
+            # message is read as markup and the rest is appended as text.
+            own = record.getMessage()
+            if message.startswith(own) and len(message) > len(own):
+                rendered: Any = super().render_message(
+                    record, console_text(record, own)
+                )
+                rendered.append(str(shown_not_obeyed(message[len(own) :])))
+                return rendered
         return super().render_message(record, console_text(record, message))
 
     def render(self, *, record: logging.LogRecord, traceback, message_renderable):
@@ -560,33 +716,99 @@ def show_debug_locals() -> bool:
     return _show_locals_requested() and not _on_a_ci_runner()
 
 
+#: Characters ASH's own messages emit that a narrow console code page cannot
+#: encode: the console-encoding checks below try to encode these.
+_EMOJI_PROBE = "✅🔴⚠️"
+
+
+def _console_cannot_encode(encoding: Optional[str]) -> bool:
+    """Whether a console with *encoding* cannot write ASH's own emoji.
+
+    Tried by encoding, rather than read off a fixed list of code pages: the
+    list named five (cp1252, cp850, cp437, ascii and a spelling of the first)
+    and left every other narrow code page (cp1251, cp932, cp936, cp949,
+    cp1250) as it was, where the same write failed. A stream that names no
+    encoding is read as UTF-8, as before.
+    """
+    try:
+        _EMOJI_PROBE.encode(encoding or "utf-8")
+    except (UnicodeEncodeError, LookupError):
+        return True
+    return False
+
+
+def _encodings_of(*streams: Any) -> Optional[Tuple[str, ...]]:
+    """The encodings *streams* name, or None when one names none this Python knows."""
+    import codecs
+
+    names = []
+    for stream in streams:
+        try:
+            name = stream.encoding
+            if not isinstance(name, str):
+                return None
+            names.append(codecs.lookup(name).name)
+        except (AttributeError, TypeError, LookupError):
+            return None
+    return tuple(names)
+
+
+def _is_a_terminal(stream: Any) -> bool:
+    """Whether *stream* is a console a person reads, False when it cannot say."""
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, TypeError, ValueError, OSError):
+        return False
+
+
+def _console_writes() -> Optional[Callable[[str], bool]]:
+    """What the console writes of a character outside ASCII, or None for nothing.
+
+    ``WindowsSafeFilter`` is on for every console whose encoding cannot write
+    ASH's own emoji, which is every code page but UTF-8, yet most of them write
+    more than ASCII: cp1252 writes "é", cp1251 Cyrillic, cp932 Japanese. A
+    function that says whether stdout and stderr both write a character, so the
+    filter escapes only what the code page cannot. None where nothing is known to
+    be written: a CI runner, whose log other tools read in an encoding this
+    process cannot see, a stream that is not a terminal (redirected to a file
+    or a pipe, where the reader decodes the bytes with a code page this process
+    cannot see, and an escape is unambiguous where a raw byte may not be), and a
+    stream that names no encoding Python knows.
+    """
+    if _on_a_ci_runner():
+        return None
+    if not (_is_a_terminal(sys.stdout) and _is_a_terminal(sys.stderr)):
+        return None
+    names = _encodings_of(sys.stdout, sys.stderr)
+    if names is None:
+        return None
+
+    def writes(character: str) -> bool:
+        try:
+            for name in names:
+                character.encode(name)
+        except UnicodeEncodeError:
+            return False
+        return True
+
+    return writes
+
+
 def _detect_encoding_issues() -> bool:
     """Return True if running on Windows with an encoding that cannot represent Unicode."""
     if platform.system().lower() != "windows":
         return False
 
-    is_ci = any(name in os.environ for name in ("CI", *_CI_RUNNER_MARKERS))
+    # By value, as every other CI read here: CI set to "", "0" or "false" is
+    # no runner (_on_a_ci_runner), where presence alone counted it as one.
+    is_ci = _on_a_ci_runner()
 
-    has_encoding_issues = False
-    console_encoding = "utf-8"
     try:
-        console_encoding = sys.stdout.encoding or "utf-8"
-        has_encoding_issues = console_encoding.lower() in [
-            "cp1252",
-            "windows-1252",
-            "cp850",
-            "cp437",
-            "ascii",
-        ]
+        console_encoding = sys.stdout.encoding
     except (AttributeError, TypeError):
-        has_encoding_issues = True
+        return True
 
-    try:
-        "✅🔴⚠️".encode(console_encoding)
-    except (UnicodeEncodeError, LookupError):
-        has_encoding_issues = True
-
-    return is_ci or has_encoding_issues
+    return is_ci or _console_cannot_encode(console_encoding)
 
 
 def _get_default_emoji_fallback_map() -> Dict[str, str]:
@@ -654,34 +876,186 @@ def _make_message_windows_safe(message: str, emoji_fallback_map: Dict[str, str])
     return safe_message
 
 
-class WindowsSafeFilter(logging.Filter):
-    """Logging filter that replaces emoji/Unicode with ASCII on Windows when encoding is limited."""
+#: Set on a record WindowsSafeFilter rewrote: its message and arguments as they
+#: were logged. The UTF-8 file sinks write from these (_file_text), so the
+#: ASCII rewrite made for a console that cannot encode never reaches a file.
+_UNFILTERED_ATTR = "_ash_unfiltered"
 
-    def __init__(self):
+
+#: The argument ``WindowsSafeFilter`` is built with when it is told nothing of
+#: the console: it reads the console's streams itself.
+_READ_THE_CONSOLE: Any = object()
+
+
+class WindowsSafeFilter(logging.Filter):
+    """Logging filter that puts a record's text in ASCII on Windows when the
+    console's encoding is limited.
+
+    The filter sits on the logger, so every handler sees its rewrite; the
+    record keeps what was logged (``_UNFILTERED_ATTR``), and the file handlers'
+    formatters write from that, so ash.log and the JSONL file keep the text
+    whole. A plain-str message is shown (utils/terminal_text.py) and put in
+    ASCII as one ShownText, so nothing is dropped: a character outside ASCII and
+    outside the emoji map is written as its escape, where it used to be deleted
+    (a path lost its accented letters). A message with arguments is formatted
+    first, so the arguments go through the same rule.
+
+    On a console whose code page writes more than ASCII (cp1252's "é", cp1251's
+    Cyrillic, cp932's Japanese) only what both streams cannot write is escaped
+    (:func:`_console_writes`), and a replacement is made only for an emoji the
+    console cannot write. On a CI runner, or where a stream names no encoding
+    Python knows, everything outside ASCII is.
+    """
+
+    def __init__(self, writes: Any = _READ_THE_CONSOLE):
+        """
+        Args:
+            writes: Says whether the console writes a character outside ASCII as
+                it is, or None to put everything outside ASCII in ASCII (a CI
+                runner, an encoding not known). Left out, it is read from the
+                console's streams (:func:`_console_writes`) when the filter is
+                active and None when it is not, so a filter built on a host that
+                has no encoding issue knows nothing of the console.
+        """
         super().__init__()
         self._active = _detect_encoding_issues()
-        self._emoji_map = _get_default_emoji_fallback_map()
+        self._writes = (
+            (_console_writes() if self._active else None)
+            if writes is _READ_THE_CONSOLE
+            else writes
+        )
+
+    @property
+    def _writes(self) -> Optional[Callable[[str], bool]]:
+        """Says whether the console writes a character outside ASCII as it is;
+        None puts everything in ASCII."""
+        return self._writes_character
+
+    @_writes.setter
+    def _writes(self, writes: Optional[Callable[[str], bool]]) -> None:
+        # The emoji map is what this function leaves for the console to write,
+        # so it is rebuilt with it: a map left from another function would
+        # replace an emoji the console writes, or leave one it cannot.
+        self._writes_character = writes
+        self._emoji_map = {
+            key: value
+            for key, value in _get_default_emoji_fallback_map().items()
+            if not self._console_writes_all(key)
+        }
+
+    def _console_writes_all(self, text: str) -> bool:
+        """Whether the console writes each character of *text* as it is."""
+        return text.isascii() or all(
+            character.isascii()
+            or (
+                self._writes is not None
+                and not is_shown_as_escape(character)
+                and self._writes(character)
+            )
+            for character in text
+        )
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if self._active and isinstance(record.msg, ShownText):
+        if not self._active:
+            return True
+        if not hasattr(record, _UNFILTERED_ATTR):
+            setattr(record, _UNFILTERED_ATTR, (record.msg, record.args))
+        if isinstance(record.msg, ShownText):
             # Shown already, so the sinks leave it as it is. Rebuilt as a plain
             # str, it was shown a second time; and a character dropped from it
             # could join "::" into a command (shown_in_ascii says how).
-            record.msg = shown_in_ascii(record.msg, self._emoji_map)
-        elif self._active and isinstance(record.msg, str):
-            safe = self._in_ascii(record.msg)
+            record.msg = shown_in_ascii(record.msg, self._emoji_map, self._writes)
+        elif isinstance(record.msg, str):
             if getattr(record, "markup", False):
-                safe = self._markup_in_ascii(record, safe)
-            record.msg = safe
+                safe = self._in_ascii(record.msg)
+                record.msg = self._markup_in_ascii(record, safe)
+            else:
+                # Formatted with its arguments, shown once, and put in ASCII
+                # with every character kept as text or as its escape. A record
+                # whose arguments do not fit its message keeps both and has
+                # each put in ASCII on its own. A message the console can
+                # already write (ASCII, its arguments in) is left as it was
+                # logged: this filter is for what the console cannot encode,
+                # the sinks show text themselves, each once, and a handler an
+                # application put on the logger gets such a record as written.
+                # Shown here, an ASCII message had a backslash run before text
+                # that reads as an escape doubled: the JSON "é" of a
+                # suggested --config-overrides command came out as "\\u00e9",
+                # which the pasted command then read as the text "u00e9".
+                folded = self._folded_message(record)
+                if folded is None:
+                    record.msg = self._in_ascii(record.msg)
+                elif not self._console_writes_all(folded):
+                    # Shown for a sink that puts it in ASCII: a backslash run is
+                    # doubled only before the text of an escape shown_in_ascii
+                    # or shown_not_obeyed writes, so a message that quotes a
+                    # path with an accented letter raw and as JSON's escape (the
+                    # suggested command above) keeps the escape as logged. On a
+                    # console whose code page writes some of the characters
+                    # (cp1252's "é", cp1251's Cyrillic), only the rest are
+                    # escaped, and a run before the escape text of one of those
+                    # it writes is not doubled.
+                    record.msg = shown_in_ascii(
+                        shown_not_obeyed(
+                            folded, lookalikes="ascii", writable=self._writes
+                        ),
+                        self._emoji_map,
+                        self._writes,
+                    )
+                    record.args = ()
+        if record.args:
+            # The arguments are put into the message when the record is
+            # formatted, after this filter: one outside the stream's encoding
+            # failed that write and dropped the whole record from the file.
+            record.args = self._args_in_ascii(record.args)
         return True
 
-    def _in_ascii(self, text: str) -> str:
-        safe = _make_message_windows_safe(text, self._emoji_map)
+    def _arg_in_ascii(self, value: Any) -> Any:
+        if isinstance(value, ShownText):
+            return shown_in_ascii(value, self._emoji_map, self._writes)
+        if isinstance(value, str):
+            return self._in_ascii(value)
+        return value
+
+    def _args_in_ascii(self, args: Any) -> Any:
+        """*args*, a record's, with each str in them in ASCII (``_in_ascii``)."""
+        if isinstance(args, tuple):
+            return tuple(self._arg_in_ascii(value) for value in args)
+        if isinstance(args, dict):
+            return {key: self._arg_in_ascii(value) for key, value in args.items()}
+        return args
+
+    @staticmethod
+    def _folded_message(record: logging.LogRecord) -> Optional[str]:
+        """The record's message with its arguments put in, or None when they do
+        not fit it (the formatting raises); the handlers then report that."""
         try:
-            safe.encode("ascii")
-        except UnicodeEncodeError:
-            safe = safe.encode("ascii", errors="ignore").decode("ascii")
-        return safe
+            return record.getMessage()
+        except Exception:  # noqa: BLE001 -- a message its arguments do not fit
+            return None
+
+    def _in_ascii(self, text: str) -> str:
+        """*text* in the console's terms: the emoji map's replacements, then each
+        character still outside ASCII that the console cannot write written as its
+        escape (``\\xNN``, ``\\uNNNN``, ``\\UNNNNNNNN``), which is every such
+        character when ``_writes`` is None (ASCII). Nothing is dropped: every such
+        character used to be deleted, so a path lost its accented letters in the
+        console and, through this filter on the logger, in every file sink too."""
+        safe = _make_message_windows_safe(text, self._emoji_map)
+        if safe.isascii():
+            return safe
+        writes = self._writes
+        return "".join(
+            character
+            if character.isascii()
+            or (
+                writes is not None
+                and not is_shown_as_escape(character)
+                and writes(character)
+            )
+            else escape_for(character)
+            for character in safe
+        )
 
     def _markup_in_ascii(self, record: logging.LogRecord, safe: str) -> str:
         """*safe*, the ASCII form of a markup record's message, if it shows what the
@@ -716,15 +1090,20 @@ class WindowsSafeFilter(logging.Filter):
         return _escaped_for_rich(expected)
 
 
-def _file_text(record: logging.LogRecord) -> str:
+def _file_text(record: logging.LogRecord, unfiltered: bool = True) -> str:
     """The message a log file writes for *record*: a MARKUP record as its text.
 
     A MARKUP message styles part of itself with tags and has its values escaped
     for Rich (escape_markup), so written as is a file got "[yellow]npm-audit[/yellow]"
     and "bandit\\[sarif,toml]". The file gets what the console shows. A message
     that does not parse as markup is written as it is.
+
+    With *unfiltered*, a record WindowsSafeFilter rewrote is written as it was
+    logged (``_UNFILTERED_ATTR``): the files are UTF-8, and the rewrite is for
+    a console that cannot encode. The last resort, which writes to that
+    console, passes False.
     """
-    message = record.getMessage()
+    message = _logged_message(record) if unfiltered else record.getMessage()
     if not getattr(record, "markup", False):
         return message
     from rich.errors import MarkupError
@@ -736,6 +1115,22 @@ def _file_text(record: logging.LogRecord) -> str:
         return message
 
 
+def _logged_message(record: logging.LogRecord) -> str:
+    """The record's message as it was logged, before any filter rewrote it.
+
+    ``record.getMessage()`` over the message and arguments WindowsSafeFilter
+    saved (``_UNFILTERED_ATTR``), else the record's own. A ShownText logged
+    with no arguments is returned as it is, so a sink shows it once.
+    """
+    unfiltered = getattr(record, _UNFILTERED_ATTR, None)
+    if unfiltered is None:
+        return record.getMessage()
+    msg, args = unfiltered
+    if not args:
+        return msg if isinstance(msg, str) else str(msg)
+    return str(msg) % args
+
+
 class TextFileFormatter(logging.Formatter):
     """The tabular log file's formatter: each message and traceback shown, not obeyed.
 
@@ -745,16 +1140,30 @@ class TextFileFormatter(logging.Formatter):
     its values were shown by escape_markup already, so only the raw controls and
     commands left in it are handled. The traceback is formatted here rather than
     taken from the record, where another handler may have cached its raw text.
+    A record WindowsSafeFilter put in ASCII is written as it was logged, unless
+    *unfiltered* is False (the last resort, which writes to that console).
     """
+
+    def __init__(self, *args: Any, unfiltered: bool = True, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._unfiltered = unfiltered
 
     def format(self, record: logging.LogRecord) -> str:
         cached = record.exc_text
+        stack = record.stack_info
+        cached_only = bool(cached) and not record.exc_info
         record.exc_text = None
+        if cached_only:
+            # The stack block is written below, after the traceback, in the
+            # order logging writes them; left to the base format here it came
+            # first, and the cached traceback landed after it.
+            record.stack_info = None
         try:
             formatted = super().format(record)
         finally:
             record.exc_text = cached
-        if cached and not record.exc_info:
+            record.stack_info = stack
+        if cached_only:
             # A record carrying only the cached text has no exc_info to format
             # it from again: a filter rendered the traceback itself and dropped
             # exc_info. The cache is kept, shown, where logging.Formatter.format
@@ -762,10 +1171,14 @@ class TextFileFormatter(logging.Formatter):
             if formatted[-1:] != "\n":
                 formatted += "\n"
             formatted += str(shown_not_obeyed(cached))
+            if stack:
+                if formatted[-1:] != "\n":
+                    formatted += "\n"
+                formatted += self.formatStack(stack)
         return formatted
 
     def formatMessage(self, record: logging.LogRecord) -> str:
-        record.message = console_text(record, _file_text(record))
+        record.message = console_text(record, _file_text(record, self._unfiltered))
         return super().formatMessage(record)
 
     def formatException(self, ei) -> str:
@@ -817,6 +1230,10 @@ class JsonFormatter(logging.Formatter):
         self.default_time_format = time_format
         self.default_msec_format = msec_format
         self.datefmt = None
+        # The default msec format ends the timestamp with "Z", UTC's designator,
+        # so the time it is put on is UTC: logging.Formatter's own converter is
+        # time.localtime, which wrote the local wall-clock time under that "Z".
+        self.converter = time.gmtime
 
     def usesTime(self) -> bool:
         """
@@ -868,6 +1285,13 @@ class JsonFormatter(logging.Formatter):
         return json_commands_broken(json.dumps(message_dict, default=str))
 
 
+# Whether configure_windows_safe_logging has made its one attempt at the process
+# locale, and the lock that makes the attempt once even when several threads
+# reach it together.
+_locale_step_done = False
+_LOCALE_STEP_LOCK = threading.Lock()
+
+
 def configure_windows_safe_logging():
     """Reconfigure stdout/stderr to UTF-8 on Windows consoles that cannot encode.
 
@@ -886,23 +1310,23 @@ def configure_windows_safe_logging():
     Narrowly gated: returns immediately unless the platform is Windows and either
     CI is detected or the console encoding cannot represent the characters ASH
     emits, so it is a no-op on Linux and macOS.
+
+    The process locale is set on the first call that gets past that gate, and not
+    again; the streams are reconfigured on each call, for the streams of the moment.
     """
+    global _locale_step_done
+
     if platform.system().lower() != "windows":
         return
 
-    # Check if we're in a CI environment where encoding might be problematic
-    is_ci = any(name in os.environ for name in ("CI", *_CI_RUNNER_MARKERS))
+    # Check if we're in a CI environment where encoding might be problematic,
+    # by value as _detect_encoding_issues reads it (CI=false is no runner).
+    is_ci = _on_a_ci_runner()
 
-    # Check console encoding
+    # Check console encoding: whether it can write ASH's own emoji, rather than
+    # a fixed list of code pages (_console_cannot_encode).
     try:
-        console_encoding = sys.stdout.encoding or "unknown"
-        has_encoding_issues = console_encoding.lower() in [
-            "cp1252",
-            "windows-1252",
-            "cp850",
-            "cp437",
-            "ascii",
-        ]
+        has_encoding_issues = _console_cannot_encode(sys.stdout.encoding)
     except (AttributeError, TypeError):
         has_encoding_issues = True
 
@@ -923,22 +1347,30 @@ def configure_windows_safe_logging():
             try:
                 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
                 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-            except (AttributeError, OSError):
-                # Fallback: wrap stdout/stderr with UTF-8 codec
+            except (AttributeError, OSError, ValueError):
+                # Fallback: wrap stdout/stderr with UTF-8 codec. ValueError is
+                # a closed or detached stream's answer to reconfigure and to
+                # detach, which get_logger must not raise for.
                 try:
                     sys.stdout = _utf8_writer_in_place_of(sys.stdout)
                     sys.stderr = _utf8_writer_in_place_of(sys.stderr)
-                except (AttributeError, OSError):
+                except (AttributeError, OSError, ValueError):
                     pass
 
-        # Set locale to UTF-8 if possible
-        try:
-            locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
-        except locale.Error:
-            try:
-                locale.setlocale(locale.LC_ALL, "C.UTF-8")
-            except locale.Error:
-                pass  # Keep default locale
+        # Set locale to UTF-8 if possible, once a process: the locale is the
+        # process's, setlocale is not safe to call from several threads at once,
+        # and get_logger runs this for every logger it sets up, MCP scan threads
+        # included. A second call would set what the first has set.
+        with _LOCALE_STEP_LOCK:
+            if not _locale_step_done:
+                try:
+                    locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+                except locale.Error:
+                    try:
+                        locale.setlocale(locale.LC_ALL, "C.UTF-8")
+                    except locale.Error:
+                        pass  # Keep default locale
+                _locale_step_done = True
 
         # Set environment variable for subprocess encoding. Under the shared
         # environment lock: get_logger runs this from MCP scan threads too.
@@ -1001,7 +1433,11 @@ def remove_ash_handlers(logger: logging.Logger) -> None:
     replaced as before.
     """
     current = _RUN_LOG_SCOPE.get()
-    for handler in [h for h in logger.handlers if added_by_ash(h)]:
+    # One copy of the list, taken whole: a comprehension read the list while
+    # another run's setup or close removed from it, which skipped a handler.
+    for handler in list(logger.handlers):
+        if not added_by_ash(handler):
+            continue
         scope = getattr(handler, _RUN_SCOPE_ATTR, None)
         if scope is not None and scope != current and scope in _ACTIVE_RUN_LOG_SCOPES:
             continue
@@ -1162,9 +1598,9 @@ def close_run_log_scope(scope: Optional[str]) -> None:
     if scope is None:
         return
     logger = logging.getLogger("ash")
-    for handler in [
-        h for h in logger.handlers if getattr(h, _RUN_SCOPE_ATTR, None) == scope
-    ]:
+    for handler in list(logger.handlers):
+        if getattr(handler, _RUN_SCOPE_ATTR, None) != scope:
+            continue
         logger.removeHandler(handler)
         try:
             handler.close()
@@ -1431,6 +1867,19 @@ class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
     """
 
     def __init__(self, filename: str, *args, **kwargs) -> None:
+        # UTF-8 unless the caller chose an encoding. FileHandler's own default,
+        # None, is the locale's encoding, under which a record holding a
+        # character outside the ANSI code page was dropped from the file on
+        # Windows; and since Python 3.10 FileHandler records that default on
+        # self.encoding as the name "locale", so a fallback read at the open
+        # ("self.encoding or 'utf-8'") found a name there and opened the file
+        # in the locale's encoding all the same. The default is chosen here,
+        # before FileHandler reads it. The files are read back as UTF-8.
+        if len(args) >= 2:
+            if args[1] is None:
+                args = (args[0], "utf-8", *args[2:])
+        elif kwargs.get("encoding") is None:
+            kwargs["encoding"] = "utf-8"
         # Imported here, not at the top: fs_guard imports this module for
         # ASH_LOGGER. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
@@ -1446,7 +1895,19 @@ class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
         # Not at the top: fs_guard imports this module. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
 
-        root, self._root = self._root, None
+        # Under the handler's own lock: two close() calls at once each read the
+        # root before either cleared it, and the counted registration was
+        # released twice. The lock may not exist yet: FileHandler opens its file
+        # before the base class makes the lock, so a refused open raises from
+        # __init__ with no lock, and reading self.lock there replaced the refusal
+        # with an AttributeError and left the root registered. Nothing else can
+        # reach a handler that has not been constructed, so no lock is needed then.
+        lock = getattr(self, "lock", None)
+        if lock is None:
+            root, self._root = self._root, None
+        else:
+            with lock:
+                root, self._root = self._root, None
         if root is not None:
             fs_guard.release_writable_root(root)
 
@@ -1457,13 +1918,25 @@ class LogFileHandler(ShownHandlerErrors, logging.FileHandler):
         finally:
             self._release_root()
 
+    def emit(self, record: logging.LogRecord) -> None:
+        # Appending, so logging.FileHandler.emit would open the file again for
+        # a record that reaches a handler close_run_log_scope has closed (its
+        # mode is not "w", the one case the base class refuses), and the
+        # reopened file was never closed; a refusal of that open also escaped
+        # the logging call. A closed handler takes nothing.
+        if self.stream is None and getattr(self, "_closed", False):
+            return
+        super().emit(record)
+
     def _open(self):
         # Not at the top: fs_guard imports this module. Do not hoist.
         from automated_security_helper.utils.sandbox import fs_guard
 
+        # The encoding __init__ chose: UTF-8 unless the caller named one. The
+        # fallback stays for an encoding set to None after the construction.
         return fs_guard.open_for_write(
             self.baseFilename,
-            encoding=self.encoding,
+            encoding=self.encoding or "utf-8",
             errors=self.errors,
             append=True,
             root=Path(self.baseFilename).parent,
@@ -1490,6 +1963,10 @@ def get_logger(
     if root_logger.handlers and name != "":
         logging.getLogger(name).propagate = False
 
+    # A logger made before this module was imported is a plain Logger until it
+    # is adopted (adopt_early_ash_loggers); the setup below relies on ASHLogger's
+    # verbose() and callHandlers().
+    adopt_early_ash_loggers()
     logger: ASHLogger = logging.getLogger(name)  # type: ignore[assignment]
 
     # Attach the Windows-safe filter if not already present
@@ -1522,7 +1999,11 @@ def get_logger(
     # server's own at the first hosted scan. A process's entry point sets it
     # once (configure_last_resort_level).
 
-    SHOW_DEBUG_INFO = logging._levelToName[logger.getEffectiveLevel() or 0] != "INFO"  # type: ignore[index]
+    # From the console level asked for, not from the logger's effective level,
+    # which the line above has just pinned to TRACE: read there, this was always
+    # True and the plain console layout below was never used.
+    requested = _coerce_log_level(level) if level is not None else None
+    SHOW_DEBUG_INFO = requested is None or logging.getLevelName(requested) != "INFO"
     # The setup's own records ("Log level set to", "Show debug info", the
     # verbose pair) are logged AFTER the handlers attach, at the end of this
     # function: logged here, between remove_ash_handlers above and the
@@ -1541,7 +2022,9 @@ def get_logger(
         "highlight": use_color,
         "legacy_windows": platform.system().lower() == "windows",
         "safe_box": platform.system().lower() == "windows",
-        "_environ": {},  # Prevent environment variable issues
+        # The console reads the process environment, as any Rich console does:
+        # built with an empty one it ignored NO_COLOR, FORCE_COLOR, TERM=dumb
+        # and COLUMNS, which an operator or a CI job sets for every program.
     }
 
     # Set color system based on the color preference. "auto" on every platform:
@@ -1635,7 +2118,6 @@ def get_logger(
         if log_format in ["JSONL", "BOTH"]:
             jsonl_log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
             jsonl_file_handler = _log_file_handler(jsonl_log_file, truncate_log)
-            logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
             jsonl_file_handler.setLevel(final_file_log_level)
             jsonl_file_handler.setFormatter(
                 JsonFormatter(
@@ -1654,11 +2136,13 @@ def get_logger(
                 )
             )
             logger.addHandler(run_handler(jsonl_file_handler))
+            # After the handler is attached, so the record reaches the file it
+            # announces instead of going homeless to the last resort.
+            logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
         # Create tabular file handler for logging to a file
         if log_format in ["TABULAR", "BOTH"]:
             tab_log_file = Path(output_dir).joinpath(f"{name}.log")
             tab_file_handler = _log_file_handler(tab_log_file, truncate_log)
-            logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
             tab_file_handler.setLevel(final_file_log_level)
             tab_file_handler.setFormatter(
                 TextFileFormatter(
@@ -1666,18 +2150,22 @@ def get_logger(
                 )
             )
             logger.addHandler(run_handler(tab_file_handler))
+            logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
 
     # After the handlers, so these reach the console and the log files instead
-    # of going homeless (see the note beside SHOW_DEBUG_INFO above).
+    # of going homeless (see the note beside SHOW_DEBUG_INFO above). The level
+    # names come from logging.getLevelName, which answers "Level N" for a
+    # number no name is registered for; the level-to-name table raised KeyError
+    # for one, after the handlers had already been replaced.
     logger._log(
         15,
-        msg=f"Log level set to: {logging._levelToName[level] if isinstance(level, int) else level}",  # type: ignore[index]
+        msg=f"Log level set to: {logging.getLevelName(level) if isinstance(level, int) else level}",
         args=(),
     )
     logger.verbose("Logger initialized: %s", name)
     logger.verbose(
         "Logger effective level: %s",
-        logging._levelToName[logger.getEffectiveLevel() or 0],  # type: ignore[index]
+        logging.getLevelName(logger.getEffectiveLevel() or 0),
     )
     # Verbose, like the setup records beside it: at INFO this flag echo was
     # never seen anywhere -- it went homeless before the handlers attached --
@@ -1710,11 +2198,16 @@ def _log_file_handler(path: Path, truncate: bool) -> logging.FileHandler:
 
 
 def _coerce_log_level(value: str | int) -> Optional[int]:
-    """The numeric level *value* names, or None for a name logging has not got."""
+    """The numeric level *value* names, or None for a name logging has not got.
+
+    A number is ASCII decimal digits only: ``str.isdigit`` admits a superscript
+    or a circled digit that ``int()`` refuses, which raised ValueError from the
+    environment read at import.
+    """
     if isinstance(value, int):
         return value
     name = value.strip().upper()
-    if name.isdigit():
+    if name.isascii() and name.isdecimal():
         return int(name)
     return logging._nameToLevel.get(name)
 
@@ -1759,7 +2252,9 @@ class _ShownLastResort(ShownHandlerErrors, logging.StreamHandler):
     def __init__(self) -> None:
         super().__init__(sys.stderr)
         self.setLevel(_last_resort_level())
-        self.setFormatter(TextFileFormatter("%(message)s"))
+        # The console's text: a record WindowsSafeFilter put in ASCII stays so
+        # here, since this writes to the console that could not encode it.
+        self.setFormatter(TextFileFormatter("%(message)s", unfiltered=False))
 
     def emit(self, record: logging.LogRecord) -> None:
         # The stream of the moment, as the last resort reads it: a test, or Rich's
@@ -1793,6 +2288,17 @@ def configure_last_resort_level(level: "str | int | None" = None) -> None:
     """
     resolved = None if level is None else _coerce_log_level(level)
     _LAST_RESORT.setLevel(_last_resort_level() if resolved is None else resolved)
+    # The gate is meant to be the only filter a homeless record meets, but a
+    # logger whose level was never set takes its parent's (root's WARNING), and
+    # that refuses an INFO or DEBUG record before it can reach a gate set below
+    # WARNING. get_logger pins the logger low for the same reason; this does it
+    # for the records logged before get_logger runs. A level somebody set
+    # stays, and so does a gate at or above the level the logger already has.
+    if (
+        ASH_LOGGER.level == logging.NOTSET
+        and _LAST_RESORT.level < ASH_LOGGER.getEffectiveLevel()
+    ):
+        ASH_LOGGER.setLevel(_LAST_RESORT.level)
 
 
 class _RoutedLastResort(ShownHandlerErrors, logging.Handler):
@@ -1800,8 +2306,9 @@ class _RoutedLastResort(ShownHandlerErrors, logging.Handler):
 
     ASHLogger.callHandlers sends a record no handler took to the stand-in, but a
     logger under "ash" is an ASHLogger only if it was made after this module set
-    the logger class and before anything set another: one made before the import,
-    or after a library's setLoggerClass, would go to logging's last resort, which
+    the logger class and before anything set another (one made before the import
+    is adopted, adopt_early_ash_loggers): one made after a library's
+    setLoggerClass would reach logging's last resort, which
     writes it as given. logging's last resort is therefore this router: "ash" and
     the loggers under it go to the stand-in, shown; every other logger to the
     last resort logging had. A reload of this module replaces the
@@ -1838,6 +2345,7 @@ if logging.lastResort is not None:
     )
 
 
+adopt_early_ash_loggers()
 ASH_LOGGER: ASHLogger = logging.getLogger("ash")  # type: ignore[assignment]
 ASH_LOGGER.propagate = False
 ASH_LOGGER.addFilter(WindowsSafeFilter())

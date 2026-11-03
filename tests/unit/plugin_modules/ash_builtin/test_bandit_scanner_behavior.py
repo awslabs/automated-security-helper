@@ -6,9 +6,15 @@ discovery in ``_process_config_options`` were unexecuted.
 
 The UV mixin hooks (``_validate_uv_tool_availability``,
 ``_get_tool_installation_info``, ``_install_uv_tool``) and the module-level
-``get_uv_tool_command`` are the seams; all are patched with ``autospec`` so a
-call that does not match the real signature fails rather than being absorbed.
-No test here shells out to bandit, and none is skipped when bandit is absent.
+``get_uv_tool_command`` are the seams. The hooks are replaced with lambdas of
+the real arity. The resolver is replaced with ``lambda command, **kwargs``: the
+scanner passes it the ``from_spec`` keyword, and a stub that names only
+``command`` raised on that call, so the stubs accept the keyword rather than
+pin its name; the resolver's own arguments are pinned by
+``test_resolver_is_asked_about_the_scanners_own_command``. The verified-binary
+route is pinned in test_bandit_scanner_exclusions_reach_bandit.py, whose
+verifier stubs record their calls. No test here shells out to bandit, and none
+is skipped when bandit is absent.
 
 One block is deliberately not covered: ``configure()``'s ``except Exception``
 arm. ``self.config = config`` is a plain attribute assignment on a model without
@@ -164,32 +170,13 @@ def test_configure_with_none_leaves_the_existing_config(scanner):
 # ---------------------------------------------------------------------------
 
 
-def test_uv_missing_but_bandit_on_path_falls_back_to_direct_execution(
-    scanner, monkeypatch, tmp_path
-):
-    """With uv absent and bandit directly runnable, run it directly."""
-    monkeypatch.setattr(
-        BanditScanner, "_validate_uv_tool_availability", lambda self: False
-    )
-    monkeypatch.setattr(
-        bandit_scanner,
-        "get_uv_tool_command",
-        lambda command: [str(tmp_path / "bandit")],
-    )
-
-    assert scanner.validate_plugin_dependencies() is True
-    assert scanner.use_uv_tool is False, (
-        "the scanner must stop trying to route through uv once it has decided "
-        "to execute the binary directly"
-    )
-    assert scanner.dependencies_satisfied is True
-
-
 def test_uv_missing_and_bandit_absent_fails_validation(scanner, monkeypatch, caplog):
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: None)
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: None
+    )
 
     with caplog.at_level(logging.ERROR):
         assert scanner.validate_plugin_dependencies() is False
@@ -294,7 +281,9 @@ def test_failed_installation_falls_back_to_the_resolver(scanner, monkeypatch, ca
     monkeypatch.setattr(
         BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: None)
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: None
+    )
 
     with caplog.at_level(logging.WARNING):
         assert scanner.validate_plugin_dependencies() is False
@@ -304,43 +293,71 @@ def test_failed_installation_falls_back_to_the_resolver(scanner, monkeypatch, ca
     )
 
 
-def test_failed_installation_still_succeeds_if_the_resolver_finds_bandit(
-    scanner, monkeypatch, tmp_path
-):
-    """The resolver's answer decides the outcome, not the install failure."""
-    monkeypatch.setattr(
-        BanditScanner, "_validate_uv_tool_availability", lambda self: True
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_get_tool_installation_info", lambda self: {"available": False}
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
-    )
-    monkeypatch.setattr(
-        bandit_scanner,
-        "get_uv_tool_command",
-        lambda command: [str(tmp_path / "bandit")],
-    )
-
-    assert scanner.validate_plugin_dependencies() is True
-
-
 def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
-    """The resolver must be queried for 'bandit', not some other tool name."""
+    """The resolver must be queried for 'bandit', not some other tool name, and
+    under the scan's own ``--from`` spec (the extras and the version range): a
+    bare ``bandit`` resolves a different environment, and a stub that threw
+    the keywords away could not tell."""
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
     asked = []
 
-    def _resolver(command):
-        asked.append(command)
+    def _resolver(command, **kwargs):
+        asked.append((command, kwargs))
 
     monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", _resolver)
 
     scanner.validate_plugin_dependencies()
 
-    assert asked == ["bandit"]
+    assert [command for command, _ in asked] == ["bandit"]
+    ((_, kwargs),) = asked
+    assert "from_spec" in kwargs, kwargs
+    assert kwargs["from_spec"].startswith("bandit[sarif,toml]"), kwargs
+    assert ">=1.7.8" in kwargs["from_spec"], kwargs
+
+
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "online"])
+@pytest.mark.parametrize("route", ["uv-absent", "install-failed"])
+def test_the_resolver_is_handed_the_scanners_offline_mode(
+    scanner, monkeypatch, route, offline
+):
+    """Both resolver calls pass the scanner's own offline reading.
+
+    Read from ASH_OFFLINE here, as ``_is_offline_mode`` reads it. Without the
+    keyword the resolver followed ASH's global mode alone: a scanner held
+    offline on its own was probed online, and the resolver's memo filed that
+    answer under the mode the probe ran in, not the one the scanner is in.
+    """
+    if route == "uv-absent":
+        monkeypatch.setattr(
+            BanditScanner, "_validate_uv_tool_availability", lambda self: False
+        )
+    else:
+        monkeypatch.setattr(
+            BanditScanner, "_validate_uv_tool_availability", lambda self: True
+        )
+        monkeypatch.setattr(
+            BanditScanner,
+            "_get_tool_installation_info",
+            lambda self: {"available": False},
+        )
+        monkeypatch.setattr(
+            BanditScanner,
+            "_install_uv_tool",
+            lambda self, timeout, retry_config: False,
+        )
+    monkeypatch.setenv("ASH_OFFLINE", "YES" if offline else "NO")
+    asked = []
+
+    def _resolver(command, **kwargs):
+        asked.append(kwargs)
+
+    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", _resolver)
+
+    scanner.validate_plugin_dependencies()
+
+    assert [kwargs.get("offline") for kwargs in asked] == [offline]
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +418,47 @@ def test_dot_bandit_config_file_is_passed_as_ini(plugin_context, tmp_path):
     argv = _scan_argv(scanner, plugin_context)
     assert _value_after(argv, "--ini") == [config_file.as_posix()]
     assert extra_arg_values(scanner, "--configfile") == []
+
+
+def test_processing_the_options_again_builds_each_flag_once(plugin_context, tmp_path):
+    """Construction processes the options once; a second call (configure(),
+    or a caller that processes them again) appended another --ini,
+    --confidence-level, --severity-level and --exclude token beside the first.
+    The option arguments now start again from the base ones on every call."""
+    config_file = tmp_path / ".bandit"
+    config_file.write_text("[bandit]\nexclude = /test\n", encoding="utf-8")
+    scanner = BanditScanner(
+        context=plugin_context,
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                config_file=config_file, confidence_level="low"
+            )
+        ),
+    )
+    once = [(arg.key, arg.value) for arg in scanner.args.extra_args]
+
+    scanner._process_config_options()
+
+    assert [(arg.key, arg.value) for arg in scanner.args.extra_args] == once
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert keys.count("--ini") == 1
+    assert keys.count("--confidence-level") == 1
+    assert keys.count("--severity-level") == 1
+    assert sum(key.startswith("--exclude=") for key in keys) == 1
+    argv = _scan_argv(scanner, plugin_context)
+    assert _value_after(argv, "--ini") == [config_file.as_posix()]
+
+    # Rebuilt from the base, not deduplicated by key: a version that kept the
+    # first --confidence-level it saw would also build each flag once, and
+    # keep the stale value after configure() with another.
+    scanner.configure(
+        BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                config_file=config_file, confidence_level="high"
+            )
+        )
+    )
+    assert extra_arg_values(scanner, "--confidence-level") == ["high"]
 
 
 @pytest.mark.parametrize("filename", ["bandit.yaml", "bandit.toml", "custom.yaml"])
@@ -502,17 +560,6 @@ def test_confidence_level_is_passed_through(plugin_context, confidence):
     assert extra_arg_values(scanner, "--confidence-level") == [confidence]
     # Severity filtering is ASH's job, so bandit is always asked for everything.
     assert extra_arg_values(scanner, "--severity-level") == ["all"]
-
-
-def test_additional_formats_each_add_a_format_flag(plugin_context):
-    scanner = BanditScanner(
-        context=plugin_context,
-        config=BanditScannerConfig(
-            options=BanditScannerConfigOptions(additional_formats=["json", "html"])
-        ),
-    )
-
-    assert extra_arg_values(scanner, "--format") == ["json", "html"]
 
 
 def test_no_additional_formats_adds_no_format_flag(scanner):

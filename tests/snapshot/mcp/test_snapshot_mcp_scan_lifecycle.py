@@ -15,10 +15,22 @@ file and returns, or raises the exit a real scan raises. So the status a snapsho
 records is the one the runner decided, not one the test assigned. Pending and
 running are read before the runner gets the loop, or from a registry entry the
 test moves by hand, because those are the states a client polls during a scan.
+
+"Before the runner gets the loop" has to be arranged: ``get_scan_progress`` reads
+the registry on a worker thread (``scan_management.check_scan_progress``), so a
+poll made right after ``run_ash_scan`` returns yields to the loop before it reads,
+and the runner's first step, which marks the entry RUNNING, races the read. The
+start-to-finish test runs its FIRST poll's read inline (``polls_read_before_the_runner``,
+entered around that one call), so that poll is the one a client makes before the
+runner has run, every time and on every worker count; every later poll of the
+test reads on a worker thread, as it does in production.
 """
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict
 from unittest.mock import AsyncMock
@@ -27,6 +39,7 @@ import pytest
 
 from automated_security_helper.cli import mcp_server
 from automated_security_helper.cli.mcp import source_delivery
+from automated_security_helper.core.resource_management import scan_management
 from automated_security_helper.core.resource_management.scan_registry import (
     MCScanStatus,
     get_scan_registry,
@@ -106,6 +119,59 @@ def launcher(monkeypatch):
     return behavior
 
 
+class _ReadsOnTheLoop:
+    """``asyncio`` as scan_management sees it, with ``to_thread`` run inline.
+
+    scan_management.check_scan_progress hands the registry read to a worker
+    thread (``asyncio.to_thread``), so the poll yields to the event loop before
+    anything is read, and the scan task's first step, which marks the entry
+    RUNNING, runs in that gap or not depending on the scheduler: a serial
+    pytest run read ``pending`` where a loaded xdist worker read ``running``
+    from the same poll. Run inline, the read happens before the poll yields,
+    which is the order a poll had before the read moved off the loop and the
+    one "what a client sees first" means. Every other attribute is asyncio's
+    own, so the module's other uses of it are untouched. In place for the
+    duration of the one poll it is entered around (``polls_read_before_the_runner``):
+    every ``to_thread`` in the module ran inline while the whole test ran under
+    it, the final poll and the cleanup included.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(asyncio, name)
+
+    @staticmethod
+    async def to_thread(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+
+@pytest.fixture
+def polls_read_before_the_runner(monkeypatch):
+    """A context to enter around the FIRST poll: its registry read runs on the loop.
+
+    Entered around one call, not set for the test: with the module's ``asyncio``
+    replaced for the whole test, every ``to_thread`` in scan_management ran
+    inline, so the final poll and the cleanup read on the loop too, which is not
+    the production order the other snapshots are meant to record. The context
+    restores the real ``asyncio`` on exit (``monkeypatch.context``).
+    """
+
+    @contextmanager
+    def reads_on_the_loop():
+        # The patch replaces the module's ``asyncio`` name, so it reaches the
+        # read only while check_scan_progress calls ``asyncio.to_thread(``
+        # through it. A refactor to ``from asyncio import to_thread`` would
+        # leave this patch a silent no-op and the first poll racing the runner
+        # again; this fails by name instead.
+        assert "asyncio.to_thread(" in inspect.getsource(
+            scan_management.check_scan_progress
+        )
+        with monkeypatch.context() as patched:
+            patched.setattr(scan_management, "asyncio", _ReadsOnTheLoop())
+            yield
+
+    return reads_on_the_loop
+
+
 async def _call(tool: str, *args, headers=None, **kwargs) -> Dict[str, Any]:
     ctx = make_ctx(headers)
     result = await getattr(mcp_server, tool)(ctx, *args, **kwargs)
@@ -134,15 +200,29 @@ def _register(source: Path, status: MCScanStatus, **finish) -> str:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", list(LAUNCHERS))
 async def test_a_scan_from_start_to_its_terminal_status(
-    outcome, project, launcher, snapshot, snapshot_normalizer
+    outcome,
+    project,
+    launcher,
+    polls_read_before_the_runner,
+    snapshot,
+    snapshot_normalizer,
 ):
     launcher["run"] = LAUNCHERS[outcome]
 
     started = await _call("run_ash_scan", source_dir=str(project))
     scan_id = started["result"]["scan_id"]
     snapshot_normalizer.add_literal(scan_id, "SCAN_ID")
-    # Polled before the runner has had the loop: what a client sees first.
-    first_poll = await _call("get_scan_progress", scan_id)
+    # Polled before the runner has had the loop: what a client sees first. The
+    # registry read runs inline for this one call (polls_read_before_the_runner),
+    # so the runner's first step cannot land between the call and its read;
+    # every later poll reads on a worker thread, as in production. Nothing
+    # else yields before the read: the only await ahead of the registry read
+    # in get_scan_progress is ``_tell_client(ctx, "info", ...)``, which ends
+    # in ``await send(message)`` on the snapshot's ctx (a MagicMock(spec=Context)
+    # whose methods are AsyncMocks, mcp_snapshot_support.make_ctx), and an
+    # AsyncMock completes without suspending.
+    with polls_read_before_the_runner():
+        first_poll = await _call("get_scan_progress", scan_id)
 
     await drain_background_tasks()
 

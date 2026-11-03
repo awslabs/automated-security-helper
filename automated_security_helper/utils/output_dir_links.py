@@ -108,10 +108,13 @@ def is_junction(path: PathLike) -> bool:
     """
     isjunction = getattr(os.path, "isjunction", None)
     if isjunction is not None:
-        return bool(isjunction(path))
+        try:
+            return bool(isjunction(path))
+        except ValueError:  # a NUL in the path: no file has that name
+            return False
     try:
         found = os.lstat(path)
-    except OSError:
+    except (OSError, ValueError):
         return False
     attributes = getattr(found, "st_file_attributes", 0)
     tag = getattr(found, "st_reparse_tag", 0)
@@ -121,27 +124,59 @@ def is_junction(path: PathLike) -> bool:
 
 
 def is_link(path: PathLike) -> bool:
-    """Whether ``path`` is a symlink or a directory junction."""
-    return Path(path).is_symlink() or is_junction(path)
+    """Whether ``path`` is a symlink or a directory junction.
+
+    Read from ``os.lstat`` directly, with every ``OSError`` answering False: on
+    CPython 3.10-3.12 ``Path.is_symlink`` lets a ``PermissionError`` from an
+    unsearchable parent through, which turned the pre-run link checks into
+    tracebacks where no link was there to refuse. A ``ValueError`` answers
+    False too: ``os.lstat`` raises it for a path holding a NUL character, which
+    no file has, and the report command's output-directory arm reached this
+    call with one from a ``--cli-json-input`` document and traced back.
+    """
+    try:
+        found = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISLNK(found.st_mode) or is_junction(path)
 
 
 def _kind(path: Path) -> str:
-    return "a symlink" if path.is_symlink() else "a directory junction"
+    try:
+        is_symlink = stat.S_ISLNK(os.lstat(path).st_mode)
+    except (OSError, ValueError):
+        is_symlink = False
+    return "a symlink" if is_symlink else "a directory junction"
 
 
 def _identity(path: PathLike) -> Optional[Tuple[int, int]]:
     """``(st_dev, st_ino)`` of what ``path`` names, links followed, or None.
 
     None too on a filesystem that reports no inode numbers, which would otherwise
-    make every directory on it the same one.
+    make every directory on it the same one, and for a path holding a NUL
+    character (``ValueError`` from ``os.stat``), which names no file.
     """
     try:
         found = os.stat(path)
-    except OSError:
+    except (OSError, ValueError):
         return None
     if not found.st_ino:
         return None
     return (found.st_dev, found.st_ino)
+
+
+def same_by_identity(first: PathLike, second: PathLike) -> bool:
+    """Whether two paths name one file system object, by device and inode.
+
+    Links are followed. False when either has no identity (:func:`_identity`): a
+    path that does not exist, one holding a NUL character, and any path on a file
+    system that reports inode 0 for everything. ``os.path.samefile`` compares
+    ``(st_dev, st_ino)`` and nothing else, so on such a mount it called every
+    directory the same one; callers that decide containment by identity use this
+    instead.
+    """
+    identity = _identity(first)
+    return identity is not None and identity == _identity(second)
 
 
 def _real_path(path: PathLike) -> Path:
@@ -157,14 +192,24 @@ def _real_path(path: PathLike) -> Path:
 
 
 def _is_below(path: Path, root: Path, root_identity: Optional[Tuple[int, int]]) -> bool:
-    """Whether ``root`` is one of ``path``'s parents, by name or by identity.
+    """Whether ``root`` is one of ``path``'s parents, by name, by real path or by identity.
 
     Compared by device and inode as well as by name, so the answer is the same
     however either path is spelled. A parent that does not exist has no identity
-    and is compared by name.
+    and is compared by name. The parent is also compared with every link
+    resolved: an operator link above the tree that lands in a subdirectory of
+    ``root`` (``/opt/link`` to ``<root>/sub``) puts everything spelled below it
+    inside the tree, so a repository link at a later component is examined,
+    where by name and by identity alone only a parent that IS ``root`` counted.
     """
     named_root = os.path.normcase(root)
     if any(os.path.normcase(parent) == named_root for parent in path.parents):
+        return True
+    real_root = os.path.normcase(_real_path(root))
+    real_parent = _real_path(path.parent)
+    if os.path.normcase(real_parent) == real_root or any(
+        os.path.normcase(parent) == real_root for parent in real_parent.parents
+    ):
         return True
     if root_identity is None:
         return False
@@ -181,8 +226,15 @@ def linked_output_component(
     - each component below ``root`` on the way to the output directory, walked as
       spelled with ``..`` included, so that a link a later ``..`` steps back out of
       is still seen; "below" is decided by name or by device and inode (_is_below),
-      so the way either path is spelled does not matter;
-    - the output directory itself, wherever it is;
+      so the way either path is spelled does not matter. A ``..`` is applied as
+      the kernel applies it, to the directory the components before it lead to
+      with their links followed: a link below ``root`` is refused the moment it is
+      reached, so the links a ``..`` steps back from are the operator's own, above
+      the tree, and stepping back from one lexically examined the components
+      after it at paths the lookup never uses, while a repository link at the
+      path it does use (``/opt/link/../x`` with ``/opt/link`` leading into the
+      tree is ``<root>/x``, not ``/opt/x``) went unexamined;
+    - the output directory itself, wherever it is, as that walk reaches it;
     - for an output directory below ``root``, that its real path is below the real
       path of ``root`` too, which catches a redirection out of the tree that the
       walk cannot see;
@@ -199,12 +251,21 @@ def linked_output_component(
         workspace: The output directory is a workspace's.
     """
     spelled = Path(output_dir).absolute()
+    # A NUL names no file: os.lstat, os.stat and os.path.realpath raise
+    # ValueError for it, which the callers' except clauses (OSError) do not
+    # cover, so the report command traced back on a --cli-json-input document
+    # whose output directory held one. Refused here, before any of them is asked.
+    if "\x00" in str(spelled):
+        return (
+            f"the output directory {spelled.as_posix()!r} holds a NUL character, "
+            "which no path can"
+        )
     root_path = Path(os.path.abspath(root)) if root is not None else None
     root_identity = _identity(root_path) if root_path is not None else None
     current = Path(spelled.anchor)
     for part in spelled.parts[1:]:
         if part == "..":
-            current = current.parent
+            current = _real_path(current).parent
             continue
         if part in ("", "."):
             continue
@@ -218,16 +279,42 @@ def linked_output_component(
                 f"{current.as_posix()} is {_kind(current)}, on the way to the "
                 f"output directory {spelled.as_posix()}"
             )
-    if is_link(spelled):
-        return f"the output directory {spelled.as_posix()} is {_kind(spelled)}"
-    lexical = Path(os.path.abspath(spelled))
-    inside_root = root_path is not None and _is_below(lexical, root_path, root_identity)
+    # The output directory as the lookup reaches it: the spelling with every
+    # ``.`` and ``..`` applied. The same path as the spelling when it holds none.
+    reached = current
+    # ASH's writers open the output directory as written, with ``..`` applied by
+    # text (``os.path.abspath``: ``open_no_follow``, ``ignore_output_dir_in_git``,
+    # ``scan_output_dirs``). When that names another directory than the one the
+    # lookup reaches (``/opt/link/../x`` with ``/opt/link`` leading elsewhere
+    # is ``<link's target>/x`` to the kernel and ``/opt/x`` as text), vetting
+    # either would leave the other unexamined, so the spelling is refused. One
+    # directory under two names (``/tmp/sub/../x`` on macOS, where ``/tmp`` is a
+    # link) is compared with both resolved and passes. Only a spelling with a
+    # ``..`` can name two directories this way: asked of every spelling it cost
+    # two real-path lookups per call, and on Windows, where abspath drops a
+    # trailing dot or space that the lookup's path keeps, it refused a spelling
+    # with no ``..`` for the wrong reason.
+    if ".." in spelled.parts:
+        written = Path(os.path.abspath(spelled))
+        if os.path.normcase(_real_path(written)) != os.path.normcase(
+            _real_path(reached)
+        ):
+            return (
+                f"the output directory {spelled.as_posix()} steps back through a "
+                f"link with ..: the lookup reaches {reached.as_posix()} while the "
+                f"path as written names {written.as_posix()}; spell it without .. "
+                "or as the directory it reaches"
+            )
+    where = _shown(spelled, reached)
+    if is_link(reached):
+        return f"the output directory {where} is {_kind(reached)}"
+    inside_root = root_path is not None and _is_below(reached, root_path, root_identity)
     if root_path is not None and inside_root:
         real_root = _real_path(root_path)
-        actual = _real_path(lexical)
+        actual = _real_path(reached)
         if not _is_below(actual, real_root, root_identity):
             return (
-                f"the output directory {lexical.as_posix()} resolves to "
+                f"the output directory {reached.as_posix()} resolves to "
                 f"{actual.as_posix()}, outside {root_path.as_posix()}"
             )
     names: Tuple[str, ...] = (
@@ -238,10 +325,17 @@ def linked_output_component(
     if inside_root:
         names += (OUTPUT_GITIGNORE,)
     for name in names:
-        entry = spelled / name
+        entry = reached / name
         if is_link(entry):
             return f"{entry.as_posix()} is {_kind(entry)}"
     return None
+
+
+def _shown(spelled: Path, reached: Path) -> str:
+    """``spelled`` for a message, with the path the lookup reaches when it differs."""
+    if os.path.normcase(os.path.abspath(spelled)) == os.path.normcase(reached):
+        return spelled.as_posix()
+    return f"{spelled.as_posix()} (reached as {reached.as_posix()})"
 
 
 def refuse_linked_output_dir(
@@ -275,27 +369,46 @@ def ignore_output_dir_in_git(source_dir: PathLike, output_dir: PathLike) -> bool
 
     Nothing is written when the output directory is not below ``source_dir`` or does
     not exist, or when something is already at the name: a ``.gitignore`` there is
-    the repository's or an earlier run's, and is left as it is. A link at the name
-    is refused, never followed: linked_output_component names it before the run,
-    and the write itself is fs_guard.open_for_write with the output directory as its
-    root and O_EXCL, which refuses one made since with OutputLinkRefused.
+    the repository's or an earlier run's, and is left as it is. Nothing is written
+    either when git lists files committed under the output directory
+    (``scan_output_dirs.git_index_below``): the directory is then partly the
+    repository's, and an ignore-everything rule there would make git ignore every
+    new file a developer adds beside the committed ones. A link at the name is
+    refused, never followed: linked_output_component names it before the run, and
+    the write itself is fs_guard.open_for_write with the output directory as its
+    root and O_EXCL, which refuses one made since with OutputLinkRefused. Any other
+    failure of the write (a read-only output directory, say) answers False: the
+    file is a courtesy to tools that read the tree themselves, and a scan is not
+    aborted over it.
 
     Returns:
         Whether it wrote the file.
     """
     source = Path(os.path.abspath(source_dir))
     output = Path(os.path.abspath(output_dir))
-    if not output.is_dir() or not _is_below(output, source, _identity(source)):
+    try:
+        is_dir = output.is_dir()
+    except OSError:
         return False
-    # Imported here: fs_guard imports this module (see open_no_follow).
+    if not is_dir or not _is_below(output, source, _identity(source)):
+        return False
+    # Imported here: fs_guard imports this module (see open_no_follow), and
+    # scan_output_dirs is above it.
     from automated_security_helper.utils.sandbox import fs_guard
+    from automated_security_helper.utils.scan_output_dirs import git_index_below
 
+    if git_index_below(output).names:
+        return False
     try:
         with fs_guard.open_for_write(
             output / OUTPUT_GITIGNORE, root=output, exclusive=True
         ) as handle:
             handle.write(OUTPUT_GITIGNORE_TEXT)
+    except OutputDirLinkRefused:
+        raise
     except FileExistsError:
+        return False
+    except OSError:
         return False
     return True
 

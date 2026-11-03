@@ -199,10 +199,14 @@ def main() -> int:
         "udp_send": udp_send,
         "env_credentials": env_credentials,
         "ipc_environment": ipc_environment,
-        "unix_socket_connect": unix_socket_connect,
         "plant_symlinks": plant_symlinks,
         "write_host_cache": write_host_cache,
     }
+    if hasattr(socket, "AF_UNIX"):
+        # Windows CPython has no socket.AF_UNIX: there is no Unix socket to reach
+        # there, and the test builds no listener for one. Not attempted, so the
+        # missing attribute is not recorded as a sandbox blocking it.
+        checks["unix_socket_connect"] = unix_socket_connect
     if os.path.isdir("/proc") and sys.platform.startswith("linux"):
         checks["parent_environ"] = parent_environ
     if sys.platform.startswith("linux"):

@@ -1551,12 +1551,15 @@ class TestThePowerShellEntrypoint:
     def test_a_checkout_that_is_itself_a_link_is_not_a_link_in_the_tree(
         self, pwsh, tmp_path
     ):
-        """The twin of the ./ash cell of the same name: the operator works in a link to
-        the checkout, with a shared config beside the checkout. The ".." after the
-        checkout's own link leaves the checkout, so the file is mounted, neither
-        refused nor marked as the repository's. ./ash tests the link's parent against
-        the trees and this wrapper tests the link's own path for a place strictly
-        below one; the two answer alike."""
+        """The twin of two ./ash tests in
+        tests/unit/test_the_container_wrappers_carry_the_operators_config.py,
+        test_a_checkout_that_is_itself_a_link_is_not_refused_as_a_link_in_the_tree
+        and test_a_checkout_that_is_itself_a_link_does_not_mark_a_file_beside_it_as_the_repositorys:
+        the operator works in a link to the checkout, with a shared config beside the
+        checkout. The ".." after the checkout's own link leaves the checkout, so the
+        file is mounted, neither refused nor marked as the repository's. ./ash tests
+        the link's parent against the trees and this wrapper tests the link's own path
+        for a place strictly below one; the two answer alike."""
         if os.name == "nt":
             pytest.skip("creating a symbolic link needs a privilege on Windows")
         root = tmp_path / "set"
@@ -2195,14 +2198,18 @@ class TestThePowerShellConfigCarryAsText:
         # Each add sits directly inside the block of the condition on the mark: the
         # exact flattened sequence, so an add in an else arm, or after the closing
         # brace, does not match.
-        assert (
-            "if ($envConfigMarked) { $envConfigGroups.Add("
-            "@('--config-file-from-scanned-repository', $envConfigInner)) }"
-        ) in text
-        assert (
-            "if ($envConfigMarked) { $envConfigGroups.Add("
-            "@('--config-from-scanned-repository')) }"
-        ) in text
+        host_add = (
+            "$envConfigGroups.Add(@('--config-file-from-scanned-repository', "
+            "$envConfigInner))"
+        )
+        config_add = "$envConfigGroups.Add(@('--config-from-scanned-repository'))"
+        assert f"if ($envConfigMarked) {{ {host_add} }}" in text
+        assert f"if ($envConfigMarked) {{ {config_add} }}" in text
+        # And each add appears once in the whole text: the guarded copy. A second,
+        # unguarded copy placed before it would keep the order above and the guarded
+        # sequence intact while marking every file given without -Config.
+        assert text.count(host_add) == 1, "the host mark is added more than once"
+        assert text.count(config_add) == 1, "the config mark is added more than once"
 
     def test_a_name_the_path_functions_throw_on_is_refused_as_a_missing_file(self):
         """Windows PowerShell 5.1 throws from the path functions on a quote or a
@@ -2348,6 +2355,47 @@ class TestTheWrappersListsAreTheClis:
         assert self._ps1_list("ashTakesSandbox") == takes_it
         # With no command named, ash scans, and takes --sandbox there too.
         assert "sandbox" in {param.name for param in root.params}
+
+    @staticmethod
+    def _options_under(command) -> list:
+        """The option params of a click command and of every command under it."""
+        found = [p for p in command.params if p.param_type_name == "option"]
+        for sub in getattr(command, "commands", {}).values():
+            found.extend(TestTheWrappersListsAreTheClis._options_under(sub))
+        return found
+
+    def test_the_commands_whose_dash_o_is_their_own_are_the_ones_that_define_one(self):
+        """ASH_DASH_O_IS_THE_SUBCOMMANDS names the commands after which ./ash forwards
+        -o as the command's own option instead of taking it as its runner: every
+        command that defines a -o of its own (on itself or a command under it) that
+        is not the CLI's alias of --oci-runner. scan's -o is that alias, so -o after
+        scan stays the runner, as it does with no command and after a command that
+        defines no -o at all (the containerized CLI would refuse it there). Derived
+        from the click commands, as the other lists are, so a command that gains a
+        non-runner -o fails here until the list names it, instead of having its -o
+        eaten as the runner."""
+        root = self._root()
+        dash_o_is_the_commands = {
+            name
+            for name, command in root.commands.items()
+            if any(
+                "-o" in option.opts and "--oci-runner" not in option.opts
+                for option in self._options_under(command)
+            )
+        }
+
+        assert (
+            self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS") == dash_o_is_the_commands
+        )
+        # The runner's side of the rule: scan's own -o is the runtime alias.
+        scan_dash_o = [
+            option
+            for option in self._options_under(root.commands["scan"])
+            if "-o" in option.opts
+        ]
+        assert [
+            set(option.opts) >= {"-o", "--oci-runner"} for option in scan_dash_o
+        ] == [True], scan_dash_o
 
 
 @pytest.mark.unit

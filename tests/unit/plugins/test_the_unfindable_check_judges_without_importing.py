@@ -282,3 +282,31 @@ def test_the_walk_imports_nothing_while_judging(tmp_path, forgetting):
     # The control: the marker mechanism works when something does import it.
     importlib.import_module("zqwalkplant_ash_plugins")
     assert marker.exists()
+
+
+def test_a_spec_probe_that_raises_keyerror_is_left_to_the_import(monkeypatch):
+    """A zipimporter evicted by a per-scan cache clear can raise KeyError from
+    its own directory cache on the next probe (the prior instance of the class
+    is documented in ``discovery._is_top_level_package``). The walk treats
+    that level exactly as an ImportError: it cannot be judged without
+    importing, so the name is left to the import instead of crashing the
+    check -- in a two-project workspace run the second project's check meets
+    exactly this state after the first project's cache invalidation."""
+
+    name = "zqwalkevicted_ash_plugins"
+
+    class EvictedArchiveFinder:
+        """A finder whose find_spec raises the evicted zipimporter's KeyError."""
+
+        @staticmethod
+        def find_spec(fullname, path=None, target=None):
+            if fullname == name or fullname.startswith(name + "."):
+                raise KeyError("hostedtoolcache-python314-zip")
+            return None
+
+    monkeypatch.setattr(sys, "meta_path", [EvictedArchiveFinder, *sys.meta_path])
+
+    # No KeyError escapes and no refusal is raised: the probe's answer is
+    # "cannot judge", the same outcome an ImportError from the finder gives.
+    assert refuse_unfindable_plugin_imports([name]) is None
+    assert name not in sys.modules

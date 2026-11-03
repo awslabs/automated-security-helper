@@ -49,7 +49,14 @@ def _stat_failing_with(error, path):
     [
         (FileNotFoundError(errno.ENOENT, "No such file"), MISSING, "ENOENT"),
         (NotADirectoryError(errno.ENOTDIR, "Not a directory"), MISSING, "ENOTDIR"),
-        (OSError(errno.ELOOP, "Too many levels of symbolic links"), LOOP, "ELOOP"),
+        # The code is the errno's name as this platform's errno module spells
+        # it: on Windows ELOOP and WSAELOOP share a number, and errorcode names
+        # it WSAELOOP.
+        (
+            OSError(errno.ELOOP, "Too many levels of symbolic links"),
+            LOOP,
+            errno.errorcode[errno.ELOOP],
+        ),
         (PermissionError(errno.EACCES, "Permission denied"), UNREADABLE, "EACCES"),
         (OSError(errno.EIO, "Input/output error"), UNREADABLE, "EIO"),
         (OSError("stat failed without an errno"), UNREADABLE, "no error code"),
@@ -121,3 +128,13 @@ def test_a_missing_path_and_a_link_loop_on_the_real_filesystem(tmp_path):
     loop.symlink_to(loop)
     looped = stat_named_path(loop)
     assert isinstance(looped, StatProblem) and looped.kind == LOOP
+
+
+def test_a_link_to_a_missing_target_on_the_real_filesystem_is_missing(tmp_path):
+    """A dangling link is a missing path, not a loop, on every platform: the
+    control for the Windows reading of an unresolvable link as LOOP, which must
+    not reach a link whose target is merely absent."""
+    dangling = tmp_path / "dangling.yaml"
+    dangling.symlink_to(tmp_path / "absent-target.yaml")
+    result = stat_named_path(dangling)
+    assert isinstance(result, StatProblem) and result.kind == MISSING, result

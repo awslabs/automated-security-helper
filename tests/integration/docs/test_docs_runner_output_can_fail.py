@@ -9,17 +9,27 @@ drawing, durations and timestamps, the session's paths, runs of whitespace), and
 requires every line of the sample other than ``...`` to appear in the output, in
 order. These tests plant a sample the output contradicts, with a matching control
 beside it, using trivial commands so the file runs in a few seconds.
+
+Skipped on Windows for the reason test_docs_runner_can_fail.py gives: the runner starts
+its blocks with bash and the docs job has no Windows runner (see docs_runner.py).
 """
 
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX shell and process groups; the docs job has no Windows runner",
+    ),
+]
 
 HERE = Path(__file__).resolve().parent
 FENCE = "```"

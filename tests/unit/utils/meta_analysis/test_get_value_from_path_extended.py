@@ -35,11 +35,19 @@ def test_get_value_from_path_null_value():
 
 
 def test_get_value_from_path_array_index_out_of_bounds():
-    """Test get_value_from_path with an array index that is out of bounds."""
+    """An index past the end names no field: the aggregate does not hold it."""
     obj = {"array": [1, 2, 3]}
     result = get_value_from_path(obj, "array[5]")
 
-    assert result["exists"] is True
+    assert result["exists"] is False
+    assert result["value"] is None
+
+
+def test_get_value_from_path_index_into_a_non_array_does_not_exist():
+    obj = {"array": "not a list"}
+    result = get_value_from_path(obj, "array[0]")
+
+    assert result["exists"] is False
     assert result["value"] is None
 
 

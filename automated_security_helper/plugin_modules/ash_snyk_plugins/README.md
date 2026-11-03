@@ -119,6 +119,7 @@ commands write ASH's output outside the scanned tree with `--output-dir`. When t
 output directory is inside the scanned tree, as the default `.ash/ash_output` is,
 snyk-code reports `ERROR` for the source and names the output directory.
 
+<!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Scan current directory
 uv run ash --scanners snyk-code --output-dir ../ash_output

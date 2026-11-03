@@ -122,6 +122,8 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
         env=checkout_env(),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     log = f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\nSTDERR:\n{proc.stderr[-4000:]}"

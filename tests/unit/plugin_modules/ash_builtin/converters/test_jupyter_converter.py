@@ -43,6 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverterConfigOptions,
 )
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
@@ -328,7 +329,13 @@ class TestValidatePluginDependencies:
         True at once; see test_jupyter_converter_needs_a_notebook.py)."""
         source = Path(test_plugin_context.source_dir)
         source.mkdir(parents=True, exist_ok=True)
-        (source / "analysis.ipynb").write_text("{}", encoding="utf-8")
+        # A notebook by the converter's own pre-check (nbformat 4 with a cells
+        # list): a file that is not one is recorded as an input error before
+        # any launch and is no candidate, so it would not bring the check here.
+        (source / "analysis.ipynb").write_text(
+            '{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": []}',
+            encoding="utf-8",
+        )
 
     def test_uv_installed_tool_is_accepted(self, converter, ash_log_records):
         converter._get_tool_installation_info = Mock(
@@ -788,7 +795,13 @@ class TestAConstraintReadFromTheEnvironmentIsNotShown:
     def _a_notebook_to_convert(self, test_plugin_context):
         source = Path(test_plugin_context.source_dir)
         source.mkdir(parents=True, exist_ok=True)
-        (source / "analysis.ipynb").write_text("{}", encoding="utf-8")
+        # A notebook by the converter's own pre-check (nbformat 4 with a cells
+        # list): a file that is not one is recorded as an input error before
+        # any launch and is no candidate, so it would not bring the check here.
+        (source / "analysis.ipynb").write_text(
+            '{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": []}',
+            encoding="utf-8",
+        )
 
     def test_the_recorded_reason_and_warning_carry_no_value(
         self, test_plugin_context, tmp_path, monkeypatch, ash_log_records
@@ -1508,26 +1521,27 @@ class TestExecuteNbconvertViaUv:
             for m in messages_at(ash_log_records, logging.WARNING)
         )
 
-    def test_a_failing_module_import_escapes_every_handler(self, converter):
-        """Pins a real defect: the import failing is not handled at all.
-
-        The uv_tool_runner import sits inside the try block and binds
-        UVToolRunnerError as a local name. When the import statement itself
-        fails, Python evaluates the earlier ``except UVToolRunnerError`` clause
-        first; the name is unbound, so an UnboundLocalError is raised while
-        handling the original ImportError and propagates out of the method
-        instead of returning False. Hoisting the import to module scope, or
-        putting ``except ImportError`` first, fixes it -- and turns this test
-        red, which is the point.
+    def test_a_failing_module_import_is_handled_as_no_conversion(
+        self, converter, ash_log_records
+    ):
+        """The uv_tool_runner import sits inside the try block and binds
+        UVToolRunnerError as a local name. With ``except ImportError`` placed
+        before the clause that names that error, an import that fails is
+        handled as "uv could not run" and the method returns False, where it
+        once raised UnboundLocalError out of the handler.
         """
-        with (
-            patch.dict(
-                sys.modules,
-                {"automated_security_helper.utils.uv_tool_runner": None},
-            ),
-            pytest.raises(UnboundLocalError),
+        with patch.dict(
+            sys.modules,
+            {"automated_security_helper.utils.uv_tool_runner": None},
         ):
-            converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"])
+            assert (
+                converter._execute_nbconvert_via_uv(["jupyter", "nbconvert"]) is False
+            )
+
+        assert any(
+            "UV tool runner module not available" in m
+            for m in messages_at(ash_log_records, logging.WARNING)
+        )
 
 
 class TestConvert:
@@ -1595,6 +1609,54 @@ class TestConvert:
         assert not cmd[cmd.index("--output") + 1].endswith(".py"), (
             "nbconvert appends .py itself"
         )
+
+    def test_a_converted_notebook_is_recorded_with_its_source(
+        self, converter, tmp_path, monkeypatch, installed_jupyter
+    ):
+        """converted-sources.json beside the output maps the converted file, as a
+        finding in it names it (relative to the work directory), to the notebook
+        in the scanned tree, so --changed-files-only places the finding by the
+        notebook."""
+        from automated_security_helper.utils.scan_output_dirs import (
+            CONVERTED_SOURCES_FILE_NAME,
+        )
+
+        notebook = write_notebook(converter.context.source_dir / "nb", "analysis.ipynb")
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", nbconvert_double())
+
+        (out,) = converter.convert()
+
+        recorded = json.loads(
+            (converter.results_dir / CONVERTED_SOURCES_FILE_NAME).read_text(
+                encoding="utf-8"
+            )
+        )
+        converted_path = (
+            out.resolve()
+            .relative_to(Path(converter.context.work_dir).resolve())
+            .as_posix()
+        )
+        assert recorded == {converted_path: "nb/analysis.ipynb"}
+
+    def test_nothing_is_recorded_when_no_notebook_converted(
+        self, converter, tmp_path, monkeypatch, installed_jupyter
+    ):
+        from automated_security_helper.utils.scan_output_dirs import (
+            CONVERTED_SOURCES_FILE_NAME,
+        )
+
+        notebook = write_notebook(converter.context.source_dir, "analysis.ipynb")
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        monkeypatch.setattr(
+            f"{MODULE}.run_ended_with_the_server",
+            nbconvert_double(returncode=1, stderr="boom"),
+        )
+
+        assert converter.convert() == []
+        assert not (converter.results_dir / CONVERTED_SOURCES_FILE_NAME).exists()
 
     def test_directories_in_the_scan_set_are_skipped(
         self, converter, ash_log_records, monkeypatch
@@ -1981,6 +2043,9 @@ class TestConvert:
             # context's config; the default config honors them.
             "honor_ignore_files": True,
             "run_id": RUN_ID,
+            # The workspace's output directory goes with the scan's own; a
+            # single-project scan has none.
+            "workspace_output_dir": None,
         }
 
 
@@ -2032,6 +2097,43 @@ class TestCandidateInputCount:
 
         assert converter.candidate_input_count() == 1
         assert started == []
+
+    def test_the_dependency_check_reads_as_far_as_the_first_candidate(
+        self, converter, monkeypatch
+    ):
+        """The check asks whether nbconvert is needed at all, not how many notebooks
+        need it. Answering through the count read and parsed every notebook in the
+        tree (up to 256 MiB each) before convert() parsed them all again; the
+        yes-or-no answer stops at the first candidate. The count still reads them
+        all, since the completeness gate needs the number."""
+        for name in ("one.ipynb", "two.ipynb", "three.ipynb"):
+            write_notebook(converter.context.source_dir, name)
+        parsed = []
+        real = type(converter)._would_hand_to_nbconvert
+
+        def counting(self, ipynb_file):
+            parsed.append(Path(ipynb_file).name)
+            return real(self, ipynb_file)
+
+        monkeypatch.setattr(type(converter), "_would_hand_to_nbconvert", counting)
+
+        assert converter._has_candidate_input() is True
+        assert len(parsed) == 1, parsed
+
+        parsed.clear()
+        assert converter.candidate_input_count() == 3
+        assert len(parsed) == 3, parsed
+
+    def test_without_candidates_the_check_answers_false_not_none(self, converter):
+        """The dependency check skips nbconvert only on a definite no: a tree with
+        no notebooks answers False, and the scan set it could not read answers
+        None, as the count does."""
+        (converter.context.source_dir).mkdir(parents=True, exist_ok=True)
+        (converter.context.source_dir / "template.yaml").write_text(
+            "Resources: {}\n", encoding="utf-8"
+        )
+
+        assert converter._has_candidate_input() is False
 
     def test_an_unreadable_scan_set_reports_no_count_rather_than_zero(
         self, converter, monkeypatch
@@ -2085,3 +2187,215 @@ class TestCandidateInputCount:
             "both convert() and candidate_input_count() must go through "
             "_notebooks_in_scan_set, or the two selections can drift"
         )
+
+    def test_a_notebook_under_an_operator_ignore_path_is_not_counted(self, converter):
+        """convert() skips it, so a missing nbconvert costs no coverage for it.
+
+        A tree whose only notebooks are ignored used to fail the completeness gate
+        on an unavailable nbconvert over files the converter would not have touched.
+        """
+        write_notebook(converter.context.source_dir / "keep", "keep.ipynb")
+        write_notebook(converter.context.source_dir / "vendor", "vendored.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="third-party code")
+        ]
+
+        assert converter.candidate_input_count() == 1
+
+        converter.context.config.global_settings.ignore_paths.append(
+            IgnorePathWithReason(path="keep/*", reason="generated")
+        )
+
+        assert converter.candidate_input_count() == 0
+
+    def test_a_client_supplied_ignore_path_does_not_lower_the_count(self, converter):
+        """The control: convert() converts a notebook under a client's entry."""
+        write_notebook(converter.context.source_dir / "client", "c.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="client/*", reason="client", client_supplied=True)
+        ]
+
+        assert converter.candidate_input_count() == 1
+
+    def test_ignore_suppressions_counts_a_notebook_under_an_ignore_path(
+        self, converter
+    ):
+        """With --ignore-suppressions convert() skips nothing, so nothing is left out."""
+        write_notebook(converter.context.source_dir / "vendor", "v.ipynb")
+        converter.context.config.global_settings.ignore_paths = [
+            IgnorePathWithReason(path="vendor/*", reason="operator")
+        ]
+        converter.context.ignore_suppressions = True
+
+        assert converter.candidate_input_count() == 1
+
+
+class TestScanSetNamesAreReadAsGiven:
+    """A scan-set name is a file's name; stripping it names another file.
+
+    The selection used to strip whitespace from every name, which ``scan_set`` and
+    the archive converter stopped doing: a name ending in whitespace is a file that
+    exists only with it, and without it the converter opened a notebook that does
+    not exist and recorded the failure. Such a name is not a notebook's at all,
+    since its suffix is not ``.ipynb``.
+    """
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Windows drops a trailing space from a name"
+    )
+    def test_a_name_ending_in_whitespace_is_not_a_notebook(
+        self, converter, monkeypatch
+    ):
+        source = converter.context.source_dir
+        source.mkdir(parents=True, exist_ok=True)
+        spaced = source / "nb.ipynb "
+        spaced.write_text(json.dumps(_NOTEBOOK), encoding="utf-8")
+        assert spaced.exists() and not (source / "nb.ipynb").exists()
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(spaced)])
+
+        assert converter._notebooks_in_scan_set() == []
+        assert converter.candidate_input_count() == 0
+        assert converter.convert() == []
+        assert converter.failed_inputs == []
+        assert converter.refused_inputs == []
+
+    def test_a_notebook_whose_name_holds_a_space_converts(self, converter, monkeypatch):
+        """The control: whitespace inside a name was never the problem."""
+        notebook = write_notebook(converter.context.source_dir, "my nb.ipynb")
+        monkeypatch.setattr(f"{MODULE}.scan_set", lambda **kwargs: [str(notebook)])
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+
+        assert converter._notebooks_in_scan_set() == [str(notebook)]
+        results = converter.convert()
+
+        assert len(results) == 1 and len(run.calls) == 1
+        assert converter.failed_inputs == []
+
+
+class TestIgnoredBy:
+    """``_ignored_by`` reads a scan-set path against the ignore paths and never
+    raises: with no ignore paths it reads nothing, and a path that is not lexically
+    under the source directory is named by no entry. It used to call
+    ``relative_to`` first, so such a path raised ValueError into the conversion
+    and was recorded as a gating tool failure of a sound notebook."""
+
+    def test_a_path_outside_the_tree_is_not_ignored_and_does_not_raise(self, converter):
+        entries = [IgnorePathWithReason(path="nb.ipynb", reason="x")]
+
+        assert converter._ignored_by("/elsewhere/nb.ipynb", entries) is None
+
+    def test_no_ignore_paths_means_no_notebook_is_ignored(self, converter):
+        assert converter._ignored_by("/elsewhere/nb.ipynb", []) is None
+
+    def test_a_notebook_under_the_tree_is_named_by_its_entry(self, converter):
+        """The control."""
+        source = converter.context.source_dir
+        entry = IgnorePathWithReason(path="vendor/*", reason="third-party")
+
+        assert (
+            converter._ignored_by(str(Path(source) / "vendor" / "nb.ipynb"), [entry])
+            is entry
+        )
+
+
+class TestOutputNames:
+    """Every notebook that converts keeps an output of its own.
+
+    The converted file is named after the notebook's path folded into one
+    component. Two paths used to fold to one name (``a b.ipynb`` and
+    ``a-b.ipynb``), and on a case-insensitive filesystem two names that differ
+    only in case still are one file; a long path folds to a name longer than a
+    file name may be. The first two used to make the later conversion remove the
+    earlier notebook's output, with nothing recording that the earlier notebook
+    was never scanned; the third failed the conversion on the name alone.
+    """
+
+    def _convert(self, converter, monkeypatch, notebooks):
+        monkeypatch.setattr(
+            f"{MODULE}.scan_set", lambda **kwargs: [str(n) for n in notebooks]
+        )
+        use_stand_in_nbconvert(monkeypatch, converter)
+        run = nbconvert_double()
+        monkeypatch.setattr(f"{MODULE}.run_ended_with_the_server", run)
+        return converter.convert(), run
+
+    def test_two_notebooks_whose_names_differ_only_in_punctuation_keep_their_own(
+        self, converter, ash_log_records, monkeypatch
+    ):
+        """``a b.ipynb`` and ``a-b.ipynb`` folded to one name once. The folding
+        gives distinct paths distinct names now, so each notebook keeps its own
+        folded name: no digest is added and no notice is written."""
+        # Out of the way, so only the names decide here.
+        monkeypatch.setattr(f"{MODULE}._OUTPUT_NAME_MAX_BYTES", 100_000, raising=False)
+        spaced = write_notebook(converter.context.source_dir, "a b.ipynb")
+        dashed = write_notebook(converter.context.source_dir, "a-b.ipynb")
+
+        results, run = self._convert(converter, monkeypatch, [spaced, dashed])
+
+        assert len(run.calls) == 2
+        assert len(results) == 2, results
+        assert len(set(results)) == 2, "the second notebook overwrote the first's"
+        assert all(path.is_file() for path in results)
+        for notebook, result in zip((spaced, dashed), results):
+            tail = get_normalized_filename(notebook.name) + "-converted.py"
+            assert result.name.endswith(tail), (result.name, tail)
+        assert converter.failed_inputs == []
+        info = messages_at(ash_log_records, logging.INFO)
+        assert not any("a-b.ipynb" in m and "a b.ipynb" in m for m in info), info
+
+    def test_two_notebooks_whose_folded_names_differ_only_in_case_both_keep_an_output(
+        self, converter, ash_log_records, monkeypatch
+    ):
+        """On a case-insensitive filesystem the two names are one file; the
+        second is told apart everywhere, so the outputs are the same on every
+        host. The first keeps the plain folded name; the notice names both."""
+        monkeypatch.setattr(f"{MODULE}._OUTPUT_NAME_MAX_BYTES", 100_000, raising=False)
+        lower = write_notebook(converter.context.source_dir, "nb.ipynb")
+        upper = write_notebook(converter.context.source_dir, "NB.ipynb")
+
+        results, run = self._convert(converter, monkeypatch, [lower, upper])
+
+        assert len(run.calls) == 2
+        assert len(results) == 2, results
+        assert len({path.name.casefold() for path in results}) == 2
+        assert all(path.is_file() for path in results)
+        assert results[0].name.endswith(expected_output_name(lower))
+        assert results[1].name.endswith("-converted.py")
+        assert converter.failed_inputs == []
+        info = messages_at(ash_log_records, logging.INFO)
+        assert any("NB.ipynb" in m and "nb.ipynb" in m for m in info), info
+
+    def test_the_output_is_named_by_the_notebooks_path_in_the_tree_wherever_ash_runs(
+        self, converter, monkeypatch, tmp_path
+    ):
+        """The folded name was the notebook's path relative to the process
+        working directory: a run from outside the tree wrote the host's absolute
+        path into the converted file's name, and two runs named one notebook two
+        ways."""
+        notebook = write_notebook(converter.context.source_dir / "sub", "nb.ipynb")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        results, run = self._convert(converter, monkeypatch, [notebook])
+
+        assert len(run.calls) == 1
+        assert [path.name for path in results] == ["sub_snb__ipynb-converted.py"]
+        assert converter.failed_inputs == []
+
+    def test_a_notebook_whose_folded_name_is_too_long_for_a_file_still_converts(
+        self, converter, monkeypatch
+    ):
+        """The notebook's own name is a legal file name; folded with its
+        directories into one component it is not, so the output's name is cut."""
+        notebook = write_notebook(converter.context.source_dir, "n" * 240 + ".ipynb")
+
+        results, run = self._convert(converter, monkeypatch, [notebook])
+
+        assert len(run.calls) == 1
+        assert converter.failed_inputs == [], converter.failed_inputs
+        assert len(results) == 1 and results[0].is_file()
+        assert len(results[0].name.encode("utf-8")) <= 255
+        assert results[0].name.endswith("-converted.py")

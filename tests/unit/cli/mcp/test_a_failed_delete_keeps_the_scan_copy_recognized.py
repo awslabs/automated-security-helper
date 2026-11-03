@@ -128,8 +128,16 @@ def _a_session_with_a_bound_profile(tmp_path, monkeypatch, session_id):
     profile_registry.set_profile_registry(
         profile_registry.register_profiles([f"held={profile}"])
     )
+    # The runner copies the profile the binding's trusted_config_path names
+    # (_run_scan_async reads resolve_session_trusted_config_path, never the
+    # session's config_path). Bound without it, a delivered config runs with no
+    # trusted base: no copy is made, so there is nothing for a delete to fail on.
     profile_registry.bind_session_config(
-        session_id, config=AshConfig(), profile_name="held", config_path=str(profile)
+        session_id,
+        config=AshConfig(),
+        profile_name="held",
+        config_path=str(profile),
+        trusted_config_path=str(profile),
     )
     return target, delivered, profile
 

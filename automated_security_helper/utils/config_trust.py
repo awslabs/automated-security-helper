@@ -61,6 +61,11 @@ Constraints and failure modes
 * Fail closed. A config with no recorded provenance (one built without
   ``resolve_config``) counts as the tree's, and so does a key whose trusted value
   cannot be resolved because an override does not apply to the bare trusted base.
+  The overrides of a section are replayed together first, as the scan applies
+  them, and one at a time when the batch does not apply, so such an override
+  makes only the keys it writes to (and the keys above them) unresolvable; the
+  other keys of the section keep their trusted value, and a pair of overrides
+  valid only together stays the operator's.
 * A trusted config outside the tree that ``extends`` a base inside it counts as the
   tree's as a whole, as it does for the sandbox's grants: the merged document does not
   record which file set a value. Set such a value with ``--config-overrides``.
@@ -79,6 +84,9 @@ from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 PathLike = Union[str, "os.PathLike[str]"]
 
 _MISSING = object()
+
+#: The top-level sections whose second segment names a plugin.
+_PLUGIN_SEGMENTS = frozenset({"scanners", "converters", "reporters"})
 
 
 @dataclass
@@ -110,36 +118,105 @@ class ConfigProvenance:
     def trusted_value(self, key: str) -> Any:
         """The value at ``key`` in the trusted base plus the overrides under it.
 
-        ``_MISSING`` when there is no trusted base or an override cannot be
-        applied to it.
+        ``_MISSING`` when there is no trusted base, or when an override that
+        writes to ``key``, to a key under it or to a key above it cannot be
+        applied to the base: that override's effect on ``key`` cannot be told.
+        An override elsewhere in the section that fails leaves ``key`` resolved.
         """
-        section = key.split(".")[0]
+        section = _key_parts(key)[0]
         if section not in self._resolved:
             self._resolved[section] = self._resolve_section(section)
         resolved = self._resolved[section]
         if resolved is _MISSING:
             return _MISSING
-        return value_at(resolved, key)
+        asked = _key_parts(key)
+        if any(_one_under_the_other(asked, failed) for failed in resolved.failed):
+            return _MISSING
+        return value_at(resolved.value, key)
 
     def _resolve_section(self, section: str) -> Any:
+        """The trusted base with the section's overrides replayed.
+
+        The section's overrides are applied together first, as the scan applies
+        them: ``apply_config_overrides`` validates the configuration it returns,
+        so two overrides that are valid only together (a mode and the path that
+        mode requires) are taken as the operator wrote them. Only when the batch
+        raises is each override applied on its own, in the order given, so one
+        that the bare trusted base cannot take (it writes under a section only
+        the tree's config introduced, say) is recorded in ``failed`` by its key
+        and the others still apply. Replayed together alone, one such override
+        made the whole section unresolvable, and every key under ``scanners``
+        then read as not the operator's; replayed one at a time alone, a pair
+        valid only together failed, and the operator's own value read as not
+        the operator's.
+        """
         if self.trusted is None:
             return _MISSING
-        mine = [
-            o
-            for o in self.overrides
-            if str(o).partition("=")[0].removesuffix("+").split(".")[0] == section
-        ]
+        mine = [o for o in self.overrides if _key_parts(_override_key(o))[0] == section]
         base = copy.deepcopy(self.trusted)
         if not mine:
-            return base
+            return _ResolvedSection(base, ())
         from automated_security_helper.config.resolve_config import (
             apply_config_overrides,
         )
 
         try:
-            return apply_config_overrides(base, mine)
+            return _ResolvedSection(apply_config_overrides(base, mine), ())
         except Exception:  # noqa: BLE001 - any failure means "cannot tell"
-            return _MISSING
+            pass
+        # The batch may have been applied in part before it raised; replay from
+        # an untouched copy of the base.
+        base = copy.deepcopy(self.trusted)
+        failed: List[Tuple[str, ...]] = []
+        for override in mine:
+            try:
+                base = apply_config_overrides(base, [override])
+            except Exception:  # noqa: BLE001 - any failure means "cannot tell"
+                failed.append(_key_parts(_override_key(override)))
+        return _ResolvedSection(base, tuple(failed))
+
+
+@dataclass(frozen=True)
+class _ResolvedSection:
+    """One section of the trusted base with its overrides replayed.
+
+    ``failed`` holds the key of each override the base could not take, as its
+    folded parts (:func:`_key_parts`).
+    """
+
+    value: Any
+    failed: Tuple[Tuple[str, ...], ...]
+
+
+def _override_key(override: Any) -> str:
+    """The dotted key a ``--config-overrides`` entry writes to, ``key=value`` and
+    ``key+=value`` alike."""
+    return str(override).partition("=")[0].removesuffix("+").strip()
+
+
+def _key_parts(key: str) -> Tuple[str, ...]:
+    """The segments of dotted ``key``, with ``-`` read as ``_`` in each, as the
+    config accepts either spelling (:func:`value_at`).
+
+    The plugin name under ``scanners``, ``converters`` or ``reporters`` is
+    folded further (case and separators dropped, as the config folds a plugin's
+    section name), so an override written ``scanners.Bandit...`` and a key asked
+    as ``scanners.bandit...`` are the same plugin to :func:`_one_under_the_other`.
+    """
+    parts = tuple(part.replace("-", "_") for part in key.split("."))
+    if len(parts) > 1 and parts[0] in _PLUGIN_SEGMENTS:
+        from automated_security_helper.config.plugin_section_names import (
+            folded_section_name,
+        )
+
+        parts = (parts[0], folded_section_name(parts[1]), *parts[2:])
+    return parts
+
+
+def _one_under_the_other(first: Tuple[str, ...], second: Tuple[str, ...]) -> bool:
+    """Whether one key is the other, or lies under it."""
+    shorter = min(len(first), len(second))
+    return first[:shorter] == second[:shorter]
 
 
 def record_provenance(
@@ -203,7 +280,7 @@ def value_at(config: Any, key: str) -> Any:
 def _comparable(value: Any) -> Any:
     if isinstance(value, os.PathLike):
         value = os.fspath(value)
-    return value.strip() if isinstance(value, str) else value
+    return value
 
 
 def _same_value(expected: Any, value: Any) -> bool:
@@ -212,13 +289,39 @@ def _same_value(expected: Any, value: Any) -> bool:
     A scanner holds a path option as a ``Path`` where the config holds the string,
     so when either side is a path both are compared as paths: on Windows
     ``str(Path("/x/rc"))`` is ``\\x\\rc``, which no string comparison matches
-    with ``/x/rc``. Two strings are compared as strings.
+    with ``/x/rc``. Two strings are compared as strings, exactly as written:
+    ``operator_path`` resolves ``value`` as given, so a value that differs from
+    the operator's by a leading or trailing character (whitespace, or one of the
+    separators ``str.strip`` also removes that the config model keeps) names a
+    different path and is not the operator's.
     """
     as_paths = isinstance(expected, os.PathLike) or isinstance(value, os.PathLike)
     expected, value = _comparable(expected), _comparable(value)
     if as_paths and isinstance(expected, str) and isinstance(value, str):
         return PurePath(expected) == PurePath(value)
     return expected == value
+
+
+def operator_value(config: Any, key: str) -> Tuple[bool, Any]:
+    """The operator's own value for dotted ``key``, when ``config`` records one.
+
+    ``(True, value)`` when ``config`` carries a provenance whose trusted base plus
+    the operator's ``--config-overrides`` resolves ``key``; ``(False, None)`` when
+    ``config`` carries no provenance, no trusted base, the key is not there, or an
+    override cannot be applied to the bare trusted base. A scanner that ignores a
+    value the repository or an MCP client set takes this value in its place, so a
+    client cannot narrow the operator's choice down to the default by writing the
+    default: ``set_by_operator`` says whether the value about to be used is the
+    operator's, and this says what the operator's is. The value is the trusted
+    base's own object (a model is dumped), so a caller that changes it copies it.
+    """
+    provenance = getattr(config, "_provenance", None)
+    if not isinstance(provenance, ConfigProvenance):
+        return False, None
+    found = provenance.trusted_value(key)
+    if found is _MISSING:
+        return False, None
+    return True, found
 
 
 def set_by_operator(config: Any, key: str, value: Any) -> bool:
@@ -368,15 +471,53 @@ def operator_paths(
 ) -> List[OperatorPath]:
     """``operator_path`` for an option that holds a list of paths, entry by entry.
 
-    ``set_by_operator`` compares a whole value, so provenance is decided once, for
-    the list as set; each entry is then resolved and, with ``outside_tree``,
-    checked on its own. A list the operator did not set gives one refusal per
-    entry, so a caller can name each one it ignores.
+    Provenance is decided per entry: the whole list is the operator's when
+    ``set_by_operator`` accepts it as set, and otherwise an entry is the
+    operator's when the trusted base plus the operator's overrides holds that
+    entry in the list at ``key`` (:func:`_operator_entries`). So an entry the
+    operator appended with ``key+=`` to a list a tree config also fills is used,
+    and the tree's own entries are refused. Each entry the operator set is then
+    resolved and, with ``outside_tree``, checked on its own. A list the operator
+    did not set gives one refusal per entry, so a caller can name each one it
+    ignores.
     """
     entries = list(values)
-    trusted = set_by_operator(config, key, entries)
     return [
         _operator_candidate(config, entry, source_dir, trusted, outside_tree)
+        for entry, trusted in zip(entries, _operator_entries(config, key, entries))
+    ]
+
+
+def _operator_entries(config: Any, key: str, entries: List[Any]) -> List[bool]:
+    """Whether each of ``entries``, the list about to be used for ``key``, is
+    the operator's.
+
+    Every entry is, when ``set_by_operator`` accepts the list as a whole; else an
+    entry is, when the trusted base plus the operator's overrides resolves
+    ``key`` to a list holding it, and the list holds every entry of the
+    operator's. An entry of the tree's, and every entry when the trusted list
+    cannot be resolved, is not. Nor is any entry when the list leaves one of the
+    operator's own entries out: a tree config that writes ``[A]`` over the
+    operator's ``[A, B]`` chose which of the operator's rules run, and taking
+    ``A`` alone as the operator's would drop ``B`` with no refusal, no warning
+    and no fallback. Refusing the whole list gives the caller one refusal per
+    entry, as a list the operator did not set does, so it warns and falls back.
+    """
+    if set_by_operator(config, key, entries):
+        return [True] * len(entries)
+    provenance = getattr(config, "_provenance", None)
+    if not isinstance(provenance, ConfigProvenance):
+        return [False] * len(entries)
+    expected = provenance.trusted_value(key)
+    if expected is _MISSING or not isinstance(expected, (list, tuple)):
+        return [False] * len(entries)
+    if any(
+        not any(_same_value(trusted_entry, entry) for entry in entries)
+        for trusted_entry in expected
+    ):
+        return [False] * len(entries)
+    return [
+        any(_same_value(trusted_entry, entry) for trusted_entry in expected)
         for entry in entries
     ]
 

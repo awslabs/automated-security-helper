@@ -215,8 +215,11 @@ else:
     served = cli_mcp._uvicorn_server_class()
 
     class Served(served):
-        # uvicorn's own server, serving this in place of the app.
+        # uvicorn's own server, serving this in place of the app. A server that
+        # served has started, as uvicorn's startup records; the runner treats
+        # one that never started as a failed start.
         def run(self, sockets=None):
+            self.started = True
             emit()
 
     cli_mcp._uvicorn_server_class = lambda: Served
@@ -251,8 +254,10 @@ served = cli_mcp._uvicorn_server_class()
 
 class Served(served):
     # uvicorn's own server, serving this in place of the app: a line written to
-    # stderr in two parts, with a uvicorn log line landing between them.
+    # stderr in two parts, with a uvicorn log line landing between them. It
+    # records that it started, as uvicorn's startup does.
     def run(self, sockets=None):
+        self.started = True
         sys.stderr.write("abc")
         logging.getLogger("uvicorn.error").info("served")
         sys.stderr.write("::add-mask::CANUVICORN\\n")

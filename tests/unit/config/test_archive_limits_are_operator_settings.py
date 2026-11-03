@@ -43,6 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
     ArchiveConverter,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.unit.config._client_policy_helpers import narrow_client_rules
 from tests.utils.archive_builders import (
     LIMIT_OPTIONS,
     MEBIBYTE,
@@ -107,6 +108,10 @@ LIMIT_CASES = [
         id="max_compression_ratio",
     ),
 ]
+
+# The same cases without the archive: for the checks that end at the config's
+# refusal and convert nothing.
+LIMIT_VALUE_CASES = [pytest.param(*case.values[:3], id=case.id) for case in LIMIT_CASES]
 
 
 @pytest.fixture
@@ -326,11 +331,16 @@ class TestClientSuppliedConfig:
 
     The extraction limits are in the denied_paths every policy holds
     (ALWAYS_DENIED_PATHS), so an upload that sets one is refused, naming it,
-    rather than resolved with the trusted value (client_config_policy).
+    rather than resolved with the trusted value (client_config_policy). Each
+    refusal is checked under the shipped default ``denied_paths`` and under a
+    policy whose operator profile replaces that list with one that leaves the
+    limits out (``narrow_client_rules``): the refusal does not rest on the
+    default list.
     """
 
+    @pytest.mark.parametrize("policy", ["default", "narrowed"])
     def test_an_uploaded_config_cannot_raise_the_limits_above_the_defaults(
-        self, layout
+        self, layout, policy
     ):
         from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -344,13 +354,15 @@ class TestClientSuppliedConfig:
                 source_dir=tree,
                 scanned_root=tree,
                 untrusted_config=True,
+                **_client_policy(policy),
             )
         for option in RAISED:
             assert option in str(refused.value), refused.value
 
-    @pytest.mark.parametrize("option, trusted, raised, members", LIMIT_CASES)
+    @pytest.mark.parametrize("policy", ["default", "narrowed"])
+    @pytest.mark.parametrize("option, trusted, raised", LIMIT_VALUE_CASES)
     def test_an_uploaded_config_cannot_raise_a_limit_above_ash_config(
-        self, option, trusted, raised, members, layout, monkeypatch
+        self, option, trusted, raised, policy, layout, monkeypatch
     ):
         from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
@@ -367,7 +379,15 @@ class TestClientSuppliedConfig:
                 source_dir=tree,
                 scanned_root=tree,
                 untrusted_config=True,
+                **_client_policy(policy),
             )
+
+
+def _client_policy(policy: str) -> dict:
+    """The ``resolve_config`` keyword for a parametrized client policy."""
+    if policy == "default":
+        return {}
+    return {"client_config_policy": narrow_client_rules()}
 
 
 class TestWorkspaceProjectConfig:

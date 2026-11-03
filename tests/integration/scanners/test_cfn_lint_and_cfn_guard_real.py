@@ -13,7 +13,12 @@ a YAML file that is not CloudFormation, and a file that is not valid YAML.
 The skip is env-gated, as in ``test_cfn_nag_custom_rules.py``: a test that silently
 skips when its tools are missing protects nothing. ``ASH_REQUIRE_CFN_TOOLS=1`` turns the
 skip into a failure; the integration-test job installs both tools with
-``ash dependencies install --tool cfn-lint --tool cfn-guard`` and sets it.
+``ash dependencies install --tool cfn-lint --tool cfn-guard`` and sets it. cfn-lint
+counts as present only when the offline scan's own dependency check accepts the copy
+on PATH (the ``sarif`` extra and the scanner's version range, see
+``_cfn_lint_problem``): the project venv carries a cfn-lint through moto without the
+extra, and a gate that admitted it ran every scan here into "Offline mode: cfn-lint
+cannot be used: missing extra: sarif".
 """
 
 from __future__ import annotations
@@ -64,6 +69,51 @@ def _required() -> bool:
     )
 
 
+def _cfn_lint_problem() -> str | None:
+    """None when the cfn-lint on PATH is one the offline scan can use.
+
+    A bare ``find_executable`` check admitted a copy every scan here refuses:
+    ``uv sync`` puts a cfn-lint in the project venv through moto's dependency
+    on it, WITHOUT the ``sarif`` extra, and ``uv run`` puts ``.venv/bin``
+    ahead of every other PATH entry. Every scan in this file runs with
+    ``ASH_OFFLINE``, where the scanner's dependency check
+    (``_select_tool_execution``) refuses that copy with "Offline mode:
+    cfn-lint cannot be used: missing extra: sarif" and the scan exits
+    incomplete, so the tests failed on every CI tier leg instead of skipping.
+    The gate therefore asks the scanner's own question:
+    ``verify_pre_installed_tool`` with the scanner's package, extras
+    (``CfnLintScanner._get_tool_package_extras``) and default version
+    constraint. The tier legs, which install no scanner tools by design,
+    then skip; the integration-test job, which provisions ``cfn-lint[sarif]``
+    and sets ``ASH_REQUIRE_CFN_TOOLS``, still fails loudly if its
+    provisioning stops satisfying the scanner.
+    """
+    executable = find_executable("cfn-lint")
+    if executable is None:
+        return "cfn-lint is not on PATH"
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+        CfnLintScannerConfigOptions,
+    )
+    from automated_security_helper.utils.pre_installed_tool import (
+        verify_pre_installed_tool,
+    )
+    from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
+
+    verdict = verify_pre_installed_tool(
+        executable,
+        "cfn-lint",
+        ["sarif"],
+        CfnLintScannerConfigOptions.model_fields["tool_version"].default,
+        uv_executable=find_uv_or_none(),
+    )
+    if verdict.status != "satisfied":
+        return (
+            f"the cfn-lint at {executable} is not one the offline scan can use: "
+            f"{verdict.detail}"
+        )
+    return None
+
+
 def _require_tools() -> None:
     from automated_security_helper.utils.rules_bundles import verify_installed_bundle
     from automated_security_helper.utils.tool_downloads import get_rules_bundle
@@ -75,8 +125,9 @@ def _require_tools() -> None:
         verify_installed_bundle(get_rules_bundle("aws-guard-rules-registry"))
     except RulesBundleUnavailable as exc:
         problems.append(str(exc))
-    if find_executable("cfn-lint") is None:
-        problems.append("cfn-lint is not on PATH")
+    lint_problem = _cfn_lint_problem()
+    if lint_problem is not None:
+        problems.append(lint_problem)
     if problems:
         message = "; ".join(problems)
         if _required():
@@ -129,6 +180,8 @@ def _scan(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=900,
         env={**os.environ, **(env or {})},
     )
@@ -367,10 +420,15 @@ def test_disabled_in_config_they_do_not_run(tmp_path):
 
 
 def _require_cfn_lint() -> None:
-    if find_executable("cfn-lint") is None:
-        if _required():
-            pytest.fail("ASH_REQUIRE_CFN_TOOLS is set but cfn-lint is not on PATH")
-        pytest.skip("cfn-lint is not on PATH")
+    problem = _cfn_lint_problem()
+    if problem is None:
+        return
+    if _required():
+        pytest.fail(
+            f"ASH_REQUIRE_CFN_TOOLS is set but {problem}. These tests must RUN "
+            "where the tools are provisioned."
+        )
+    pytest.skip(problem)
 
 
 def _rules_that_mark(directory: Path, marker: Path) -> Path:
@@ -431,6 +489,8 @@ def _scan_with_tree_config(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=900,
         env={**os.environ, "ASH_OFFLINE": "true"},
         cwd=cwd,

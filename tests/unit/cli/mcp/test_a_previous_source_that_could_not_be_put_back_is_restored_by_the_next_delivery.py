@@ -106,11 +106,11 @@ def _scratch(tmp_path: Path) -> List[str]:
     )
 
 
-def _a_clone_that_fails(cmd, *, env):
+def _a_clone_that_fails(cmd, *, env, grows_in=None):
     return subprocess.CompletedProcess(cmd, 128, "", "fatal: unable to access")
 
 
-def _a_clone_that_works(cmd, *, env):
+def _a_clone_that_works(cmd, *, env, grows_in=None):
     if "clone" in cmd:
         target = Path(cmd[-1])
         target.mkdir(parents=True, exist_ok=True)
@@ -243,7 +243,7 @@ def test_trees_kept_for_want_of_a_guess_go_once_a_delivery_has_worked(
     assert _scratch(tmp_path) == []
 
 
-def _a_clone_that_runs_out_of_disk(cmd, *, env):
+def _a_clone_that_runs_out_of_disk(cmd, *, env, grows_in=None):
     return subprocess.CompletedProcess(
         cmd, 128, "", "fatal: write error: No space left on device"
     )
@@ -316,7 +316,7 @@ def test_control_the_error_of_another_failure_does_not_say_the_disk_is_full(
 def _a_clone_that_writes(files):
     """A ``_run_git`` double whose clone writes ``files`` (name -> text)."""
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if "clone" in cmd:
             target = Path(cmd[-1])
             target.mkdir(parents=True, exist_ok=True)

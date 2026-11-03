@@ -56,8 +56,11 @@ the compile fails, the ``probe_install`` row says so and the wrapper-level rows
 supports 3.10), editing the source, and syrupy snapshots.
 
 Rows are JSON lines. Each cell publishes them four ways, any of which survives a
-passing run: ``print`` (visible with ``-s`` or ``-rP``), ``record_property``
-(``<properties>`` of the testcase in the junit file), the terminal reporter (the
+passing run: ``print`` (visible with ``-s`` or ``-rP``), the testsuite's
+``<properties>`` in the junit file (through ``record_testsuite_property``, the
+one property element pytest's default ``junit_family``, xunit2, admits; a
+testcase's ``<properties>``, which the ``record_property`` fixture writes and
+warns about, is not in that schema), the terminal reporter (the
 console log), and ``settle-trace-<cell>.jsonl`` under the test's ``tmp_path`` and
 under ``$ASH_SETTLE_TRACE_DIR`` when that is set to an existing directory. Every
 line starts ``SETTLE-TRACE <cell> `` so a log can be filtered with one pattern.
@@ -331,7 +334,6 @@ def _write_rows(directory: Path, cell: str, lines: List[str]) -> None:
 
 def _publish(
     request: pytest.FixtureRequest,
-    record_property: Callable[[str, object], None],
     rows: _Rows,
     directory: Path,
 ) -> None:
@@ -346,8 +348,20 @@ def _publish(
         print(f"SETTLE-TRACE END {cell}")
 
     def to_junit() -> None:
+        # The testsuite's <properties>, the one place the default junit_family
+        # (xunit2) admits a property: a testcase's <properties> breaks that
+        # schema, which is what the record_property fixture warns about, and
+        # appending to the node's user_properties wrote the same element
+        # without the warning. The property names carry the cell, so the rows
+        # stay attributable without a per-testcase element. Requested here,
+        # not as a parameter, so a cell that never publishes asks for nothing.
+        # On a pytest-xdist worker the fixture is a no-op (pytest builds the
+        # junit writer on the controller only; pytest issue 7767), so under
+        # xdist the rows reach the junit file from no worker; the files and
+        # terminal channels below carry them there, and junit is one of four.
+        record = request.getfixturevalue("record_testsuite_property")
         for index, line in enumerate(lines, 1):
-            record_property(f"settle-trace.{cell}.{index:03d}", line)
+            record(f"settle-trace.{cell}.{index:03d}", line)
 
     def to_files() -> None:
         _write_rows(directory, cell, lines)
@@ -1188,7 +1202,6 @@ def _q1_summary(rows: _Rows, host_file: Path) -> Dict[str, Any]:
 
 def _measure_a_refused_delivery(
     request: pytest.FixtureRequest,
-    record_property: Callable[[str, object], None],
     monkeypatch: pytest.MonkeyPatch,
     server: Dict[str, Path],
     *,
@@ -1220,17 +1233,16 @@ def _measure_a_refused_delivery(
             row["kind"] != "meta" for row in rows.snapshot()
         )
         rows.add("controls", **controls)
-        _publish(request, record_property, rows, server["tmp"])
+        _publish(request, rows, server["tmp"])
     assert controls["scenario_constructed"], "the delivered tree was not constructed"
     assert controls["recorder_captured_rows"], "the recorder captured no row"
 
 
 @pytest.mark.usefixtures("host_set_aside")
-def test_settle_q1_not_a_config(_server, monkeypatch, request, record_property) -> None:
+def test_settle_q1_not_a_config(_server, monkeypatch, request) -> None:
     """Twin of test_a_linked_file_that_is_not_a_config_is_not_quoted."""
     _measure_a_refused_delivery(
         request,
-        record_property,
         monkeypatch,
         _server,
         cell="q1-not-a-config",
@@ -1240,11 +1252,10 @@ def test_settle_q1_not_a_config(_server, monkeypatch, request, record_property) 
 
 
 @pytest.mark.usefixtures("host_set_aside")
-def test_settle_q1_bad_expiry(_server, monkeypatch, request, record_property) -> None:
+def test_settle_q1_bad_expiry(_server, monkeypatch, request) -> None:
     """Twin of test_a_validators_own_message_is_reported_by_its_type."""
     _measure_a_refused_delivery(
         request,
-        record_property,
         monkeypatch,
         _server,
         cell="q1-bad-expiry",
@@ -1254,11 +1265,10 @@ def test_settle_q1_bad_expiry(_server, monkeypatch, request, record_property) ->
 
 
 @pytest.mark.usefixtures("host_set_aside")
-def test_settle_q1_unknown_key(_server, monkeypatch, request, record_property) -> None:
+def test_settle_q1_unknown_key(_server, monkeypatch, request) -> None:
     """Twin of test_a_key_the_schema_does_not_have_is_not_named."""
     _measure_a_refused_delivery(
         request,
-        record_property,
         monkeypatch,
         _server,
         cell="q1-unknown-key",
@@ -1267,7 +1277,7 @@ def test_settle_q1_unknown_key(_server, monkeypatch, request, record_property) -
     )
 
 
-def test_settle_q1_scan_itself(_server, monkeypatch, request, record_property) -> None:
+def test_settle_q1_scan_itself(_server, monkeypatch, request) -> None:
     """Twin of test_the_scan_itself_refuses_it_without_reading_it.
 
     No ``host_set_aside``, as in the original. A refusal is raised on, so the
@@ -1275,7 +1285,6 @@ def test_settle_q1_scan_itself(_server, monkeypatch, request, record_property) -
     """
     _measure_a_refused_delivery(
         request,
-        record_property,
         monkeypatch,
         _server,
         cell="q1-scan-itself",
@@ -1379,7 +1388,6 @@ def _q2_summary(rows: _Rows) -> Dict[str, Any]:
 
 def _measure_log_emission(
     request: pytest.FixtureRequest,
-    record_property: Callable[[str, object], None],
     monkeypatch: pytest.MonkeyPatch,
     caplog: Any,
     server: Dict[str, Path],
@@ -1441,19 +1449,16 @@ def _measure_log_emission(
             row["kind"] != "meta" for row in rows.snapshot()
         )
         rows.add("controls", **controls)
-        _publish(request, record_property, rows, server["tmp"])
+        _publish(request, rows, server["tmp"])
     assert controls["scenario_constructed"], "the delivered tree was not constructed"
     assert controls["recorder_captured_rows"], "the recorder captured no row"
 
 
 @pytest.mark.usefixtures("host_set_aside")
-def test_settle_q2_yaml_parse_emission(
-    _server, monkeypatch, caplog, request, record_property
-) -> None:
+def test_settle_q2_yaml_parse_emission(_server, monkeypatch, caplog, request) -> None:
     """Twin of test_the_log_line_for_it_does_not_quote_it_either."""
     _measure_log_emission(
         request,
-        record_property,
         monkeypatch,
         caplog,
         _server,
@@ -1463,13 +1468,10 @@ def test_settle_q2_yaml_parse_emission(
 
 
 @pytest.mark.usefixtures("host_set_aside")
-def test_settle_q2_read_failure_control(
-    _server, monkeypatch, caplog, request, record_property
-) -> None:
+def test_settle_q2_read_failure_control(_server, monkeypatch, caplog, request) -> None:
     """The same plumbing with an injected OSError: the call site known to log."""
     _measure_log_emission(
         request,
-        record_property,
         monkeypatch,
         caplog,
         _server,

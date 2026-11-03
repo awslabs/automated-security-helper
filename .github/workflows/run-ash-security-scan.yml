@@ -1883,7 +1883,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@26e5b7d197ebf60545ee9667bcbace0be11ccaec # v1.334.0
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
         with:
           ruby-version: "3.3"
           # Neither from the checkout. The action's default `bundler: Gemfile.lock`

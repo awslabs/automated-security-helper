@@ -42,7 +42,8 @@ from tests.unit import test_ash_output_dirs_are_not_scanned as named
 from tests.unit import test_output_dir_patterns_are_escaped as patterns
 from tests.unit.workspace.test_execution import _git
 
-capture = named.capture
+# ``capture`` is the ``caplog`` fixture tests/unit/conftest.py defines for every
+# unit test; it is no longer re-exported through test_ash_output_dirs_are_not_scanned.
 
 #: The scanners built here start no tool, and a tree built without ``git init`` is
 #: outside git wherever tmp_path is (tests/unit/conftest.py).
@@ -269,7 +270,12 @@ def _tool_scanner(kind: str, context):
             "bandit.sarif"
         )
     if kind in ("semgrep", "opengrep"):
-        return patterns._grep_scanner(kind, context), "results_sarif.sarif"
+        scanner = patterns._grep_scanner(kind, context)
+        # Both are off by default on Windows, where the executor leaves a disabled
+        # scanner unscanned and keeps no raw results. The tool is stubbed below, so
+        # the platform's default is not what this test measures.
+        scanner.config.enabled = True
+        return scanner, "results_sarif.sarif"
     if kind == "grype":
         from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
             GrypeScanner,

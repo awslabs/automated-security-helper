@@ -194,9 +194,20 @@
 │                                                                           bwrap, firejail,       │
 │                                                                           landlock; macOS:       │
 │                                                                           sandbox-exec). A       │
-│                                                                           scanner that cannot be │
-│                                                                           sandboxed as requested │
-│                                                                           is reported MISSING.   │
+│                                                                           scanner whose sandbox  │
+│                                                                           cannot be set up is    │
+│                                                                           graded by the refusal: │
+│                                                                           under 'auto' no        │
+│                                                                           working backend is a   │
+│                                                                           missing dependency and │
+│                                                                           the scanner is         │
+│                                                                           reported MISSING; a    │
+│                                                                           named backend that is  │
+│                                                                           unavailable, or any    │
+│                                                                           other refusal (such as │
+│                                                                           a results path that is │
+│                                                                           a symlink), is         │
+│                                                                           reported ERROR.        │
 │                                                                           Overrides the config   │
 │                                                                           file's sandbox.mode;   │
 │                                                                           default off. Refused   │
@@ -491,5 +502,7 @@
 │                                      overrides environment variables. Run with                   │
 │                                      --generate-cli-skeleton for a template.                     │
 │ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every   │
-│                                      parameter of this command with its default, and exit.       │
+│                                      parameter of this command with its default, or null where   │
+│                                      it is required or an environment variable backs it, and     │
+│                                      exit.                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

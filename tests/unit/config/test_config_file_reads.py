@@ -17,9 +17,7 @@ from __future__ import annotations
 import errno
 import os
 import sys
-import threading
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -33,6 +31,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
+from tests.utils.fifo_calls import returns_promptly
 from tests.utils.open_audit import record_opens
 
 pytestmark = pytest.mark.unit
@@ -53,32 +52,6 @@ def _no_ash_config_variable(monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
 
 
-def _returns_promptly(call: Callable[[], object], fifo: Path) -> BaseException | None:
-    """Run ``call`` in a thread; fail when it is still running after 10 seconds.
-
-    A call blocked opening ``fifo`` for reading is released by opening its write
-    end, so a failing test does not leave a thread behind. Returns what ``call``
-    raised, or None.
-    """
-    outcome: dict = {}
-
-    def _run() -> None:
-        try:
-            outcome["value"] = call()
-        except BaseException as exc:  # recorded for the assertion below
-            outcome["error"] = exc
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    thread.join(10)
-    blocked = thread.is_alive()
-    if blocked:
-        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
-        thread.join(10)
-    assert not blocked, f"reading {fifo.name} blocked"
-    return outcome.get("error")
-
-
 class TestSpecialFilesAreNotRead:
     @needs_fifo
     def test_a_fifo_named_pyproject_toml_given_as_the_config_is_refused_at_once(
@@ -87,7 +60,7 @@ class TestSpecialFilesAreNotRead:
         fifo = tmp_path / "pyproject.toml"
         os.mkfifo(fifo)
 
-        error = _returns_promptly(
+        error = returns_promptly(
             lambda: resolve_config(config_path=fifo, source_dir=tmp_path), fifo
         )
 
@@ -99,7 +72,7 @@ class TestSpecialFilesAreNotRead:
         fifo = tmp_path / "pyproject.toml"
         os.mkfifo(fifo)
 
-        assert _returns_promptly(lambda: describe_config_path(fifo), fifo) is None
+        assert returns_promptly(lambda: describe_config_path(fifo), fifo) is None
 
     @needs_fifo
     @pytest.mark.parametrize("name", ["cfg.yaml", "cfg.json", "cfg.toml"])
@@ -110,7 +83,7 @@ class TestSpecialFilesAreNotRead:
         fifo = tmp_path / name
         os.mkfifo(fifo)
 
-        error = _returns_promptly(lambda: read_config_file(fifo), fifo)
+        error = returns_promptly(lambda: read_config_file(fifo), fifo)
 
         assert isinstance(error, OSError), error
         assert "not a regular file" in str(error)
@@ -220,7 +193,7 @@ class TestDiscoveryOpensOnlyRegularFiles:
 
         # In a thread with a deadline: an open of the FIFO without O_NONBLOCK
         # would block the test rather than fail it.
-        error = _returns_promptly(
+        error = returns_promptly(
             lambda: config_sources.discover_config_source(tmp_path), pyproject
         )
 
@@ -240,7 +213,7 @@ class TestDiscoveryOpensOnlyRegularFiles:
         def discover():
             found["discovery"] = config_sources.discover_config_source(tmp_path)
 
-        assert _returns_promptly(discover, pyproject) is None
+        assert returns_promptly(discover, pyproject) is None
         discovery = found["discovery"]
         assert discovery.selected.path == tmp_path / ".ash.yaml"
         assert discovery.ignored == []

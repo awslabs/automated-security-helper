@@ -71,9 +71,21 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
 
 from pydantic import AnyUrl, Field, PrivateAttr, field_validator, model_validator
 
@@ -82,6 +94,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.base.uv_tool_mixin import guarded_values
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.exceptions import ScannerError
@@ -91,6 +104,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
     Level,
+    Location,
+    PhysicalLocation,
+    PhysicalLocation2,
     PropertyBag,
     Result,
     Run,
@@ -111,10 +127,12 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     NOT_THE_OPERATORS,
     operator_paths,
+    operator_value,
     refusal_warning,
     scan_root,
     set_by_operator,
 )
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
@@ -125,10 +143,17 @@ from automated_security_helper.utils.rules_bundles import (
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scanned_tree import (
+    REASON_HARDLINK,
     TreeInputRefused,
     open_in_scanned_tree,
+    relative_display,
 )
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    WAS_KILLED_ENDING,
+    find_executable,
+    response_could_not_stop,
+)
 from automated_security_helper.utils.tool_config_dir import write_tool_config
 from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
@@ -153,13 +178,110 @@ VIOLATION_LEVEL = "error"
 
 _SUCCESS_EXIT_CODES = frozenset({0, 19})
 
+#: Shown in a failure message in place of the tool's stderr when the scanner's
+#: redaction values could not be read (``guarded_values`` answered None): the text
+#: is withheld rather than printed unredacted.
+_STDERR_WITHHELD = "(stderr withheld: the scanner's redaction values could not be read)"
+
+
+def _stderr_for_message(
+    response: Dict[str, Any], values: Optional[Iterable[str]]
+) -> str:
+    """cfn-guard's stderr for a failure message, redacted before it is cut.
+
+    The excerpt keeps the start and the end of the text and drops the middle, so a
+    value that straddles a cut survives a redaction run on the excerpt (neither
+    half matches it). The redaction therefore runs on the whole text first.
+    ``values`` None means the scanner's redaction values could not be read; then
+    the text is withheld, never shown unredacted.
+    """
+    raw = response.get("stderr") or ""
+    if not raw.strip():
+        return ""
+    if values is None:
+        return _STDERR_WITHHELD
+    return tool_output_excerpt(text_without_values(raw, values).strip(), 500)
+
+
 #: The executable this scanner runs.
 _COMMAND = "cfn-guard"
-_RULE_SET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+#: The failure recorded for a template whose cfn-guard invocation was not started
+#: because an earlier one in the same scan timed out (as cfn-lint records it).
+_NOT_STARTED_AFTER_TIMEOUT = (
+    "not started: an earlier cfn-guard invocation of this scan timed out, and the "
+    "scan is discarded after a timeout"
+)
+#: ``\Z``, not ``$``: ``$`` also matches before a trailing newline, so a name
+#: ending in one passed the validator and failed later as an unknown rule set.
+_RULE_SET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 #: The files cfn-guard 3.2.1 reads from a ``cfn-guard --rules`` directory, case-sensitively
 #: (measured: ``x.ruleset`` read, ``UP.GUARD`` and ``x.txt`` not).
 _RULE_SUFFIXES = (".guard", ".ruleset")
+
+#: The most bytes one of the operator's rules files may hold: the cap
+#: ``utils/rules_bundles.py`` applies to one member of the installed bundle. An
+#: operator's file was read whole with no bound, several times per scan.
+_MAX_OPERATOR_RULE_BYTES = 16 * 1024 * 1024
+
+#: The longest file name the filesystems ASH runs on accept (NAME_MAX).
+_MAX_COPY_NAME_BYTES = 255
+
+#: The failure recorded for a template whose cfn-guard run was not started because
+#: the templates before it in the same scan had spent the scanner's scan_timeout.
+_NOT_STARTED_AFTER_BUDGET = (
+    "not started: the templates before it in this scan spent the scanner's "
+    "scan_timeout, which bounds the whole scan rather than each template"
+)
+
+
+def _copy_name(index: int, name: str) -> str:
+    """The name of the copy of an operator's rules file: its position, then its name.
+
+    The copy is written beside the others in one directory, so the position keeps
+    two files of one name apart. The name is cut to fit ``_MAX_COPY_NAME_BYTES``
+    with its suffix kept, since the four bytes the position adds pushed a name of
+    252 to 255 bytes past NAME_MAX and the copy could not be written.
+    """
+    prefix = f"{index:03d}-"
+    suffix = next((s for s in _RULE_SUFFIXES if name.endswith(s)), "")
+    stem = name[: len(name) - len(suffix)]
+    budget = _MAX_COPY_NAME_BYTES - len(prefix) - len(suffix)
+    while stem and len(stem.encode("utf-8", "surrogateescape")) > budget:
+        stem = stem[:-1]
+    return f"{prefix}{stem}{suffix}"
+
+
+def _run_failure(response: Dict[str, Any]) -> Optional[str]:
+    """Why a run that did not complete failed, worded by the response's flags, or None.
+
+    The flags (``subprocess_utils.RESPONSE_FLAGS``) say what happened; the ``error``
+    key alone does not. Before this every response with an error key read as
+    "could not be started", a tool that ran and died on a signal, or whose output
+    ASH failed to record, included; and every timeout read as "was killed", one
+    ASH could not end (the tool possibly left alive), included. The endings
+    themselves are spelled once, in ``subprocess_utils``.
+    """
+    if response.get("timed_out"):
+        ending = (
+            COULD_NOT_STOP_ENDING
+            if response_could_not_stop(response)
+            else WAS_KILLED_ENDING
+        )
+        return f"cfn-guard timed out{ending}"
+    if response.get("signaled"):
+        return f"cfn-guard did not finish: {response.get('error')}"
+    if response.get("post_run_error"):
+        return f"cfn-guard ran, but ASH could not record its output: {response.get('error')}"
+    if response.get("cancelled"):
+        return f"cfn-guard was cancelled: {response.get('error')}"
+    if response.get("result_rejected"):
+        return f"cfn-guard's result was rejected: {response.get('error')}"
+    if "error" in response:
+        # spawn_failed, or a response with no flag at all: the command never ran.
+        return f"cfn-guard could not be started: {response['error']}"
+    return None
 
 
 @dataclass(frozen=True)
@@ -238,6 +360,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    #: The exit codes a completed cfn-guard run may end with (19 = at least one
+    #: rule failed), the same set ``_parse_response`` accepts per template. Declared
+    #: on the class so the base class's reading of a run's exit code sees
+    #: cfn-guard's own set and not its default of {0, 1}, under which 19 read as a
+    #: failed run and 1 as a clean one.
+    success_exit_codes: ClassVar[Set[int]] = set(_SUCCESS_EXIT_CODES)
+
     # Rules warnings already logged. The rules are selected again for the dependency
     # check and for each target, and each warning is logged once per scanner.
     _warned_rules: Set[str] = PrivateAttr(default_factory=set)
@@ -272,7 +401,19 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 f"{unavailable}"
             )
             return SandboxRequirements()
-        return SandboxRequirements(read_paths=(root.as_posix(),))
+        shown = root.as_posix()
+        if "$" in shown or shown.startswith("~"):
+            # The policy expands ``~`` and ``$VAR`` in every read path
+            # (utils/sandbox/policy._expand), while cfn-guard is given the
+            # literal path, so such a root is granted somewhere else or not at
+            # all, and every --rules path is missing inside the sandbox.
+            self._warn_rules_once(
+                f"The cfn-guard rules directory {shown!r} holds a '$' or starts "
+                "with '~', which the sandbox reads as an expansion; its grant may "
+                "not match the path cfn-guard reads, and the rules may be missing "
+                "under --sandbox. Set ASH_CFN_GUARD_RULES_DIR to a path without them."
+            )
+        return SandboxRequirements(read_paths=(shown,))
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -380,20 +521,29 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     f"scanners.cfn-guard.options.rules_paths names {entry.path}, "
                     "which does not exist"
                 )
+            # Inside the tree, read under the tree's root, so a link swapped in
+            # after operator_paths checked the path is refused when the file is
+            # opened; for a directory, so a directory replaced by a link that
+            # leads out of the tree is refused file by file (os.walk follows the
+            # directory it is given). Outside the tree the operator controls the
+            # path and the link it may be.
+            inside = entry.path.is_relative_to(real_root)
             if entry.path.is_dir():
-                rules.extend(self._rules_in_directory(entry.path))
-            else:
-                # Inside the tree, read under the tree's root, so a link swapped in
-                # after operator_paths checked the path is refused when the file is
-                # opened. Outside it the operator controls the path and the link it
-                # may be.
-                read_root = (
-                    real_root
-                    if entry.path.is_relative_to(real_root)
-                    else entry.path.parent
+                found = self._rules_in_directory(
+                    entry.path, real_root if inside else entry.path, in_tree=inside
                 )
+                if not found:
+                    # Nothing from it is evaluated, and the default rule sets
+                    # still run, so the operator's rules went silently unread.
+                    self._warn_rules_once(
+                        f"cfn-guard rules directory {entry.path.as_posix()} holds "
+                        "no .guard or .ruleset file, so nothing from it is evaluated."
+                    )
+                rules.extend(found)
+            else:
+                read_root = real_root if inside else entry.path.parent
                 try:
-                    rules.append(self._read_rule(entry.path, read_root))
+                    rules.append(self._read_rule(entry.path, read_root, in_tree=inside))
                 except TreeInputRefused as unusable:
                     # Named directly, so no other rule to fall back on: the
                     # operator asked for this file and it cannot be used.
@@ -403,10 +553,15 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     ) from unusable
         return rules, bool(refused)
 
-    def _rules_in_directory(self, directory: Path) -> List[_RuleFile]:
-        """The rules files under ``directory`` that stay inside it, read, sorted.
+    def _rules_in_directory(
+        self, directory: Path, root: Path, *, in_tree: bool
+    ) -> List[_RuleFile]:
+        """The rules files under ``directory`` that stay inside ``root``, read, sorted.
 
-        Like cfn-guard, the walk does not enter a symlinked subdirectory. One that
+        ``root`` is the directory itself for one outside the scanned tree, and the
+        tree's root for one inside it (``in_tree``), so a link swapped in after
+        the path was checked is refused as the file branch refuses it. Like
+        cfn-guard, the walk does not enter a symlinked subdirectory. One that
         cannot be listed fails the scan rather than dropping its rules.
         """
 
@@ -424,11 +579,13 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     continue
                 path = Path(dirpath) / name
                 try:
-                    rules.append(self._read_rule(path, directory))
+                    rules.append(self._read_rule(path, root, in_tree=in_tree))
                 except TreeInputRefused as refused:
+                    reason = refused.reason
+                    if not in_tree:
+                        reason = reason.replace("scanned tree", "rules directory")
                     self._warn_rules_once(
-                        f"Not evaluating cfn-guard rules {path.as_posix()}: "
-                        f"{refused.reason.replace('scanned tree', 'rules directory')}."
+                        f"Not evaluating cfn-guard rules {path.as_posix()}: {reason}."
                     )
         return rules
 
@@ -438,21 +595,39 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             self._plugin_log(message, level=logging.WARNING)
 
     @staticmethod
-    def _read_rule(path: Path, root: Path) -> _RuleFile:
+    def _read_rule(path: Path, root: Path, *, in_tree: bool = False) -> _RuleFile:
         """``path``'s content, read only if it is a regular file inside ``root``.
 
+        A symlink inside ``root`` is followed, as cfn-guard follows one, and that
+        option also admits a file with more than one hard link. Inside the
+        scanned tree (``in_tree``) such a file is refused: its content is also
+        reachable under another name, which may be outside the tree, and
+        cfn-guard prints a rules file it cannot parse. Outside the tree the
+        operator owns the file, and installers hard-link freely there.
+
         Raises:
-            TreeInputRefused: it resolves outside ``root`` or is not a regular file.
-            RulesBundleUnavailable: it could not be read.
+            TreeInputRefused: it resolves outside ``root``, is not a regular
+                file, or is a hard-linked file inside the scanned tree.
+            RulesBundleUnavailable: it could not be read, or it is larger than
+                ``_MAX_OPERATOR_RULE_BYTES``.
         """
         try:
             with open_in_scanned_tree(path, root, follow_links_inside=True) as handle:
-                raw = handle.read()
+                if in_tree and os.fstat(handle.fileno()).st_nlink > 1:
+                    raise TreeInputRefused(
+                        relative_display(path, root), REASON_HARDLINK
+                    )
+                raw = handle.read(_MAX_OPERATOR_RULE_BYTES + 1)
         except OSError as exc:
             raise RulesBundleUnavailable(
                 f"cfn-guard rules {path.as_posix()} could not be read: "
                 f"{exc.strerror or exc}"
             ) from exc
+        if len(raw) > _MAX_OPERATOR_RULE_BYTES:
+            raise RulesBundleUnavailable(
+                f"cfn-guard rules {path.as_posix()} is larger than the "
+                f"{_MAX_OPERATOR_RULE_BYTES}-byte cap for one rules file"
+            )
         # surrogateescape keeps every byte, and the copy is written back the same
         # way; only a CRLF line ending becomes LF.
         text = raw.decode("utf-8", errors="surrogateescape")
@@ -489,31 +664,46 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         return selected
 
     def _operator_rule_sets(self) -> List[str]:
-        """``rule_sets`` when the operator chose it, else the default set.
+        """``rule_sets`` as the operator chose it.
 
         A narrower set drops findings before ASH sees them, so they are neither
         reported nor counted as suppressed: ``rule_sets: [wa-Reliability-Pillar]``
         in the scanned tree's ``.ash/.ash.yaml`` turned 24 findings on the fixture
         into 9, losing every S3 public-access, encryption and logging finding. A
         value from a config inside a git checkout or the scanned directory, or from
-        an MCP client, is ignored with a warning, as ``rules_paths`` is; one equal to the default is used.
+        an MCP client, is replaced by the operator's own choice (the trusted base
+        with the operator's overrides replayed, ``config_trust.operator_value``),
+        or by the default set when the operator chose none, with a warning when the
+        two differ, as ``rules_paths`` is. A repository value equal to the default
+        used to be taken as it stood, with no provenance check, so a repository
+        could narrow an operator's wider set down to the default by writing the
+        default.
         """
         value = list(self._options().rule_sets)
-        if value == [DEFAULT_RULE_SET] or set_by_operator(
-            self.context.config if self.context is not None else None,
-            "scanners.cfn-guard.options.rule_sets",
-            value,
-        ):
+        config = self.context.config if self.context is not None else None
+        key = "scanners.cfn-guard.options.rule_sets"
+        if set_by_operator(config, key, value):
             return value
+        found, trusted = operator_value(config, key)
+        chosen = (
+            [str(name) for name in trusted]
+            if found and isinstance(trusted, list)
+            else [DEFAULT_RULE_SET]
+        )
+        if value == chosen:
+            return chosen
+        if chosen == [DEFAULT_RULE_SET]:
+            evaluates = f"ASH's default rule set, {DEFAULT_RULE_SET}"
+        else:
+            evaluates = f"the operator's rule sets, {chosen!r}"
         self._warn_rules_once(
             refusal_warning(
                 f"Ignoring scanners.cfn-guard.options.rule_sets ({value!r}): "
-                f"{NOT_THE_OPERATORS}. cfn-guard evaluates ASH's default rule set, "
-                f"{DEFAULT_RULE_SET}.",
+                f"{NOT_THE_OPERATORS}. cfn-guard evaluates {evaluates}.",
                 NOT_THE_OPERATORS,
             )
         )
-        return [DEFAULT_RULE_SET]
+        return chosen
 
     def rule_files(self) -> List[Path]:
         """The rules files cfn-guard will be evaluated with, in order.
@@ -547,7 +737,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             path = rule.path
             if rule.content is not None:
                 path = write_tool_config(
-                    f"{index:03d}-{rule.path.name}",
+                    _copy_name(index, rule.path.name),
                     rule.content,
                     context=self.context,
                     errors="surrogateescape",
@@ -571,6 +761,16 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         except RulesBundleUnavailable as exc:
             self._record_unavailable(str(exc))
             return False
+        except OSError as exc:
+            # Path.exists() and Path.is_dir() raise PermissionError on a rules
+            # path under a directory this user cannot search (Python 3.10-3.12).
+            # Escaping here dropped the scanner with a traceback instead of
+            # reporting it MISSING with the reason.
+            self._record_unavailable(
+                "cfn-guard rules could not be checked: "
+                f"{type(exc).__name__}: {exc.strerror or exc}"
+            )
+            return False
         return True
 
     def nothing_to_scan_reason(self) -> Optional[str]:
@@ -586,8 +786,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
     def _record_unavailable(self, reason: str) -> None:
         self.dependency_unavailable_reason = reason
-        if reason not in self.errors:
-            self.errors.append(reason)
+        # The ERROR log puts the line in self.errors (PluginBase._plugin_log);
+        # appended here as well, every reason was recorded twice.
         self._plugin_log(reason, level=logging.ERROR)
 
     def _execute_scan(
@@ -636,6 +836,20 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         seen: Set[str] = set()
         for run in report.runs or []:
             for result in run.results or []:
+                if not result.locations:
+                    # A result cfn-guard reports with no location (a rule that
+                    # fails the document as a whole) reached the merged report
+                    # with nothing saying which template it was found in. The
+                    # template is the location it has.
+                    result.locations = [
+                        Location(
+                            physicalLocation=PhysicalLocation(
+                                root=PhysicalLocation2(
+                                    artifactLocation=ArtifactLocation(uri=uri)
+                                )
+                            )
+                        )
+                    ]
                 for location in result.locations or []:
                     physical = location.physicalLocation
                     if (
@@ -665,11 +879,25 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         **kwargs: Any,
     ) -> Any:
         # Reset above every return, the exit code included; see cfn_lint_scanner.
+        # The exit code is None, not 0: no cfn-guard has run for this target yet,
+        # and a target whose every candidate the model rejects never starts one,
+        # so the executor read a 0 for a tool that never ran. self.errors too, as
+        # cfn_lint_scanner resets it: one instance scans the source and then the
+        # converted target, and the converted target's invocation carried the
+        # source target's failures beside an executionSuccessful of its own.
         self.targets_attempted = 0
         self.targets_failed = 0
-        self.exit_code = 0
+        self.exit_code = None
+        self._reset_errors()
 
         report = self._empty_report()
+        # The unevaluated targets are cleared as cfn-nag clears them, for a
+        # caller that is not the executor (which clears them before each scan);
+        # a dependency recorded unavailable before this call keeps its line, the
+        # reason the scan below does not start.
+        self.clear_unevaluated_targets()
+        if self.dependency_unavailable_reason:
+            self.errors.append(self.dependency_unavailable_reason)
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(
                 f"Target directory {target} is empty or doesn't exist. Skipping scan.",
@@ -697,35 +925,108 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             results_dir = self.results_dir.joinpath(target_type)
             results_dir.mkdir(parents=True, exist_ok=True)
             rule_args = self._rules_arguments(selected)
+            source_dir = self._source_dir()
             # Without the files the global ignore paths ignore, as cfn-nag reads them.
             discovery = discover_templates(
                 self.context, target_type, global_ignore_paths
             )
-            for shown, reason in discovery.refused:
-                # Not read, so not known to be CloudFormation: skipped and named, as
-                # cfn-nag skips it.
+            for shown, reason in [*discovery.refused, *discovery.unparseable]:
+                # Not read, or read by neither parser, so not known to be
+                # CloudFormation: skipped and named, as cfn-nag skips it.
                 self._plugin_log(
                     f"Skipped {shown}: {reason}",
                     target_type=target_type,
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
+            for shown, reason in discovery.skipped:
+                # Not UTF-8 and not CloudFormation by its text: skipped and named,
+                # as cfn-nag skips it, counted as nothing.
+                self._plugin_log(
+                    f"Skipped {shown}: {reason}",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
+            for shown, reason in discovery.unreadable:
+                # A candidate ASH could not open, or a template it could not decode:
+                # not known not to be CloudFormation. The tool-absent check counts
+                # it as a template (only MISSING cannot hide one), so with the tool
+                # present it is a target that was not evaluated, not a skip: the
+                # two runs give the same answer for the same file.
+                self.targets_attempted += 1
+                self.targets_failed += 1
+                self.record_unevaluated_target(shown)
+                self._plugin_log(
+                    f"cfn-guard did not evaluate {shown}: {reason}",
+                    target_type=target_type,
+                    level=logging.ERROR,
+                )
             for path, reason in discovery.unmodelable:
                 self.targets_attempted += 1
                 self.targets_failed += 1
-                self.errors.append(f"{path.as_posix()}: {reason}")
+                shown = display_path(path, source_dir)
+                # A target the tool never evaluated, recorded by name as the
+                # unreadable ones are and as cfn-nag records it, so the run's
+                # error record names it. The ERROR log puts the line in
+                # self.errors; appended here as well, every failure was recorded
+                # twice, and with the host's absolute path where the other lines
+                # carry the shown one.
+                self.record_unevaluated_target(shown)
                 self._plugin_log(
-                    f"cfn-guard did not evaluate {path.as_posix()}: {reason}",
+                    f"cfn-guard did not evaluate {shown}: {reason}",
                     target_type=target_type,
                     level=logging.ERROR,
                 )
 
-            source_dir = self._source_dir()
             merged: List[Result] = []
             driver = report.runs[0].tool.driver
+            # scan_timeout bounds the whole scan: each template was given the full
+            # limit, so a scan's run time was bounded only by templates x limit.
+            # A template reached with no time left is named and not started.
+            budget = self._effective_scan_timeout()
+            deadline = time.monotonic() + budget if budget is not None else None
+            # Each template's stderr, written once below as one log: the runner
+            # truncates the per-run log at each start, so the log on disk kept
+            # only the last template's text.
+            stderr_sections: List[str] = []
+            timed_out = False
             for template in discovery.templates:
                 self.targets_attempted += 1
                 shown = display_path(template, source_dir)
+                if timed_out:
+                    # An earlier invocation timed out, and the executor discards
+                    # the whole scan after a recorded timeout, so starting the
+                    # remaining templates, each with a fresh full scan_timeout,
+                    # would only spend their time. Named, not started, and
+                    # recorded as a target the tool never evaluated, as every
+                    # template that fails below is (the run's error record
+                    # names each). The ERROR log puts the line in self.errors
+                    # (PluginBase._plugin_log appends every ERROR log), so it is
+                    # not appended here as well: appended twice, each template
+                    # appeared twice in the invocation's exitCodeDescription.
+                    self.targets_failed += 1
+                    self.record_unevaluated_target(shown)
+                    self._plugin_log(
+                        f"cfn-guard did not evaluate {shown}: "
+                        f"{_NOT_STARTED_AFTER_TIMEOUT}",
+                        target_type=target_type,
+                        level=logging.ERROR,
+                    )
+                    continue
+                remaining: Optional[float] = None
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self.targets_failed += 1
+                        self.record_unevaluated_target(shown)
+                        self._plugin_log(
+                            f"cfn-guard did not evaluate {shown}: "
+                            f"{_NOT_STARTED_AFTER_BUDGET}",
+                            target_type=target_type,
+                            level=logging.ERROR,
+                        )
+                        continue
                 command = [
                     _COMMAND,
                     "validate",
@@ -735,18 +1036,34 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     "--structured",
                     "--show-summary=none",
                 ]
+                output_before = len(self.output)
                 response = self._run_subprocess(
                     command=command,
                     results_dir=results_dir,
                     stdout_preference="return",
-                    stderr_preference="both",
-                    timeout=self._effective_scan_timeout(),
+                    stderr_preference="return",
+                    timeout=remaining,
                 )
-                failure, template_report = self._parse_response(response)
+                timed_out = timed_out or (
+                    isinstance(response, dict) and bool(response.get("timed_out"))
+                )
+                # The SARIF came back on stdout and is merged below; the base class
+                # also kept every line of it in self.output, so memory grew with
+                # the number of templates for text the report already holds.
+                del self.output[output_before:]
+                if isinstance(response, dict):
+                    stderr_text = response.get("stderr") or ""
+                    if str(stderr_text).strip():
+                        stderr_sections.append(f"--- {shown}\n{stderr_text}")
+                failure, template_report = self._parse_response(
+                    response, values=guarded_values(self)
+                )
                 if failure is not None or template_report is None:
                     failure = failure or "cfn-guard output could not be read"
                     self.targets_failed += 1
-                    self.errors.append(f"{shown}: {failure}")
+                    # Recorded as a target the tool never evaluated; the ERROR
+                    # log puts the line in self.errors; see above.
+                    self.record_unevaluated_target(shown)
                     self._plugin_log(
                         f"cfn-guard did not evaluate {shown}: {failure}",
                         target_type=target_type,
@@ -758,6 +1075,12 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                     if run_driver is not None and run_driver.semanticVersion:
                         driver.version = run_driver.semanticVersion
                 merged.extend(self.normalize_results(template_report, shown))
+
+            if stderr_sections:
+                with open_for_write(
+                    results_dir.joinpath(f"{self.__class__.__name__}.stderr.log")
+                ) as handle:
+                    handle.write("\n".join(stderr_sections) + "\n")
 
             report.runs[0].results = merged
             self._post_scan(target=target, target_type=target_type)
@@ -797,7 +1120,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
         A bundled rule set is recorded relative to the rules root (its bundle
         directory and file name), an operator's rules relative to the source
-        directory, so ash_aggregated_results.json carries no machine paths.
+        directory, and one outside the source directory by its file name alone
+        (``display_path`` returns such a path absolute), so
+        ash_aggregated_results.json carries no machine paths.
         """
         recorded = []
         for path in rules:
@@ -806,22 +1131,33 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 shown = f"{parent}/{path.name}"
             else:
                 shown = display_path(path, source_dir)
+                if Path(shown).is_absolute():
+                    shown = path.name
             recorded.append(f"--rules={shown}")
         return recorded
 
     @staticmethod
     def _parse_response(
         response: object,
+        *,
+        values: Optional[Iterable[str]],
     ) -> Tuple[Optional[str], Optional[SarifReport]]:
-        """(failure reason or None, parsed report or None) for one invocation."""
+        """(failure reason or None, parsed report or None) for one invocation.
+
+        ``values`` are the scanner's redaction values (``guarded_values(self)`` at
+        the call site): the tool's stderr is redacted with them before it is cut
+        for the message, and ``None`` (the values could not be read) shows a note in
+        place of the stderr rather than the text unredacted. Required, with no
+        default: a default of "redact nothing" let a caller that forgot it print
+        the stderr unredacted, the gap the parameter closes.
+        """
         if not isinstance(response, dict):
             return "cfn-guard did not run", None
-        if response.get("timed_out"):
-            return "cfn-guard timed out and was killed", None
-        if "error" in response:
-            return f"cfn-guard could not be started: {response['error']}", None
+        failure = _run_failure(response)
+        if failure is not None:
+            return failure, None
         code = response.get("returncode")
-        stderr = tool_output_excerpt((response.get("stderr") or "").strip(), 500)
+        stderr = _stderr_for_message(response, values)
         if code not in _SUCCESS_EXIT_CODES:
             return (
                 f"cfn-guard exited {code}" + (f": {stderr}" if stderr else ""),
@@ -834,6 +1170,16 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             parsed = SarifReport.model_validate(json.loads(stdout))
         except Exception as exc:
             return f"cfn-guard output was not valid SARIF ({exc})", None
+        if not parsed.runs:
+            # Every field of a SARIF log is optional, so ``{}`` validates. No run
+            # is no evaluation, and it read as a clean template.
+            return (
+                (
+                    f"cfn-guard exited {code} with SARIF that holds no run, so the "
+                    "template was not evaluated"
+                ),
+                None,
+            )
         has_results = any(run.results for run in parsed.runs or [])
         if code == 19 and not has_results:
             # 19 is "a rule failed", and a failure that rendered no result is a

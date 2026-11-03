@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
+import typer
 
 from automated_security_helper.cli.inspect.inspect_findings_app import (
     FindingDetailScreen,
@@ -1207,8 +1208,12 @@ class TestFindingsCommand:
         with tempfile.TemporaryDirectory() as tmpdir:
             report_path = Path(tmpdir) / "report.json"
             report_path.write_text("{}")
-            findings_command(output_dir=Path(tmpdir), report_file="report.json")
+            # A report that does not load leaves nothing to inspect, so the
+            # command exits 1, as a scan with no results does.
+            with pytest.raises(typer.Exit) as exited:
+                findings_command(output_dir=Path(tmpdir), report_file="report.json")
 
+        assert exited.value.exit_code == 1
         mock_secho.assert_called_once()
         call_args = mock_secho.call_args
         assert "Error loading model or report" in call_args[0][0]
@@ -1229,8 +1234,10 @@ class TestFindingsCommand:
         with tempfile.TemporaryDirectory() as tmpdir:
             report_path = Path(tmpdir) / "report.json"
             report_path.write_text("{}")
-            findings_command(output_dir=Path(tmpdir), report_file="report.json")
+            with pytest.raises(typer.Exit) as exited:
+                findings_command(output_dir=Path(tmpdir), report_file="report.json")
 
+        assert exited.value.exit_code == 1
         mock_echo.assert_called_once()
         assert "No model" in mock_echo.call_args[0][0]
 
@@ -1274,12 +1281,15 @@ class TestFindingsCommand:
             original_cwd = os.getcwd()
             try:
                 os.chdir(tmpdir)
-                findings_command(
-                    output_dir=None, report_file="ash_aggregated_results.json"
-                )
+                # No results to show: the command says so and exits 1.
+                with pytest.raises(typer.Exit) as exited:
+                    findings_command(
+                        output_dir=None, report_file="ash_aggregated_results.json"
+                    )
             finally:
                 os.chdir(original_cwd)
 
+        assert exited.value.exit_code == 1
         mock_echo.assert_called_once()
         assert "No model" in mock_echo.call_args[0][0]
 

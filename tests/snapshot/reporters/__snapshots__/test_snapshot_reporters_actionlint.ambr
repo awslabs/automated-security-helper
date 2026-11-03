@@ -2,9 +2,7 @@
 # name: test_actionlint_status_and_counts
   dict({
     'actionable_finding_count': 4,
-    'dependencies_satisfied': True,
     'duration': 0.25,
-    'excluded': False,
     'exit_code': 0,
     'finding_count': 8,
     'severity_counts': dict({
@@ -15,7 +13,6 @@
       'medium': 2,
       'suppressed': 0,
     }),
-    'skipped_reason': None,
     'status': 'FAILED',
     'suppressed_finding_count': 0,
   })

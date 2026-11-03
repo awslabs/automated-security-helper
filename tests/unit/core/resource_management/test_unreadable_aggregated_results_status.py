@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A results file that cannot be read as results must not report a finished scan.
+"""A results file that cannot be read as results must not read as a clean scan.
 
 WHY THIS EXISTS
 ---------------
@@ -15,8 +15,19 @@ examined nothing.
 
 The atomic write in utils/atomic_write.py removed the concurrent rewrite as one cause
 of that. It did nothing for a file that is corrupt on disk, truncated by a full disk,
-or the wrong shape. Those now report ``failed`` with ``error_message`` naming the file
-and what was wrong with it.
+or the wrong shape. What the poll answers depends on who owns the entry's lifecycle:
+
+* An entry no runner owns (PENDING) takes its status from the file: an unreadable one
+  reports ``failed`` with ``error_message`` naming the file and what was wrong with it,
+  and the entry is closed FAILED.
+* An entry a runner closed as COMPLETED keeps the runner's word. A read-only poll does
+  not rewrite it. The response says what the file cannot give: ``results_available`` is
+  False, ``coverage_complete`` is None, the scanners are empty, and ``error_message``
+  names the file. ``status`` stays ``completed`` because the scan did end; a client
+  decides whether there is anything to read from ``results_available``, not from
+  ``status`` alone. (That ``completed`` plus ``results_available`` False is a state the
+  published tool reference describes differently is a documentation row, not settled
+  here.)
 
 WHAT IS DELIBERATELY NOT A FAILURE
 ----------------------------------
@@ -33,7 +44,9 @@ Two states look like "no results" and are not errors:
   dumps with ``exclude_unset`` and the scan fills ``scanner_results`` in place. While
   the scan is still running that is "not finished yet", so it reports the entry's own
   active status and ``is_complete: False``. Once the entry is closed as completed, the
-  same document means the scan ended without final results, and that is ``failed``.
+  same document means the scan ended without final results: the status stays
+  ``completed`` and ``results_available`` is False with the file named in
+  ``error_message``.
 """
 
 from __future__ import annotations
@@ -214,16 +227,90 @@ def test_the_scan_phase_document_reads_as_still_running(tmp_path):
     assert progress["error_message"] is None
 
 
-def test_the_scan_phase_document_after_the_scan_ended_is_a_failure(tmp_path):
-    """The scan returned, and the final rewrite that adds scanner_results never came."""
+def test_the_scan_phase_document_after_the_scan_ended_reports_no_results(tmp_path):
+    """The scan returned, and the final rewrite that adds scanner_results never came.
+
+    The runner's word stands: the entry was closed COMPLETED, so the poll's status
+    is "completed" and is_complete is True, and a read-only poll does not re-close
+    the entry as FAILED (it used to, while an unreadable file kept the entry, so the
+    two unusable-file shapes answered differently). What the file read found is
+    reported beside the status: results_available is False, and error_message
+    names the file and the missing scanner_results, so a client that would read
+    the results is told there are none to read.
+    """
     registry = ScanRegistry()
     scan_id, output_dir = _register(registry, tmp_path, SCAN_PHASE_DOCUMENT)
     registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
 
     progress = registry.check_scan_progress(scan_id)
 
-    _assert_reported_as_failed(progress, output_dir)
-    assert "scanner_results" in progress["error_message"]
+    assert progress["status"] == "completed"
+    assert progress["is_complete"] is True
+    assert progress["results_available"] is False
+    message = progress["error_message"]
+    assert message, "The poll carries no error_message, so a client cannot say why."
+    assert str(output_dir / RESULTS_FILE) in message, message
+    assert "scanner_results" in message, message
+    assert progress["scanners"] == {}
+    # Read-only: the entry keeps the status its runner gave it.
+    assert registry.get_scan(scan_id).status is MCScanStatus.COMPLETED
+
+
+def _assert_the_completed_entry_was_left_alone(
+    registry: ScanRegistry, scan_id: str, progress: Dict[str, Any], output_dir: Path
+) -> None:
+    assert progress["status"] == "completed"
+    assert progress["is_complete"] is True
+    assert progress["results_available"] is False
+    assert progress["coverage_complete"] is None
+    assert progress["scanners"] == {}
+    assert str(output_dir / RESULTS_FILE) in progress["error_message"]
+    entry = registry.get_scan(scan_id)
+    assert entry.status is MCScanStatus.COMPLETED
+    assert entry.error_message is None, (
+        "A read-only poll wrote its finding into the entry, so every later poll "
+        "and list_active_scans would report it as the scan's own reason."
+    )
+
+
+@pytest.mark.parametrize("content", TRUNCATED.values(), ids=TRUNCATED.keys())
+def test_a_truncated_file_under_a_completed_entry_is_reported_not_rewritten(
+    tmp_path, content
+):
+    """The runner closed the entry as completed; the poll reports the file.
+
+    The same file under an entry no runner owns closes it FAILED (above). Here the
+    entry keeps its status, its end time and an empty reason, and the response
+    carries the finding: results_available False beside status completed.
+    """
+    registry = ScanRegistry()
+    scan_id, output_dir = _register(registry, tmp_path, content)
+    registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+    end_time = registry.get_scan(scan_id).end_time
+
+    progress = registry.check_scan_progress(scan_id)
+
+    _assert_the_completed_entry_was_left_alone(registry, scan_id, progress, output_dir)
+    assert "Invalid JSON" in progress["error_message"]
+    assert registry.get_scan(scan_id).end_time == end_time
+
+
+@pytest.mark.parametrize(
+    "content,reason", SCHEMA_INVALID.values(), ids=SCHEMA_INVALID.keys()
+)
+def test_a_schema_invalid_file_under_a_completed_entry_is_reported_not_rewritten(
+    tmp_path, content, reason
+):
+    registry = ScanRegistry()
+    scan_id, output_dir = _register(registry, tmp_path, content)
+    registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+    end_time = registry.get_scan(scan_id).end_time
+
+    progress = registry.check_scan_progress(scan_id)
+
+    _assert_the_completed_entry_was_left_alone(registry, scan_id, progress, output_dir)
+    assert reason in progress["error_message"]
+    assert registry.get_scan(scan_id).end_time == end_time
 
 
 def test_an_entry_closed_as_completed_without_a_results_file_stays_completed(tmp_path):

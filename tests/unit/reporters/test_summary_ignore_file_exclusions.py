@@ -134,9 +134,14 @@ class TestTheSummaryLine:
         """Results an older ASH wrote, or a run that built no scan set."""
         assert _lines(request.getfixturevalue(fixture).report(_model(None))) == []
 
-    def test_compact_markdown_leaves_it_out_with_the_scan_metadata(
+    def test_compact_markdown_keeps_it_and_omits_the_scan_metadata(
         self, test_plugin_context
     ):
+        """The compact view omits the scan metadata block but keeps the coverage
+        notices, and the ignore-files line is one: it says how many files the
+        repository's ignore files kept out of the scan set. The test that landed
+        with the code asserted the opposite and was red from that day; its
+        heading check also named a spelling the reporter never writes."""
         reporter = MarkdownReporter(
             context=test_plugin_context,
             config=MarkdownReporterConfig(
@@ -144,8 +149,13 @@ class TestTheSummaryLine:
             ),
         )
         report = reporter.report(_model(HONORED))
-        assert "## Scan Metadata" not in report
-        assert _lines(report) == []
+        assert "## Scan metadata" not in report
+        assert _lines(report) == [
+            (
+                "- **Ignore files**: the scanned repository's .gitignore and "
+                ".ignore files excluded 7 files from ASH's scan set"
+            )
+        ]
 
     def test_a_record_read_back_from_json_renders_the_same(self, text_reporter):
         stored = AshAggregatedResults.model_validate_json(

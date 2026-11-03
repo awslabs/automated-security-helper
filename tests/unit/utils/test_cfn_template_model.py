@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import sys
 from types import SimpleNamespace
 
@@ -21,7 +22,12 @@ from automated_security_helper.utils.cfn_template_model import (
     get_model_from_template,
     get_model_from_template_text,
     holds_cloudformation_template,
+    read_template_text,
     unevaluable_template_reason,
+)
+from automated_security_helper.utils.scanned_tree import (
+    REASON_SYMLINK,
+    TreeInputRefused,
 )
 
 pytestmark = pytest.mark.unit
@@ -245,10 +251,10 @@ class TestHowDeepATemplateIsRead:
         "kind,levels,expected",
         [
             pytest.param("mapping", 50, "model", id="mappings-50"),
+            pytest.param("mapping", 350, "model", id="mappings-350-past-yaml"),
             pytest.param(
-                "mapping", 350, "TemplateDocumentError", id="mappings-350-past-yaml"
+                "sequence", 410, "TemplateDocumentError", id="sequences-410-past-400"
             ),
-            pytest.param("sequence", 410, "model", id="sequences-410-past-400"),
         ],
     )
     def test_a_tab_indented_json_template_is_decided_as_with_spaces(
@@ -256,10 +262,14 @@ class TestHowDeepATemplateIsRead:
     ):
         """The same template, the same answer, whichever it is indented with.
 
-        YAML refuses a tab before it reaches the depth, and JSON decided: mappings
-        nested from about 330 levels (the YAML loader's limit for them) to 400 were
-        scanned with tabs and a failed target with spaces, and sequences from 401 to
-        about 490 the other way round.
+        At the base YAML read every JSON template first and refused a tab before it
+        reached the depth, so JSON decided the tab-indented form and YAML the
+        space-indented one: mappings nested from about 330 levels (the YAML loader's
+        limit for them) to 400 were scanned with tabs and a failed target with
+        spaces, and sequences from 401 to about 490 the other way round. A text that
+        opens with ``{`` is now read by the JSON parser first, so JSON_NESTING_LIMIT
+        (400) decides both spellings alike: a 350-level mapping is a template and a
+        410-level sequence is nested too deep, with tabs and with spaces.
         """
         document = _template_holding(_nested(kind, levels))
         tabs = json.dumps(document, indent="\t")
@@ -449,6 +459,62 @@ class TestHowDeepATemplateIsRead:
         reason = unevaluable_template_reason(candidate, tmp_path, text)
 
         assert (reason is not None) is failed, reason
+
+
+class TestReadTemplateText:
+    """The template read admits a hard-linked regular file and still refuses a link.
+
+    Both scanners read a candidate through ``read_template_text`` to decide whether
+    they evaluate it. The scanned-tree rule refused a file with a second hard link,
+    and both scanners took that refusal as the not-CloudFormation skip: no finding,
+    no error, no failed target, so a repository that hard-links its templates was
+    reported clean. A hard link to a regular file is the tree's own bytes under a
+    second name and follows no link to another path, so the read admits it; a
+    symlink, which does name another path, stays refused.
+    """
+
+    TEMPLATE = "Resources:\n  MyBucket:\n    Type: AWS::S3::Bucket\n"
+
+    @pytest.fixture
+    def tree(self, tmp_path):
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        return tree
+
+    @pytest.fixture
+    def elsewhere(self, tmp_path):
+        """The template's first name, outside the scanned tree."""
+        path = tmp_path / "elsewhere" / "template.yaml"
+        path.parent.mkdir()
+        path.write_text(self.TEMPLATE, encoding="utf-8")
+        return path
+
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+    def test_a_hard_linked_template_is_read_and_counted(self, tree, elsewhere):
+        linked = tree / "template.yaml"
+        try:
+            os.link(elsewhere, linked)
+        except OSError as exc:  # pragma: no cover - filesystem without hard links
+            pytest.skip(f"cannot create a hard link here: {exc}")
+
+        assert read_template_text(linked, tree) == self.TEMPLATE
+        # The tool-absent check counts it, so a tree whose only template is
+        # hard-linked reads MISSING without the tool, not "no template".
+        assert holds_cloudformation_template([linked], tree) is True
+        model = get_model_from_template(linked, scan_root=tree)
+        assert model is not None
+        assert "MyBucket" in model.Resources
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="needs symlinks")
+    def test_a_symlinked_template_is_still_refused(self, tree, elsewhere):
+        """The must-not-admit control: the admit covers a hard link only."""
+        (tree / "template.yaml").symlink_to(elsewhere)
+
+        with pytest.raises(TreeInputRefused) as excinfo:
+            read_template_text(tree / "template.yaml", tree)
+
+        assert excinfo.value.reason == REASON_SYMLINK
+        assert holds_cloudformation_template([tree / "template.yaml"], tree) is False
 
 
 #: A template damaged so no reader parses it, whose root is a sequence: an unclosed

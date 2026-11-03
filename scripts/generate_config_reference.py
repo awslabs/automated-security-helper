@@ -268,6 +268,8 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
     :func:`evaluate_default` against each platform in :data:`PLATFORMS`. One that
     cannot be evaluated that way is reported with the value ``None``, rendered as
     "depends on the platform".
+    A ``Field(default=...)`` default is read through its ``default`` keyword, as
+    ``_default_expressions`` reads it for the environment checks.
     """
     import types as _types
 
@@ -292,8 +294,14 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
             seen.add(name)
             if stmt.value is None:
                 continue
-            if not _reads_platform(stmt.value):
+            defaults = [
+                expression
+                for expression in _default_expressions(stmt)
+                if _reads_platform(expression)
+            ]
+            if not defaults:
                 continue
+            default = defaults[0]
             values = []
             for label, system, sys_platform, os_name in PLATFORMS:
                 namespace = {
@@ -308,7 +316,7 @@ def platform_defaults(model: type) -> dict[str, list[tuple[str, Any]]]:
                     ),
                 }
                 try:
-                    value = evaluate_default(stmt.value, namespace)
+                    value = evaluate_default(default, namespace)
                 except Exception:
                     value = None
                 values.append((label, value))

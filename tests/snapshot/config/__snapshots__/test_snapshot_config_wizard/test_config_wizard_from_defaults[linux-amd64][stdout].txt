@@ -86,7 +86,7 @@ Offline mode
 
 Community plugin modules
   Provide Python module paths for additional plugins, one per line. Leave blank to finish.
-  Add a plugin module (blank to finish): my_org.ash_plugins
+  Add a plugin module (blank to finish): my_org_ash_plugins
   Add a plugin module (blank to finish):
 ╭────────────────────────────────────────────── Done ──────────────────────────────────────────────╮
 │ Config written to <WORKSPACE>/.ashrc.yaml                                                        │

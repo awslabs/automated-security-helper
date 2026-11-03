@@ -1,0 +1,298 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A config write that cannot be staged beside the file is made in place, a
+config that another name also refers to is never replaced, the file's permission
+bits are kept, and a failed `lint --fix` write is reported.
+
+The config writers stage the new text beside the file and rename it over the
+target, so a failed write leaves the file whole. Two places refuse that shape
+where the plain in-place write succeeded: a directory the user may not write
+(the staging file fails EACCES) and a single file bind-mounted into the
+container (the rename onto a mount point fails EBUSY). There the in-place write
+is made. A file with a second name is written in place too: a rename makes a new
+file under one name and leaves the other on the old text. So is a file given to
+a group the writer cannot give back to the staging file: the new inode takes the
+writer's own group, and the teammates the file was shared with would lose it. The
+staged write makes a new inode at the umask's mode, so the file's own bits are
+put back before the rename (a 0600 config stays 0600). A write the lint fixers
+cannot make is reported on one line with exit 1, not a traceback.
+"""
+
+from __future__ import annotations
+
+import errno
+import io
+import os
+import stat
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import yaml
+from typer.testing import CliRunner
+
+from automated_security_helper.cli import config as config_module
+from automated_security_helper.cli.config import config_app
+
+pytestmark = pytest.mark.unit
+
+STARTING_CONFIG = "project_name: demo\nfail_on_findings: true\n"
+
+
+@pytest.fixture
+def config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = tmp_path / ".ashrc.yaml"
+    path.write_text(STARTING_CONFIG, encoding="utf-8")
+    return path
+
+
+def _update(config_file: Path):
+    return CliRunner().invoke(
+        config_app, ["update", str(config_file), "--set", "fail_on_findings=false"]
+    )
+
+
+def _written(config_file: Path) -> dict:
+    return yaml.safe_load(config_file.read_text(encoding="utf-8"))
+
+
+def test_a_rename_refused_with_ebusy_falls_back_to_the_in_place_write(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bind-mounted config file: os.replace onto the mount point fails EBUSY."""
+    target = config_file.resolve()
+    real_replace = os.replace
+    refused: list[str] = []
+
+    def replace_unless_mounted(src, dst, *args, **kwargs):
+        if isinstance(dst, (str, os.PathLike)) and Path(dst).resolve() == target:
+            refused.append(os.fspath(dst))
+            raise OSError(errno.EBUSY, os.strerror(errno.EBUSY), os.fspath(dst))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", replace_unless_mounted)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    # The rename was tried and refused: the in-place write was the fallback, not
+    # the only write made.
+    assert refused == [os.fspath(target)]
+    assert _written(config_file)["fail_on_findings"] is False
+    assert [p.name for p in config_file.parent.iterdir()] == [config_file.name]
+
+
+def test_a_staging_file_refused_with_eacces_falls_back_to_the_in_place_write(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A writable file in a directory the user may not write: the staging file
+    cannot be created, the file itself can be."""
+    real_open = os.open
+    staging_prefix = f".{config_file.name}."
+    refused: list[str] = []
+
+    def open_unless_staging(path, flags, *args, **kwargs):
+        name = os.path.basename(os.fspath(path))
+        if isinstance(name, str) and name.startswith(staging_prefix):
+            refused.append(name)
+            raise PermissionError(
+                errno.EACCES, os.strerror(errno.EACCES), os.fspath(path)
+            )
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_unless_staging)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    # The staging file was asked for under its name beside the config and
+    # refused; a writer that never staged would pass without it.
+    assert len(refused) == 1 and refused[0].startswith(staging_prefix)
+    assert _written(config_file)["fail_on_findings"] is False
+
+
+def _replaces_of(monkeypatch: pytest.MonkeyPatch, target: Path) -> list[str]:
+    """Record every ``os.replace`` onto a file named like ``target``, letting it
+    happen. Matched on the file name alone: the guard renames by name relative to
+    a directory it holds open, so the destination may be a bare name."""
+    real_replace = os.replace
+    seen: list[str] = []
+
+    def recording_replace(src, dst, *args, **kwargs):
+        if isinstance(dst, (str, os.PathLike)) and Path(dst).name == target.name:
+            seen.append(os.fspath(dst))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", recording_replace)
+    return seen
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX hard links")
+def test_a_hard_linked_config_is_rewritten_under_both_names(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rename over one name of a file with two names leaves the other name on
+    the old text; the plain write changed the one file both names refer to."""
+    other = config_file.parent / "shared.yaml"
+    try:
+        os.link(config_file, other)
+    except OSError as refused:
+        pytest.skip(f"this host refuses hard links: {refused}")
+    replaced = _replaces_of(monkeypatch, config_file)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    assert replaced == []
+    assert _written(config_file)["fail_on_findings"] is False
+    assert _written(other)["fail_on_findings"] is False
+    assert config_file.stat().st_nlink == 2
+
+
+def _given_to_another_group(
+    monkeypatch: pytest.MonkeyPatch, config_file: Path, chown
+) -> tuple[int, int]:
+    """Make the config read as given to a group one above its real one, and send
+    every ``os.fchown`` to ``chown``. Returns the (owner, group) it reads as.
+
+    A real group change needs a group the test user belongs to besides its own,
+    which a venue may not have, so the writer's view of the file is replaced."""
+    real = config_file.stat()
+    shown = SimpleNamespace(
+        st_mode=real.st_mode,
+        st_uid=real.st_uid,
+        st_gid=real.st_gid + 1,
+        st_nlink=real.st_nlink,
+    )
+    monkeypatch.setattr(config_module, "_stat_to_keep", lambda target: shown)
+    monkeypatch.setattr(os, "fchown", chown)
+    return shown.st_uid, shown.st_gid
+
+
+@pytest.mark.skipif(not hasattr(os, "fchown"), reason="POSIX file groups")
+def test_a_config_given_to_a_group_the_writer_cannot_give_back_is_rewritten_in_place(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A config chgrp'd to a shared group and left group-writable: the staged
+    write's new inode takes the writer's own group, and giving the file's back is
+    refused (EPERM) for a group the writer is not in, so the teammates it was
+    shared with would lose it; the plain write kept the inode and its group."""
+    chowned: list[tuple[int, int]] = []
+
+    def refused_chown(fd, uid, gid):
+        chowned.append((uid, gid))
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+
+    wanted = _given_to_another_group(monkeypatch, config_file, refused_chown)
+    inode = config_file.stat().st_ino
+    replaced = _replaces_of(monkeypatch, config_file)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    # The group was asked for and refused: the write was then made in place.
+    assert chowned == [wanted]
+    assert replaced == []
+    assert _written(config_file)["fail_on_findings"] is False
+    assert config_file.stat().st_ino == inode
+    assert [p.name for p in config_file.parent.iterdir()] == [config_file.name]
+
+
+@pytest.mark.skipif(not hasattr(os, "fchown"), reason="POSIX file groups")
+def test_a_config_given_to_a_group_the_writer_can_give_back_is_still_replaced(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The positive control: a writer that is in the file's group (or is root) gets
+    the group onto the staging file, so the staged write still replaces the file
+    and the test above is not a write that is always in place."""
+    chowned: list[tuple[int, int]] = []
+
+    def allowed_chown(fd, uid, gid):
+        chowned.append((uid, gid))
+
+    wanted = _given_to_another_group(monkeypatch, config_file, allowed_chown)
+    replaced = _replaces_of(monkeypatch, config_file)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    assert chowned == [wanted]
+    assert len(replaced) == 1
+    assert _written(config_file)["fail_on_findings"] is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_the_rewritten_config_keeps_its_permission_bits(config_file: Path) -> None:
+    config_file.chmod(0o600)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    assert _written(config_file)["fail_on_findings"] is False
+    assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
+
+
+def test_lint_fix_reports_a_write_it_cannot_make_without_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails for the write's own reason (a full disk) is not
+    retried in place; `lint --fix` says so on one line and exits 1.
+
+    The fixable issue is one a scan accepts (a scanner section's internal-only
+    `name` field, a warning --fix removes): lint's exit describes the file as it
+    is after the fixes, and a file a scan refuses (a top-level `build` section)
+    exits 3 before the refused rewrite's 1, so with such a file the write error
+    would be reported and the exit would still be 3.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    config_path = tmp_path / ".ash" / ".ash.yaml"
+    config_path.parent.mkdir()
+    starting = "project_name: full-disk-probe\nscanners:\n  bandit:\n    name: bandit\n"
+    config_path.write_text(starting, encoding="utf-8")
+    real_open = io.open
+
+    class _RefusingHandle:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def write(self, text):
+            probe = (
+                b"full-disk-probe"
+                if isinstance(text, (bytes, bytearray))
+                else "full-disk-probe"
+            )
+            if probe in text:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return self._inner.write(text)
+
+        def __enter__(self):
+            self._inner.__enter__()
+            return self
+
+        def __exit__(self, *exc):
+            return self._inner.__exit__(*exc)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    def opening(file, mode="r", *args, **kwargs):
+        handle = real_open(file, mode, *args, **kwargs)
+        if "w" in mode:
+            return _RefusingHandle(handle)
+        return handle
+
+    monkeypatch.setattr(io, "open", opening)
+
+    result = CliRunner().invoke(
+        config_app, ["lint", "--config", str(config_path), "--fix", "--yes"]
+    )
+
+    assert result.exit_code == 1, result.output
+    assert not isinstance(result.exception, OSError), result.exception
+    assert "Error writing config file" in result.output
+    assert config_path.read_text(encoding="utf-8") == starting

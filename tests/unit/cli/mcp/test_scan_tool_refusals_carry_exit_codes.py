@@ -72,7 +72,7 @@ def no_scan_runs(monkeypatch) -> list:
 
     started: list = []
 
-    def record(scan_id, coroutine) -> None:
+    def record(scan_id, coroutine, **start_options) -> None:
         coroutine.close()
         started.append(scan_id)
 

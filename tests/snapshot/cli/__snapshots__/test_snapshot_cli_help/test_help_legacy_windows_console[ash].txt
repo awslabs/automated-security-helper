@@ -193,14 +193,24 @@
 │                                                                           bwrap, firejail,      │
 │                                                                           landlock; macOS:      │
 │                                                                           sandbox-exec). A      │
-│                                                                           scanner that cannot   │
-│                                                                           be sandboxed as       │
-│                                                                           requested is reported │
-│                                                                           MISSING. Overrides    │
-│                                                                           the config file's     │
-│                                                                           sandbox.mode; default │
-│                                                                           off. Refused with     │
-│                                                                           --mode container      │
+│                                                                           scanner whose sandbox │
+│                                                                           cannot be set up is   │
+│                                                                           graded by the         │
+│                                                                           refusal: under 'auto' │
+│                                                                           no working backend is │
+│                                                                           a missing dependency  │
+│                                                                           and the scanner is    │
+│                                                                           reported MISSING; a   │
+│                                                                           named backend that is │
+│                                                                           unavailable, or any   │
+│                                                                           other refusal (such   │
+│                                                                           as a results path     │
+│                                                                           that is a symlink),   │
+│                                                                           is reported ERROR.    │
+│                                                                           Overrides the config  │
+│                                                                           file's sandbox.mode;  │
+│                                                                           default off. Refused  │
+│                                                                           with --mode container │
 │                                                                           (exit 5), which runs  │
 │                                                                           the scanners          │
 │                                                                           unsandboxed inside    │

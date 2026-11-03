@@ -262,12 +262,16 @@ ash config validate
 
 It checks the config a scan of the project would use, the way the scan loads it, and ends
 with `Configuration is valid! A scan accepts it.` It may also warn that `project_name` is not
-set, which a scan accepts. A wrong value, a missing required field such as `reason`, or a
-misspelled key such as `expiry` for `expiration` makes it name the field and exit with code 3:
+set, which a scan accepts. A typo in an optional key such as `expiry` for `expiration` does
+not make the file invalid: validate still accepts it, the entry suppresses nothing until the
+key is fixed, and the scan that loads the config warns, naming the key with a did-you-mean
+(`fail_on_unknown_keys: true` makes it an error, the default from ASH v4). A wrong value or a
+missing required field such as `reason` makes validate name the field and exit with code 3; a
+typo in a required key does the same, because the required field then goes missing:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-sed 's/expiration:/expiry:/' .ashrc.yaml > typo.yaml
+sed 's/reason:/reasn:/' .ashrc.yaml > typo.yaml
 ash config validate --config typo.yaml
 ```
 

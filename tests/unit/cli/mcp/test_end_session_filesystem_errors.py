@@ -74,22 +74,26 @@ def _sandbox(root: Path, session_id: str) -> Path:
     return sandbox
 
 
-class _StatRefused:
-    """A session directory whose stat fails as a stale network handle does."""
+class _StatRefused(type(Path())):
+    """The session's directory, whose ``is_dir`` stat fails as a stale network
+    handle does. A real path otherwise: the removal that follows the failed
+    stat renames and deletes what stands at it (``_set_aside_for_removal``
+    takes the path the caller resolved), which a stand-in that is no path
+    could not have."""
 
     def is_dir(self) -> bool:
         raise OSError(errno.ESTALE, "FAKE stale file handle", "FAKE-sandbox")
 
 
 def _stat_fails(monkeypatch, session_id: str) -> None:
-    """Make the stat of every session directory fail from now on.
+    """Make the ``is_dir`` stat of every session directory fail from now on.
 
     The registry entry for ``session_id`` is made first: a new entry is built
-    from a real directory path, which the stand-in is not.
+    from the directory path as the server resolves it.
     """
     sessions.get_default_registry().session_for(session_id)
     monkeypatch.setattr(
-        sessions, "session_directory", lambda _root, _sid: _StatRefused()
+        sessions, "session_directory", lambda root, sid: _StatRefused(root / sid)
     )
 
 

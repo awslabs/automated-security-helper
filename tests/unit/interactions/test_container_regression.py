@@ -79,17 +79,31 @@ class TestBug97TerminateWithoutWait:
 
     def test_terminate_has_wait_and_kill_escalation(self):
         """Since the interrupt is passed on rather than SIGTERMed, the stop lives in
-        _stop_after_interrupt; TestRunCmdDirectInterruption checks it by behavior."""
+        _stop_after_interrupt; TestRunCmdDirectInterruption checks it by behavior.
+
+        The kill itself lives in the helper that logs a refused kill instead of
+        letting the error replace the interrupt, and the reaping wait in the
+        bounded wait after a kill. How the helper waits, kills and reaps is pinned
+        by behavior in TestRunCmdDirectInterruption, so this reads only which
+        function the wait loop ends the runtime through and where the kill and
+        the wait are made.
+        """
+        from automated_security_helper.interactions import run_ash_container
         from automated_security_helper.interactions.run_ash_container import (
-            _stop_after_interrupt,
             run_cmd_direct,
         )
+        from automated_security_helper.utils import subprocess_utils
 
-        assert "_stop_after_interrupt(process)" in inspect.getsource(run_cmd_direct)
-        post_interrupt = inspect.getsource(_stop_after_interrupt)
-        assert "process.wait(" in post_interrupt or ".wait(" in post_interrupt, (
-            "After process.terminate(), must call process.wait()"
+        assert (
+            run_ash_container._stop_after_interrupt
+            is subprocess_utils.stop_after_interrupt
         )
-        assert "process.kill()" in post_interrupt or ".kill()" in post_interrupt, (
-            "Must escalate to process.kill() if process doesn't exit"
+        # The wait loop ends the runtime through the wrapper that adds a kill
+        # when the helper itself is cut short.
+        assert "_stop_the_runtime(" in inspect.getsource(run_cmd_direct)
+        assert ".kill()" in inspect.getsource(subprocess_utils._kill_unless_refused), (
+            "The kill helper is the one that calls process.kill()"
+        )
+        assert ".wait(" in inspect.getsource(subprocess_utils._wait_after_kill), (
+            "The bounded wait is the one that calls process.wait()"
         )

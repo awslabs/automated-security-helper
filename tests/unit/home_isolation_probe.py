@@ -21,10 +21,16 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("ASH_HOME_ISOLATION_PROBE") != "1",
-    reason="run by tests/unit/test_home_isolation.py in a child with a sentinel home",
-)
+# The tier must be unit: the child pytest runs without --run-integration, which
+# skips every integration- or e2e-marked test, and tests/conftest.py refuses a
+# collected test with no tier marker before any test runs.
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        os.environ.get("ASH_HOME_ISOLATION_PROBE") != "1",
+        reason="run by tests/unit/test_home_isolation.py in a child with a sentinel home",
+    ),
+]
 
 
 def _write_under_home(name: str) -> Path:

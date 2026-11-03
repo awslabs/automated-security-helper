@@ -29,7 +29,11 @@ def sample_sarif_file_no_scanner():
         ],
     }
 
-    with tempfile.NamedTemporaryFile(suffix="_bandit.sarif", delete=False) as f:
+    # The scanner is the part of the file name before its first "_": "semgrep"
+    # here, whatever tempfile puts after the prefix.
+    with tempfile.NamedTemporaryFile(
+        prefix="semgrep_", suffix="_bandit.sarif", delete=False
+    ) as f:
         f.write(json.dumps(sarif_content).encode("utf-8"))
         return Path(f.name)
 
@@ -60,17 +64,18 @@ def test_analyze_sarif_file_with_provided_scanner():
         file_path = f.name
 
     try:
-        # Mock the function to return our expected values
-        with patch(
-            "automated_security_helper.utils.meta_analysis.sarif_analysis.analyze_sarif_file",
-            return_value=({}, "CustomScanner"),
-        ):
-            field_paths, scanner_name = analyze_sarif_file(
-                file_path, scanner_name="CustomScanner"
-            )
+        # The function under test is the imported name; patching its module
+        # attribute changed nothing it ran, so the assertion is on the real call.
+        field_paths, scanner_name = analyze_sarif_file(
+            file_path, scanner_name="CustomScanner"
+        )
 
-            # Check that the provided scanner name was used
-            assert scanner_name == "CustomScanner"
+        # The provided scanner name wins over the driver's, on every field.
+        assert scanner_name == "CustomScanner"
+        assert field_paths
+        assert all(
+            info["scanners"] == {"CustomScanner"} for info in field_paths.values()
+        )
     finally:
         # Clean up the temporary file
         os.unlink(file_path)
@@ -88,9 +93,12 @@ def test_analyze_sarif_file_infer_from_filename(sample_sarif_file_no_scanner):
             str(sample_sarif_file_no_scanner)
         )
 
-        # Check that scanner name was inferred from filename
-        # The function returns TestScanner for files starting with tmp
-        assert scanner_name == "TestScanner"
+        # With no tool.driver.name, the scanner is the part of the file name
+        # before its first underscore: the fixture's prefix. (A file whose name
+        # started with "tmp" used to get hard-coded test data and the name
+        # "TestScanner" instead.)
+        assert scanner_name == "semgrep"
+        assert "runs[0].results[0].ruleId" in field_paths
     finally:
         # Clean up the temporary file
         sample_sarif_file_no_scanner.unlink()
@@ -110,16 +118,13 @@ def test_analyze_sarif_file_error_handling():
         file_path = f.name
 
     try:
-        # Mock the function to return our expected values
-        with patch(
-            "automated_security_helper.utils.meta_analysis.sarif_analysis.analyze_sarif_file",
-            return_value=({}, "error"),
-        ):
-            field_paths, scanner_name = analyze_sarif_file(file_path)
+        # The real call: a file that is not JSON yields no fields and the name
+        # "error" (the patch this test used to wrap itself in was dead, since the
+        # imported name is not the module attribute it replaced).
+        field_paths, scanner_name = analyze_sarif_file(file_path)
 
-            # Check that empty results are returned on error
-            assert field_paths == {}
-            assert scanner_name == "error"
+        assert field_paths == {}
+        assert scanner_name == "error"
     finally:
         # Clean up the temporary file
         os.unlink(file_path)

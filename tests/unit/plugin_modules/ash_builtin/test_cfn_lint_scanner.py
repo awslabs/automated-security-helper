@@ -549,7 +549,15 @@ class TestScan:
         report = self._run(scanner, cfn_lint)
         assert scanner.targets_attempted == 2
         assert scanner.targets_failed == 1
-        assert "templates/compliant.yaml: cfn-lint exited 1: boom" in scanner.errors
+        # The failure is recorded once, by the ERROR log line the base class appends
+        # to self.errors; at an earlier tip a second, bare "<template>: <reason>"
+        # line sat beside it, and this test looked for that exact element.
+        recorded = [
+            e
+            for e in scanner.errors
+            if "templates/compliant.yaml: cfn-lint exited 1: boom" in e
+        ]
+        assert len(recorded) == 1, scanner.errors
         assert not any("insecure.yaml" in e for e in scanner.errors), scanner.errors
         _assert_parses_to(report, EXPECTED_INSECURE)
 
@@ -615,6 +623,10 @@ class TestScan:
         self._run(scanner, fake)
         assert fake.calls == []
         assert scanner.targets_attempted == 0
+        # No cfn-lint ran, so there is no exit code: None, as cfn-guard records it,
+        # not the 0 an earlier tip's reset wrote and the executor read for a tool
+        # that never ran.
+        assert scanner.exit_code is None
 
     @pytest.mark.parametrize(
         "environment",
@@ -671,13 +683,23 @@ class TestScan:
         for name, value in environment.items():
             assert os.environ[name] == value
 
-    def test_regions_set_in_the_config_are_passed_as_given(self, repo, monkeypatch):
+    def test_regions_set_by_the_operator_are_passed_as_given(self, repo, monkeypatch):
         monkeypatch.setenv("AWS_REGION", "af-south-1")
         fake = FakeCfnLint({}, returncode=0)
-        self._run(_scanner(repo, regions=["eu-west-1", "us-west-2"]), fake)
+        self._run(
+            _scanner(repo, operator=True, regions=["eu-west-1", "us-west-2"]), fake
+        )
         argv = fake.calls[0]
         start = argv.index("--regions") + 1
         assert argv[start : start + 2] == ["eu-west-1", "us-west-2"]
+
+    def test_regions_set_by_the_scanned_tree_are_not_passed(self, repo, monkeypatch):
+        """--regions overrides a template's own regions and drops region-dependent
+        findings, so it goes through the operator gate like ignore_checks."""
+        monkeypatch.setenv("AWS_REGION", "af-south-1")
+        fake = FakeCfnLint({}, returncode=0)
+        self._run(_scanner(repo, regions=["eu-west-1", "us-west-2"]), fake)
+        assert "--regions" not in fake.calls[0], fake.calls[0]
 
     def test_missing_dependencies_return_false_without_running(self, repo):
         scanner = _scanner(repo)

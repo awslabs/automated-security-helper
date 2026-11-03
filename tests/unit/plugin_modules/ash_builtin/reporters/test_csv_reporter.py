@@ -41,12 +41,17 @@ class TestCsvReporter:
         assert isinstance(reporter.config, CSVReporterConfig)
 
     def test_sarif_field_mappings_returns_dict(self):
-        """sarif_field_mappings returns a non-empty dict mapping paths to headers."""
+        """sarif_field_mappings returns a non-empty dict mapping paths to headers.
+
+        The headers are the field names the CSV emits ("rule_id"), not the
+        title-case names ("Rule ID") this test once pinned, which no row of the
+        report carried.
+        """
         mappings = CsvReporter.sarif_field_mappings()
         assert mappings is not None
         assert isinstance(mappings, dict)
         assert "runs[].results[].ruleId" in mappings
-        assert mappings["runs[].results[].ruleId"] == "Rule ID"
+        assert mappings["runs[].results[].ruleId"] == "rule_id"
 
     def test_report_empty_model_returns_header_only(
         self, csv_reporter, sample_ash_model

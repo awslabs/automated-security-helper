@@ -3997,12 +3997,18 @@ class Harness:
         self._patch(pwd, "getpwnam", lambda name: self._passwd(os.getuid(), str(name)))
         self._patch(pwd, "getpwall", lambda: [self._passwd(os.getuid(), "char")])
 
-    def _patch_defaults(self, function: Any, old: Any, new: Any) -> None:
+    def _patch_defaults(
+        self, function: Any, old: Any, new: Any, _followed: Tuple[Any, ...] = ()
+    ) -> None:
         """Replace ``old`` among ``function``'s defaults, and inside typer options.
 
         A default that is ``old`` itself becomes ``new``. When ``old`` is a path, a
         default that is its text (``str(ASH_BIN_PATH)`` at import) becomes the text
-        of ``new`` (see ``_replaced_default``)."""
+        of ``new`` (see ``_replaced_default``).
+
+        A wrapper made with ``functools.wraps`` has no defaults of its own; the
+        function it wraps does, and ``inspect.signature`` (which Typer reads) follows
+        ``__wrapped__`` to it. So the wrapped function is patched too."""
         defaults = getattr(function, "__defaults__", None)
         if defaults:
             replaced = [_replaced_default(d, old, new) for d in defaults]
@@ -4039,6 +4045,11 @@ class Harness:
                 )
                 if replacement is not _NOT_REPLACED:
                     self._patch(default, "default", replacement)
+        wrapped = getattr(function, "__wrapped__", None)
+        if isinstance(wrapped, types.FunctionType) and not any(
+            wrapped is seen for seen in (*_followed, function)
+        ):
+            self._patch_defaults(wrapped, old, new, (*_followed, function))
 
     def _install_lookup_seam(self) -> None:
         """Put every directory ASH searches for tools inside the harness.

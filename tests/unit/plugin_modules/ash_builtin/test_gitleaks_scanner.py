@@ -331,8 +331,23 @@ def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
 @pytest.mark.parametrize("variable", ["GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"])
 @pytest.mark.unit
 def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, variable):
-    """The operator's environment, not the tree: gitleaks resolves it."""
-    monkeypatch.setenv(variable, "anything")
+    """The operator's environment, not the tree: gitleaks resolves it.
+
+    An absolute ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML`` (the config's
+    text), needs nothing from ASH. A RELATIVE ``GITLEAKS_CONFIG`` is the one
+    value gitleaks would resolve against its working directory, the scanned
+    tree, so ASH anchors that one where the operator set it and passes it as
+    ``--config`` (the test below)."""
+    value = (
+        str(tmp_path / "operator.toml")
+        if variable == "GITLEAKS_CONFIG"
+        else 'title = "inline"\n'
+    )
+    # Only the variable under test is set: the other one, if the runner's
+    # environment carries it, would add a second route to the same answer.
+    monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
+    monkeypatch.setenv(variable, value)
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text("")
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
@@ -1339,22 +1354,50 @@ def test_the_copies_are_private_to_their_owner(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_relative_gitleaks_config_variable_is_resolved_from_the_source(
+def test_a_relative_gitleaks_config_variable_is_anchored_where_the_operator_set_it(
     tmp_path, monkeypatch
 ):
-    """The first run resolves it from the source directory, its working
-    directory; the re-scan runs from the copies, so it is given the same file."""
+    """gitleaks resolves a relative GITLEAKS_CONFIG against its working directory,
+    the scanned source directory, so the repository would supply the file the
+    operator named in ASH's own directory. The scanner anchors the value to the
+    directory ASH runs in and passes it as ``--config`` to the first run and the
+    re-scans alike; the scanned tree's file of the same name is never read."""
+    operator_dir = tmp_path / "operator"
+    (operator_dir / "rules").mkdir(parents=True)
+    (operator_dir / "rules" / "gl.toml").write_text('title = "operator"\n')
+    monkeypatch.chdir(operator_dir)
     monkeypatch.setenv("GITLEAKS_CONFIG", "rules/gl.toml")
     monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
+    _write(source, "rules/gl.toml", 'title = "repo"\n')
     (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\n")
     _add_back(scanner, source, _report(), tmp_path)
-    assert not any(a.startswith("--config=") for a in calls[0]["argv"])
-    assert calls[0]["env"]["GITLEAKS_CONFIG"] == (
-        (source / "rules" / "gl.toml").absolute().as_posix()
-    )
+    anchored = (operator_dir / "rules" / "gl.toml").resolve().as_posix()
+    assert f"--config={anchored}" in calls[0]["argv"]
+    repo_copy = (source / "rules" / "gl.toml").absolute().as_posix()
+    assert calls, "no gitleaks run was made"
+    for call in calls:
+        # Every run, the first and each re-scan, is handed the anchored file.
+        assert f"--config={anchored}" in call["argv"], call["argv"]
+        assert not any(repo_copy in a for a in call["argv"])
+        # And the environment the child really gets cannot lead gitleaks into
+        # the tree. A run recorded with no environment inherits ASH's own,
+        # where the variable is the operator's relative value, and gitleaks
+        # reads ``--config`` before the variable: that is the assertion above.
+        # A run recorded with an environment is read as it stands: the
+        # variable absent, or set to a value that, resolved where gitleaks
+        # runs (the run's working directory, a copy of the tree for a
+        # re-scan), lands in neither the scanned tree nor that directory.
+        environment = call["env"]
+        if environment is None:
+            continue
+        value = environment.get("GITLEAKS_CONFIG")
+        if value is not None:
+            resolved = (Path(call["cwd"]) / value).resolve()
+            assert not resolved.is_relative_to(source.resolve()), value
+            assert not resolved.is_relative_to(Path(call["cwd"]).resolve()), value
 
 
 # --------------------------------------------------------------------------- #
@@ -1684,6 +1727,37 @@ def _another_thread_reads_the_clock() -> None:
     thread.join()
 
 
+class _Clock:
+    """A stand-in for ``_monotonic`` that moves only when the test moves it.
+
+    Time passes in the fake gitleaks run, not per read: the re-scan reads the
+    clock when it sets the deadline, before each copy and before each run, and
+    a scripted sequence of readings pinned that count, so a check added to the
+    copy step read the sequence ahead and timed the first run with a later
+    reading.
+    """
+
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _timed_runs(scanner, clock: _Clock, monkeypatch, seconds_per_run: float) -> list:
+    """Record each run's timeout and let ``seconds_per_run`` pass during it."""
+    timeouts = []
+    fake = scanner._run_subprocess
+
+    def timed(command, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        clock.now += seconds_per_run
+        return fake(command, **kwargs)
+
+    monkeypatch.setattr(scanner, "_run_subprocess", timed)
+    return timeouts
+
+
 @pytest.mark.unit
 def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
     """Each run is given what is left of one scan_timeout, not a fresh one."""
@@ -1691,18 +1765,11 @@ def test_the_re_scan_runs_share_one_deadline(tmp_path, monkeypatch):
         gitleaks_scanner as module,
     )
 
-    clock = iter([100.0, 100.0, 130.0, 130.0])
-    monkeypatch.setattr(module, "_monotonic", lambda: next(clock))
+    clock = _Clock(100.0)
+    monkeypatch.setattr(module, "_monotonic", clock)
     _another_thread_reads_the_clock()
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
-    timeouts = []
-    fake = scanner._run_subprocess
-
-    def timed(command, **kwargs):
-        timeouts.append(kwargs.get("timeout"))
-        return fake(command, **kwargs)
-
-    monkeypatch.setattr(scanner, "_run_subprocess", timed)
+    timeouts = _timed_runs(scanner, clock, monkeypatch, seconds_per_run=30.0)
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
     (source / ".gitleaksignore").write_text(
@@ -1718,10 +1785,11 @@ def test_a_re_scan_with_no_time_left_fails_the_scan(tmp_path, monkeypatch):
         gitleaks_scanner as module,
     )
 
-    clock = iter([100.0, 100.0, 160.0, 160.0])
-    monkeypatch.setattr(module, "_monotonic", lambda: next(clock))
+    clock = _Clock(100.0)
+    monkeypatch.setattr(module, "_monotonic", clock)
     _another_thread_reads_the_clock()
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {}, scan_timeout=50)
+    _timed_runs(scanner, clock, monkeypatch, seconds_per_run=60.0)
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
     (source / ".gitleaksignore").write_text(

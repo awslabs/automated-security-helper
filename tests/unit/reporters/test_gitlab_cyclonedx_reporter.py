@@ -73,7 +73,10 @@ def test_components_have_package_manager(reporter, model):
         if p["name"] == "gitlab:dependency_scanning:package_manager:name"
     ]
     assert len(pms) == 1
-    assert pms[0]["value"] == "npm"
+    # The lockfile names the manager: the component's input file is yarn.lock
+    # (test_components_have_input_file_path), so the generic "npm" of its
+    # ecosystem is refined to "yarn".
+    assert pms[0]["value"] == "yarn"
 
 
 def test_components_have_input_file_path(reporter, model):
@@ -152,6 +155,14 @@ def test_normalize_input_file_path():
         == "yarn.lock"
     )
     assert _normalize_input_file_path("/app/go.sum") == "app/go.sum"
+    # A directory that merely contains a vendored name is the repository's own.
+    assert (
+        _normalize_input_file_path("/src/myvendor/package-lock.json")
+        == "src/myvendor/package-lock.json"
+    )
+    assert _normalize_input_file_path("/src/vendor/package-lock.json") == (
+        "package-lock.json"
+    )
     assert _normalize_input_file_path(None) is None
     assert _normalize_input_file_path("") is None
 

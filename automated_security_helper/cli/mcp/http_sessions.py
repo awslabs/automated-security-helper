@@ -51,8 +51,10 @@ Failure modes and limits
 
 from __future__ import annotations
 
+import functools
 import re
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -115,12 +117,18 @@ class HttpCaller:
             :data:`MODE_STATELESS`), so a refusal can give advice that holds on
             the server the request actually reached. None on a stamp built
             outside a boundary.
+        session_expired: True when a stateful app issued the session the request
+            names and the TTL sweep has since removed it. The request carries no
+            identity, as one naming an id the app never issued does, but the
+            refusal can say the session expired and what went with it, which a
+            client cannot learn from "not issued".
     """
 
     transport: str
     session_id: Optional[str]
     protocol_version_is_cause: bool = False
     server_mode: Optional[str] = None
+    session_expired: bool = False
 
 
 def caller_of(scope: Any) -> Optional[HttpCaller]:
@@ -234,13 +242,22 @@ def _query_value(scope: Scope, name: str) -> Optional[str]:
 
 
 #: How long a session workspace may go unused before the sweep removes it, by
-#: default. Long enough that no live session loses its tree: a stateful session
-#: the SDK keeps is idle for at most 30 minutes, and every request naming a
-#: session refreshes its workspace.
+#: default. It bounds the sessions whose end this app cannot see: every
+#: stateless one, and a stateful session the SDK dropped for being idle without
+#: telling this app. Every request naming a session refreshes its workspace, and
+#: the sweep keeps a session whose event stream is open (an sse stream, or a
+#: stateful session's standalone GET stream) whatever its age, so an open but
+#: idle stream never loses its tree to a TTL shorter than its idle time.
 DEFAULT_SESSION_WORKSPACE_TTL_SECONDS = 24 * 60 * 60
 
 #: How often, at most, the sweep runs after the first request.
 _SWEEP_INTERVAL_SECONDS = 5 * 60
+
+#: How many swept stateful session ids a boundary remembers, to tell a client
+#: whose session expired that it did (``HttpCaller.session_expired``). The oldest
+#: is forgotten first, and a request naming a forgotten id is answered as one
+#: naming an id the app never issued, which is still a refusal.
+_EXPIRED_SESSIONS_REMEMBERED = 1024
 
 _LIFESPAN_SHUTDOWN_DONE = ("lifespan.shutdown.complete", "lifespan.shutdown.failed")
 
@@ -291,23 +308,38 @@ class SessionBoundary:
         RuntimeError: building a stateful boundary without ``handshake_versions``,
             if the SDK's list of handshake protocol versions cannot be imported.
 
-    Raises:
-        RuntimeError: building a stateful boundary, if the SDK's list of
-            handshake protocol versions cannot be imported.
-
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
-    session's ``DELETE``, answered 2xx only after the removal succeeded (when it
-    fails the answer is a 500 and the session stays issued, so the client can send
-    the ``DELETE`` again; a removal that waits for a running scan counts as
-    succeeded, because it completes when that scan returns); the SDK
-    answering 404 on its endpoint for a stateful session it discarded (a 404
-    for any other path is Starlette's, for a path with no route); an sse event stream
-    finishing; and every session this app issued when it shuts down. Sessions
-    whose end it cannot see -- every stateless one, and a stateful one the SDK
-    closed for being idle that no client asks about again -- are removed by the
-    TTL sweep, which runs before the first request is answered and then at most
-    every five minutes.
+    session's ``DELETE``, answered 2xx only after the removal succeeded (when the
+    removal raises, the answer is a 500 and the session stays issued, so the
+    client can send the ``DELETE`` again; a removal that waits for a running
+    scan, a change or a write of the session counts as succeeded, because it
+    completes when that holder returns, and so does one that leaves the tree for
+    the TTL sweep because the scan presence lock was refused); the SDK answering
+    404 on its endpoint for a stateful session it discarded (a 404 for any other
+    path is Starlette's, for a path with no route); an sse event stream
+    finishing; and every session this app still holds when it is asked to shut
+    down, ended at the shutdown request, before the app's own lifespan exit,
+    which can end the process, and again before shutdown is reported complete
+    for a removal that failed. Sessions whose end it cannot see -- every
+    stateless one, and a stateful session the SDK closed for being idle that no
+    client asks about again, since nothing tells this app it ended -- are
+    removed by the TTL sweep, which runs before the first request is answered
+    and then at most every five minutes. The sweep keeps only the sessions
+    whose event stream is open (an sse stream, or a stateful session's
+    standalone ``GET`` stream), whatever their age, and marks their
+    workspaces used so another server sharing the root keeps them too; an
+    issued stateful id is not kept on its own account, or the tree of every
+    client that disconnects without a ``DELETE`` would stay for the life of the
+    process. A stateful session the sweep removes is ended here too: its id
+    leaves ``_issued``, so its next request carries no identity and the tools
+    that need a session refuse it, saying the session expired
+    (``HttpCaller.session_expired``). Left issued, the session's next scan
+    would run with the bound profile and the delivered source gone and nothing
+    said to the client. A session whose stream opens while the sweep runs is
+    not ended even if the sweep removed its workspace first: the open streams
+    are read again when the result is applied
+    (``_end_what_the_sweep_removed``).
     """
 
     def __init__(
@@ -351,6 +383,20 @@ class SessionBoundary:
         # the app's own responses. sse: ids read from the endpoint event of an
         # event stream that is still open.
         self._issued: Set[str] = set()
+        # The sessions whose event stream is open right now (an sse stream, or a
+        # stateful session's standalone GET): the one kind of session the TTL
+        # sweep keeps whatever its age (_sweep_if_due). A stateful id stays
+        # issued after the SDK drops its idle session, since nothing tells this
+        # app, so it is not kept on that account.
+        self._open_streams: Set[str] = set()
+        # How many event streams of a stateful session are open: a session stays
+        # in _open_streams until the last of them closes. The SDK allows one
+        # standalone GET stream per session and refuses a second at once, and
+        # that refusal must not close the first's hold.
+        self._stream_holds: Dict[str, int] = {}
+        # Stateful sessions the sweep removed, oldest first, so a request that
+        # names one is refused as an expired session (HttpCaller.session_expired).
+        self._expired: "OrderedDict[str, None]" = OrderedDict()
         self._next_sweep = 0.0
         self._sweep_lock: Optional[Any] = None
 
@@ -372,6 +418,7 @@ class SessionBoundary:
             return HttpCaller(
                 STREAMABLE_HTTP,
                 header if known else None,
+                session_expired=not known and header in self._expired,
                 # Only an issued id refused for its version alone: that is the
                 # one refusal a handshake version fixes. A request with no
                 # session header, or an id this app never issued, gains nothing
@@ -406,12 +453,65 @@ class SessionBoundary:
         self._issued.discard(session_id)
         return True
 
+    def _end_what_the_sweep_removed(self, removed: Iterable[str]) -> None:
+        """Forget, as issued, the stateful sessions the sweep just removed.
+
+        The sweep removed the workspace, the bound profile and the delivered
+        source of each. A session still held as issued would take its next
+        request as a live session's: a scan of it would run with none of that
+        and nothing said to the client. Forgotten here, the request carries no
+        identity and the tools that need a session refuse it, as for an id the
+        app never issued, and ``HttpCaller.session_expired`` lets the refusal
+        say what happened.
+
+        A session with an open stream is not forgotten, so none is ended with
+        its stream open. The sweep keeps the sessions whose stream was open when
+        it began, but a stream can open while its worker runs, after the worker
+        last read the workspace's age and before this method applies the result.
+        The open streams are read again here, at the moment of the apply, and
+        such a session stays issued: its workspace was already removed under it,
+        so an empty marked one is put back (:func:`_put_back_a_swept_workspace`),
+        which a later sweep ages and removes once the stream has closed, and the
+        session is ended then. The bound profile and delivered source went with
+        the removed workspace and are not restored.
+        """
+        if self.mode != MODE_STATEFUL:
+            return
+        for session_id in removed:
+            if session_id not in self._issued:
+                continue
+            if session_id in self._open_streams or self._stream_holds.get(session_id):
+                _logger().warning(
+                    f"MCP session {session_id}: its event stream opened while the "
+                    "workspace sweep ran, so the session is kept although its "
+                    "workspace was removed"
+                )
+                _put_back_a_swept_workspace(session_id)
+                continue
+            self._issued.discard(session_id)
+            self._expired[session_id] = None
+            self._expired.move_to_end(session_id)
+        while len(self._expired) > _EXPIRED_SESSIONS_REMEMBERED:
+            self._expired.popitem(last=False)
+
+    def _stream_opened(self, session_id: str) -> None:
+        """A stateful session's event stream is open: the sweep keeps it."""
+        self._stream_holds[session_id] = self._stream_holds.get(session_id, 0) + 1
+        self._open_streams.add(session_id)
+
+    def _stream_closed(self, session_id: str) -> None:
+        """An event stream of a stateful session closed; the last one frees it."""
+        remaining = self._stream_holds.get(session_id, 0) - 1
+        if remaining > 0:
+            self._stream_holds[session_id] = remaining
+            return
+        self._stream_holds.pop(session_id, None)
+        self._open_streams.discard(session_id)
+
     async def _sweep_if_due(self) -> None:
         import time
 
         import anyio
-
-        from automated_security_helper.cli.mcp.sessions import sweep_stale_workspaces
 
         if time.monotonic() < self._next_sweep:
             return
@@ -424,13 +524,29 @@ class SessionBoundary:
         async with self._sweep_lock:
             if time.monotonic() < self._next_sweep:
                 return
+            # The sessions whose sse event stream is open right now are kept
+            # whatever their age: an open but idle stream has not ended, and its
+            # end comes through _end, not the sweep. Each is also marked used
+            # now, since another server sharing the root sweeps by age alone
+            # and cannot see this app's open streams. A stateful session is not
+            # kept by being issued: the SDK drops an idle stateful session
+            # without telling this app, so its id would stay issued, and its
+            # workspace kept, for the life of the process; every request that
+            # names it refreshes its workspace instead, and the TTL covers it.
+            open_streams = frozenset(self._open_streams)
             try:
-                await anyio.to_thread.run_sync(
-                    sweep_stale_workspaces, self.session_workspace_ttl
+                removed = await anyio.to_thread.run_sync(
+                    functools.partial(
+                        _sweep_keeping_open_streams,
+                        self.session_workspace_ttl,
+                        open_streams,
+                    )
                 )
             except Exception as exc:
                 # A sweep must not fail the request that started it.
                 _logger().warning(f"MCP session workspace sweep failed: {exc}")
+            else:
+                self._end_what_the_sweep_removed(removed or ())
             self._next_sweep = time.monotonic() + min(
                 self.session_workspace_ttl, _SWEEP_INTERVAL_SECONDS
             )
@@ -440,7 +556,11 @@ class SessionBoundary:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         kind = scope.get("type")
         if kind == "lifespan":
-            await self.app(scope, receive, self._end_all_on_shutdown(send))
+            await self.app(
+                scope,
+                self._end_all_at_shutdown_request(receive),
+                self._end_all_on_shutdown(send),
+            )
             return
         if kind != "http":
             await self.app(scope, receive, send)
@@ -467,19 +587,66 @@ class SessionBoundary:
             await self._serve_event_stream(scope, receive, send)
             return
         if self.mode == MODE_STATEFUL:
-            await self.app(
-                scope, receive, self._watch_stateful(scope, send, through_check)
+            watched = self._watch_stateful(scope, send, through_check)
+            # A session's standalone GET stream is its open event stream: the
+            # sweep keeps the session while the request is being served, as it
+            # keeps an sse session while its stream is open.
+            stream_of = (
+                caller.session_id
+                if scope.get("method") == "GET"
+                and _on_the_sdk_session_path(scope, self.endpoint_path, through_check)
+                else None
             )
+            if stream_of is None:
+                await self.app(scope, receive, watched)
+                return
+            self._stream_opened(stream_of)
+            try:
+                await self.app(scope, receive, watched)
+            finally:
+                self._stream_closed(stream_of)
             return
         await self.app(scope, receive, send)
 
+    async def _end_all(self) -> None:
+        """End every session this app still holds as issued."""
+
+        for session_id in sorted(self._issued):
+            await self._end(session_id)
+
+    def _end_all_at_shutdown_request(self, receive: Receive) -> Receive:
+        """End the issued sessions as soon as the app is asked to shut down.
+
+        At the ``lifespan.shutdown`` message, before it reaches the app: the
+        app's own lifespan exit runs next, and it can end the process without
+        coming back (a signal ended the server while a scan was still running;
+        see ``cli/mcp/__init__._exit_if_a_signal_stopped_the_server``), so a
+        boundary that waited for ``lifespan.shutdown.complete`` ended nothing
+        then. The server has closed its connections by the time it asks for the
+        shutdown, so no request of these sessions is in flight. A session a
+        running scan or write still holds is deferred as on its ``DELETE``, and
+        completed when the holder returns (``sessions.finish_ended_session``),
+        which the app's cancellation of its scans brings about.
+        """
+
+        async def watched() -> Message:
+            message = await receive()
+            if message.get("type") == "lifespan.shutdown":
+                await self._end_all()
+            return message
+
+        return watched
+
     def _end_all_on_shutdown(self, send: Send) -> Send:
-        """End every session this app issued before reporting shutdown complete."""
+        """End what is still issued before reporting shutdown complete.
+
+        The second pass: a session whose removal failed at the shutdown request
+        stays issued and is tried once more here.
+        """
 
         async def watched(message: Message) -> None:
             if message.get("type") in _LIFESPAN_SHUTDOWN_DONE:
-                for session_id in sorted(self._issued):
-                    await self._end(session_id)
+                await self._end_all()
             await send(message)
 
         return watched
@@ -543,19 +710,30 @@ class SessionBoundary:
     async def _serve_event_stream(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        """Serve one sse stream; the session it carries ends when it finishes."""
+        """Serve one sse stream; the session it carries ends when it finishes.
 
-        opened: Dict[str, str] = {}
+        The session is read from the endpoint event, the first event the SDK
+        writes on the stream, and from nothing else: the first body chunk that
+        carries an event field decides it, with or without a ``session_id`` (a
+        ping before it is a comment line with no field, and is passed over).
+        Reading every later chunk would adopt an id a relayed message happens to
+        contain, such as a URL in a tool result, as a session this app issued.
+        """
+
+        opened: Dict[str, Optional[str]] = {}
 
         async def watched(message: Message) -> None:
             if "session" not in opened and message.get("type") == "http.response.body":
-                found = _ENDPOINT_SESSION.search(message.get("body") or b"")
-                session = _canonical_sse_session(
-                    found.group(1).decode("ascii") if found else None
-                )
-                if session:
+                body = message.get("body") or b""
+                if b"data:" in body:
+                    found = _ENDPOINT_SESSION.search(body)
+                    session = _canonical_sse_session(
+                        found.group(1).decode("ascii") if found else None
+                    )
                     opened["session"] = session
-                    self._issued.add(session)
+                    if session:
+                        self._issued.add(session)
+                        self._open_streams.add(session)
             await send(message)
 
         try:
@@ -563,7 +741,58 @@ class SessionBoundary:
         finally:
             session = opened.get("session")
             if session:
+                self._open_streams.discard(session)
                 await self._end(session)
+
+
+def _sweep_keeping_open_streams(
+    ttl_seconds: float, open_streams: FrozenSet[str]
+) -> list[str]:
+    """Run the TTL sweep with the open event streams' sessions kept and marked used.
+
+    On the worker thread the sweep runs on. Each open stream's workspace is
+    touched first: this process keeps it by name (``in_use``), and another
+    server sharing the root, which sweeps by age alone and cannot see this
+    app's streams, then reads it as used now, so an open stream's workspace is
+    kept there too for as long as the stream stays open and the sweeps run.
+    """
+    from automated_security_helper.cli.mcp.sessions import (
+        sweep_stale_workspaces,
+        touch_session_workspace,
+    )
+
+    for session_id in open_streams:
+        touch_session_workspace(session_id)
+    return sweep_stale_workspaces(ttl_seconds, in_use=open_streams)
+
+
+def _put_back_a_swept_workspace(session_id: str) -> None:
+    """Re-create the empty, marked workspace of a session kept after the sweep.
+
+    For a stateful session whose event stream opened while the sweep ran, so
+    that the sweep removed its workspace and the boundary kept the session. The
+    new directory is fresh and carries the session marker, so the next sweep
+    ages and removes it like any other, and ends the session once its stream has
+    closed. A path that is a symlink is left alone, as the sweep and the touch
+    leave one. A failure is logged and does not fail the request that set the
+    sweep off.
+    """
+    from automated_security_helper.cli.mcp.session_paths import (
+        mark_session_workspace,
+        session_directory,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    try:
+        sandbox = session_directory(resolve_workspace_root(), session_id)
+        if not sandbox.is_symlink():
+            mark_session_workspace(sandbox)
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger().warning(
+            f"MCP session {session_id}: could not put its workspace back: {exc}"
+        )
 
 
 def _logger() -> ASHLogger:

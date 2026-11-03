@@ -14,20 +14,35 @@ for another reason cannot pass a changing-name cell.
 The grant is a stand-in policy in these cells (``_config_input_refusal``): a path
 under ``outside/`` is refused and any other is permitted, so the cells do not
 depend on the environment's roots.
+
+Windows cannot make the changes a cell makes from inside the check while the
+server holds the file. The call keeps the descriptor it opened to judge the file
+until it has answered (``config_sources.open_config_for_judgment``), and a file
+opened without ``FILE_SHARE_DELETE`` cannot be replaced on Windows while it is
+open. A replacement made from inside the call gets a ``PermissionError`` there,
+from the server's own handle, and its cell skips: the change it pins is one the
+operating system does not allow on that platform. Anywhere else the same error is
+the cell's to see.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
 from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
-from automated_security_helper.config import resolve_config
+from automated_security_helper.config import config_sources, resolve_config
+from tests.utils.held_file_swaps import (
+    HELD_FILE_WINERRORS,
+    skip_if_refused,
+    swap_or_record,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -54,7 +69,26 @@ class _Layout:
         self.far.write_text(f"project_name: {CANARY}\n", encoding="utf-8")
         self.name = self.granted / "ash-config.yaml"
 
-    def lead_to_the_outside_file(self) -> None:
+    def _put_at_the_name(
+        self, source: Path, refused: Optional[List[BaseException]]
+    ) -> None:
+        """``os.replace(source, self.name)``.
+
+        A change made from inside the call under test passes `refused`: on Windows
+        the server's own open handle on the name can refuse it (see the module
+        doc), and ``swap_or_record`` records that there for ``skip_if_refused``
+        instead of raising it, because it would be raised inside the server's call,
+        which could turn it into an answer. Any other error is a real one and is
+        raised, as every error is for a change made without `refused`.
+        """
+        if refused is None:
+            os.replace(source, self.name)
+        else:
+            swap_or_record(lambda: os.replace(source, self.name), refused)
+
+    def lead_to_the_outside_file(
+        self, refused: Optional[List[BaseException]] = None
+    ) -> None:
         link = self.granted / ".link-to-far"
         if os.path.lexists(link):
             link.unlink()
@@ -62,12 +96,12 @@ class _Layout:
             link.symlink_to(self.far)
         except (OSError, NotImplementedError) as error:
             pytest.skip(f"cannot make a symbolic link here: {error}")
-        os.replace(link, self.name)
+        self._put_at_the_name(link, refused)
 
-    def be_a_granted_file(self) -> None:
+    def be_a_granted_file(self, refused: Optional[List[BaseException]] = None) -> None:
         replacement = self.granted / ".granted-file"
         replacement.write_text("project_name: granted\n", encoding="utf-8")
-        os.replace(replacement, self.name)
+        self._put_at_the_name(replacement, refused)
 
 
 def _grant_everything_but_the_outside(monkeypatch, layout: _Layout, after=None) -> None:
@@ -140,18 +174,19 @@ def test_a_name_that_led_elsewhere_while_the_check_resolved_it_is_refused(
     layout = _Layout(tmp_path)
     layout.lead_to_the_outside_file()
     state: List[str] = []
+    refused: List[BaseException] = []
     real_realpath = os.path.realpath
 
     def realpath_that_sees_a_granted_file(path: Any, *args: Any, **kwargs: Any) -> Any:
         if os.fspath(path) == str(layout.name) and not state:
             state.append("granted")
-            layout.be_a_granted_file()
+            layout.be_a_granted_file(refused)
         return real_realpath(path, *args, **kwargs)
 
     def lead_back_to_the_outside_file() -> None:
         if state == ["granted"]:
             state.append("outside")
-            layout.lead_to_the_outside_file()
+            layout.lead_to_the_outside_file(refused)
 
     monkeypatch.setattr(os.path, "realpath", realpath_that_sees_a_granted_file)
     _grant_everything_but_the_outside(
@@ -160,6 +195,7 @@ def test_a_name_that_led_elsewhere_while_the_check_resolved_it_is_refused(
 
     response = _get_config(monkeypatch, layout, discovered)
 
+    skip_if_refused(refused)
     _refused_with_nothing_from_the_outside_file(response)
 
 
@@ -170,18 +206,19 @@ def test_the_resolved_read_shows_nothing_of_a_name_that_led_elsewhere_either(
     layout = _Layout(tmp_path)
     layout.lead_to_the_outside_file()
     state: List[str] = []
+    refused: List[BaseException] = []
     real_realpath = os.path.realpath
 
     def realpath_that_sees_a_granted_file(path: Any, *args: Any, **kwargs: Any) -> Any:
         if os.fspath(path) == str(layout.name) and not state:
             state.append("granted")
-            layout.be_a_granted_file()
+            layout.be_a_granted_file(refused)
         return real_realpath(path, *args, **kwargs)
 
     def lead_back_to_the_outside_file() -> None:
         if state == ["granted"]:
             state.append("outside")
-            layout.lead_to_the_outside_file()
+            layout.lead_to_the_outside_file(refused)
 
     monkeypatch.setattr(os.path, "realpath", realpath_that_sees_a_granted_file)
     _grant_everything_but_the_outside(
@@ -197,6 +234,7 @@ def test_the_resolved_read_shows_nothing_of_a_name_that_led_elsewhere_either(
     else:
         response = mcp_get_config(config_path=str(layout.name))
 
+    skip_if_refused(refused)
     _refused_with_nothing_from_the_outside_file(response)
 
 
@@ -211,18 +249,21 @@ def _arrange_asked_with_an_environment_config(
     other.write_text(f"project_name: {CANARY}\n", encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(config))
     changed: List[bool] = []
+    refused: List[BaseException] = []
 
     def untrusted_after_the_file_changed(*_args: Any, **_kwargs: Any) -> bool:
         # Called once the check has returned and before the file is loaded.
-        if swap and not changed:
-            os.replace(other, config)
-            changed.append(True)
+        if swap and not changed and not refused:
+            # The server holds the file it checked (see the module doc).
+            if swap_or_record(lambda: os.replace(other, config), refused):
+                changed.append(True)
         return False
 
     monkeypatch.setattr(
         sandbox, "client_named_config_is_untrusted", untrusted_after_the_file_changed
     )
     response = mcp_get_config(config_path=str(config))
+    skip_if_refused(refused)
     assert bool(changed) is swap, "the file did not change where the cell expects it"
     return response
 
@@ -247,3 +288,30 @@ def test_control_the_environment_config_unchanged_is_shown(
 
     assert response.get("success") is not False, response
     assert response.get("project_name") == "checked", response
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only Windows refuses to replace a file that is held open",
+)
+def test_control_a_swap_over_a_file_the_server_holds_open_is_refused(tmp_path) -> None:
+    """The swap tests skip when Windows refuses their swap, and that skip is only
+    justified if it does: the file the server opens to judge a config
+    (``open_config_for_judgment``) cannot be replaced while it is open, with a
+    sharing violation or an access denial, and is left as it was."""
+    config = tmp_path / "ash-config.yaml"
+    config.write_text("project_name: checked\n", encoding="utf-8")
+    other = tmp_path / "other.yaml"
+    other.write_text(f"project_name: {CANARY}\n", encoding="utf-8")
+    opened = config_sources.open_config_for_judgment(config)
+    assert opened is not None, "the file was not opened"
+    refused: List[BaseException] = []
+    try:
+        ran = swap_or_record(lambda: os.replace(other, config), refused)
+    finally:
+        os.close(opened.fd)
+
+    assert ran is False, "the swap over a held file was not refused"
+    assert len(refused) == 1, refused
+    assert getattr(refused[0], "winerror", None) in HELD_FILE_WINERRORS, refused
+    assert config.read_text(encoding="utf-8") == "project_name: checked\n"

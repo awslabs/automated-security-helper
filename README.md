@@ -23,7 +23,7 @@ Finch, or Podman.
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network and starts a container scan" -->
 ```bash
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
 
 # Run from the project you want to scan
 ash --mode container
@@ -51,15 +51,15 @@ Run with uv:
 
 <!-- doctest: illustrative reason="runs ASH from GitHub over the network" -->
 ```bash
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 ash --help
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 ash --mode container
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.1 ash --help
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.1 ash --mode container
 ```
 
 Install in a Python environment:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
 ```
 
 Install with Homebrew:
@@ -77,12 +77,12 @@ Install from source:
 
 <!-- doctest: illustrative reason="clones this repository and installs it over the network" -->
 ```bash
-git clone --branch v3.7.0 https://github.com/awslabs/automated-security-helper.git
+git clone --branch v3.7.1 https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
 pip install .
 ```
 
-Pin `@v3.7.0` for a reproducible install. The floating `@v3` tag follows
+Pin `@v3.7.1` for a reproducible install. The floating `@v3` tag follows
 stable v3 releases. See the [installation guide](docs/content/how-to/install.md)
 for Windows and offline environments.
 
@@ -243,7 +243,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.7.1
     hooks:
       - id: ash
 ```

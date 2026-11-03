@@ -60,7 +60,7 @@ Known limitations
   practice, and :class:`TestTheProbesActuallyFire` is the control that they fire at
   all.
 * Comments inside a RUN's line continuations are scanned along with the command,
-  because a ``\``-continued RUN has no comment syntax of its own. A commented-out
+  because a ``\\``-continued RUN has no comment syntax of its own. A commented-out
   bashism inside a RUN is therefore a false positive; write it outside the RUN.
 * Only ``RUN`` is checked. ``CMD``/``ENTRYPOINT`` in exec form name their
   interpreter explicitly, and in shell form they run at container start under

@@ -176,12 +176,26 @@ class TestLint:
         ), [str(i) for i in result.issues]
 
     def test_fix_refuses_toml(self, runner, tmp_path):
-        pyproject = _pyproject(tmp_path)
+        # A fix to make (a bare line_start): --fix refuses a TOML file only
+        # when it would rewrite it; one with nothing to fix passes.
+        pyproject = _write(
+            tmp_path / "pyproject.toml",
+            """
+            [tool.ash]
+            project_name = "p"
+
+            [[tool.ash.global_settings.suppressions]]
+            rule_id = "B101"
+            path = "src/app.py"
+            reason = "reviewed"
+            line_start = 3
+            """,
+        )
         before = pyproject.read_text()
         result = runner.invoke(
             config_app, ["lint", "--config", str(pyproject), "--fix", "--yes"]
         )
-        assert result.exit_code == 1
+        assert result.exit_code == 1, result.output
         assert "edit" in result.output and "by hand" in result.output
         assert pyproject.read_text() == before
         with pytest.raises(ValueError, match="YAML and JSON"):

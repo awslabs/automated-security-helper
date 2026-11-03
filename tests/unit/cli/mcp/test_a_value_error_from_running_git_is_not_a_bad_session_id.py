@@ -104,7 +104,7 @@ def _subcommand(cmd: List[str]) -> str:
 def test_a_value_error_from_a_git_step_is_a_git_failure(
     delivery, monkeypatch, step
 ) -> None:
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if _subcommand(cmd) == step:
             raise ValueError("embedded null byte")
         return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -168,7 +168,7 @@ def test_a_second_delivery_git_cannot_run_for_leaves_the_first_tree_to_scan(
 
     real_run_git = sd._run_git
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if _subcommand(cmd) == "fetch":
             raise ValueError("embedded null byte")
         return real_run_git(cmd, env=env)

@@ -281,7 +281,7 @@ command lines changed the same way even when they go to a file; only the report 
 is written to a file as is.
 
 A missing results file prints `No scan results found:` with the paths it checked, and
-exits 5. With `--output-dir` or `ASH_OUTPUT_DIR` the message names the three paths ASH
+exits 1. With `--output-dir` or `ASH_OUTPUT_DIR` the message names the three paths ASH
 looked in (`none of … exists`); otherwise it names
 `.ash/ash_output/ash_aggregated_results.json` under the current directory, in full
 (`… does not exist`). `ash report` creates nothing then, and an output directory under a

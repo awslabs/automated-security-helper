@@ -9,6 +9,11 @@ out, and a config warning says so. When the file is one an MCP client delivered
 (``cli/mcp/sandbox.config_is_client_supplied``, judged by its path and by the
 file it resolves to), the warning says the file is client-supplied. The warning
 becomes a ``config_warning`` validation checkpoint in the results.
+
+Every scanner here is built with ``enabled=True``: semgrep and opengrep publish
+no Windows build, so their configs are disabled by default there, and a disabled
+scanner records no note. The note's path judgment is what these tests measure,
+on every platform alike.
 """
 
 from __future__ import annotations
@@ -48,7 +53,7 @@ def _scanner_warnings(scanner_name: str, source: Path, out: Path) -> List[str]:
             OpengrepScanner as Scanner,
             OpengrepScannerConfig as ScannerConfig,
         )
-    scanner = Scanner(context=context, config=ScannerConfig())
+    scanner = Scanner(context=context, config=ScannerConfig(enabled=True))
     scanner._resolve_arguments(target=source, results_file=out / "r.sarif")
     return [w for w in config._resolution_warnings if ".semgrepignore" in w]
 
@@ -150,9 +155,9 @@ def test_the_checkpoint_in_the_results_carries_the_wording(
     out.mkdir()
     config = AshConfig(project_name="test")
     context = PluginContext(source_dir=source, output_dir=out, config=config)
-    SemgrepScanner(context=context, config=SemgrepScannerConfig())._resolve_arguments(
-        target=source, results_file=out / "r.sarif"
-    )
+    SemgrepScanner(
+        context=context, config=SemgrepScannerConfig(enabled=True)
+    )._resolve_arguments(target=source, results_file=out / "r.sarif")
 
     class _Engine:
         def execute_phases(self, phases=None):
@@ -209,7 +214,7 @@ def test_a_note_the_scanner_adds_while_scanning_reaches_the_results(
         def execute_phases(self, phases=None):
             context = PluginContext(source_dir=source, output_dir=out, config=config)
             SemgrepScanner(
-                context=context, config=SemgrepScannerConfig()
+                context=context, config=SemgrepScannerConfig(enabled=True)
             )._resolve_arguments(target=source, results_file=out / "r.sarif")
             return AshAggregatedResults()
 

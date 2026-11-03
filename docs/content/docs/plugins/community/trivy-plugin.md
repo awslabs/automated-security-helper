@@ -1471,7 +1471,7 @@ jobs:
       - uses: actions/checkout@v3
       
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
       
       - name: Run Trivy Security Scan
         run: |
@@ -1481,7 +1481,7 @@ jobs:
         # Also when ASH exits non-zero on findings: without a status function
         # GitHub skips this step after any failed step.
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: security-results
           # Not the whole output directory: scanners/ and converted/ hold each
@@ -1499,7 +1499,7 @@ security-scan:
   stage: test
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
     - ash --scanners trivy-repo --formats sarif,markdown
   artifacts:
     reports:

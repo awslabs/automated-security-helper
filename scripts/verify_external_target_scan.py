@@ -84,7 +84,11 @@ Deliberate choices
   finding in ASH's own repository scan. bandit and checkov are two independent
   scanner families, which is enough positive signal without that risk.
 * Scanner status MISSING means the underlying tool is not installed on this runner.
-  That is tolerated. ERROR means the scanner ran and broke, and fails the gate.
+  For a scanner outside ``GATE_SCANNERS`` that is tolerated. For one of the two
+  this gate selects it is a failure: ``check_gate_scanners_ran`` names it, and the
+  scan's own exit code moves to 1 as well (``fail_on_incomplete_scanners``
+  defaults on), which ``check_exit_code`` reports. ERROR means the scanner ran
+  and broke, and fails the gate.
 * The scan is invoked as ``<python> -m automated_security_helper.cli.main`` with
   ``cwd`` set to the repository root. ``-m`` prepends the working directory to
   ``sys.path``, so the gate always exercises the working tree rather than whatever
@@ -133,17 +137,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
+import shlex
 import shutil
 import subprocess  # nosec B404 -- the gate runs ASH as a child process with cwd != source_dir
+import signal
 import sys
 import tempfile
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 RESULTS_FILENAME = "ash_aggregated_results.json"
 
@@ -182,10 +189,11 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: The set is named because the runners do not have the other tools. This
 #: workflow's own comment records it: "On the Windows runner only bandit and
 #: checkov are available at all". Left unnarrowed, cfn-nag, grype, syft and the
-#: rest report MISSING. On its own that does not fail the run today, because
-#: ``fail_on_incomplete_scanners`` defaults to False and ``ash scan`` exits 0 on a
-#: results file full of MISSING -- and that is the reason to name the set rather
-#: than a reason not to. An unnarrowed run would land inside
+#: rest report MISSING. ``fail_on_incomplete_scanners`` defaults to True, so an
+#: unnarrowed run would exit 1 for the tools the runner lacks, and under an
+#: operator config that turns the gate off ``ash scan`` exits 0 on a results
+#: file full of MISSING -- either way the set has to be named. An unnarrowed
+#: run that did exit 0 would land inside
 #: TOLERATED_EXIT_CODES having exercised two scanners while appearing to cover ten,
 #: and ``check_some_scanner_ran`` would not catch it either, since it only fires
 #: when *every* scanner is missing. Naming the set is the difference between this
@@ -204,12 +212,23 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: missing, so a run down to one working scanner would still pass.
 GATE_SCANNERS: Tuple[str, ...] = ("bandit", "checkov")
 
-# The job that runs this script sets timeout-minutes: 25 (1500s). The default here
+# The job that runs this script sets timeout-minutes: 30 (1800s). The default here
 # must stay below that budget, or GitHub cancels the job first and the operator gets
 # no summary table, no rule evidence and no log tail -- only a cancellation notice.
+# What the job spends besides the scan comes out of the difference: the setup before
+# the scan (checkout, the ASH install, the tool downloads, the fixture build) and,
+# after a timed-out scan, the stop and the drain of the child (up to
+# 2 * (SHUTDOWN_GRACE_SECONDS + DRAIN_SECONDS), 60 s). So the default leaves the
+# setup 540 s; at 25 minutes it left 240 s, which a cold Windows runner used up.
+# --timeout is checked when parsed against MAX_SCAN_TIMEOUT_SECONDS, the budget less
+# a setup floor and the shutdown, rather than against the bare budget: 1700 stayed
+# under 1800 and was accepted, and GitHub then cancelled the job before this
+# script's diagnostics could print.
 # The workflow also passes --timeout explicitly so both numbers are visible together.
-JOB_TIMEOUT_BUDGET_SECONDS = 1500.0
+JOB_TIMEOUT_BUDGET_SECONDS = 1800.0
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
+#: The least the job's steps before the scan are given, whatever --timeout says.
+SETUP_MARGIN_SECONDS = 300.0
 
 # Log tail printed when something fails. Enough to see the scanner errors without
 # dumping the whole Rich-rendered scan output into the job log.
@@ -311,9 +330,19 @@ class ScannerState:
     status: str
     finding_count: int
     actionable_finding_count: int
-    exit_code: int
+    #: None when the record carries no exit code: no tool ran, or the scanner
+    #: could not be built. It used to be read as 0, which the ERROR report and
+    #: the summary table then printed as a clean exit.
+    exit_code: int | None
     dependencies_satisfied: bool
     excluded: bool
+
+    @property
+    def exit_code_text(self) -> str:
+        """The exit code for a report: the number, or what its absence means."""
+        if self.exit_code is None:
+            return "none (no tool ran)"
+        return str(self.exit_code)
 
     @property
     def ran(self) -> bool:
@@ -416,10 +445,25 @@ def normalize_status(raw: Any) -> str:
 
 
 def _as_int(value: Any) -> int:
+    """``value`` as an int, or 0 for anything that is not one.
+
+    OverflowError is caught too: ``json.loads`` accepts ``Infinity``, and
+    ``int(float("inf"))`` raises it rather than ValueError.
+    """
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
+
+
+def _as_optional_int(value: Any) -> int | None:
+    """``value`` as an int, or None when it is absent or not an integer."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def check_results_shape(results: Any) -> List[str]:
@@ -472,7 +516,7 @@ def parse_scanner_states(results: Mapping[str, Any]) -> Tuple[ScannerState, ...]
                 actionable_finding_count=_as_int(
                     record.get("actionable_finding_count")
                 ),
-                exit_code=_as_int(record.get("exit_code")),
+                exit_code=_as_optional_int(record.get("exit_code")),
                 dependencies_satisfied=bool(record.get("dependencies_satisfied", True)),
                 excluded=bool(record.get("excluded", False)),
             )
@@ -565,6 +609,21 @@ def collect_sarif_evidence(results: Mapping[str, Any]) -> SarifEvidence:
     )
 
 
+def _entries(value: Any) -> List[Any]:
+    """A checkpoint field's entries: a list as is, one string as one entry.
+
+    Iterating a string value character by character produced one garbled
+    diagnostic line per character; a mapping is likewise one entry.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes, Mapping)):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
 def collect_recorded_errors(
     results: Mapping[str, Any],
 ) -> Dict[str, Tuple[str, ...]]:
@@ -582,7 +641,7 @@ def collect_recorded_errors(
             continue
         label = str(checkpoint.get("checkpoint_name") or "checkpoint")
         for key in ("errors", "discrepancies"):
-            for entry in checkpoint.get(key) or []:
+            for entry in _entries(checkpoint.get(key)):
                 checkpoint_messages.append(f"{label}.{key}: {entry}")
 
     collected: Dict[str, Tuple[str, ...]] = {}
@@ -617,7 +676,8 @@ def check_no_scanner_errors(
         lines = [
             (
                 f"scanner '{state.name}' reported status ERROR "
-                f"(exit_code={state.exit_code}, finding_count={state.finding_count}, "
+                f"(exit_code={state.exit_code_text}, "
+                f"finding_count={state.finding_count}, "
                 f"dependencies_satisfied={state.dependencies_satisfied})"
             )
         ]
@@ -648,6 +708,44 @@ def check_some_scanner_ran(states: Sequence[ScannerState]) -> List[str]:
     ]
 
 
+def check_gate_scanners_ran(states: Sequence[ScannerState]) -> List[str]:
+    """Every scanner this gate selected must have run: present, not MISSING,
+    SKIPPED or excluded.
+
+    The gate names two scanners and asserts findings from both. Every other
+    check here skips a producer that did not run, which is right for those
+    checks, and ``check_exit_code`` catches a MISSING selected scanner only
+    through the product's exit code, which does not move for SKIPPED. So a
+    selected scanner that was SKIPPED (nothing to scan), excluded by an
+    environment variable, or absent from ``scanner_results`` altogether used to
+    halve the gate's coverage with no signal: the remaining scanner was
+    asserted and the gate printed PASS. This is the direct statement that both
+    ran.
+    """
+    by_name = {state.name: state for state in states}
+    violations: List[str] = []
+    for scanner in GATE_SCANNERS:
+        state = by_name.get(scanner)
+        if state is None:
+            violations.append(
+                f"scanner '{scanner}' is one of the two this gate selects "
+                f"(--scanners) but is absent from scanner_results entirely, so "
+                f"nothing it would have found could be asserted. Present: "
+                f"{sorted(by_name) or 'none'}"
+            )
+            continue
+        if not state.ran:
+            how = "excluded" if state.excluded else state.status
+            violations.append(
+                f"scanner '{scanner}' is one of the two this gate selects but "
+                f"did not run ({how}), so the gate would be asserting on one "
+                f"scanner while claiming both. A SKIPPED selected scanner does "
+                f"not move the scan's exit code, so this check is the only "
+                f"place that sees it"
+            )
+    return violations
+
+
 def check_findings_present(states: Sequence[ScannerState]) -> List[str]:
     """Positive assertion: the scanners that ran must have found something.
 
@@ -660,15 +758,51 @@ def check_findings_present(states: Sequence[ScannerState]) -> List[str]:
         # check_some_scanner_ran already reports this; do not double-count it.
         return []
     total = sum(state.finding_count for state in ran)
-    if total > 0:
-        return []
-    names = ", ".join(state.name for state in ran)
+    if total <= 0:
+        names = ", ".join(state.name for state in ran)
+        return [
+            (
+                f"the fixture produced zero findings across every scanner that ran "
+                f"({names}). The fixture contains known insecure Python and a "
+                "non-compliant aws_s3_bucket, so zero findings means scanning is "
+                "broken, not that the target is clean"
+            )
+        ]
+    # Per selected scanner, not only in sum: the fixture gives each of the two
+    # a file of its own to trip, so one of them at zero while the other found
+    # things is that scanner broken, and the sum used to hide it.
     return [
         (
-            f"the fixture produced zero findings across every scanner that ran "
-            f"({names}). The fixture contains known insecure Python and a "
-            "non-compliant aws_s3_bucket, so zero findings means scanning is "
-            "broken, not that the target is clean"
+            f"scanner '{state.name}' ran with status {state.status} and reported "
+            f"zero findings while the other selected scanner found some. The "
+            f"fixture gives it its own file to trip, so zero means it did not "
+            f"read the target"
+        )
+        for state in ran
+        if state.name in GATE_SCANNERS and state.finding_count <= 0
+    ]
+
+
+def check_actionable_findings_present(states: Sequence[ScannerState]) -> List[str]:
+    """The fixture is built to produce actionable findings, so some must be.
+
+    Exit 0 is tolerated by check_exit_code, and nothing used to ask whether any
+    finding was actionable, so a change that left every fixture finding below
+    the threshold passed with a clean exit and a full finding count.
+    """
+    ran = [state for state in states if state.ran]
+    if not ran or sum(state.finding_count for state in ran) <= 0:
+        # check_findings_present reports those; do not double-count them.
+        return []
+    actionable = sum(state.actionable_finding_count for state in ran)
+    if actionable > 0:
+        return []
+    return [
+        (
+            "no finding is actionable although the scanners that ran reported "
+            f"{sum(state.finding_count for state in ran)} finding(s). The fixture "
+            "trips rules at or above the default threshold, so an actionable "
+            "count of zero means the threshold or the severity mapping moved"
         )
     ]
 
@@ -722,9 +856,24 @@ def check_expected_rules_present(
     Both behaviours are intended together. This gate asserts findings from two named
     scanners; if one of them never ran it cannot do its job, so the job failing is the
     correct outcome and this function simply is not the place that reports it.
+    ``check_gate_scanners_ran`` is: it names a selected scanner that is MISSING,
+    SKIPPED, excluded or absent directly, including the SKIPPED case the exit code
+    never sees.
     """
     by_name = {state.name: state for state in states}
     violations: List[str] = []
+    if not evidence.has_attribution and evidence.all_rule_ids():
+        # The union fallback in rules_for is for diagnostics. As the thing the
+        # per-scanner assertion reads, it let a complete scanner_name regression
+        # pass: every producer matched its pattern against everybody's rules.
+        return [
+            (
+                "no SARIF result carries properties.scanner_name, so no rule can be "
+                "attributed to the scanner that produced it and the per-scanner "
+                "assertions below cannot run. Every rule ID present: "
+                f"{list(evidence.all_rule_ids())}"
+            )
+        ]
     for producer in EXPECTED_PRODUCERS:
         state = by_name.get(producer.scanner)
         if state is None or not state.ran:
@@ -761,14 +910,56 @@ def _normalize_uri(uri: str) -> str:
     Separators are normalized because ``str(Path)`` uses backslashes on Windows and
     a scanner may emit either. Everything downstream compares path components, not
     slash-joined strings.
+
+    A ``file://`` URI is percent-decoded, and the separator a URI puts before a
+    Windows drive letter (``/C:/x``) is dropped, so the inside-repository test
+    can read the path the URI names. Neither happened before, so that test could
+    never match a ``file://`` URI.
     """
     text = str(uri).strip()
     if text.lower().startswith("file://"):
-        text = urlsplit(text).path
+        text = unquote(urlsplit(text).path)
+        if len(text) > 2 and text[0] == "/" and text[2] == ":":
+            text = text[1:]
     text = text.replace("\\", "/")
     while text.startswith("./"):
         text = text[2:]
     return text
+
+
+def _resolves_inside(root: Path, candidate: Path) -> bool:
+    """Whether ``candidate`` names an existing file under ``root``.
+
+    Strict resolution: a path that does not exist, a symlink loop
+    (RuntimeError on some Python versions, OSError on others) or a name the OS
+    refuses is a path that names no repository file, so it is not inside. An
+    unresolved join used to be judged lexically, where ``..`` components made
+    ``is_relative_to`` true, and a loop was a traceback.
+    """
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return resolved.is_relative_to(root)
+
+
+def _repository_candidates(root: Path, normalized: str) -> List[Path]:
+    """The paths a normalized URI may name inside the repository.
+
+    Three shapes are measured on healthy runs and a fourth is the regression:
+    a repository-relative path (``automated_security_helper/x.py``); a
+    root-relative one with a leading separator (``/automated_security_helper/x.py``),
+    which ``Path(root, ...)`` would read as filesystem-absolute; checkov's
+    stripped-absolute shape (an absolute path minus its leading separator); and
+    a plain absolute path. All of them are tried, so a repository file in any
+    of those spellings is seen as inside.
+    """
+    candidates = [Path(root, normalized)]
+    if normalized.startswith("/"):
+        candidates.append(Path(root, normalized.lstrip("/")))
+    else:
+        candidates.append(Path("/" + normalized))
+    return candidates
 
 
 def _sample(values: Sequence[str], limit: int = 5) -> str:
@@ -808,10 +999,16 @@ def check_findings_are_from_the_fixture(
     fixture_basenames = frozenset(FIXTURE_FILES)
     wrong_basename: List[str] = []
     inside_repository: List[str] = []
+    # A URI that normalizes to nothing ("./", a bare "file://") names no file,
+    # so neither test below can run on it. It used to be skipped while still
+    # counting as a located finding, so a run whose every URI was empty printed
+    # PASS having verified zero locations. It is reported instead.
+    unlocatable: List[str] = []
 
     for uri in evidence.uris:
         normalized = _normalize_uri(uri)
         if not normalized:
+            unlocatable.append(uri)
             continue
 
         # PurePosixPath because separators are already normalized to "/"; using it
@@ -819,13 +1016,10 @@ def check_findings_are_from_the_fixture(
         if PurePosixPath(normalized).name not in fixture_basenames:
             wrong_basename.append(uri)
 
-        # Path joining discards the base when the right operand is absolute, so an
-        # absolute URI resolves to itself and lands outside the repository, which is
-        # exactly the verdict we want for it.
-        candidate = Path(root, normalized)
-        with suppress(OSError, ValueError):
-            candidate = candidate.resolve()
-        if candidate.is_relative_to(root) and candidate.exists():
+        if any(
+            _resolves_inside(root, candidate)
+            for candidate in _repository_candidates(root, normalized)
+        ):
             inside_repository.append(uri)
 
     violations: List[str] = []
@@ -837,8 +1031,20 @@ def check_findings_are_from_the_fixture(
                 "repository was scanned. Either the SARIF location shape moved or "
                 "locations are being dropped"
             )
-        # Zero results at all is check_findings_present's verdict, not this one's.
+        # Zero results at all is check_findings_present's call, not this one's.
         return violations
+
+    if evidence.results_without_location:
+        # Not only when every finding lacks one. A finding with no location can
+        # neither confirm nor deny that the fixture was scanned, and the PASS
+        # line says every finding was located, so a mix used to pass with a
+        # claim the evidence did not support.
+        violations.append(
+            f"{evidence.results_without_location} of "
+            f"{evidence.total_results} finding(s) carry no location URI, so the "
+            "gate cannot tell where they came from. Every fixture finding has a "
+            "file; either the location shape moved or locations are being dropped"
+        )
 
     if wrong_basename:
         violations.append(
@@ -852,19 +1058,53 @@ def check_findings_are_from_the_fixture(
             "the process working directory instead of --source-dir: "
             f"{_sample(inside_repository)}"
         )
+    if unlocatable:
+        violations.append(
+            f"{len(unlocatable)} finding location(s) normalize to no path at all "
+            f"({_sample(unlocatable)}), so the gate cannot tell which file they "
+            "name, let alone whether it is the fixture's. Either the location "
+            "shape moved or URIs are being emptied"
+        )
     return violations
 
 
-def check_exit_code(exit_code: int) -> List[str]:
-    """The scan process itself must not have failed or rejected its config."""
+def check_exit_code(exit_code: int, states: Sequence[ScannerState] = ()) -> List[str]:
+    """The scan process itself must not have failed or rejected its config.
+
+    Each tolerated code is tolerated only in its own case: exit 0 with
+    actionable findings in ``scanner_results``, or exit 2 with none, is the code
+    and the payload disagreeing, which a consumer of the exit code would be hurt
+    by. With no states given (the pure logic called on its own) both codes are
+    accepted, as before.
+    """
     if exit_code in TOLERATED_EXIT_CODES:
+        ran = [state for state in states if state.ran]
+        actionable = sum(state.actionable_finding_count for state in ran)
+        if exit_code == 0 and actionable > 0:
+            return [
+                (
+                    f"ash scan exited 0 although the scanners that ran report "
+                    f"{actionable} actionable finding(s). The exit code says clean "
+                    "while the payload says actionable findings"
+                )
+            ]
+        if exit_code == 2 and ran and actionable == 0:
+            return [
+                (
+                    "ash scan exited 2 (actionable findings) but no scanner that ran "
+                    "reports an actionable finding; the exit code and the payload "
+                    "disagree"
+                )
+            ]
         return []
     return [
         (
             f"ash scan exited {exit_code}; expected one of "
             f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
-            "Exit 1 is a scan error, exit 3 is an invalid config or refused input "
-            "and exit 5 is a usage error: ASH refused this script's command line"
+            "Exit 1 is a scan error, or a selected scanner that did not run "
+            "(fail_on_incomplete_scanners defaults on; check_gate_scanners_ran "
+            "names it), exit 3 is an invalid config or refused input and exit 5 "
+            "is a usage error: ASH refused this script's command line"
         )
     ]
 
@@ -919,7 +1159,9 @@ def evaluate_results(
         check_no_scanner_errors(states, collect_recorded_errors(results))
     )
     outcome.violations.extend(check_some_scanner_ran(states))
+    outcome.violations.extend(check_gate_scanners_ran(states))
     outcome.violations.extend(check_findings_present(states))
+    outcome.violations.extend(check_actionable_findings_present(states))
     outcome.violations.extend(check_expected_producers_available(states))
     outcome.violations.extend(check_expected_rules_present(states, evidence))
     if repo_root is not None:
@@ -927,7 +1169,7 @@ def evaluate_results(
             check_findings_are_from_the_fixture(evidence, repo_root)
         )
     if exit_code is not None:
-        outcome.violations.extend(check_exit_code(exit_code))
+        outcome.violations.extend(check_exit_code(exit_code, states))
     return outcome
 
 
@@ -940,7 +1182,7 @@ def format_summary_table(states: Sequence[ScannerState]) -> str:
             state.status or "-",
             str(state.finding_count),
             str(state.actionable_finding_count),
-            str(state.exit_code),
+            "-" if state.exit_code is None else str(state.exit_code),
         )
         for state in states
     ]
@@ -987,8 +1229,13 @@ def format_rule_evidence(
             lines.append(f"{producer.scanner}: not present in scanner_results")
             continue
         if not state.ran:
+            # Not "tool unavailable": SKIPPED and excluded are not that, and a
+            # selected scanner that did not run IS asserted, by
+            # check_gate_scanners_ran, whatever the reason.
+            how = "excluded" if state.excluded else state.status
             lines.append(
-                f"{producer.scanner}: {state.status} (tool unavailable; not asserted)"
+                f"{producer.scanner}: {how} (did not run; no rules to show, and "
+                "check_gate_scanners_ran reports it)"
             )
             continue
         rules = evidence.rules_for(producer.scanner)
@@ -1000,9 +1247,12 @@ def format_rule_evidence(
             f"{producer.scanner}: {len(matched)} rule(s) matching "
             f"{producer.rule_pattern} -- {matched}; anchors seen: {anchors}"
         )
+    # The scanner list is the set that attributed results, not where the URIs
+    # came from: URIs are collected per result, not per scanner.
     scanners = sorted(evidence.by_scanner) or ["none"]
     lines.append(
-        f"finding locations: {len(evidence.uris)} URI(s) from scanner(s) {scanners}; "
+        f"finding locations: {len(evidence.uris)} URI(s); results were attributed "
+        f"to scanner(s) {scanners}; "
         f"{evidence.results_without_location} finding(s) carried no location"
     )
     return "\n".join(lines)
@@ -1058,6 +1308,117 @@ def build_scan_command(source_dir: Path, output_dir: Path) -> List[str]:
     return command
 
 
+def child_environment(base: Mapping[str, str] | None = None) -> Dict[str, str]:
+    """The environment the scan child runs under.
+
+    Every ``ASH_*`` variable is dropped. The product reads options from the
+    environment too (``ASH_EXCLUDED_SCANNERS``, ``ASH_CONFIG``, ``ASH_SHARD_INDEX``
+    and ``ASH_SHARD_COUNT`` among them), so an operator's shell could drop one of
+    the two selected scanners or shard the run, and the gate would judge a scan
+    other than the one its command line describes, with no trace in its output.
+    The gate's inputs are its command line and nothing else.
+
+    The child renders a Rich table. UTF-8 is forced both ways so a cp1252 default
+    on Windows cannot turn a passing scan into an encoding traceback.
+
+    PYTHONSAFEPATH is dropped: with it set, ``-m`` no longer puts the working
+    directory on ``sys.path``, so the child would import whatever ASH is
+    installed instead of the working tree this gate says it exercises, with no
+    trace in its output.
+    """
+    source = os.environ if base is None else base
+    env = {key: value for key, value in source.items() if not key.startswith("ASH_")}
+    env.pop("PYTHONSAFEPATH", None)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env.setdefault("PYTHONUTF8", "1")
+    return env
+
+
+#: Seconds the scan child gets to shut down after SIGTERM before it is killed.
+SHUTDOWN_GRACE_SECONDS = 15.0
+
+#: Seconds to keep reading the child's output once it has been stopped.
+DRAIN_SECONDS = 15.0
+
+#: The most --timeout may ask for: the job budget less the setup floor and the
+#: shutdown a timed-out scan costs (the stop waits the grace period twice, and
+#: the drain waits its deadline twice). Above it the scan can still be stopped
+#: in time, but the job is cancelled before the tables print.
+MAX_SCAN_TIMEOUT_SECONDS = (
+    JOB_TIMEOUT_BUDGET_SECONDS
+    - SETUP_MARGIN_SECONDS
+    - 2 * (SHUTDOWN_GRACE_SECONDS + DRAIN_SECONDS)
+)
+
+
+def _kill_process_group(process: Any) -> None:
+    """SIGKILL the child's process group, or the child alone without groups."""
+    if hasattr(os, "killpg") and hasattr(signal, "SIGKILL"):
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    elif process.poll() is None:
+        process.kill()
+
+
+def _stop_process_group(
+    process: Any, grace_seconds: float = SHUTDOWN_GRACE_SECONDS
+) -> None:
+    """Stop the scan child and the tools it started, SIGTERM first.
+
+    ``subprocess.run(timeout=...)`` kills the child with SIGKILL, which skips ASH's
+    own SIGTERM shutdown, so the scanner tools ASH had started kept running after
+    the gate exited and kept writing into the kept evidence directory. The child
+    is started as the leader of its own process group (``start_new_session``):
+    SIGTERM goes to the group so ASH runs its own shutdown, which is what stops
+    the tools ASH starts in sessions of their own (its spawn plan decides that
+    per tool; the group signals never reach those), then a grace period, then
+    SIGKILL to the group. Where process groups are not available the child alone
+    is terminated, then killed, which is what ``subprocess.run`` did minus the
+    grace period.
+
+    The group gets the SIGKILL sweep even when the child exited in time: a tool
+    that traps SIGTERM, or one ASH did not wait for, can outlive the child in
+    the group, keep the output pipes open and keep writing into the evidence
+    directory. ``ProcessLookupError`` from an empty group is expected and
+    suppressed, so the sweep costs nothing when there is nothing left.
+    """
+    group_signals = hasattr(os, "killpg") and hasattr(signal, "SIGKILL")
+    if group_signals:
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGTERM)
+    elif process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=grace_seconds)
+        return
+    _kill_process_group(process)
+
+
+def _drain_output(
+    process: Any, drain_seconds: float = DRAIN_SECONDS
+) -> Tuple[str, str]:
+    """Read what a stopped child wrote, without waiting for ever.
+
+    A process that outlives the child, outside its group, can hold the output
+    pipes open, and a bare ``communicate()`` then blocks until that process
+    exits. Read for *drain_seconds*; if the pipes are still open, kill the group
+    once more and read for the same time again; if they are still open after
+    that, return the output read so far and let the caller close the pipes.
+    """
+    try:
+        return process.communicate(timeout=drain_seconds)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+    try:
+        return process.communicate(timeout=drain_seconds)
+    except subprocess.TimeoutExpired as still_open:
+        return _as_text(still_open.stdout), _as_text(still_open.stderr)
+
+
 def run_scan(
     repo_root: Path,
     source_dir: Path,
@@ -1070,24 +1431,54 @@ def run_scan(
     the child rather than set with ``os.chdir``: this project deliberately removed
     process-wide cwd dependence, and reintroducing a global chdir previously took
     the unit suite from 2677 passed to 107 failed.
+
+    Raises ``subprocess.TimeoutExpired`` carrying the output read so far when the
+    scan outlives *timeout*; the child and its tools are stopped first
+    (``_stop_process_group``) and its output is read for a bounded time
+    (``_drain_output``).
     """
     command = build_scan_command(source_dir, output_dir)
-    env = dict(os.environ)
-    # The child renders a Rich table. Force UTF-8 both ways so a cp1252 default on
-    # Windows cannot turn a passing scan into an encoding traceback.
-    env["PYTHONIOENCODING"] = "utf-8"
-    env.setdefault("PYTHONUTF8", "1")
-    return subprocess.run(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
+    popen_options: Dict[str, Any] = {}
+    if hasattr(os, "setsid"):
+        # The child leads its own process group, so a timeout can stop it and
+        # every tool it started together; see _stop_process_group.
+        popen_options["start_new_session"] = True
+    with subprocess.Popen(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
         command,
         cwd=str(repo_root),
-        env=env,
-        capture_output=True,
+        env=child_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=timeout,
-        check=False,
-    )
+        **popen_options,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as expired:
+            _stop_process_group(process)
+            stdout, stderr = _drain_output(process)
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=stdout, stderr=stderr
+            ) from expired
+        except BaseException:
+            # Ctrl-C, a CI cancel or a SIGTERM to the gate turned into
+            # SystemExit. The child leads its own session, so the terminal's
+            # SIGINT never reached it, and Popen.__exit__ assumes it did: it
+            # waits a moment and returns with the child still running. Stop the
+            # group before the exception unwinds.
+            _stop_process_group(process)
+            raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+class ResultsUnreadable(Exception):
+    """The results file exists but could not be read or decoded.
+
+    Raised for invalid UTF-8 and for a read error, which used to escape ``main``
+    as a traceback in place of the gate's FAIL report and its scan log tail.
+    """
 
 
 def load_results(output_dir: Path) -> Any:
@@ -1095,7 +1486,53 @@ def load_results(output_dir: Path) -> Any:
     results_path = output_dir / RESULTS_FILENAME
     if not results_path.exists():
         raise FileNotFoundError(str(results_path))
-    return json.loads(results_path.read_text(encoding="utf-8"))
+    try:
+        text = results_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as bad_bytes:
+        raise ResultsUnreadable(
+            f"the results file is not valid UTF-8: {bad_bytes}"
+        ) from bad_bytes
+    except OSError as unreadable:
+        raise ResultsUnreadable(
+            f"the results file could not be read: {unreadable}"
+        ) from unreadable
+    return json.loads(text)
+
+
+def _scan_timeout(text: str) -> float:
+    """The ``--timeout`` value: a finite number of seconds, positive and within the job budget.
+
+    ``type=float`` alone accepted 0, a negative number, ``nan`` and ``inf``,
+    none of which stops a hung scan before the job's own cancellation, and a
+    value at or above JOB_TIMEOUT_BUDGET_SECONDS, which the help text said must
+    stay under the budget but nothing enforced. Checking against the bare budget
+    was not enough either: the setup steps and the shutdown after a timeout
+    spend from the same budget, so a value that stayed under it by less than
+    their sum was accepted and lost the race it was meant to win. The bound is
+    MAX_SCAN_TIMEOUT_SECONDS, which takes both off.
+    """
+    try:
+        seconds = float(text)
+    except ValueError as bad:
+        raise argparse.ArgumentTypeError(f"not a number of seconds: {text!r}") from bad
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError(
+            f"the timeout must be a positive, finite number of seconds, not {text!r}"
+        )
+    if seconds > MAX_SCAN_TIMEOUT_SECONDS:
+        raise argparse.ArgumentTypeError(
+            f"the timeout may be at most {MAX_SCAN_TIMEOUT_SECONDS:g}s: the job's "
+            f"{JOB_TIMEOUT_BUDGET_SECONDS:g}s budget less {SETUP_MARGIN_SECONDS:g}s "
+            f"for the steps before the scan and "
+            f"{2 * (SHUTDOWN_GRACE_SECONDS + DRAIN_SECONDS):g}s to stop and drain a "
+            f"timed-out scan, so this script's diagnostics win the race; not {text!r}"
+        )
+    return seconds
+
+
+def _remove_hint(path: Path) -> str:
+    """The cleanup command printed for a kept temp directory, shell-quoted."""
+    return f"rm -rf {shlex.quote(str(path))}"
 
 
 def sanitize_for_console(text: str) -> str:
@@ -1181,13 +1618,15 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--timeout",
-        type=float,
+        type=_scan_timeout,
         default=DEFAULT_SCAN_TIMEOUT_SECONDS,
         help=(
             "seconds to allow the scan subprocess (default: "
-            f"{DEFAULT_SCAN_TIMEOUT_SECONDS:g}; must stay under the job's "
-            f"{JOB_TIMEOUT_BUDGET_SECONDS:g}s timeout-minutes budget so this "
-            "script's own diagnostics win the race)"
+            f"{DEFAULT_SCAN_TIMEOUT_SECONDS:g}; a positive finite number of at most "
+            f"{MAX_SCAN_TIMEOUT_SECONDS:g}, which is the job's "
+            f"{JOB_TIMEOUT_BUDGET_SECONDS:g}s timeout-minutes budget less the setup "
+            "steps and the shutdown of a timed-out scan, so this script's own "
+            "diagnostics win the race)"
         ),
     )
     parser.add_argument(
@@ -1215,8 +1654,12 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     # Set only on the success path. Anything else -- a violation, a timeout, an
     # unhandled exception -- leaves the fixture and the scan output on disk, because
-    # the failure messages tell the reader to go and look at them.
+    # the failure messages tell the reader to go and look at them. Until the
+    # fixture is written there is nothing to keep: a failed precondition used to
+    # leave the empty temp directory behind (inside the checkout, when that was
+    # the precondition that failed) and name a fixture that was never written.
     succeeded = False
+    evidence_written = False
     try:
         precondition_violations = check_paths_outside_repo(
             repo_root, target_dir, output_dir
@@ -1228,6 +1671,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             return 1
 
         written = write_fixture(target_dir)
+        evidence_written = True
         output_dir.mkdir(parents=True, exist_ok=True)
 
         print("ASH external-target scan gate")
@@ -1259,7 +1703,16 @@ def main(argv: Iterable[str] | None = None) -> int:
             _print_block("scan stderr (tail)", _tail(completed.stderr))
             return 1
         except json.JSONDecodeError as bad_json:
+            # The scan log says what wrote a half file; it used to be withheld
+            # on this path while the missing-file path printed it.
             print(f"FAIL: the results file is not valid JSON: {bad_json}")
+            _print_block("scan stdout (tail)", _tail(completed.stdout))
+            _print_block("scan stderr (tail)", _tail(completed.stderr))
+            return 1
+        except ResultsUnreadable as unreadable:
+            print(f"FAIL: {unreadable}")
+            _print_block("scan stdout (tail)", _tail(completed.stdout))
+            _print_block("scan stderr (tail)", _tail(completed.stderr))
             return 1
 
         outcome = evaluate_results(
@@ -1291,7 +1744,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         _print_block("scan stderr (tail)", _tail(completed.stderr))
         return 1
     finally:
-        if succeeded and not args.keep_temp:
+        if not evidence_written or (succeeded and not args.keep_temp):
             _remove_tree(temp_root)
         else:
             reason = "--keep-temp" if succeeded else "the gate failed"
@@ -1299,7 +1752,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             print(f"EVIDENCE KEPT ({reason}):")
             print(f"  fixture:     {target_dir}")
             print(f"  scan output: {output_dir}")
-            print(f"  remove with: rm -rf {temp_root}")
+            print(f"  remove with: {_remove_hint(temp_root)}")
 
 
 if __name__ == "__main__":

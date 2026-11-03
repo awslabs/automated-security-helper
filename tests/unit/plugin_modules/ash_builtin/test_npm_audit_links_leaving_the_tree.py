@@ -422,7 +422,10 @@ def test_a_link_into_another_project_of_the_workspace_is_audited(
 
 @pytest.mark.parametrize("binary", ["npm", "pnpm", "yarn"])
 def test_the_child_copies_no_file_that_leaves_the_tree(tmp_path, binary):
-    """Called directly, without the scanner's refusal: the copy holds no outside file."""
+    """Called directly, without the scanner's refusal: the copy holds no outside
+    file. It refuses the package instead of copying without the lockfile; yarn
+    run in place (no directory outside the tree could hold its copy) copies
+    nothing and is started in the package directory."""
     root = tmp_path / "repo"
     lockfile = LOCKFILES[binary]
     package = _package(root, lockfile)
@@ -430,14 +433,39 @@ def test_the_child_copies_no_file_that_leaves_the_tree(tmp_path, binary):
     results = tmp_path / "results"
     results.mkdir()
 
-    with package_manager_child(
-        binary, package, parent=results, scan_root=root, yarn_major=1
-    ) as child:
-        if child.cwd != package:
-            for path in child.cwd.rglob("*"):
-                if path.is_file():
-                    assert MARKER not in path.read_text(), path
-            assert not (child.cwd / lockfile).exists()
+    try:
+        with package_manager_child(
+            binary, package, parent=results, scan_root=root, yarn_major=1
+        ) as child:
+            assert binary == "yarn" and child.cwd == package
+    except child_module.InputRefused as refused:
+        assert MARKER not in str(refused)
+        assert lockfile in str(refused)
+
+
+@pytest.mark.parametrize("binary", ["npm", "pnpm"])
+def test_an_input_refused_as_the_copy_opens_it_fails_that_audit(
+    online, spawns, tmp_path, binary
+):
+    """The package passes the scanner's check, and the copy then finds the open
+    file outside the tree (a swap between the two; hooked here through the
+    descriptor's own place). The copy used to leave the file out and the audit
+    ran on what was left with nothing recorded; the refusal is raised and the
+    scan loop records it for the lockfile. The emitter of the
+    "the audit raised" text is the scan loop's failure list
+    (npm_audit_scanner.py, ``audit_failures``)."""
+    online.setattr(child_module, "_descriptor_within", lambda fd, roots: False)
+    scanner = _scanner(tmp_path)
+    lockfile = LOCKFILES[binary]
+    _package(scanner.context.source_dir, lockfile)
+
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    message = str(raised.value)
+    assert "could not audit 1 lockfile(s)" in message, message
+    assert f"web/{lockfile}: the audit raised InputRefused" in message, message
+    assert _audits(spawns) == [], "an audit was started on a copy missing a file"
 
 
 def test_the_whole_scan_reports_it_and_no_outside_content_reaches_any_output(

@@ -1,14 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Every refusal the `./ash` bash entrypoint makes itself exits 3.
+"""Every refusal the `./ash` bash entrypoint makes itself exits with the code it means.
 
 A wrapper refusal is a problem with the wrapper's own arguments or environment,
-found before anything is built or run: no OCI runner, a malformed
-ASH_BASE_OCI_LAYOUT, an option given without its value or with an empty one, a
---source-dir that does not exist, an --output-dir that is not a directory. ./ash
-refuses with 3, the code ASH uses for input it refuses. A failed image build is
-not one of them: it keeps the build's own status.
+found before anything is built or run. Most exit 3, the code ASH uses for input it
+refuses: no OCI runner, a malformed ASH_BASE_OCI_LAYOUT, a linked output directory.
+The usage errors `ash` itself refuses with 5 exit 5 here too, with its text: an
+option given no value or a blank one, a --source-dir that does not exist, an
+--output-dir that is not a directory, a --sandbox other than off. A failed image
+build is neither: it keeps the build's own status.
 
 `./ash --source-dir typo` and an --output-dir naming a file are refused, and an
 option at the end of the line with no value, or with "", is refused rather than
@@ -50,8 +51,9 @@ ASH_SCRIPT = REPO_ROOT / "ash"
 WRAPPER_REFUSAL_EXIT = 3
 
 #: The exit status of the usage errors `ash` itself refuses with 5: a --sandbox
-#: other than off, a --source-dir that names no directory to scan, and an
-#: --output-dir that is a file.
+#: other than off, a value option given no value or a blank one, a --source-dir
+#: that names no directory to scan, and an --output-dir that is a file or cannot be
+#: made, entered or written.
 USAGE_ERROR_EXIT = 5
 
 pytestmark = [
@@ -71,8 +73,9 @@ pytestmark = [
 
 #: The utilities ./ash calls besides bash builtins and the runner. tr lower-cases a
 #: --sandbox mode other than off, so without it such a mode is still refused (see
-#: test_sandbox_off_is_taken_without_tr). rm removes the file the output directory's
-#: write check makes.
+#: test_sandbox_off_is_taken_without_tr), and lower-cases a --build-target (the
+#: stage tests below need it). rm removes the file the output directory's write
+#: check makes.
 _TOOLS = ("dirname", "basename", "mkdir", "id", "date", "cat", "tr", "rm")
 
 #: Records every call, prints nothing a test could mistake for success, and fails.
@@ -146,16 +149,61 @@ def _mounts(tmp_path: Path) -> list[str]:
     return [value for option, value in zip(args, args[1:]) if option == "--mount"]
 
 
-def test_no_runner_on_path(tmp_path, run_ash):
-    tools_only = tmp_path / "tools-only"
-    tools_only.mkdir()
+@pytest.fixture
+def tools_only(tmp_path: Path) -> Path:
+    """A PATH with the tools ./ash needs and no runner at all, for the tests that
+    want the runner lookup to fail."""
+    path = tmp_path / "tools-only"
+    path.mkdir()
     for tool in _TOOLS:
-        (tools_only / tool).symlink_to(shutil.which(tool))
+        (path / tool).symlink_to(shutil.which(tool))
+    return path
 
+
+def test_no_runner_on_path(run_ash, tools_only):
     result, calls = run_ash("--source-dir", "src", path=tools_only)
 
     assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
     assert "Unable to resolve an OCI_RUNNER" in result.stderr
+    assert calls == []
+
+
+def test_the_output_dir_is_made_before_a_runner_is_looked_for(
+    tmp_path, run_ash, tools_only
+):
+    """A missing --output-dir is made, parents and all, and a run that then finds no
+    runtime stops at the runner refusal with the directory in place: the shape
+    tests/unit/cli/test_directory_refusals_agree.py pins for a PATH with no runtime.
+    Making it just before the build or the run left it unmade here."""
+    out = tmp_path / "p" / "q" / "out"
+
+    result, calls = run_ash(
+        "--source-dir", "src", "--output-dir", str(out), path=tools_only
+    )
+
+    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    assert "Unable to resolve an OCI_RUNNER" in result.stderr
+    assert out.is_dir(), result.stdout + result.stderr
+    assert calls == []
+
+
+def test_an_output_dir_that_cannot_be_made_is_refused_before_a_runner_is_looked_for(
+    tmp_path, run_ash, tools_only
+):
+    """The usage refusal, exit 5 in `ash scan`'s words, comes before the runtime
+    lookup, so it is the same with and without a runtime on PATH. Made just before
+    the build or the run, it came after "Unable to resolve an OCI_RUNNER"."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x\n", encoding="utf-8")
+    out = blocker / "out"
+
+    result, calls = run_ash(
+        "--source-dir", "src", "--output-dir", str(out), path=tools_only
+    )
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory cannot be created: " in result.stderr, result.stderr
+    assert "Unable to resolve an OCI_RUNNER" not in result.stderr, result.stderr
     assert calls == []
 
 
@@ -201,8 +249,26 @@ def test_an_option_without_its_value(run_ash, bare_path, option):
         OCI_RUNNER=str(bare_path / "recording-runner"),
     )
 
-    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    # A value option with no value is the usage error the CLI exits 5 for.
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert f"{option} needs a value" in result.stderr
+    assert calls == []
+
+
+def test_an_attached_empty_value_is_refused(run_ash, bare_path):
+    """`--build-target=` is the attached spelling with nothing after the "=": refused
+    like `--build-target ""`, naming the option without the "=", before the stage is
+    read, so an empty stage never reaches the name check or the image tag."""
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        "--build-target=",
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "--build-target needs a value" in result.stderr, result.stderr
     assert calls == []
 
 
@@ -235,7 +301,8 @@ def test_an_option_given_an_empty_value(run_ash, bare_path, option):
         OCI_RUNNER=str(bare_path / "recording-runner"),
     )
 
-    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    # A value option with no value is the usage error the CLI exits 5 for.
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert f"{option} needs a value" in result.stderr
     assert calls == []
 
@@ -337,6 +404,129 @@ def test_an_output_dir_that_cannot_be_created_says_why(tmp_path, run_ash, bare_p
     assert result.stderr.rstrip().endswith(" (Not a directory)"), result.stderr
     assert "mkdir:" not in result.stderr, result.stderr
     assert "\x1b" not in result.stderr, repr(result.stderr)
+    assert "--output-dir" not in result.stderr, result.stderr
+    assert calls == []
+
+
+@pytest.mark.skipif(
+    # The module is skipped on Windows before this line is reached (the
+    # module-level skip above), so os.geteuid exists wherever it is evaluated.
+    os.geteuid() == 0,
+    reason="root creates a directory whatever its parent's mode says",
+)
+def test_a_default_output_dir_that_cannot_be_created_names_the_option(
+    tmp_path, run_ash, bare_path
+):
+    """The default output directory is inside the scanned directory. A scanned
+    directory that cannot take it (read-only here) refuses with the reason, as any
+    output directory does, and names --output-dir as the way to write elsewhere; the
+    refusal of an --output-dir the operator chose carries no such hint (the check
+    above), since the choice was already theirs."""
+    source = tmp_path / "src"
+    source.chmod(0o555)
+    try:
+        result, calls = run_ash(
+            "--no-build",
+            "--source-dir",
+            "src",
+            OCI_RUNNER=str(bare_path / "recording-runner"),
+        )
+    finally:
+        source.chmod(0o755)
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory cannot be created: " in result.stderr, result.stderr
+    assert "(Permission denied)" in result.stderr, result.stderr
+    assert "pass --output-dir to write elsewhere" in result.stderr, result.stderr
+    assert "mkdir:" not in result.stderr, result.stderr
+    assert calls == []
+
+
+def test_a_default_output_dir_that_is_a_file_names_the_option(
+    tmp_path, run_ash, bare_path
+):
+    """The hint goes on every refusal the default alone can draw, not only the one
+    of a directory that cannot be created: a file at `<source>/.ash/ash_output`
+    (here), a default that cannot be written (the next test), and one reached
+    through a link the repository commits
+    (tests/unit/test_ash_bash_entrypoint_output_paths.py)."""
+    (tmp_path / "src" / ".ash").mkdir()
+    (tmp_path / "src" / ".ash" / "ash_output").write_text("", encoding="utf-8")
+
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory is not a directory: " in result.stderr, result.stderr
+    assert ".ash/ash_output" in result.stderr, result.stderr
+    assert "pass --output-dir to write elsewhere" in result.stderr, result.stderr
+    assert calls == [], "the results were sent to the working directory instead"
+
+
+@pytest.mark.skipif(
+    # The module is skipped on Windows before this line is reached (the
+    # module-level skip above), so os.geteuid exists wherever it is evaluated.
+    os.geteuid() == 0,
+    reason="root writes into a directory whatever its mode says",
+)
+def test_a_default_output_dir_that_cannot_be_written_names_the_option(
+    tmp_path, run_ash, bare_path
+):
+    """A default output directory that is there but takes no file (read-only here)
+    is refused with the reason and names --output-dir, as the other refusals of a
+    default do."""
+    output = tmp_path / "src" / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    output.chmod(0o555)
+    try:
+        result, calls = run_ash(
+            "--no-build",
+            "--source-dir",
+            "src",
+            OCI_RUNNER=str(bare_path / "recording-runner"),
+        )
+    finally:
+        output.chmod(0o755)
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert "Output directory cannot be written: " in result.stderr, result.stderr
+    assert "(Permission denied)" in result.stderr, result.stderr
+    assert "pass --output-dir to write elsewhere" in result.stderr, result.stderr
+    assert calls == []
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0,
+    reason="root writes into a directory whatever its mode says",
+)
+def test_an_output_dir_that_cannot_be_written(tmp_path, run_ash, bare_path):
+    """Control: an --output-dir the operator chose is refused with the reason, in
+    `ash scan`'s words, and with no hint, since the choice was already theirs."""
+    output = tmp_path / "out"
+    output.mkdir()
+    output.chmod(0o555)
+    try:
+        result, calls = run_ash(
+            "--no-build",
+            "--source-dir",
+            "src",
+            "--output-dir",
+            "out",
+            OCI_RUNNER=str(bare_path / "recording-runner"),
+        )
+    finally:
+        output.chmod(0o755)
+
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
+    assert (
+        "ERROR: Output directory cannot be written: out (Permission denied)"
+        in result.stderr.splitlines()
+    ), result.stderr
+    assert "--output-dir to write elsewhere" not in result.stderr, result.stderr
     assert calls == []
 
 
@@ -355,7 +545,8 @@ def test_an_option_given_only_whitespace(run_ash, bare_path, option, blank):
         OCI_RUNNER=str(bare_path / "recording-runner"),
     )
 
-    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    # A value option with no value is the usage error the CLI exits 5 for.
+    assert result.returncode == USAGE_ERROR_EXIT, result.stdout + result.stderr
     assert f"{option} needs a value" in result.stderr
     assert calls == []
 
@@ -952,7 +1143,7 @@ def test_operator_values_in_progress_lines_are_shown_not_obeyed(
         return
     assert calls, output
     if case == "layout-runner-name":
-        assert "Base image expected in $'ok\\E[31mrunner'" in result.stdout, output
+        assert "Base image expected in $'ok\\E[31mrunner'" in result.stderr, output
 
 
 def test_a_printable_value_is_shown_as_typed(run_ash, bare_path):
@@ -1370,15 +1561,10 @@ def test_a_blank_oci_runner_from_the_environment_is_refused(run_ash, bare_path, 
 
 
 def test_the_empty_runner_check_comes_before_the_wrapper_prefix(
-    tmp_path, run_ash, bare_path
+    run_ash, bare_path, tools_only
 ):
     """The empty-runner check runs before OCI_RUNNER_WRAPPER is prefixed, so an
     empty runner is still refused."""
-    tools_only = tmp_path / "tools-only"
-    tools_only.mkdir()
-    for tool in _TOOLS:
-        (tools_only / tool).symlink_to(shutil.which(tool))
-
     result, calls = run_ash(
         "--source-dir",
         "src",
@@ -1464,8 +1650,8 @@ def test_an_output_dir_that_is_a_file(tmp_path, run_ash, bare_path):
     assert calls == [], "the results were sent to the working directory instead"
 
 
-#: The code ./ash refuses an explicit --sandbox other than off with, the one
-#: exception to WRAPPER_REFUSAL_EXIT: ASH in a container refuses it as a usage error.
+#: The code ./ash refuses an explicit --sandbox other than off with: one of the usage
+#: errors (USAGE_ERROR_EXIT), since ASH in a container refuses it as a usage error.
 SANDBOX_REFUSAL_EXIT = 5
 
 _WORKSPACE_MESSAGE = "./ash scans one directory and cannot run a workspace scan"
@@ -1476,13 +1662,14 @@ _WORKSPACE_MESSAGE = "./ash scans one directory and cannot run a workspace scan"
 #: names no runner or names the guard runner, so a refusal that did not happen shows
 #: as a runner call and exit 99.
 _ASH_SITES = {
-    "option-without-value": (["--oci-runner"], {}, {}, 3, "--oci-runner needs a value"),
-    "option-empty": (["--output-dir", ""], {}, {}, 3, "--output-dir needs a value"),
+    # A value option with no value is a usage error, 5, as the CLI's own is.
+    "option-without-value": (["--oci-runner"], {}, {}, 5, "--oci-runner needs a value"),
+    "option-empty": (["--output-dir", ""], {}, {}, 5, "--output-dir needs a value"),
     "option-blank": (
         ["--build-target", " "],
         {},
         {},
-        3,
+        5,
         "--build-target needs a value",
     ),
     "mount-path-with-a-comma": (
@@ -1737,6 +1924,50 @@ def test_another_sandbox_mode_is_still_refused_without_tr(run_ash, bare_path):
     )
 
     assert result.returncode == SANDBOX_REFUSAL_EXIT, result.stdout + result.stderr
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param([], id="default-stage"),
+        pytest.param(["--build-target", "ci"], id="lower-case-stage"),
+    ],
+)
+def test_a_lower_case_build_target_needs_no_tr(run_ash, bare_path, args):
+    """A stage name with no upper-case letter, the default non-root among them, is
+    its own lower-case: it is taken without tr on PATH, as `--sandbox off` is. Every
+    run lower-cased the stage through tr, so a run without tr was refused for a
+    stage it never had to change."""
+    (bare_path / "tr").unlink()
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        *args,
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == 99, result.stdout + result.stderr
+    assert "lower-cased" not in result.stderr, result.stderr
+    assert calls, "the accepted call did not reach the runner"
+
+
+def test_an_upper_case_build_target_without_tr_is_refused(run_ash, bare_path):
+    """A stage with an upper-case letter needs tr to be lower-cased; without it the
+    stage to build is unknown, and the check fails closed with the reason."""
+    (bare_path / "tr").unlink()
+    result, calls = run_ash(
+        "--no-build",
+        "--source-dir",
+        "src",
+        "--build-target",
+        "NON-ROOT",
+        OCI_RUNNER=str(bare_path / "recording-runner"),
+    )
+
+    assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
+    assert "could not be lower-cased" in result.stderr, result.stderr
     assert calls == []
 
 

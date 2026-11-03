@@ -17,6 +17,7 @@ report file: the model's findings decide.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
@@ -102,11 +103,19 @@ def _with_findings(tmp_path: Path) -> AshAggregatedResults:
     return build_fixture_model(tmp_path / "fixture")
 
 
-def _records(results: AshAggregatedResults) -> List[dict]:
+def _checkpoints(results: AshAggregatedResults) -> List[dict]:
     return [
-        checkpoint["metadata"]
+        checkpoint
         for checkpoint in results.validation_checkpoints
         if checkpoint.get("type") == "reports_written"
+    ]
+
+
+def _records(results: AshAggregatedResults) -> List[dict]:
+    """The files and formats each record lists, without the token naming its process."""
+    return [
+        {key: checkpoint["metadata"][key] for key in ("files", "formats")}
+        for checkpoint in _checkpoints(results)
     ]
 
 
@@ -128,6 +137,10 @@ def test_the_report_phase_records_the_files_it_wrote(tmp_path):
     assert _records(results) == [
         {"files": ["ash.other.json"], "formats": {"ash.other.json": "other-format"}}
     ]
+    # The record also names the process that wrote it, which is how a later phase
+    # of this run tells it from one an earlier run left in loaded results.
+    (checkpoint,) = _checkpoints(results)
+    assert re.fullmatch(r"[0-9a-f]{32}", checkpoint["metadata"]["run_token"])
 
 
 class _FailingConfig(ReporterPluginConfigBase):

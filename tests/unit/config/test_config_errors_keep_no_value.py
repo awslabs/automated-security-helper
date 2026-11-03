@@ -41,7 +41,7 @@ ENV_KEY = f"global_settings:\n  ${{{PROBE}:k}}: 1\n"
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setenv(PROBE, PROBE_VALUE)
-    monkeypatch.setenv("ASH_TEST_OPSECRET", f"{OPERATOR_VALUE}.yaml")
+    monkeypatch.setenv("ASH_TEST_OPBASE", f"{OPERATOR_VALUE}.yaml")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -98,7 +98,7 @@ def _chain_error(project):
 
     config = project / "ash.yaml"
     config.write_text(
-        "extends: ${ASH_TEST_OPSECRET:base.yaml}\nproject_name: demo\n",
+        "extends: ${ASH_TEST_OPBASE:base.yaml}\nproject_name: demo\n",
         encoding="utf-8",
     )
     return _raised(lambda: resolve_config(config, fallback_to_default=False))
@@ -274,7 +274,7 @@ def test_an_ash_config_base_named_by_a_variable(project, command):
     in-tree config makes resolve_config read the ASH_CONFIG chain for it."""
     repo = _repo(project)
     operator = _operator(
-        project, "extends: ${ASH_TEST_OPSECRET:base.yaml}\nproject_name: op\n"
+        project, "extends: ${ASH_TEST_OPBASE:base.yaml}\nproject_name: op\n"
     )
 
     with pytest.MonkeyPatch.context() as mp:

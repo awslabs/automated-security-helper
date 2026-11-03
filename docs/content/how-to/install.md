@@ -70,12 +70,12 @@ command is the same in a POSIX shell and in PowerShell:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
 ash --version
 ```
 
 ```text
-awslabs/automated-security-helper v3.7.0
+awslabs/automated-security-helper v3.7.1
 ```
 
 The install provides three names for the same program: `ash`, `ashv3`, and
@@ -88,21 +88,21 @@ To move to another version, run the same command with the new tag and add `--for
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0' ash --version
+uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1' ash --version
 ```
 
 uvx builds the environment once and reuses it, so later runs start quickly. Every
 command needs the full `uvx --from` specification, so you may want a shell alias:
 
 ```bash
-alias ash="uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0' ash"
+alias ash="uvx --python 3.12 --from 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1' ash"
 ```
 
 ## Install with pipx
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pipx install --python python3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+pipx install --python python3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
 ```
 
 Install pipx itself from your package manager, for example `apt install pipx` on
@@ -110,7 +110,7 @@ Ubuntu, or with `uv tool install pipx`. On systems whose Python is marked as
 externally managed, such as Ubuntu 24.04, pip refuses to install pipx outside a
 virtual environment. pipx needs the named Python on your `PATH`.
 
-ASH installs bandit, checkov, and semgrep with uv. It uses the `uv`
+ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv. It uses the `uv`
 that pipx installs into ASH's environment, so a pipx install needs no separate uv.
 
 ## Install with pip
@@ -126,7 +126,7 @@ virtual environment.
     ```bash
     python3.12 -m venv ~/.venvs/ash
     . ~/.venvs/ash/bin/activate
-    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
     ash --version
     ```
 
@@ -138,13 +138,13 @@ virtual environment.
     ```powershell
     py -3.12 -m venv $HOME\.venvs\ash
     & $HOME\.venvs\ash\Scripts\Activate.ps1
-    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+    pip install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
     ash --version
     ```
 
 Activate the environment in each new shell before you run `ash`, or run the
-environment's `ash` by its path. Either way, ASH installs bandit, checkov, and
-semgrep with the environment's own `uv`.
+environment's `ash` by its path. Either way, ASH installs bandit, checkov, semgrep,
+cfn-lint, and zizmor with the environment's own `uv`.
 
 Keep the environment outside the scanned directory. During a scan ASH does not run
 tools that it finds inside the directory it is scanning, so scanners installed into a
@@ -175,7 +175,7 @@ the install needs a C compiler.
 
 | Reference | What you get |
 |---|---|
-| `@v3.7.0` | That release. The release process creates each version tag once and moves only the `v3` tag. |
+| `@v3.7.1` | That release. The release process creates each version tag once and moves only the `v3` tag. |
 | a full commit SHA | That commit. The only reference that cannot change. |
 | `@v3` | The latest 3.x release. It moves with each release. |
 | `@main` | The current development state. |
@@ -300,9 +300,7 @@ The scanner tools and data that ASH installed stay behind. To remove them too:
   are in `share/cfn-guard-rules` next to it.
 - The scanners installed as uv tools. Name the ones `uv tool list` shows, because
   `uv tool uninstall` fails for a name that is not installed:
-  `uv tool uninstall bandit checkov semgrep nbconvert`. Earlier ASH releases also
-  installed `cfn-lint` and `zizmor` as uv tools, so add whichever of them
-  `uv tool list` still shows.
+  `uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.
 - The cfn-nag gem: `gem uninstall cfn-nag`. The gems it depends on stay installed.
 - The scanners' own caches, such as `~/.cache/grype` and `~/.cache/trivy`.
 - The `.ash/ash_output/` directory that each scan writes in the project it scanned.
