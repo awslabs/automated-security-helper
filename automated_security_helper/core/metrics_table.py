@@ -313,6 +313,27 @@ def print_inputs_not_scanned(
         console.print(not_scanned_line(scanner_name, path, reason))
 
 
+def print_requested_scanners_not_run(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """One line per requested scanner name that matched no scanner, after the table.
+
+    The names come from ``metadata.requested_scanners_not_run``
+    (how-to/choose-scanners.md, reference/output-files.md): the ``--scanners`` or
+    ``ASH_SCANNERS`` names the scan warned about and ran without. No row can say
+    it -- a name that matched no scanner has no scanner row -- so this is the
+    summary's only statement that part of the request was not served. Printed
+    unstyled, the name's control characters and markup neutralized, so the line
+    reads the same wherever the summary lands. Nothing is printed when the field
+    is null.
+    """
+    for name in asharp_model.metadata.requested_scanners_not_run or []:
+        console.print(
+            f"Requested but not run: {escape(name, one_line=True)} "
+            "(no registered scanner has this name)"
+        )
+
+
 def print_stale_content_databases(
     asharp_model: AshAggregatedResults, console: Console
 ) -> None:
@@ -459,6 +480,7 @@ def display_metrics_table(
             for printer in (
                 print_coverage_shortfalls,
                 print_inputs_not_scanned,
+                print_requested_scanners_not_run,
                 print_stale_content_databases,
                 print_converter_refusals,
             ):

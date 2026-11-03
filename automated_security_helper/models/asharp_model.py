@@ -982,6 +982,26 @@ class ReportMetadata(StrippedRecordModel):
             ),
         ),
     ]
+    # Declared for the reasons the `shard` field above states: the committed
+    # AshAggregatedResults.json documents what `ash merge` reads back, and the
+    # console summary prints from a validated field rather than an extra key.
+    # None rather than [] when there is nothing to record, so a results file
+    # says `null` when every name matched or no list was given, which is what
+    # reference/output-files.md documents for it.
+    requested_scanners_not_run: Annotated[
+        List[str] | None,
+        Field(
+            default=None,
+            description=(
+                "The names in --scanners or ASH_SCANNERS that matched no "
+                "registered scanner, recorded by a scan that ran because other "
+                "names matched; sorted, each name once, in the spelling given. "
+                "Null when every name matched or no list was given. `ash merge` "
+                "records every shard's names, united. An unknown "
+                "--exclude-scanners name is never recorded."
+            ),
+        ),
+    ] = None
     plugin_load_errors: Annotated[
         Dict[str, str],
         Field(

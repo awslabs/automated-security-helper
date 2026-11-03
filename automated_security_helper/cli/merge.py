@@ -1801,6 +1801,19 @@ def merge_shard_results(
     merged.metadata.plugin_load_errors = combined_plugin_load_errors(
         shard.metadata.plugin_load_errors for _, shard, _ in shards
     )
+    # Every shard's requested names that matched no scanner, united and sorted
+    # (reference/output-files.md: "`ash merge` records the names of all the
+    # shards"). Set from every shard rather than inherited from the base copy,
+    # because each shard warns only about its own command line; None when no
+    # shard recorded any, as a single scan writes it.
+    requested_not_run = sorted(
+        {
+            name
+            for _, shard, _ in shards
+            for name in (shard.metadata.requested_scanners_not_run or [])
+        }
+    )
+    merged.metadata.requested_scanners_not_run = requested_not_run or None
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
     merged.metadata.report_id = _union_report_id(shards)

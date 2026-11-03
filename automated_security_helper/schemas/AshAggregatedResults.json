@@ -17176,6 +17176,22 @@
           "description": "Unique identifier for the report",
           "title": "Report Id"
         },
+        "requested_scanners_not_run": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The names in --scanners or ASH_SCANNERS that matched no registered scanner, recorded by a scan that ran because other names matched; sorted, each name once, in the spelling given. Null when every name matched or no list was given. `ash merge` records every shard's names, united. An unknown --exclude-scanners name is never recorded.",
+          "title": "Requested Scanners Not Run"
+        },
         "shard": {
           "anyOf": [
             {
