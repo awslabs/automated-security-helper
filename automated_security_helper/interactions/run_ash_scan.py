@@ -1468,15 +1468,34 @@ def print_incompleteness_message(
                 )
                 + "[/yellow]"
             )
-        if any(
-            not (getattr(row, "kinds", ()) or ()) for row in incomplete_converter_rows
-        ):
+        no_kind_rows = [
+            row
+            for row in incomplete_converter_rows
+            if not (getattr(row, "kinds", ()) or ())
+        ]
+        if no_kind_rows:
+            # A hand-built (name, reason) pair carries no record kinds, so the
+            # reason's own text is what says whether the converter ran: one
+            # whose reason names inputs it could not convert ran, and a corrupt
+            # archive is not fixed by installing a tool, so that remedy is
+            # offered beside the install advice rather than in its place.
+            could_not_convert = any(
+                "could not convert" in str(row[1]) for row in no_kind_rows
+            )
             print(
                 "[yellow]A converter that did not run leaves its inputs unscanned, "
                 "so the scanners saw fewer files than this repository holds. "
                 + ways_out(
                     "Install the converter's tool",
                     "disable the converter if its inputs are not wanted",
+                    *(
+                        (
+                            "fix the files it could not convert or exclude them "
+                            "with ignore_paths",
+                        )
+                        if could_not_convert
+                        else ()
+                    ),
                     *accept_partial,
                 )
                 + ". A converter with nothing to convert never reports here.[/yellow]"
