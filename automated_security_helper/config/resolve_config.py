@@ -2316,8 +2316,19 @@ def resolve_config(
         )
 
         rules_chain, rules_named, _ = default_views()
+        # The views hold the load's resolved paths, so a delivered link
+        # ASH_CONFIG names would otherwise be judged only by the file it points
+        # at: the name the environment carries is judged too, as the trusted
+        # route judges it (client_config_policy.trusted_default_config), and
+        # config_is_client_supplied reads a path by every name on its way.
+        env_named = os.environ.get("ASH_CONFIG")
         if any(
-            config_is_client_supplied(path) for path in (*rules_chain, *rules_named)
+            config_is_client_supplied(path)
+            for path in (
+                *rules_chain,
+                *rules_named,
+                *([Path(env_named)] if env_named else []),
+            )
         ):
             for path in rules_chain:
                 key = Path(path).resolve()
