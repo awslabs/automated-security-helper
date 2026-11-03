@@ -52,6 +52,20 @@ run_hook() {
   return "$rc"
 }
 
+# On an unexpected hook result, the job log holds ASH's refusal but not the
+# scanner's own words: ASH does not read the output of a run it refused, and
+# try-repo deletes its clone, so the only copy is the per-scanner logs left in
+# the fixture's output directory. Print their tails before failing.
+show_scanner_logs() {
+  local dir="$1" f
+  for f in "$dir"/.ash/ash_output/scanners/*/*/*.log; do
+    [ -f "$f" ] || continue
+    say "---- ${f#"$dir"/} (last 4096 bytes)"
+    tail -c 4096 "$f"
+    printf '\n'
+  done
+}
+
 clean="$WORK/clean"
 finding="$WORK/finding"
 make_fixture "$clean" 'def greet(name):
@@ -65,13 +79,19 @@ def run(cmd):
 
 rc=0
 run_hook ash "$clean" "$WORK/ash-clean.log" || rc=$?
-[ "$rc" -eq 0 ] || fail "the ash hook failed on a clean repository (pre-commit exit $rc)"
+if [ "$rc" -ne 0 ]; then
+  show_scanner_logs "$clean"
+  fail "the ash hook failed on a clean repository (pre-commit exit $rc)"
+fi
 say "ash on a clean repository: passed"
 
 rc=0
 run_hook ash "$finding" "$WORK/ash-finding.log" || rc=$?
 # pre-commit exits 1 for any failed hook and prints the hook's own code.
-[ "$rc" -eq 1 ] || fail "pre-commit exited $rc on a repository with a finding, expected 1"
+if [ "$rc" -ne 1 ]; then
+  show_scanner_logs "$finding"
+  fail "pre-commit exited $rc on a repository with a finding, expected 1"
+fi
 # [[:space:]]* because Python on Windows ends the line with \r\n.
 grep -q -- '- exit code: 2[[:space:]]*$' "$WORK/ash-finding.log" ||
   fail "the ash hook failed on a repository with a finding, but not with ASH's findings exit code 2"
