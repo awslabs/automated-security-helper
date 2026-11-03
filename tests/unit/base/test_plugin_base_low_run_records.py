@@ -232,13 +232,17 @@ def test_a_system_python_switch_read_as_false_names_no_interpreter(
 def test_a_system_python_switch_read_as_true_is_the_callers_choice(
     plugin_context, monkeypatch
 ):
+    # UV_SYSTEM_PYTHON is the environment form of ``uv pip --system``, so only
+    # the ``uv pip`` family reads it (python_child._UV_SYSTEM_PYTHON_SUBCOMMANDS):
+    # there a true value is the caller's choice of interpreter and nothing is
+    # injected. ``uv run`` ignores the variable, so it still gets UV_PYTHON.
     monkeypatch.delenv("UV_PYTHON", raising=False)
     monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
     seen = _capture_env(monkeypatch)
     plugin = _Plugin(context=plugin_context)
 
     plugin._run_subprocess(
-        ["uv", "run", "probe"],
+        ["uv", "pip", "install", "probe"],
         env={"PATH": "/usr/bin", "UV_SYSTEM_PYTHON": "1"},
     )
 

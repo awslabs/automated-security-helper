@@ -112,10 +112,12 @@ class KillAfter:
 
 
 def bound_run_command(monkeypatch, seconds: float = CHILD_TIMEOUT_SECONDS) -> None:
-    """Give ``subprocess_utils.run_command`` a timeout when its caller passes none.
+    """Cap ``subprocess_utils.run_command``'s timeout at ``seconds``.
 
-    For a test that reaches a child through ASH code with no timeout argument of its
-    own, such as the installer's ``dependencies.run_command``. A child still running
+    For a test that reaches a child through ASH code whose own timeout is absent or
+    far larger than a test should wait, such as the installer's
+    ``dependencies.run_command`` (which passes its 3600 s install timeout
+    explicitly, so a none-only override never applied). A child still running
     after ``seconds`` is killed and the test fails naming it. ``pytest.fail``, not an
     ``AssertionError``, because the installer catches ``Exception`` and would report
     the timeout as one more failed command.
@@ -127,8 +129,10 @@ def bound_run_command(monkeypatch, seconds: float = CHILD_TIMEOUT_SECONDS) -> No
     original = subprocess_utils.run_command
 
     def run_command(*args, **kwargs):
-        if kwargs.get("timeout") is None:
-            kwargs["timeout"] = seconds
+        caller_timeout = kwargs.get("timeout")
+        kwargs["timeout"] = (
+            seconds if caller_timeout is None else min(seconds, caller_timeout)
+        )
         result = original(*args, **kwargs)
         if isinstance(result, subprocess_utils.TimedOutProcess):
             pytest.fail(

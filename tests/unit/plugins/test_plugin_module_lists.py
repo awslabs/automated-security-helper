@@ -195,6 +195,9 @@ def _scan(packages: Path, tmp_path: Path, plugin_args, extra_env=None):
     return completed, rows
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
+)
 @pytest.mark.integration
 def test_a_comma_list_in_the_flag_loads_each_module(plugin_packages, tmp_path):
     completed, rows = _scan(

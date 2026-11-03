@@ -2598,7 +2598,10 @@ def _refuse_absolute_extends(config: str) -> None:
             continue
         seen.add(current)
         for ref, written, _ in entries.get(current) or ():
-            if Path(ref).is_absolute() or Path(ref).drive:
+            # root too: on Windows a drive-less rooted entry ("/base/x.yaml")
+            # has is_absolute() False and no drive, yet it also does not name
+            # the same file inside the container.
+            if Path(ref).is_absolute() or Path(ref).drive or Path(ref).root:
                 raise ContainerInputError(
                     f"'{EXTENDS_KEY}: {written}' in {shown(current)} names a base "
                     "by absolute path, which does not name the same file inside "

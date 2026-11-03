@@ -3,7 +3,8 @@
 
 """The test-selection tools are where the testing docs and their own imports say.
 
-``docs/content/docs/testing/test_selection.md``, ``index.md`` and the tools' own
+``docs/content/contributing/testing.md`` (where the old
+``docs/content/docs/testing`` pages' selection content lives) and the tools' own
 imports name modules under ``tests/utils/``, so that is where the tools live, as
 ``selection.py`` and ``optimization.py``. Both are tools, not tests: under a ``test_``
 name pytest would collect them and find nothing to run.
@@ -24,15 +25,14 @@ import pytest
 from tests.utils.helpers import checkout_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TESTING_DOCS = REPO_ROOT / "docs" / "content" / "docs" / "testing"
+TESTING_DOCS = REPO_ROOT / "docs" / "content" / "contributing" / "testing.md"
 TOOLS = ("tests.utils.selection", "tests.utils.optimization")
 
 
 def _selection_doc_text() -> str:
-    """test_selection.md whole, and the "Test Selection Utilities" part of index.md."""
-    index = (TESTING_DOCS / "index.md").read_text(encoding="utf-8")
-    section = index.split("### Test Selection Utilities", 1)[1].split("\n## ", 1)[0]
-    return (TESTING_DOCS / "test_selection.md").read_text(encoding="utf-8") + section
+    """The contributing testing guide, which carries the selection commands and
+    the import line the regexes below read."""
+    return TESTING_DOCS.read_text(encoding="utf-8")
 
 
 @pytest.mark.unit

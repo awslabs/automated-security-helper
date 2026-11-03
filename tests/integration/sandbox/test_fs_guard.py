@@ -5,6 +5,7 @@
 
 import errno
 import os
+import pathlib
 import stat
 import threading
 
@@ -59,6 +60,11 @@ def test_a_link_below_a_results_directory_is_refused_before_a_scan(tree):
         fs_guard.refuse_links_below(root)
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo"),
+    reason="a FIFO needs os.mkfifo, which Windows lacks; this file's scope is "
+    "POSIX filesystem behavior",
+)
 def test_a_fifo_at_the_file_name_is_refused_without_blocking(tree):
     root, _ = tree
     fifo = root / "source" / "out.log"
@@ -184,6 +190,11 @@ def test_a_read_back_of_a_link_at_the_file_name_is_refused(tree, tmp_path, regis
         fs_guard.read_bytes_at_most(directory / "out.log", 100)
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo"),
+    reason="a FIFO needs os.mkfifo, which Windows lacks; this file's scope is "
+    "POSIX filesystem behavior",
+)
 def test_a_read_back_of_a_fifo_is_refused_without_blocking(tree):
     root, _ = tree
     fifo = root / "source" / "out.log"
@@ -248,6 +259,12 @@ def test_a_file_unlinked_with_eperm_keeps_its_own_error(tree, monkeypatch):
         raise PermissionError(errno.EPERM, "Operation not permitted")
 
     monkeypatch.setattr(os, "unlink", _eperm)
+    if os.name == "nt":
+        # The Windows arm of unlink_beneath removes through Path.unlink, and
+        # on CPython <= 3.11 pathlib bound os.unlink at import time, so the
+        # patch above never fires there: patch the method the branch reads at
+        # call time too.
+        monkeypatch.setattr(pathlib.Path, "unlink", _eperm)
 
     with pytest.raises(PermissionError) as excinfo:
         fs_guard.unlink_beneath(root, ("source", "worker.json"))

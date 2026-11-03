@@ -196,6 +196,14 @@ class TestOnPosixTheWaitIsOne:
         monkeypatch.setattr(
             subprocess_utils, "_child_got_the_terminals_interrupt", lambda: True
         )
+        # The die-now observation reads a stand-in pid as already ended
+        # through os.waitid (OSError on a pid past the kernel's space), but
+        # CPython on macOS has no os.waitid and the fallback polls, which
+        # this stand-in answers as still running; the observation is stood in
+        # as already-ended so every POSIX build measures the one reaping wait.
+        monkeypatch.setattr(
+            subprocess_utils, "discard_tool_pid_once_exited", lambda _process: True
+        )
         child = _Child()
 
         stop_after_interrupt(child)

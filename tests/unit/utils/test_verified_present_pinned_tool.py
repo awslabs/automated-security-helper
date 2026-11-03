@@ -235,6 +235,12 @@ class TestIdenticalBinaryIsNotReinstalled:
         assert downloads.urls == []
         assert installed == at_destination
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="the stand-in is a plain 'grype' with a POSIX execute bit; "
+        "Windows executable resolution is PATHEXT-shaped and cannot "
+        "resolve a suffix-less file",
+    )
     def test_the_scanner_resolves_the_binary_that_was_verified(
         self, tmp_path, pins, monkeypatch, downloads
     ):

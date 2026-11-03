@@ -609,12 +609,16 @@ class TestThresholdSources:
         )
 
         produced = set()
-        for overrides in ({}, {"options": {"severity_threshold": "HIGH"}}):
+        # None: a model whose results record no configuration, which produces
+        # the third documented source, "unavailable" (scanner_statistics_calculator
+        # answers it whenever ash_config is None).
+        for overrides in (None, {}, {"options": {"severity_threshold": "HIGH"}}):
             model = AshAggregatedResults()
-            config = get_default_config()
-            if overrides:
-                config.scanners.bandit.options.severity_threshold = "HIGH"
-            model.ash_config = config
+            if overrides is not None:
+                config = get_default_config()
+                if overrides:
+                    config.scanners.bandit.options.severity_threshold = "HIGH"
+                model.ash_config = config
             _threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
                 model, "bandit"
             )

@@ -93,7 +93,9 @@ class TestRecordConvertedSources:
         }
 
     @pytest.mark.skipif(
-        sys.platform == "win32", reason="a name that is not UTF-8 is a POSIX shape"
+        sys.platform in ("win32", "darwin"),
+        reason="a name that is not UTF-8 is a POSIX shape, and APFS refuses it "
+        "too: macOS file names must be valid UTF-8, so the fixture cannot exist",
     )
     def test_a_name_that_is_not_utf8_is_keyed_in_the_record_form(self, tmp_path):
         """``mark_converted_results`` writes ``converted_path`` in the record form,

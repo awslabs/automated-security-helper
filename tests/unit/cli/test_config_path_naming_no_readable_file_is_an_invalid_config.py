@@ -31,6 +31,7 @@ on its own: root reads it anyway, and skipping the case for root would hide it.
 from __future__ import annotations
 
 import socket
+import sys
 
 import pytest
 from typer.testing import CliRunner
@@ -112,7 +113,19 @@ def test_ash_config_naming_a_missing_file_exits_3(command):
 
 @pytest.mark.parametrize(
     "make",
-    [_a_directory, _a_socket, _not_utf8],
+    [
+        _a_directory,
+        pytest.param(
+            _a_socket,
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="the AF_UNIX-socket stand-in for an unreadable special "
+                "file is POSIX-minded; Windows renders it as a reparse-point "
+                "file the CLI reads through another branch",
+            ),
+        ),
+        _not_utf8,
+    ],
     ids=["directory", "unreadable", "not-utf8"],
 )
 @pytest.mark.parametrize("args", INVOCATIONS, ids=IDS)

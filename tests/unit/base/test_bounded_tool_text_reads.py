@@ -94,6 +94,12 @@ _ALLOWED_HELPER_CALLS = {
     ): "the head of an action metadata file at _ACTION_PROBE_LIMIT + 1, parsed "
     "for an action declaration; operator input, not tool output (listed under "
     "both shapes so the sized-read and guarded-read spellings are each reviewed)",
+    (
+        "plugin_modules/ash_builtin/scanners/actionlint_scanner.py",
+        "stderr_names_configs",
+    ): "the bounded head of the run's stderr log, searched for config path "
+    "spellings and answered as two booleans; the text is never kept, quoted "
+    "or logged",
 }
 
 # Reviewed sized .read(n) sites. Each reads bytes that are hashed, copied,
@@ -155,6 +161,12 @@ _ALLOWED_SIZED_READS = {
     ): "a 64 KiB head of an output-directory file compared with the ASH marker "
     "shapes; bytes compared, not shown",
     (
+        "core/resource_management/scan_tracking.py",
+        "_read_result_file_bytes",
+    ): "bounded+1 read of a scanner's own ASH.ScanResults.json over the checked "
+    "descriptor (opened no-follow, fstat-ed regular file), None over the cap; "
+    "parsed as JSON by its caller, not shown",
+    (
         "config/client_scanner_exclusions.py",
         "_trivy_ignore_exclusions",
     ): "the project's trivy ignore file at _MAX_IGNORE_FILE_BYTES + 1, refused "
@@ -169,6 +181,11 @@ _ALLOWED_SIZED_READS = {
         "read_config_bytes",
     ): "the operator's config file in 1 MiB chunks, the total bounded by "
     "ASH_CONFIG_MAX_FILE_BYTES + 1 and refused over it",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_first_decompressed_block",
+    ): "one decompressed block of up to tarfile.BLOCKSIZE (512) bytes, compared "
+    "with the tar header shape; bytes compared, not shown",
     (
         "plugin_modules/ash_builtin/converters/archive_converter.py",
         "_zip_directory_start",
@@ -318,6 +335,12 @@ _ALLOWED_SIZED_READS = {
         "utils/scan_source.py",
         "_read_gitdir_record",
     ): "bounded+1 read of a gitdir record, refused over the cap",
+    (
+        "workspace/policy.py",
+        "_counted_from_the_start",
+    ): "the BOM-length head of the operator's policy file, re-read to re-base a "
+    "UnicodeDecodeError's offsets past a byte order mark; bytes compared, not "
+    "shown",
     (
         "workspace/aggregation.py",
         "stamp_run_record",

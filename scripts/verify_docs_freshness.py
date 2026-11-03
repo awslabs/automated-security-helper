@@ -994,9 +994,11 @@ def check_suppression_field_name() -> list[str]:
                 continue
             for offset, line in enumerate(block.body.splitlines()):
                 if _FILE_PATH_KEY.search(line):
+                    # as_posix(), as the path comparisons above: a native
+                    # Windows rendering would read "docs\\page.md".
                     failures.append(
-                        f"{rel_path}:{block.body_line + offset} uses 'file_path:' as "
-                        f"a suppression key (the key is 'path:')"
+                        f"{rel_path.as_posix()}:{block.body_line + offset} uses "
+                        f"'file_path:' as a suppression key (the key is 'path:')"
                     )
 
     return failures

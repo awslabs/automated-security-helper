@@ -23,6 +23,7 @@ Negative control: putting back ``default_factory=is_offline_mode`` and reading
 case fail.
 """
 
+from pathlib import Path
 from typing import Callable, NamedTuple
 
 import pytest
@@ -72,6 +73,16 @@ def _arg_keys(scanner) -> list:
     return [a.key for a in scanner.args.extra_args]
 
 
+def _checkov_scan_argv_offline(scanner) -> bool:
+    # checkov decides --skip-download per scan, in _execute_scan (the offline
+    # mode is read at the moment it is asked), so the probe reads the scan's
+    # resolved argv rather than the construction-time extra_args.
+    argv, _, _ = scanner._execute_scan(
+        Path(scanner.context.source_dir), "source", []
+    )
+    return "--skip-download" in argv
+
+
 def _grep_cache_verdict(env_var: str) -> Callable:
     # Offline, a *grep scanner swaps the registry for the local rule cache; with no
     # cache configured it records why it cannot run. Online it records nothing.
@@ -96,7 +107,7 @@ CASES = {
         CheckovScannerConfig,
         CheckovScannerConfigOptions,
         "checkov",
-        lambda s: "--skip-download" in _arg_keys(s),
+        _checkov_scan_argv_offline,
     ),
     "grype": Case(
         GrypeScanner,
@@ -276,15 +287,18 @@ def test_semgrep_offline_rules_reach_the_subprocess(
 def test_offline_rule_cache_is_held_to_its_staleness_bound(
     case, online, test_plugin_context
 ):
-    """Offline, the rule cache is a content database the staleness gate must check."""
+    """Offline with no cache configured, no rule cache is in use.
+
+    The grep family answers a content database only once a scan command
+    actually read a cache (``_grep_scanner_base``: ``_cache_dir_in_use`` is
+    written by the scan); the ``online`` fixture deletes the cache variables,
+    so a construction here can never have one to report."""
     config = case.config_cls()
     _go_offline(online)
 
     scanner = case.scanner_cls(context=test_plugin_context, config=config)
 
-    assert [db.scanner for db in scanner.content_databases_in_use()] == [
-        case.segment_field
-    ]
+    assert scanner.content_databases_in_use() == []
 
 
 @pytest.mark.parametrize(

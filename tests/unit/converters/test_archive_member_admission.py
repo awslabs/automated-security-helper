@@ -589,10 +589,14 @@ def test_the_debug_line_for_an_archive_not_extracted_whole_is_not_read_as_markup
 def test_the_debug_line_for_an_unsupported_archive_format_is_not_read_as_markup(
     test_plugin_context, monkeypatch, ash_records_at_every_level
 ):
-    """A file named like a gzip that holds something else is left to the
-    scanners as it is, and the debug line that says so names the file. It sits in
-    the directory ``d[`` and is named ``x].gz``, so its path spells ``[/``."""
-    path = Path(test_plugin_context.source_dir) / "d[" / "x].gz"
+    """A file named ``.gz`` alone decompresses to no name at all
+    (``_plain_gzip_name`` answers None for an empty inner name), and it is not
+    named as a zip or a tar either, so it is left to the scanners as it is, and
+    the debug line that says so names the file. A gzip-NAMED file whose bytes
+    are not gzip (``x].gz`` of plain text) moved to the failed-input class and
+    no longer reaches this arm. The file sits in the directory ``d[``, so its
+    displayed path spells ``[/``."""
+    path = Path(test_plugin_context.source_dir) / "d[" / ".gz"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"plain text, not gzip data\n")
 

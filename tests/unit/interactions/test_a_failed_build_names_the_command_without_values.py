@@ -15,6 +15,7 @@ output is not covered by this: it streams to the terminal as the build runs.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import List
@@ -167,12 +168,29 @@ def _wire_echoing_build(
     stderr and exits with ``exit_code``, running nothing else: the captured
     output then holds whatever values rode --build-arg, which is what the
     --debug dump of a failed build repeats."""
-    runtime = tmp_path / "echoing-runtime"
-    runtime.write_text(
-        f'#!/bin/sh\necho "ECHO-OUT $@"\necho "ECHO-ERR $@" 1>&2\nexit {exit_code}\n',
-        encoding="utf-8",
-    )
-    runtime.chmod(0o755)
+    if sys.platform == "win32":
+        # CreateProcess starts no shebang script, so the runtime is a .cmd
+        # that runs the same echo through Python, as the snyk record
+        # fixture's stand-in does.
+        script = tmp_path / "echoing_runtime.py"
+        script.write_text(
+            "import sys\n"
+            'print("ECHO-OUT " + " ".join(sys.argv[1:]))\n'
+            'print("ECHO-ERR " + " ".join(sys.argv[1:]), file=sys.stderr)\n'
+            f"sys.exit({exit_code})\n",
+            encoding="utf-8",
+        )
+        runtime = tmp_path / "echoing-runtime.cmd"
+        runtime.write_text(
+            f'@"{sys.executable}" -I "{script}" %*\r\n', encoding="utf-8"
+        )
+    else:
+        runtime = tmp_path / "echoing-runtime"
+        runtime.write_text(
+            f'#!/bin/sh\necho "ECHO-OUT $@"\necho "ECHO-ERR $@" 1>&2\nexit {exit_code}\n',
+            encoding="utf-8",
+        )
+        runtime.chmod(0o755)
 
     assets = tmp_path / "assets"
     assets.mkdir()

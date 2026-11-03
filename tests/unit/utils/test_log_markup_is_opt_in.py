@@ -568,12 +568,14 @@ def test_a_missing_scan_target_is_reported_in_text(tmp_path):
         config=AshConfig(project_name="test"),
     )
     scanner = _Scanner(config=_Config(), context=context)
+    # A markup-bracket name with no path separator: "/" inside a name is a
+    # separator on Windows, where "a[/x]" splits into two components.
     with pytest.raises(ScannerError) as caught:
-        scanner._pre_scan(target=tmp_path / "a[/x]", target_type="source")
+        scanner._pre_scan(target=tmp_path / "a[red]x", target_type="source")
 
     message = str(caught.value)
     assert message.startswith("(brackets @ source) Target "), message
-    assert message.endswith("a[/x] does not exist!"), message
+    assert message.endswith("a[red]x does not exist!"), message
 
 
 def test_an_expired_entry_whose_name_reads_as_markup_is_logged_as_text(

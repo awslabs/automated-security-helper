@@ -2021,7 +2021,7 @@ def test_pytest_ini_is_what_the_ci_runs_read_and_each_of_its_settings_is_decided
         ]
         assert between, module
         found = [
-            str((directory / config).relative_to(REPO_ROOT))
+            (directory / config).relative_to(REPO_ROOT).as_posix()
             for directory in between
             for config in PYTEST_CONFIG_NAMES
             if (directory / config).exists()
@@ -2032,7 +2032,9 @@ def test_pytest_ini_is_what_the_ci_runs_read_and_each_of_its_settings_is_decided
             f"{name}: pytest reads {first[:1]} at the repository's root, not pytest.ini"
         )
         conftests = sorted(
-            str((directory / "conftest.py").relative_to(REPO_ROOT))
+            # as_posix, so the compare measures the file set and not the
+            # platform's separator against CONFTESTS' forward-slash spellings.
+            (directory / "conftest.py").relative_to(REPO_ROOT).as_posix()
             for directory in (REPO_ROOT, *between)
             if (directory / "conftest.py").exists()
         )
