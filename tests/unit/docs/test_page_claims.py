@@ -6714,7 +6714,7 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
             None, 0, "Configuration is valid! A scan accepts it.", id="as-written"
         ),
         pytest.param(
-            ("expiration:", "expiry:"),
+            ("expires:", "expiry:"),
             0,
             "Configuration is valid! A scan accepts it.",
             id="a-misspelled-key",
@@ -6743,7 +6743,7 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
     ``ash config validate`` as written and with one field broken in each way the
     page's sentence lists. A wrong value and a missing required field exit 3 and
     name the field, and a scan, resolving the same file, refuses it too. A typo
-    in an optional key (``expiry`` for ``expiration``) is the warn-then-refuse
+    in an optional key (``expiry`` for ``expires``) is the warn-then-refuse
     rollout's default: validate accepts the file, a scan accepts it too, the
     scan's resolution warning names the key with a did-you-mean, and the entry
     is kept but applies to nothing (``has_unknown_keys``). The page's ``sed``
@@ -6757,7 +6757,7 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         "It checks the config a scan of the project would use, the way the scan loads it, "
         "and ends with `Configuration is valid! A scan accepts it.` It may also warn that "
         "`project_name` is not set, which a scan accepts. A typo in an optional key such as "
-        "`expiry` for `expiration` does not make the file invalid: validate still accepts "
+        "`expiry` for `expires` does not make the file invalid: validate still accepts "
         "it, the entry suppresses nothing until the key is fixed, and the scan that loads "
         "the config warns, naming the key with a did-you-mean (`fail_on_unknown_keys: true` "
         "makes it an error, the default from ASH v4). A wrong value or a missing required "
@@ -6810,17 +6810,22 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
 
 
 @pytest.mark.parametrize(
-    "page, heading, written",
+    # ``key`` is the spelling the page's block writes: a suppression writes the
+    # canonical ``expires`` (models/core.py); a staleness override's field is
+    # still named ``expiration`` (config/ash_config.py).
+    "page, heading, key, written",
     [
         pytest.param(
             _CONFIG_LOCAL_PAGE,
             "## 7. Suppress the false positive",
+            "expires",
             '"2027-04-30"',
             id="a-suppression",
         ),
         pytest.param(
             _OFFLINE_PAGE,
             "## Allow a stale database",
+            "expiration",
             '"2027-06-30"',
             id="a-staleness-override",
         ),
@@ -6835,7 +6840,13 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
 )
 @pytest.mark.integration
 def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
-    tmp_path: Path, page: str, heading: str, written: str, quoted: bool, verdict: int
+    tmp_path: Path,
+    page: str,
+    heading: str,
+    key: str,
+    written: str,
+    quoted: bool,
+    verdict: int,
 ) -> None:
     """local.md (7. Suppress the false positive) and run-offline.md (Allow a stale
     database).
@@ -6855,7 +6866,7 @@ def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
         "Quote the date: an unquoted date makes the whole config invalid.",
     )
     block = _config_yaml_block(page, heading)
-    assert f"expiration: {written}" in block, block
+    assert f"{key}: {written}" in block, block
     text = block if quoted else block.replace(written, written.strip('"'))
     tree = _config_scan_tree(tmp_path, {"app.py": "x = 1\n", ".ashrc.yaml": text})
 
@@ -6886,7 +6897,7 @@ def test_a_suppression_whose_expiration_date_has_passed_is_accepted_and_does_not
     from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
     block = _config_yaml_block(_CONFIG_LOCAL_PAGE, "## 7. Suppress the false positive")
-    assert 'expiration: "2027-04-30"' in block, block
+    assert 'expires: "2027-04-30"' in block, block
     next_year = (date.today() + timedelta(days=365)).isoformat()
     for when, suppressed in (("2020-01-01", False), (next_year, True)):
         tree = _tree_with_config(tmp_path / when, block.replace("2027-04-30", when))
