@@ -3455,9 +3455,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             f"Failed to run npm audit in {package_dir}: {described}",
                             extra=NO_MARKUP,
                         )
+                        # The record form (posix separators), as the
+                        # refused-inputs branch shows the same lockfile: str()
+                        # on the Path rendered the platform separator.
                         audit_failures.append(
-                            f"{lock_file}: the audit raised {type(e).__name__}: "
-                            f"{described}"
+                            f"{self._shown_path(lock_file, target_type)}: "
+                            f"the audit raised {type(e).__name__}: {described}"
                         )
 
             # Save the combined results
