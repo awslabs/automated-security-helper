@@ -5165,19 +5165,27 @@ ASH_SCANNERS = [UnevaluatingScanner]
 
 
 @pytest.mark.integration
-def test_workspace_mode_does_not_check_for_rules_that_could_not_be_evaluated(
+def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
     tmp_path: Path,
 ) -> None:
     """exit-codes.md (ash scan; Workspace mode).
 
     A plugin scanner reports one rule it could not evaluate. Scanned alone, the project
     exits 1 and names the rule, which is the control: it shows the notification reaches
-    the gate. Scanned as the one project of a workspace, the same project exits 0.
+    the gate. Scanned as the one project of a workspace, the same project exits 1 too:
+    workspace mode checks the same unconditional causes as a single scan.
     """
-    assert_on_page(EXIT_CODES, "| 1 | A rule could not be evaluated |")
     assert_on_page(
         EXIT_CODES,
-        "Workspace mode does not check for rules that could not be evaluated.",
+        "| 1 | A rule could not be evaluated, or a scanner tool ASH could not stop "
+        "(also with `fail_on_incomplete_scanners` off) |",
+    )
+    assert_on_page(
+        EXIT_CODES,
+        "Workspace mode checks the same unconditional causes as a single scan: a rule "
+        "a scanner could not evaluate, a scanner tool ASH could not stop, and a stale "
+        "content database under a `fail` policy each fail the project whatever "
+        "`fail_on_incomplete_scanners` says.",
     )
     path = _plugin_path(tmp_path, "page_claim_scanners", _UNEVALUATING_PLUGIN)
     project = tmp_path / "workspace" / "api"
@@ -5227,7 +5235,7 @@ def test_workspace_mode_does_not_check_for_rules_that_could_not_be_evaluated(
         cwd=tmp_path,
         PYTHONPATH=path,
     )
-    assert in_a_workspace.returncode == 0, _output_tail(in_a_workspace)
+    assert in_a_workspace.returncode == 1, _output_tail(in_a_workspace)
 
 
 # --------------------------------------------------------------------------- #
