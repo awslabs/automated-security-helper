@@ -13,6 +13,10 @@ which case it is and no flag, since the MCP server's parameter is
 - ``Source directory does not exist: <path>``
 - ``Source directory is not a directory: <path>``
 - ``Source directory cannot be entered: <path>``
+- ``Source directory is not a valid path: <path>``, for a path the OS cannot
+  take at all (an embedded NUL, which a ``--cli-json-input`` document can carry
+  and a command line cannot); the surface that prints it shows the NUL as
+  ``\x00``, as it shows every control character
 - ``Output directory is not a directory: <path>``
 - ``Output directory cannot be entered: <path>``
 - ``Output directory cannot be created: <path> (<reason>)``, where the reason is
@@ -95,8 +99,13 @@ def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
     except (FileNotFoundError, NotADirectoryError):
         return f"Source directory does not exist: {path}"
     except ValueError:
-        # A path the OS cannot take at all (an embedded NUL) names nothing.
-        return f"Source directory does not exist: {path}"
+        # A path the OS cannot take at all (an embedded NUL) is not a valid
+        # path, which is its own refusal: "does not exist" would send a reader
+        # checking the filesystem for a path no call can ever name
+        # (exit-codes.md, ash scan, code 5). The path stays as given; the
+        # surface that prints the text writes the NUL as ``\x00``, as it does
+        # for every control character (utils/terminal_text.py).
+        return f"Source directory is not a valid path: {path}"
     except OSError as error:
         # A link that leads back to itself names nothing, as a link to nothing does.
         if error.errno == errno.ELOOP:

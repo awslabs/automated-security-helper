@@ -36,7 +36,9 @@ def test_an_empty_output_dir_is_refused_as_mkdir_refuses_it():
 
 
 def test_a_path_holding_a_nul_is_refused_not_raised():
-    assert source_dir_refusal("a\x00b") == "Source directory does not exist: a\x00b"
+    assert (
+        source_dir_refusal("a\x00b") == "Source directory is not a valid path: a\x00b"
+    )
     refusal = output_dir_refusal("a\x00b")
     assert refusal is not None
     assert refusal.startswith("Output directory cannot be created: a\x00b (")
