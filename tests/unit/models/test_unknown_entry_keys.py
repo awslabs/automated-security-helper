@@ -236,7 +236,8 @@ class TestConfigFiles:
         config = resolve_config(source_dir=source)
         warnings = [w for w in config._resolution_warnings if "expiraton" in w]
         assert len(warnings) == 1, config._resolution_warnings
-        assert "did you mean 'expiration'" in warnings[0]
+        # The canonical spelling, never the deprecated "expiration" alias.
+        assert "did you mean 'expires'" in warnings[0]
         (entry,) = [
             p for p in config.global_settings.ignore_paths if p.path == "vendor/**"
         ]
@@ -255,7 +256,7 @@ class TestConfigFiles:
         with pytest.raises(ASHConfigValidationError) as excinfo:
             resolve_config(source_dir=source)
         assert "expiraton" in str(excinfo.value)
-        assert "did you mean 'expiration'" in str(excinfo.value)
+        assert "did you mean 'expires'" in str(excinfo.value)
 
     def test_expires_is_accepted_on_an_ignore_path_without_a_warning(self, tmp_path):
         """``expires`` is the canonical spelling of the field, so it is neither
