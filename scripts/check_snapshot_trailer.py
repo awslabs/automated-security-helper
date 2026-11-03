@@ -17,19 +17,23 @@ rebase with ``--exec git commit --amend``; this hook says the same thing at comm
 time, while the message is still being written and the fix is one more line.
 
 This is the early warning, not the gate, so it covers the subset a contributor
-regenerates routinely with syrupy's ``--snapshot-update``: any STAGED path inside a
-``__snapshots__/`` directory, and any staged ``*.ambr`` file. The CI script's GOLDEN
-set is wider (published schemas, MCP goldens, generated reference pages) and stays the
-one list; a golden change outside the snapshot patterns is still caught there.
+regenerates routinely with syrupy's ``--snapshot-update``: any STAGED path with a
+``__snapshots__`` directory component, the same test as the CI script's
+``__snapshots__`` golden pattern. The CI script's GOLDEN set is wider (published
+schemas, MCP goldens, generated reference pages) and stays the one list; a golden
+change outside that pattern is still caught there.
 
 WHAT IT DOES
 ------------
 Given the commit message file as argv[1] (pre-commit passes it at the commit-msg
 stage), the hook passes when either
 
-* no staged file matches the snapshot patterns (the staged list is
+* no staged file matches the snapshot pattern (the staged list is
   ``git diff --cached --name-only --no-renames``, so a rename counts as touching both
-  paths, as the CI script counts it), or
+  paths, as the CI script counts it; during a merge, when ``MERGE_HEAD`` exists, only
+  paths that also differ from the merged-in parent count, the commit-time analogue of
+  the combined ``git diff-tree -c`` CI reads, so merging a branch whose snapshots
+  already carry their trailers demands nothing here), or
 * the message carries a ``Snapshot-Update:`` trailer with a non-empty reason that is
   not the documentation's own ``<why the output changed>`` placeholder.
 
@@ -73,22 +77,39 @@ def git(*args: str, stdin: "str | None" = None) -> str:
     return proc.stdout
 
 
+def _staged_paths(*parents: str) -> "list[str]":
+    out = git("diff", "--cached", "--name-only", "--no-renames", *parents)
+    return [path for path in out.splitlines() if path]
+
+
 def staged_snapshot_files() -> "list[str]":
     """Staged paths the Snapshot-Update convention covers.
 
-    A path is covered when a ``__snapshots__`` directory component lies above it
-    (matching the CI script's ``__snapshots__`` golden pattern) or it is a ``.ambr``
-    file, syrupy's single-file snapshot format, wherever it sits.
+    A path is covered when a ``__snapshots__`` directory component lies above it,
+    exactly the CI script's ``__snapshots__`` golden pattern. A ``.ambr`` file
+    outside such a directory is not in CI's GOLDEN set, so it is not counted here
+    either; the module docstring promises a subset, never a stricter rule.
+
+    During a merge (``MERGE_HEAD`` exists), ``git diff --cached`` against HEAD
+    alone lists every file the merged-in side brought, so an ordinary
+    ``git merge`` of a branch that regenerated a snapshot would demand a trailer
+    for a change this commit does not make. A merge is therefore counted the way
+    CI's combined diff (``git diff-tree -c``) counts it: only paths whose staged
+    content differs from BOTH parents, i.e. the diff against HEAD intersected
+    with the diff against MERGE_HEAD.
     """
-    out = git("diff", "--cached", "--name-only", "--no-renames")
-    matches = []
-    for path in out.splitlines():
-        if not path:
-            continue
-        parts = PurePosixPath(path).parts
-        if "__snapshots__" in parts[:-1] or path.endswith(".ambr"):
-            matches.append(path)
-    return matches
+    paths = _staged_paths()
+    merge_head = subprocess.run(
+        ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if merge_head.returncode == 0:
+        differs_from_merged_parent = set(_staged_paths("MERGE_HEAD"))
+        paths = [path for path in paths if path in differs_from_merged_parent]
+    return [
+        path for path in paths if "__snapshots__" in PurePosixPath(path).parts[:-1]
+    ]
 
 
 def visible_message(raw: str) -> str:

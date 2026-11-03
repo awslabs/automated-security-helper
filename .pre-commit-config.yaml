@@ -10,6 +10,11 @@
 # the ash hook at manual), and a per-hook stages key still overrides this default.
 default_stages: [pre-commit]
 
+# A commit-msg hook is installed only when its hook type is: without this, a plain
+# `pre-commit install` installs the pre-commit stage alone and leaves the two
+# commit-msg hooks (commitizen, check-snapshot-trailer) inert.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: local
     hooks:
@@ -49,7 +54,12 @@ repos:
       # The CI lint gate (ash-unified-ci.yml) runs `uv run --group dev ruff check .`
       # and `uv run --group dev ruff format --check .` over the whole tree, and these
       # two run the same commands here, so a commit that would fail that gate fails
-      # before it is made. They complement rather than repeat the ruff-pre-commit
+      # before it is made. The scope is the working tree, not the commit: ruff's `.`
+      # also lints untracked, non-ignored .py files, which pre-commit never stashes,
+      # so a scratch file beside the checkout can fail a commit CI would pass. When a
+      # scratch file is the only failure, delete or gitignore it, or commit with
+      # SKIP=ruff-check-project,ruff-format-check-project.
+      # They complement rather than repeat the ruff-pre-commit
       # hooks below: those run ruff-pre-commit's own pinned binary in --fix mode over
       # the staged files, these run the ruff uv.lock resolves, in check-only mode,
       # over the whole tree -- a tree that fails `ruff check` fails CI whichever
@@ -137,7 +147,8 @@ repos:
       # that changed them -- a rule that is per commit, so by the time CI reports it
       # the fix is a rebase with --exec amends. This hook says the same thing while
       # the message is still being written: when the staged files include snapshot
-      # output (a path inside a __snapshots__/ directory, or a .ambr file) and the
+      # output (a path with a __snapshots__/ directory component; on a merge, only
+      # one that differs from both parents, as CI's combined diff counts it) and the
       # message carries no such trailer, it fails and prints the exact line to add.
       # The CI script stays the authority and checks the wider golden set (schemas,
       # MCP goldens, generated reference pages); this covers the subset a
