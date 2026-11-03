@@ -96,9 +96,12 @@ from typing import Any, Callable
 _BANNER = "ash: fatal error"
 
 #: The modules whose exception hooks only print the traceback, which ASH's
-#: traceback prints in their place: typer's, and rich.traceback.install()'s. A
-#: wrapper of one (it has ``__wrapped__``) is not one of them.
-_PRINTERS = frozenset({"typer.main", "rich.traceback"})
+#: traceback prints in their place: typer's, rich.traceback.install()'s, and the
+#: exceptiongroup backport's (on interpreters below 3.11 it installs its
+#: print-only hook, so under pytest on 3.10 it is ``sys.excepthook`` and
+#: ``typer.main._original_except_hook``). A wrapper of one (it has
+#: ``__wrapped__``) is not one of them.
+_PRINTERS = frozenset({"typer.main", "rich.traceback", "exceptiongroup._formatting"})
 
 #: The descriptors :func:`ensure_std_streams` found closed when it ran: a
 #: stream was ``None`` and the descriptor under it was closed (EBADF). A number
