@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -312,6 +313,12 @@ def test_a_config_path_validate_config_names_is_shown(tmp_path, exists):
 
     path = tmp_path / ("cfg" + ESC + "[31m" + RLO + "\n.yaml")
     if exists:
+        if sys.platform == "win32":
+            pytest.skip(
+                "NTFS refuses ESC and a line break in a file name, so the "
+                "unparseable fixture cannot exist there; the [missing] leg "
+                "still covers the shown-name contract"
+            )
         path.write_text("project_name: [x\n", encoding="utf-8")
 
     problems = _problems(mcp_validate_config(config_path=str(path)))
