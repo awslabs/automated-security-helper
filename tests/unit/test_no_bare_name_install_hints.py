@@ -777,14 +777,20 @@ def test_the_mcp_testing_guide_keeps_the_checkouts_extras():
     installed are gone after it (measured on a toy project with uv 0.12, which
     also showed ``uv run`` and ``uv sync --inexact`` keeping them). The guide's
     server config uses ``uv run``, so its repair steps must not undo that.
+
+    The guide moved: ``docs/MCP-SERVER-TESTING-GUIDE.md`` redirects to
+    ``contributing/testing.md`` (docs/redirects.yml), whose repair steps use
+    ``uv run`` and give no ``uv sync`` step at all, so the check is
+    zero-expect: any ``uv sync`` line that returns must keep ``--inexact``.
     """
-    guide = REPO_ROOT / "docs" / "content" / "docs" / "MCP-SERVER-TESTING-GUIDE.md"
+    redirects = (REPO_ROOT / "docs" / "redirects.yml").read_text(encoding="utf-8")
+    assert "docs/MCP-SERVER-TESTING-GUIDE.md: contributing/testing.md" in redirects
+    guide = REPO_ROOT / "docs" / "content" / "contributing" / "testing.md"
     syncs = [
         line.strip()
         for line in guide.read_text(encoding="utf-8").splitlines()
         if re.match(r"\s*uv sync\b", line)
     ]
-    assert syncs, "the guide no longer gives a uv sync step; update this test"
     assert [line for line in syncs if "--inexact" not in line] == [], syncs
 
 
@@ -792,15 +798,21 @@ def test_the_mcp_testing_guide_keeps_the_checkouts_extras():
 def test_the_mcp_testing_guide_does_not_call_the_ash_package_warning_harmless():
     """uv's warning about a package named ``ash`` means the unrelated project ran.
 
-    The guide used to call that warning safe to ignore; it now says to switch
-    the configuration to ``uv run``.
+    The guide used to call that warning safe to ignore; it then said to switch
+    the configuration to ``uv run``. The guide moved
+    (``docs/MCP-SERVER-TESTING-GUIDE.md`` redirects to
+    ``contributing/testing.md``, docs/redirects.yml) and the new page no
+    longer shows uv's warning at all, so the check is zero-expect: wherever
+    the warning text returns, it is never labeled ignorable and ``uv run``
+    must follow within 8 lines.
     """
-    guide = REPO_ROOT / "docs" / "content" / "docs" / "MCP-SERVER-TESTING-GUIDE.md"
+    redirects = (REPO_ROOT / "docs" / "redirects.yml").read_text(encoding="utf-8")
+    assert "docs/MCP-SERVER-TESTING-GUIDE.md: contributing/testing.md" in redirects
+    guide = REPO_ROOT / "docs" / "content" / "contributing" / "testing.md"
     lines = guide.read_text(encoding="utf-8").splitlines()
     warning = [
         i for i, line in enumerate(lines) if "is not provided by package `ash`" in line
     ]
-    assert warning, "the guide no longer shows uv's warning; update this test"
     for index in warning:
         labels = [line for line in lines[:index] if line.startswith("**")]
         label = labels[-1] if labels else ""
