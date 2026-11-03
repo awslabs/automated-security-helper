@@ -1459,6 +1459,11 @@ class TestTheSaveWritesItsBytesOnce:
             assert name.endswith(".tmp"), name
         assert [p.name for p in tmp_path.iterdir()] == [config_path.name]
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="staged-copy privacy is not expressible as a POSIX mode there: "
+        "S_IMODE of a writable file reads 0o666 whatever the create asked",
+    )
     def test_an_existing_file_s_staged_copy_starts_no_wider_than_private(
         self, tmp_path: Path, monkeypatch
     ):

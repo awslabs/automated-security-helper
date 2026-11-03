@@ -288,6 +288,11 @@ def own_home(tmp_path, monkeypatch):
     for name in ("home", "config", "cache", "data", "uv-tools", "uv-bin", "uv-cache"):
         (tmp_path / name).mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # On Windows ``Path.home()`` reads USERPROFILE, not HOME, and uv's cache
+    # locations there are LOCALAPPDATA-based, so both are pinned too or the
+    # real probes' cache writes land in the guarded runner home.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
