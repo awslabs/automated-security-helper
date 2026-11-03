@@ -38,7 +38,7 @@ VARIABLE = "ASH_MAKER_CANARY"
     ids=["no-values", "one-value", "two-values"],
 )
 def test_a_record_survives_every_pickle_protocol(protocol, values):
-    restored = pickle.loads(pickle.dumps(_EnvironmentRecord(values), protocol=protocol))
+    restored = pickle.loads(pickle.dumps(_EnvironmentRecord(values), protocol=protocol))  # nosec B301
     assert restored.values == values
 
 

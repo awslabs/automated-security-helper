@@ -27,7 +27,7 @@ from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
 pytestmark = pytest.mark.unit
 
-SECRET = "envproj-secret-5e19"
+SECRET = "envproj-secret-5e19"  # pragma: allowlist secret #gitleaks:allow
 
 
 def _applied(tmp_path, label: str, value: str = SECRET) -> str:

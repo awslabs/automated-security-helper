@@ -47,7 +47,7 @@ _SOLUTION_MAX_LENGTH = 7000
 #: The prefix of a secret finding's rule id, read once, so a rule such as
 #: SECRET-SECRET-KEYWORD keeps the rest of its name (``replace`` took every
 #: occurrence and described it as type Keyword).
-_SECRET_RULE_PREFIX = "SECRET-"
+_SECRET_RULE_PREFIX = "SECRET-"  # pragma: allowlist secret
 
 
 # The GitLab security-report schema version this reporter's output conforms to, and
