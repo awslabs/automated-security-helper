@@ -16,6 +16,7 @@ from automated_security_helper.utils.occurrence_context import (
     valid_context,
     persisted_context,
 )
+from automated_security_helper.utils.severity_ladder import resolve_missing_levels
 
 pytestmark = pytest.mark.unit
 
@@ -571,3 +572,65 @@ def test_guid_hex_casing_does_not_prevent_local_lookup(owner):
         for value in ("one", "two")
     ]
     assert len({flat.id for flat in _flat(_report(results, tool=tool))}) == 2
+
+
+def test_merge_keeps_an_existing_results_missing_level_unset():
+    # A result that states no level takes its rule's defaultConfiguration level
+    # through resolve_missing_levels, which skips any result whose level reads
+    # as set. A later merge that brings curated context re-copies the
+    # aggregate's existing results; that copy must not mark the default level
+    # set, or the result loses its rule-derived severity.
+    rules = [{"id": "RULE", "defaultConfiguration": {"level": "error"}}]
+    model = AshAggregatedResults()
+    model.sarif.merge_sarif_report(
+        _report([_result()], tool={"driver": {"name": "scanner", "rules": rules}})
+    )
+    incoming_result = _result()
+    incoming_result["locations"] = [
+        {"physicalLocation": {"artifactLocation": {"index": 0}}}
+    ]
+    model.sarif.merge_sarif_report(
+        _report([incoming_result], artifacts=[{"location": {"uri": "two.py"}}])
+    )
+    results = model.sarif.runs[0].results
+    assert len(results) == 2
+    assert all("level" not in result.model_fields_set for result in results)
+    resolve_missing_levels(model.sarif)
+    assert str(results[0].level) == "error"
+
+
+def test_merge_keeps_an_absolute_uri_unchanged_when_its_base_differs():
+    # SARIF 3.4.4: an absolute URI has no base, so a uriBaseId the aggregate
+    # defines differently is dropped, never expanded in front of the scheme.
+    model = AshAggregatedResults()
+    model.sarif.merge_sarif_report(
+        _report(
+            [_result()],
+            originalUriBaseIds={"SRCROOT": {"uri": "file:///aggregate/"}},
+        )
+    )
+    incoming_result = _result()
+    incoming_result["locations"] = [
+        {
+            "physicalLocation": {
+                "artifactLocation": {
+                    "uri": "file:///abs/x.py",
+                    "uriBaseId": "SRCROOT",
+                }
+            }
+        }
+    ]
+    model.sarif.merge_sarif_report(
+        _report(
+            [incoming_result],
+            originalUriBaseIds={"SRCROOT": {"uri": "file:///src/"}},
+        )
+    )
+    location = (
+        model.sarif.runs[0]
+        .results[-1]
+        .locations[0]
+        .physicalLocation.root.artifactLocation
+    )
+    assert location.uri == "file:///abs/x.py"
+    assert location.uriBaseId is None

@@ -2902,10 +2902,24 @@ class SarifReport(RecordModel):
             occurrence_context,
         )
 
-        def curated_copy(res, source_run, drop_rule_index=True):
+        def curated_dump(res, source_run, drop_rule_index=True):
+            """One curated dump for every copy a merge makes of a result.
+
+            A full dump, not one of the set fields only: pydantic marks a field
+            set on construction or assignment, never on an append, so a dump of
+            the set fields drops what code appended in place to a default list
+            (a tag on a fresh PropertyBag, a related location). A full dump also
+            marks every field as set, so a result that stated no level came back
+            with the default level set and resolve_missing_levels could no
+            longer give it the level its rule's defaultConfiguration names. That
+            one field keeps its unset state; nothing else reads the set-fields
+            record of a result.
+            """
             clean_result = res.model_dump(
                 exclude=["ruleIndex"] if drop_rule_index else []
             )
+            if "level" not in res.model_fields_set:
+                clean_result.pop("level", None)
             properties = clean_result.get("properties")
             if isinstance(properties, dict):
                 properties.pop(CONTEXT_PROPERTY, None)
@@ -2914,7 +2928,10 @@ class SarifReport(RecordModel):
                 properties = properties if isinstance(properties, dict) else {}
                 properties[CONTEXT_PROPERTY] = context
                 clean_result["properties"] = properties
-            return Result(**clean_result)
+            return clean_result
+
+        def curated_copy(res, source_run, drop_rule_index=True):
+            return Result(**curated_dump(res, source_run, drop_rule_index))
 
         # Copies, never the incoming objects: ash merge promises not to mutate
         # its inputs, and a later merge appends to the aggregate's lists, so an
@@ -2931,30 +2948,13 @@ class SarifReport(RecordModel):
         for res in report_run.results or []:
             # Remove `ruleIndex`, since we're reordering rules. RuleId should
             # correctly correlate results to associated rules in our set of scanners
-            # without it. A full dump, not one of the set fields only: pydantic marks
-            # a field set on construction or assignment, never on an append, so a
-            # dump of the set fields drops what code appended in place to a default
-            # list (a tag on a fresh PropertyBag, a related location).
-            clean_result = res.model_dump(exclude={"ruleIndex"})
-            # A full dump marks every field as set, so a result that stated no level
-            # came back with the default level set and resolve_missing_levels could
-            # no longer give it the level its rule's defaultConfiguration names. That
-            # one field keeps its unset state; nothing else reads the set-fields
-            # record of a result.
-            if "level" not in res.model_fields_set:
-                clean_result.pop("level", None)
+            # without it. The dump, the unset level and the occurrence context
+            # (curated before the run-scoped references are detached: it is read
+            # from the incoming result and run while their tables and indices
+            # still apply) come from curated_dump, the same code the aggregate's
+            # own results go through, so the two copies cannot drift.
+            clean_result = curated_dump(res, report_run)
             _keep_the_rule_by_id(clean_result, res, report_tool)
-            # Curate source identity before the run-scoped references are
-            # detached: the occurrence context is read from the incoming result
-            # and run while their tables and indices still apply.
-            properties = clean_result.get("properties")
-            if isinstance(properties, dict):
-                properties.pop(CONTEXT_PROPERTY, None)
-            context = occurrence_context(res, report_run)
-            if context is not None:
-                properties = properties if isinstance(properties, dict) else {}
-                properties[CONTEXT_PROPERTY] = context
-                clean_result["properties"] = properties
             if self.runs:
                 # Folded into a run that does not carry the incoming run's
                 # artifacts, logicalLocations or originalUriBaseIds, so an index
@@ -3162,6 +3162,17 @@ def _detach_run_scoped_references(
         if base_definition(base_id) is None:
             return
         if same_chain(base_id):
+            return
+        uri = location.get("uri")
+        if isinstance(uri, str) and (
+            uri.startswith("/") or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", uri)
+        ):
+            # SARIF 3.4.4: an absolute URI has no base, so the differing base
+            # definition does not apply to it. Prefixing would nest the scheme
+            # or the root (file:///src/file:///abs/x.py); the uri stays as
+            # written, and the base id, which names a base this aggregate
+            # defines differently, goes with the detachment.
+            location.pop("uriBaseId", None)
             return
         expanded, remaining = expand(location.get("uri"), base_id)
         if remaining == base_id:
