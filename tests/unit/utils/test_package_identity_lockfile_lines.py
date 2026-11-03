@@ -16,6 +16,7 @@ unreadable lockfile into None, and failed the whole scanner run.
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -63,6 +64,14 @@ def test_a_lockfile_nested_past_the_recursion_limit_answers_none(tmp_path):
     depth = 100_000
     nested = "[" * depth + "]" * depth
     text = '{"packages": {"node_modules/a": {"version": "1"}}, "deep": ' + nested + "}"
-    with pytest.raises(RecursionError):
-        json.loads(text)
-    assert load_npm_lock_entries(_lockfile(tmp_path, text)) is None
+    # Whether json.loads raises at a given depth is a host interpreter/stack
+    # property; lower the limit so the precondition holds deterministically and
+    # the cell measures the product's except arm.
+    limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(1_000)
+    try:
+        with pytest.raises(RecursionError):
+            json.loads(text)
+        assert load_npm_lock_entries(_lockfile(tmp_path, text)) is None
+    finally:
+        sys.setrecursionlimit(limit)
