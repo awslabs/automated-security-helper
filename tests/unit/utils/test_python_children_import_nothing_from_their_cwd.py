@@ -184,26 +184,39 @@ def test_the_detect_secrets_worker_imports_nothing_from_the_tree_or_its_results(
 
 
 @pytest.mark.unit
-def test_a_relative_bin_path_is_made_absolute_where_it_is_read(tmp_path, monkeypatch):
+def test_a_relative_bin_path_is_warned_about_and_not_searched(tmp_path, monkeypatch):
+    """The documented contract (core/constants.py): tool lookup does not search
+    a relative ASH_BIN_PATH, and only ``ash dependencies install`` makes one
+    absolute. ``current_bin_path`` is the installer's reader, absolutized at
+    the caller's working directory, where the caller named it;
+    ``_bin_path`` keeps the value as written and warns once per value."""
     from automated_security_helper.utils import subprocess_utils
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_BIN_PATH", "rel/bin")
     assert current_bin_path() == tmp_path / "rel" / "bin"
-    assert subprocess_utils._bin_path() == tmp_path / "rel" / "bin"
-    assert subprocess_utils.path_independent_dirs()[0].is_absolute()
+    subprocess_utils._warned_relative_bin_paths.discard("rel/bin")
+    assert subprocess_utils._bin_path() == Path("rel/bin")
+    assert "rel/bin" in subprocess_utils._warned_relative_bin_paths
+    assert subprocess_utils.path_independent_dirs()[0] == Path("rel/bin")
 
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("rel/bin", "{cwd}/rel/bin"), ("", "{home}/.ash/bin")],
+    [("rel/bin", "rel/bin"), ("", "{home}/.ash/bin")],
     ids=["relative", "empty"],
 )
 @pytest.mark.integration
-def test_the_bin_path_constant_is_absolute(tmp_path, value, expected):
+def test_the_bin_path_constant_follows_the_documented_contract(
+    tmp_path, value, expected
+):
     """``core.constants.ASH_BIN_PATH`` is computed at import, so it is read in a child.
 
-    An empty value used to become ``Path("")``, the current directory.
+    An empty value used to become ``Path("")``, the current directory; it is
+    the home fallback now. A relative value is kept as written
+    (``_bin_path_at_import``), under the documented contract that tool lookup
+    does not search a relative ASH_BIN_PATH and only ``ash dependencies
+    install`` makes one absolute (core/constants.py).
     """
     home = tmp_path / "home"
     home.mkdir()
