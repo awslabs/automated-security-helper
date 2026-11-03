@@ -1203,7 +1203,14 @@ def refuse_plugin_name_clashes(
             name = declared_plugin_name(cls)
             if name is None:
                 continue
-            by_lookup.setdefault(reduced_plugin_name(name), []).append((name, cls))
+            # A name that reduces to nothing (only type words and punctuation)
+            # is indexed under no reduced spelling by plugin_key_lookup_names,
+            # so such names do not read as one; they are grouped by the exact
+            # name alone, which still catches two plugins with the very same
+            # name. The NUL prefix cannot collide with a reduced value, which
+            # never holds one.
+            reduced = reduced_plugin_name(name)
+            by_lookup.setdefault(reduced or f"\x00{name}", []).append((name, cls))
         for _, members in sorted(by_lookup.items()):
             if len(members) < 2:
                 continue
