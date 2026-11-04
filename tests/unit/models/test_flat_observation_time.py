@@ -170,6 +170,8 @@ def test_observation_parser_supports_python310_iso_forms(monkeypatch, value, exp
         ("2025-01-02T10:00:00+24:00", None),
         ("2025-13-02T10:00:00Z", None),
         ("2025-01-02T10:00:00", None),
+        ("0001-01-01T00:00:00+07:00", None),
+        ("9999-12-31T23:00:00-02:00", None),
     ],
 )
 def test_portable_extended_timestamp_boundary_preserves_raw_value(value, expected):

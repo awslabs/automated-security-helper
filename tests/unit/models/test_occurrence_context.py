@@ -634,3 +634,52 @@ def test_merge_keeps_an_absolute_uri_unchanged_when_its_base_differs():
     )
     assert location.uri == "file:///abs/x.py"
     assert location.uriBaseId is None
+
+
+def test_merge_keeps_a_rooted_uri_unchanged_when_its_base_differs():
+    # The same rule for a rooted path with no scheme: a leading slash is
+    # absolute too, so the differing base is dropped and the path is not
+    # prefixed with the aggregate's or the incoming run's base uri.
+    model = AshAggregatedResults()
+    model.sarif.merge_sarif_report(
+        _report(
+            [_result()],
+            originalUriBaseIds={"SRCROOT": {"uri": "file:///aggregate/"}},
+        )
+    )
+    incoming_result = _result()
+    incoming_result["locations"] = [
+        {
+            "physicalLocation": {
+                "artifactLocation": {
+                    "uri": "/abs/x.py",
+                    "uriBaseId": "SRCROOT",
+                }
+            }
+        }
+    ]
+    model.sarif.merge_sarif_report(
+        _report(
+            [incoming_result],
+            originalUriBaseIds={"SRCROOT": {"uri": "file:///src/"}},
+        )
+    )
+    location = (
+        model.sarif.runs[0]
+        .results[-1]
+        .locations[0]
+        .physicalLocation.root.artifactLocation
+    )
+    assert location.uri == "/abs/x.py"
+    assert location.uriBaseId is None
+
+
+def test_merge_of_a_plain_result_leaves_the_run_unmarked():
+    # A result with no run-local reference and no rule or message to resolve
+    # curates no context, so the merge has nothing to protect: the run takes no
+    # lifecycle marker and the result carries no context property.
+    model = AshAggregatedResults()
+    model.sarif.merge_sarif_report(_report([_result()]))
+    run = model.sarif.runs[0]
+    assert getattr(run.properties, MARKER, None) is None
+    assert _contexts(model.sarif) == [None]
