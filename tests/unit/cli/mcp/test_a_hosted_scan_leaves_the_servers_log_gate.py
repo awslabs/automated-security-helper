@@ -11,7 +11,8 @@ progress off). A gate write anywhere on that path moves the server's gate for
 every later line, for every session.
 
 The cell drives the server object itself through the SDK's in-memory client, in
-one child process with no server spawn: it sets the gate to ERROR as
+one child process with no server spawn, inside ``serving_local_client()`` as
+every in-memory caller of the server must be: it sets the gate to ERROR as
 ``ash mcp --log-level error`` does, runs one hosted scan through the
 ``run_ash_scan`` tool, and reads the gate after the scan and again after the
 session ends. A homeless INFO line logged last must not reach stderr. The scan
@@ -140,6 +141,9 @@ _DRIVER = reaching_the_stand_in(
     _tasks_spec.loader.exec_module(_tasks)
 
     from automated_security_helper.cli import mcp_tools
+    from automated_security_helper.cli.mcp.session_identity import (
+        serving_local_client,
+    )
     from automated_security_helper.cli.mcp_server import mcp
     from automated_security_helper.core.resource_management.scan_registry import (
         get_scan_registry,
@@ -156,26 +160,27 @@ _DRIVER = reaching_the_stand_in(
 
     async def main():
         out = {{"gate_at_start": ash_log._LAST_RESORT.level}}
-        async with Client(mcp, raise_exceptions=True) as client:
-            started = await client.call_tool(
-                "run_ash_scan",
-                {{
-                    "source_dir": str(layout / "allowed" / "target"),
-                    "config_path": str(layout / "configs" / "plugin-only.yaml"),
-                }},
-            )
-            payload = started.structured_content["result"]
-            out["started"] = bool(payload.get("success"))
-            # A refused start names its refusal in the control's message.
-            out["error"] = payload.get("error")
-            out["error_type"] = payload.get("error_type")
-            # An exception or a cancellation that escapes a scan task fails the
-            # driver, which the test reads as a failed child.
-            await _tasks.drain_clean(tasks=list(mcp_tools._scan_tasks))
-            scan_id = payload.get("scan_id")
-            entry = get_scan_registry().get_scan(scan_id) if scan_id else None
-            out["status"] = entry.status.value if entry is not None else None
-            out["gate_after_scan"] = ash_log._LAST_RESORT.level
+        with serving_local_client():
+            async with Client(mcp, raise_exceptions=True) as client:
+                started = await client.call_tool(
+                    "run_ash_scan",
+                    {{
+                        "source_dir": str(layout / "allowed" / "target"),
+                        "config_path": str(layout / "configs" / "plugin-only.yaml"),
+                    }},
+                )
+                payload = started.structured_content["result"]
+                out["started"] = bool(payload.get("success"))
+                # A refused start names its refusal in the control's message.
+                out["error"] = payload.get("error")
+                out["error_type"] = payload.get("error_type")
+                # An exception or a cancellation that escapes a scan task fails the
+                # driver, which the test reads as a failed child.
+                await _tasks.drain_clean(tasks=list(mcp_tools._scan_tasks))
+                scan_id = payload.get("scan_id")
+                entry = get_scan_registry().get_scan(scan_id) if scan_id else None
+                out["status"] = entry.status.value if entry is not None else None
+                out["gate_after_scan"] = ash_log._LAST_RESORT.level
         out["gate_after_session"] = ash_log._LAST_RESORT.level
         homeless({_MARKER!r})
         print(json.dumps(out))
