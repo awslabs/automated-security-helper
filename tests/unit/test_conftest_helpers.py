@@ -140,6 +140,9 @@ class _RecordingParser:
     def addoption(self, *names: str, **_kwargs) -> None:
         self.flags.append(names[0])
 
+    def getgroup(self, *_args, **_kwargs) -> "_RecordingParser":
+        return self
+
 
 class _RecordingConfig:
     def __init__(self) -> None:

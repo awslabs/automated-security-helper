@@ -148,6 +148,7 @@ def test_a_baseline_in_the_scanned_tree_s_own_checkout_does_not_verify(
     """Scanning a subdirectory: the rest of that repository is still the repository's."""
     checkout = tmp_path / "repo"
     (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     source = _project(checkout / "service")
     baseline = _verifying_baseline(checkout / "ops" / "verifying.baseline")
 

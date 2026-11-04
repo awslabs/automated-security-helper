@@ -681,8 +681,16 @@ def test_a_git_file_naming_a_missing_directory_is_named_in_the_refusal(
         _committed_entries_in_the_way(output)
 
     message = _words(str(refused.value))
-    assert "not a git repository" in message, message
-    assert missing.as_posix() in message, message
+    # Git's own wording varies with its version: older git says "not a git
+    # repository" and names the missing target, newer git says "gitfile does not
+    # point to a valid repository" and names the gitfile.
+    assert (
+        "not a git repository" in message
+        or "does not point to a valid repository" in message
+    ), message
+    assert missing.as_posix() in message or (source / ".git").as_posix() in message, (
+        message
+    )
     assert "ash_aggregated_results.json" in message, message
 
 

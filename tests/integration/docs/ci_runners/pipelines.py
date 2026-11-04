@@ -308,8 +308,11 @@ class Options:
 
     @classmethod
     def from_config(cls, config) -> Options:
-        names = ("bin", "wheel", "out")
-        values = {n: config.getoption(f"--ci-runner-{n}") for n in names}
+        values = {
+            "bin": config.getoption("--ci-runner-bin"),
+            "wheel": config.getoption("--ci-runner-wheel"),
+            "out": config.getoption("--ci-runner-out"),
+        }
         missing = [f"--ci-runner-{n}" for n, v in values.items() if not v]
         if missing:
             raise HarnessError(f"the CI-runner tests need {', '.join(missing)}")

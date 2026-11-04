@@ -383,11 +383,6 @@ _EXEMPT.update(
         ): _TEST_OWN_TREE,
         (
             "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
-            "test_the_child_copies_no_file_that_leaves_the_tree",
-            "child.cwd",
-        ): _NPM_AUDIT_CWD,
-        (
-            "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
             "fake_run",
             "cwd",
         ): _NPM_AUDIT_CWD,

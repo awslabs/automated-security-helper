@@ -248,12 +248,14 @@ def test_a_corrupt_archive_is_a_failed_input_that_fails_the_scan(corrupt):
     results = json.loads((output / "ash_aggregated_results.json").read_text())
     row = results["converter_results"]["archive"]
     assert sorted(item["path"] for item in row.get("failed_inputs") or []) == [
-        "clash.zip",
         "crc.zip",
         "cut.tar",
     ]
-    for leftover in ("ok.py", "ok_tar.py", "a.py"):
+    # clash.zip is not a failed input: the converter refuses a member written over
+    # a directory alone (archive_converter's _MEMBER_OVER_A_DIRECTORY), so the
+    # directory's own member is extracted and scanned.
+    for leftover in ("ok.py", "ok_tar.py"):
         assert not list((output / "converted").rglob(leftover)), (
             f"partial output left: {leftover}"
         )
-    assert "could not convert 3 inputs:" in out
+    assert "could not convert 2 inputs:" in out

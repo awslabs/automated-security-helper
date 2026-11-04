@@ -408,9 +408,7 @@ class TestTheDroppedSandboxIsReported:
         """The operator's mode is a floor for a project's in-tree config."""
         root = tmp_path / "ws"
         (root / "api" / ".ash").mkdir(parents=True)
-        # Inside the workspace root, which is the /src mount: container mode
-        # refuses a --config outside the source directory.
-        operator = root / "operator-ash.yaml"
+        operator = tmp_path / "operator-ash.yaml"
         operator.write_text(
             "project_name: operator\nsandbox:\n  mode: bwrap\n", encoding="utf-8"
         )
@@ -747,14 +745,12 @@ class TestNothingToReport:
 
 @pytest.mark.integration
 class TestSchemaDependentInvalidsAreTheImagesToJudge:
-    """With ``--no-build`` the host judges only what holds for every ASH
-    revision: that each config parses and that its ``extends`` chain stays
-    confined to its root. A value this revision's model refuses --
-    ``sandbox.mode: not-a-mode`` -- may be one another revision's model
-    declares, so the host hands the scan to the image, whose own ASH refuses
-    it with exit 3 before the appended override could apply. These cells pin
-    the handoff exactly, and that this tree's CLI, given the handed-over
-    invocation, refuses it as the image's would.
+    """The host's gate refuses a config this revision's model refuses -- a
+    ``sandbox.mode: not-a-mode`` -- with exit 3 before the runner is asked to
+    run, ``--no-build`` included, so only a config the gate accepts is handed
+    over. These cells pin that handoff exactly, and that this tree's CLI,
+    given the handed-over invocation and a config its model refuses, refuses
+    it as the image's would.
     """
 
     def test_the_forwarded_invocation_is_the_exact_handed_over_argv(
@@ -769,7 +765,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         """
         (project / ".ash").mkdir()
         (project / ".ash" / ".ash.yaml").write_text(
-            "project_name: repo\nsandbox:\n  mode: not-a-mode\n", encoding="utf-8"
+            'project_name: repo\nsandbox:\n  mode: "bwrap"\n', encoding="utf-8"
         )
 
         _, run_args = _scan(
@@ -837,11 +833,14 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         runtime guards stay on PATH, so nothing real is reached if the
         refusal regressed.
         """
+        # The handoff happens only for a config the host's gate accepts, and the
+        # forwarded argv does not depend on the configured mode, so the argv is
+        # captured with no config; the refused one is written after it.
+        _, run_args = _scan(tmp_path, stand_in, "--source-dir", str(project))
         (project / ".ash").mkdir()
         (project / ".ash" / ".ash.yaml").write_text(
             "project_name: repo\nsandbox:\n  mode: not-a-mode\n", encoding="utf-8"
         )
-        _, run_args = _scan(tmp_path, stand_in, "--source-dir", str(project))
         inner = run_args[run_args.index("automated-security-helper:non-root") + 1 :]
         assert inner[0] == "ash", inner
         inner_out = tmp_path / "inner-out"
@@ -889,16 +888,16 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         assert "Invalidvalueat'sandbox.mode'" in squished, squished[-3000:]
         assert "'bwrap'" in squished, squished[-3000:]
 
-    @pytest.mark.parametrize(
-        "mode", ["bwrap", "not-a-mode", None], ids=["valid", "invalid", "absent"]
-    )
+    @pytest.mark.parametrize("mode", ["bwrap", None], ids=["valid", "absent"])
     def test_the_off_override_is_always_appended_and_never_derived(
         self, tmp_path, stand_in, project, mode
     ):
-        """``sandbox.mode=off`` is appended for a valid, an invalid and an
-        absent configured mode alike, and it is the only sandbox override
+        """``sandbox.mode=off`` is appended for a valid and an absent
+        configured mode alike, and it is the only sandbox override
         forwarded: a handoff that read the config's value to decide, or
-        forwarded that value, fails the exact comparison."""
+        forwarded that value, fails the exact comparison. An invalid mode
+        never reaches the handoff: the host's gate refuses it with exit 3
+        first, ``--no-build`` included."""
         if mode is not None:
             (project / ".ash").mkdir()
             (project / ".ash" / ".ash.yaml").write_text(
