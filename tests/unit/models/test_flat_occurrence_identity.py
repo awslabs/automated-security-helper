@@ -477,15 +477,19 @@ def test_additional_line_representations_normalize_and_a_new_line_changes_the_id
 @pytest.mark.parametrize(
     "normalized, aliases",
     [
-        (0, [0, "0", 0.0, False]),
-        (-1, [-1, "-1", -1.0]),
-        (1, [1, "1", 1.0, True]),
+        (0, [0, "0", 0.0]),
+        (-1, [-1, -1.0]),
+        (1, [1, "1", 1.0]),
     ],
 )
 @pytest.mark.unit
 def test_all_accepted_additional_line_aliases_contribute_to_identity(
     normalized, aliases
 ):
+    """The spellings ``_optional_line`` reads as a line number: an int (a
+    negative one included), a whole float, or the decimal digits of one in text.
+    Each reads as the number and gives an identity that differs from an entry
+    with no line."""
     unknown = FlatVulnerability.from_additional_report(
         {"description": "same"}, "scanner"
     )
@@ -495,6 +499,24 @@ def test_all_accepted_additional_line_aliases_contribute_to_identity(
         assert flat.line_start == flat.line_end == normalized
         assert flat.id != unknown.id
         assert json.loads(flat.raw_data) == entry
+
+
+@pytest.mark.parametrize("value", [False, True, "-1"])
+@pytest.mark.unit
+def test_booleans_and_signed_text_are_not_additional_line_aliases(value):
+    """A bool is not a line number and signed text is not decimal digits, so
+    ``_optional_line`` reads each as not stated: both lines are None, the
+    identity is that of an entry with no line, and the raw value stays in the
+    kept source."""
+    unknown = FlatVulnerability.from_additional_report(
+        {"description": "same"}, "scanner"
+    )
+    entry = {"description": "same", "line_start": value, "line_end": value}
+    flat = FlatVulnerability.from_additional_report(entry, "scanner")
+    assert flat.line_start is None
+    assert flat.line_end is None
+    assert flat.id == unknown.id
+    assert json.loads(flat.raw_data) == entry
 
 
 @pytest.mark.parametrize("value", [1.5, "1.5", "not-a-line", {}, []])
@@ -553,12 +575,35 @@ def test_address_is_outside_the_key_but_kept_in_the_source(field, values):
 
 
 @pytest.mark.unit
-def test_additional_default_and_validated_string_aliases_have_equal_identity():
+def test_additional_defaults_and_numeric_text_equate_but_padding_does_not():
+    """What the product equates: an entry with no title or description and one
+    that states the defaults, and a line given as ``"10"`` and as ``10``. What it
+    does not equate: a padded string. The identity is built from the strings as
+    the entry wrote them, so padding in the scanner name, rule id, message or
+    file path changes the id. The model strips the other string fields it holds,
+    but ``file_path`` is kept as written, so a padded path stays padded."""
     flat = FlatVulnerability.from_additional_report({}, "scanner")
     explicit = FlatVulnerability.from_additional_report(
         {"title": "Unknown Issue", "description": "No description available"}, "scanner"
     )
     assert flat.id == explicit.id
+
+    entry = {
+        "title": "Title",
+        "description": "same",
+        "rule_id": "RULE",
+        "cve_id": "CVE-2025-10001",
+        "cwe_id": "CWE-79",
+        "file_path": "file.py",
+        "line_start": 10,
+    }
+    as_text = FlatVulnerability.from_additional_report(
+        {**entry, "line_start": "10"}, "scanner"
+    )
+    as_int = FlatVulnerability.from_additional_report(entry, "scanner")
+    assert as_text.line_start == as_int.line_start == 10
+    assert as_text.id == as_int.id
+
     padded = {
         "title": " Title ",
         "description": " same ",
@@ -568,16 +613,22 @@ def test_additional_default_and_validated_string_aliases_have_equal_identity():
         "file_path": " file.py ",
         "line_start": "10",
     }
-    normalized = {
-        key: value.strip() if isinstance(value, str) else value
-        for key, value in padded.items()
-    }
     first = FlatVulnerability.from_additional_report(padded, " scanner ")
-    second = FlatVulnerability.from_additional_report(normalized, "scanner")
-    for field in ("scanner", "title", "rule_id", "file_path", "cve_id", "cwe_id"):
+    second = FlatVulnerability.from_additional_report(entry, "scanner")
+    for field in ("scanner", "title", "rule_id", "cve_id", "cwe_id"):
         assert getattr(first, field) == getattr(second, field)
+    assert first.file_path == " file.py "
+    assert second.file_path == "file.py"
     assert first.line_start == second.line_start == 10
+    assert first.id != second.id
     assert json.loads(first.raw_data) == padded
+
+    # The path alone: everything else identical, the id still moves.
+    path_padded = FlatVulnerability.from_additional_report(
+        {**entry, "file_path": " file.py "}, "scanner"
+    )
+    assert path_padded.file_path == " file.py "
+    assert path_padded.id != as_int.id
 
 
 @pytest.mark.parametrize(
