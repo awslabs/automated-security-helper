@@ -15,6 +15,7 @@ scanner and position, not its content.
 
 from __future__ import annotations
 
+import json
 import logging
 
 import pytest
@@ -36,12 +37,23 @@ def _flat(**fields):
         ("cwe_id", 79, "79"),
         ("cve_id", 2026, "2026"),
         ("rule_id", 1234, "1234"),
-        ("detected_at", 17000, "17000"),
         ("file_path", 12, "12"),
     ],
 )
 def test_a_number_where_text_is_declared_is_read_as_its_text(field, given, kept):
     assert getattr(_flat(**{field: given}), field) == kept
+
+
+def test_an_integer_detected_at_is_not_a_timestamp_so_it_is_left_unset():
+    """detected_at is the observation time, which must be timezone-aware.
+
+    An integer carries no zone, so it is not read as the text "17000"; the
+    field stays unset and the plugin's raw value is kept in raw_data.
+    """
+    vuln = _flat(detected_at=17000)
+
+    assert vuln.detected_at is None
+    assert json.loads(vuln.raw_data)["detected_at"] == 17000
 
 
 @pytest.mark.parametrize(
@@ -74,7 +86,11 @@ def test_fix_available_is_read_as_yes_or_no_or_not_stated(given, kept):
 
 
 def test_a_well_formed_entry_is_read_as_before():
-    """The control: nothing a plugin wrote correctly changes."""
+    """The control: nothing a plugin wrote correctly changes.
+
+    The one deliberate exception is detected_at, which is the observation time
+    and is normalized to the +00:00 form (a Z suffix is rewritten).
+    """
     vuln = _flat(
         rule_id="R1",
         cve_id="CVE-2026-0001",
@@ -87,7 +103,7 @@ def test_a_well_formed_entry_is_read_as_before():
     )
 
     assert (vuln.rule_id, vuln.cve_id, vuln.cwe_id) == ("R1", "CVE-2026-0001", "CWE-79")
-    assert vuln.detected_at == "2026-10-31T00:00:00Z"
+    assert vuln.detected_at == "2026-10-31T00:00:00+00:00"
     assert (vuln.file_path, vuln.line_start, vuln.line_end) == ("src/app.py", 3, 5)
     assert vuln.fix_available is True
 
