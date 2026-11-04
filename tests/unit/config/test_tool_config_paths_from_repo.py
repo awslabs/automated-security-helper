@@ -409,4 +409,4 @@ def test_ferret_gets_only_the_operators_config_when_one_is_named(tmp_path):
     )
     argv = scanner._resolve_arguments(source, tmp_path / "results.sarif")
     values = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--config"]
-    assert values == [str(operator.resolve())]
+    assert values == [operator.resolve().as_posix()]
