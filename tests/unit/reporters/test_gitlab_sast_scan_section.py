@@ -667,8 +667,8 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         The first keeps the legacy id as it was; the second gets an occurrence of
         its own, as the shared ids and the OCSF fallback uids already do."""
         model = _model(
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
             _result("B106", "other"),
         )
 

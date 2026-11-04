@@ -206,7 +206,7 @@ def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
     shown = rac._streamed_line(
         "a finding: -----BEGIN PRIVATE KEY----- in a file", (_PEM,)  # pragma: allowlist secret
     )
-    assert "BEGIN PRIVATE KEY" in shown
+    assert "BEGIN PRIVATE KEY" in shown  # pragma: allowlist secret
 
 
 def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
