@@ -529,10 +529,18 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         receipt = Path(written.read_text())
         assert Path.home() in receipt.parents, receipt
         assert developer_home / ".ash" not in receipt.parents, receipt
-        assert not any(
-            os.path.commonpath([os.path.realpath(receipt), root]) == root
-            for root in guarded
-        ), receipt
+
+        def under(path: str, root: str) -> bool:
+            # ntpath.commonpath raises ValueError across drives (the receipt on
+            # D: against a guarded root on C:). Such a pair has no common path,
+            # so the receipt is not under that root.
+            try:
+                return os.path.commonpath([path, root]) == root
+            except ValueError:
+                return False
+
+        real_receipt = os.path.realpath(receipt)
+        assert not any(under(real_receipt, root) for root in guarded), receipt
 
     @pytest.mark.unit
     def test_ash_run_as_a_module_with_the_developer_home_is_refused(
