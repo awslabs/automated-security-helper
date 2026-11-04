@@ -18,7 +18,6 @@ import subprocess
 import sys
 
 import pytest
-from pydantic import ValidationError
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.flat_vulnerability import (
@@ -501,11 +500,17 @@ def test_all_accepted_additional_line_aliases_contribute_to_identity(
 @pytest.mark.parametrize("value", [1.5, "1.5", "not-a-line", {}, []])
 @pytest.mark.parametrize("source_id", [None, "explicit"])
 @pytest.mark.unit
-def test_invalid_additional_line_values_still_fail_validation(value, source_id):
-    with pytest.raises(ValidationError):
-        FlatVulnerability.from_additional_report(
-            {"id": source_id, "line_start": value}, "scanner"
-        )
+def test_unreadable_additional_line_values_are_not_stated(value, source_id):
+    """Lenient-line contract: a line value that is not a whole number (a
+    fractional float, non-decimal text, a container) does not raise. It is read
+    as not stated, so line_start and line_end are None, and the raw value stays
+    in the kept source."""
+    flat = FlatVulnerability.from_additional_report(
+        {"id": source_id, "line_start": value}, "scanner"
+    )
+    assert flat.line_start is None
+    assert flat.line_end is None
+    assert json.loads(flat.raw_data)["line_start"] == value
 
 
 @pytest.mark.parametrize(
