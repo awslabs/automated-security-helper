@@ -322,8 +322,10 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
 
     Where ASH exits with its own usage-error code and that code is not also the
     actionable-findings code, the runner proves the refusal, so the static check
-    leaves the value alone. Where the two codes are the same, an expect-exit block
-    cannot tell a typo from findings, so the value is still reported.
+    leaves the value alone. The bad-selection code (2) proves one too, but only on
+    a ``dependencies`` command, which never scans (``shows_a_selection_refusal``);
+    on any other command exit 2 means actionable findings, so an expect-exit=2
+    block cannot tell a typo from findings there and the value is still reported.
     """
     text = (
         f"<!-- doctest: run expect-exit=5 -->\n{FENCE}bash\n"
@@ -334,11 +336,22 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
     monkeypatch.setattr(dc, "usage_error_exit", lambda: None)
     _assert_reports(_check(cli_root, text), "named 'gryp'", 3)
     monkeypatch.setattr(dc, "usage_error_exit", lambda: 5)
+    # expect-exit=2 is ash dependencies install's refusal code for an unknown
+    # tool, so the runner proves the refusal and the value is left alone there...
+    assert _check(cli_root, text.replace("expect-exit=5", "expect-exit=2")) == []
+    monkeypatch.setattr(dc, "bad_selection_exit", lambda: None)
     _assert_reports(
         _check(cli_root, text.replace("expect-exit=5", "expect-exit=2")),
         "named 'gryp'",
         3,
     )
+    monkeypatch.undo()
+    # ... and on a command whose exit 2 is the findings code, it is still reported.
+    scan_text = (
+        f"<!-- doctest: run expect-exit=2 -->\n{FENCE}bash\n"
+        f"ash --source-dir . --scanners banditt --offline\n{FENCE}\n"
+    )
+    _assert_reports(_check(cli_root, scan_text), "named 'banditt'", 3)
 
 
 @pytest.mark.unit

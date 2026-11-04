@@ -1085,7 +1085,11 @@ class TestStoredResults:
             else options["excluded_paths"]
         )
         expirations = [
-            e.expiration if hasattr(e, "expiration") else e["expiration"]
+            # A model keeps ``expiration`` as a deprecated property of ``expires``;
+            # a dumped dict spells the field by its canonical name.
+            e.expiration
+            if hasattr(e, "expiration")
+            else e.get("expires", e.get("expiration"))
             for e in excluded
         ]
         assert expirations == ["next quarter"]
@@ -1339,7 +1343,7 @@ class TestLint:
             "  ignore_paths:\n"
             "    - path: 'vendor/**'\n"
             "      reason: vendored\n"
-            "      expiration: '2026-06-16'\n",
+            "      expires: '2026-06-16'\n",
         )
         assert not [i for i in issues if "expir" in i.message], issues
 

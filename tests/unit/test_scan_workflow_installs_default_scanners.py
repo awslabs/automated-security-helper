@@ -563,7 +563,9 @@ def test_the_install_step_installs_exactly_the_tools_switched_on(
     assert ran["bin_paths"] == {bin_dir}
     assert bin_dir in ran["on_path"], "the bin directory is not added to GITHUB_PATH"
     for call in ran["calls"]:
-        assert call["cwd"] == ctx["runner"]["temp"], call
+        # The step installs from an empty directory under the runner's temp, so
+        # nothing of the checkout (its config, its lockfiles) is beside the install.
+        assert call["cwd"] == f"{ctx['runner']['temp']}/ash-install-cwd", call
         assert call["ash_config"] == "<unset>", call
 
 

@@ -110,7 +110,7 @@ class TestEveryEntryKind:
             (
                 {"path": "vendor/**", "reason": "r", "expiraton": "2099-01-01"},
                 "expiraton",
-                "expiration",
+                "expires",
             ),
         ],
     )

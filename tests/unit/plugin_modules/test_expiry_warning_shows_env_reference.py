@@ -76,13 +76,13 @@ def test_an_expiring_env_read_date_is_shown_as_its_reference(
 ):
     """Red before the fix for ``expires``: the warning held the resolved date."""
     resolved = _in_days(5)
-    monkeypatch.setenv("Q2_EXPIRY", resolved)
-    config = _config_from(tmp_path, spelling, "${Q2_EXPIRY}")
+    monkeypatch.setenv("ASH_TEST_Q2_EXPIRY", resolved)
+    config = _config_from(tmp_path, spelling, "${ASH_TEST_Q2_EXPIRY}")
 
     logged = _warnings_logged(config)
 
     assert "expire within 30 days" in logged, logged
-    assert "${Q2_EXPIRY}" in logged, logged
+    assert "${ASH_TEST_Q2_EXPIRY}" in logged, logged
     assert resolved not in logged, logged
 
 
@@ -91,13 +91,13 @@ def test_an_expired_env_read_date_is_shown_as_its_reference(
     tmp_path, monkeypatch, spelling
 ):
     resolved = _in_days(-5)
-    monkeypatch.setenv("Q2_EXPIRY", resolved)
-    config = _config_from(tmp_path, spelling, "${Q2_EXPIRY}")
+    monkeypatch.setenv("ASH_TEST_Q2_EXPIRY", resolved)
+    config = _config_from(tmp_path, spelling, "${ASH_TEST_Q2_EXPIRY}")
 
     logged = _warnings_logged(config)
 
     assert "have expired" in logged, logged
-    assert "${Q2_EXPIRY}" in logged, logged
+    assert "${ASH_TEST_Q2_EXPIRY}" in logged, logged
     assert resolved not in logged, logged
 
 

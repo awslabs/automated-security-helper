@@ -331,7 +331,7 @@ FIRST = {
     "reason": "asserts in tests",
     "line_start": 10,
     "line_end": 10,
-    "expiration": "2099-01-31",
+    "expires": "2099-01-31",
 }
 
 
@@ -359,7 +359,7 @@ class TestSecondSuppressionForOneRuleAndPath:
         [
             pytest.param({"line_start": 20, "line_end": 25}, id="line-range"),
             pytest.param({"reason": "another reason"}, id="reason"),
-            pytest.param({"expiration": "2099-06-30"}, id="expiration"),
+            pytest.param({"expires": "2099-06-30"}, id="expires"),
         ],
     )
     def test_a_different_one_is_saved(self, tmp_path: Path, name: str, change):

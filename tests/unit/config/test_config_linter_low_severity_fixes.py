@@ -727,7 +727,7 @@ class TestPluginSectionSpellings:
                             {
                                 "path": "a",
                                 "reason": "r",
-                                "expiration": "2020-01-01",
+                                "expires": "2020-01-01",
                             }
                         ]
                     }

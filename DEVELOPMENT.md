@@ -125,7 +125,7 @@ it did not exercise.
 Install the hooks, the commit-message one included, and run them over the whole tree.
 `default_install_hook_types` in `.pre-commit-config.yaml` now covers `commit-msg`, so a
 plain `uv run pre-commit install` installs the commit-message hooks too; the explicit
-`--hook-type` flags below are equivalent and work on older setups:
+`pre-commit install --hook-type` form below is equivalent and works on older setups:
 
 <!-- doctest: illustrative reason="installs and runs this repository's pre-commit hooks, so it needs a checkout of this repository" -->
 ```bash

@@ -942,7 +942,7 @@ global_settings:
   ignore_paths:
     - path: 'tests/test_data/**'
       reason: 'Test data only'
-      expiration: null  # Optional: ISO date string
+      expires: null  # Optional: ISO date string
   
   suppressions:
     - path: 'src/app.py'
@@ -950,7 +950,7 @@ global_settings:
       line_start: 42
       line_end: 42
       reason: 'False positive - debug mode only in development'
-      expiration: '2026-12-31'  # Optional: ISO date string
+      expires: '2026-12-31'  # Optional: ISO date string
 
 scanners:
   bandit:
@@ -1084,7 +1084,7 @@ suppressions:
   - path: 'src/legacy/old_api.py'
     rule_id: 'B501'
     reason: 'Legacy code - will be refactored in Q2 2026'
-    expiration: '2026-06-30'
+    expires: '2026-06-30'
 ```
 
 ### Suppression Workflow
@@ -1744,7 +1744,7 @@ its file and lines, or the fingerprints its scanner reports. For example,
 Call `suggest_suppression` with the finding's `id`, `results_path` set to the
 `ash_aggregated_results.json` file (not the directory), and the user's reason as
 `justification`. It writes nothing and returns one entry as `yaml` and `json`. Its
-`expiration` defaults to 90 days from today. Leave out the `client_supplied` key it includes,
+`expires` defaults to 90 days from today. Leave out the `client_supplied` key it includes,
 and put the entry under `global_settings.suppressions` in the project's config:
 
 <!-- doctest: save-as=.ashrc.yaml -->
@@ -1756,7 +1756,7 @@ global_settings:
       line_start: 3
       line_end: 3
       reason: "Test fixture value, not a real credential"
-      expiration: "2027-06-30"
+      expires: "2027-06-30"
 ```
 
 - `path` and `reason` are required. `path` is relative to the scanned directory and may use
@@ -1764,7 +1764,7 @@ global_settings:
 - `rule_id` matches without regard to case and may use glob patterns.
 - `line_start` and `line_end` tie the suppression to those lines. Leave them out to match the
   rule anywhere in the path.
-- Write `expiration` as a quoted `YYYY-MM-DD` date. From that date on, the suppression no
+- Write `expires` as a quoted `YYYY-MM-DD` date. From that date on, the suppression no
   longer applies and the finding counts again. An expired suppression is listed in
   `reports/ash.unused-suppressions.json`, with the ones that matched nothing.
 - `ignore_paths` entries also need `path` and `reason`, and drop every finding in the matching
