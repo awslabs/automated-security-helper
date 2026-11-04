@@ -11,7 +11,6 @@ in both places at once.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 import pytest
 

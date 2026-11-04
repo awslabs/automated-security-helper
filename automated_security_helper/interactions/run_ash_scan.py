@@ -1490,8 +1490,7 @@ def print_incompleteness_message(
                     "disable the converter if its inputs are not wanted",
                     *(
                         (
-                            "fix the files it could not convert or exclude them "
-                            "with ignore_paths",
+                            "fix the files it could not convert or exclude them with ignore_paths",
                         )
                         if could_not_convert
                         else ()
