@@ -410,14 +410,17 @@ def test_missing_additional_ids_tell_advisories_apart_only_within_a_run(
         None,
         {},
         {"startLine": None, "endLine": None},
-        {"startLine": 10},
         {"endLine": 10},
         {"startLine": None, "endLine": 10},
-        {"startLine": 10, "endLine": None},
     ],
 )
 @pytest.mark.unit
-def test_context_line_fallback_distinguishes_occurrences(region):
+def test_context_lines_distinguish_occurrences_when_region_has_no_start_line(region):
+    """contextRegion is consulted only when the region supplies no startLine.
+
+    With the region absent or without a startLine, the contextRegion lines are the
+    reported location, so two payloads differing only there get different ids.
+    """
     payloads = []
     for line in (10, 20):
         payload = _payload()
@@ -426,6 +429,32 @@ def test_context_line_fallback_distinguishes_occurrences(region):
         physical["contextRegion"] = {"startLine": line, "endLine": line}
         payloads.append(payload)
     assert _id(payloads[0]) != _id(payloads[1])
+
+
+@pytest.mark.parametrize(
+    "region",
+    [
+        {"startLine": 10},
+        {"startLine": 10, "endLine": None},
+    ],
+)
+@pytest.mark.unit
+def test_context_lines_do_not_contribute_when_region_has_a_start_line(region):
+    """A region startLine closes the contextRegion fallback gate.
+
+    The fallback loop in flat_vulnerability.py only reaches the contextRegion
+    lines while ``line_start is None``. Once the region supplies startLine 10, the
+    start and end lines come from the region alone (end None for a one-line
+    finding), so two payloads differing only in contextRegion lines share one id.
+    """
+    payloads = []
+    for line in (10, 20):
+        payload = _payload()
+        physical = payload["locations"][0]["physicalLocation"]
+        physical["region"] = region
+        physical["contextRegion"] = {"startLine": line, "endLine": line}
+        payloads.append(payload)
+    assert _id(payloads[0]) == _id(payloads[1])
 
 
 @pytest.mark.unit
