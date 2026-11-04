@@ -411,7 +411,7 @@ global_settings:
     - rule_id: generic-api-key
       path: tests/unit/plugins/test_the_registry_and_decorators_name_a_masked_module_by_its_mask.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
-    # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-11-04) ===
+    # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-11-27) ===
     # braces <= 3.0.3 is affected and no fixed release exists, so neither an upgrade
     # nor an npm `overrides` pin can remove it. deploy/cdk-constructs reaches it only
     # through build tooling: micromatch, pulled in by fast-glob and
@@ -431,12 +431,12 @@ global_settings:
       package_name: "braces"
       package_version: "3.0.3"
       package_path: "deploy/cdk-constructs/node_modules/braces"
-      expires: "2026-11-04"
+      expires: "2026-11-27"
       reason: >-
         GHSA-vfj7-8cjw-p6xm: braces 3.0.3 in deploy/cdk-constructs/package-lock.json. No patched
         version exists. Reachable only through dev/build tooling (micromatch via
         fast-glob and jsii-rosetta) and not shipped in the wheel or container image. Revisit when a fix
-        ships; see the block comment above.
+        ships; see the block comment above; expiry renewed 2026-11-04, still no patched version.
     # === Time-boxed: deepmerge GHSA-gcqx-w48m-w2h4, no patched version (expires 2026-11-27) ===
     # deepmerge 4.2.0 through 4.3.1 is affected (mergeObject() prototype poisoning of
     # the returned object) and no fixed release exists: the advisory, published
@@ -494,7 +494,7 @@ global_settings:
       package_name: "minimatch"
       package_version: "10.2.5"
       package_path: "deploy/cdk/node_modules/aws-cdk-lib/minimatch"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
         deploy/cdk/package-lock.json. npm overrides cannot replace a bundled dependency and
@@ -506,7 +506,7 @@ global_settings:
       package_name: "minimatch"
       package_version: "10.2.5"
       package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/minimatch"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
         deploy/cdk-constructs/package-lock.json. npm overrides cannot replace a bundled
@@ -518,7 +518,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         GHSA-g3hv-75wg-m249 (grype spelling): minimatch 10.2.5 bundled inside aws-cdk-lib
         2.273.0 in deploy/cdk/package-lock.json. The lockfile's own minimatch is overridden
@@ -529,7 +529,7 @@ global_settings:
       path: "deploy/cdk/package-lock.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      expiration: "2026-11-27"
+      expires: "2026-11-27"
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
         inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
