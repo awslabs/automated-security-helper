@@ -1012,6 +1012,13 @@ class UVToolMixin:
                     response["could_not_stop_pid"] = pid
             if response.get("signaled"):
                 response["signal"] = getattr(result, "signal", None)
+            # The program the spawn layer resolved and ran (uv itself on this
+            # arm), carried as data like could_not_stop above: the scanner's
+            # refused-exit-code record names it, so a CI read can tell WHICH
+            # resolved file produced the code.
+            program = getattr(result, "resolved_program", None)
+            if isinstance(program, str) and program:
+                response["resolved_program"] = program
             if response.get("post_run_error"):
                 # A run whose output ASH could not record: its error is ASH's.
                 response["spawn_failed"] = False

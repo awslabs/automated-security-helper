@@ -5454,6 +5454,13 @@ def run_command_with_output_handling(
         returncode = result.returncode
 
         response = {"returncode": returncode}
+        # The program that ran, as the spawn layer resolved it: the copied
+        # argv's first element after _resolved_or_refused replaced it in
+        # place. A caller judging the exit code (a scanner refusing one
+        # outside its success set) can then record WHICH resolved file
+        # returned it, which the bare code never said.
+        if isinstance(command, list) and command:
+            response["resolved_program"] = str(command[0])
         # A signal ASH did not send ended the tool: its negative code is kept, and
         # the flag and reason say so, since no exit code describes it.
         death = signal_death(returncode, cmd_str)
