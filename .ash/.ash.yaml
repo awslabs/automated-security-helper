@@ -493,7 +493,7 @@ global_settings:
       path: "node_modules/aws-cdk-lib/minimatch/package.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      package_path: "deploy/cdk/node_modules/aws-cdk-lib/minimatch"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/minimatch"
       expires: "2026-11-27"
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
@@ -505,7 +505,7 @@ global_settings:
       path: "node_modules/aws-cdk-lib/minimatch/package.json"
       package_name: "minimatch"
       package_version: "10.2.5"
-      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/minimatch"
+      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/minimatch"
       expires: "2026-11-27"
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
