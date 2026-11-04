@@ -107,9 +107,7 @@ def staged_snapshot_files() -> "list[str]":
     if merge_head.returncode == 0:
         differs_from_merged_parent = set(_staged_paths("MERGE_HEAD"))
         paths = [path for path in paths if path in differs_from_merged_parent]
-    return [
-        path for path in paths if "__snapshots__" in PurePosixPath(path).parts[:-1]
-    ]
+    return [path for path in paths if "__snapshots__" in PurePosixPath(path).parts[:-1]]
 
 
 def visible_message(raw: str) -> str:
@@ -156,7 +154,9 @@ def main(argv: "list[str]") -> int:
     raw = Path(argv[1]).read_text(encoding="utf-8", errors="replace")
     message = visible_message(raw)
     if not message:
-        return 0  # git aborts a commit with an empty message itself; one report is enough
+        return (
+            0  # git aborts a commit with an empty message itself; one report is enough
+        )
     if has_reason(message):
         return 0
     print(

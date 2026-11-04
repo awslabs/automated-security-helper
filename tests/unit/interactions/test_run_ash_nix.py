@@ -697,7 +697,8 @@ class TestRunAshNix:
         monkeypatch.setattr(module, "ASH_LOGGER", recorder)
         monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
         monkeypatch.setenv(
-            ASH_NIX_FLAKE_REF_ENV_VAR, "git+https://user:token-1@host/org/repo"  # pragma: allowlist secret
+            ASH_NIX_FLAKE_REF_ENV_VAR,
+            "git+https://user:token-1@host/org/repo",  # pragma: allowlist secret
         )
         monkeypatch.setattr(module, "find_executable", lambda _: "/usr/bin/nix")
 
@@ -712,7 +713,9 @@ class TestRunAshNix:
             for m in logged
         )
         # The shell is given the reference as the operator wrote it.
-        assert "git+https://user:token-1@host/org/repo" in entered_shell.cmd  # pragma: allowlist secret
+        assert (
+            "git+https://user:token-1@host/org/repo" in entered_shell.cmd
+        )  # pragma: allowlist secret
 
     def test_the_operators_pythonpath_is_handed_to_the_inner_command(
         self, monkeypatch, entered_shell

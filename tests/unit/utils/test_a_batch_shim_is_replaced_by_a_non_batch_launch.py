@@ -129,9 +129,7 @@ def test_with_no_substitute_the_cmd_exe_argument_check_stands(tmp_path, monkeypa
     # carried; ASH builds no such value any more (the control test above).
     shim = _write_shim(tmp_path)
     monkeypatch.setattr(spu, "find_executable", lambda name: str(shim))
-    monkeypatch.setattr(
-        importlib.util, "find_spec", lambda name, *args, **kwargs: None
-    )
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *args, **kwargs: None)
 
     with pytest.raises(OSError) as refused:
         spu.resolve_command(["checkov", "--skip-path", "(^|/)[.]venv/"])
@@ -149,9 +147,7 @@ def test_with_no_substitute_the_scanners_own_values_pass_through_a_batch_launch(
     # launch proceeds instead of being refused or split.
     shim = _write_shim(tmp_path)
     monkeypatch.setattr(spu, "find_executable", lambda name: str(shim))
-    monkeypatch.setattr(
-        importlib.util, "find_spec", lambda name, *args, **kwargs: None
-    )
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *args, **kwargs: None)
 
     arguments = _skip_path_arguments()
     resolved = spu.resolve_command(["checkov", *arguments])

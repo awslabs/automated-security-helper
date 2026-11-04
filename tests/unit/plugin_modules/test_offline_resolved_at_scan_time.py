@@ -77,9 +77,7 @@ def _checkov_scan_argv_offline(scanner) -> bool:
     # checkov decides --skip-download per scan, in _execute_scan (the offline
     # mode is read at the moment it is asked), so the probe reads the scan's
     # resolved argv rather than the construction-time extra_args.
-    argv, _, _ = scanner._execute_scan(
-        Path(scanner.context.source_dir), "source", []
-    )
+    argv, _, _ = scanner._execute_scan(Path(scanner.context.source_dir), "source", [])
     return "--skip-download" in argv
 
 

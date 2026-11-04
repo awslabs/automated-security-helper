@@ -228,8 +228,7 @@ def build_ash_image_cli_command(
     interrupted_message = "ASH build-image interrupted before it finished"
     if not no_run:
         interrupted_message += (
-            ": there is no verdict, and the output directory may hold partial "
-            "results"
+            ": there is no verdict, and the output directory may hold partial results"
         )
     record_die_now_message(f"{interrupted_message}.")
     try:

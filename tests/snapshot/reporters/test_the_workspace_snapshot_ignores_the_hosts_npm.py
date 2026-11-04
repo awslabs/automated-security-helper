@@ -99,11 +99,7 @@ def test_the_workspace_output_is_identical_with_and_without_npm(tmp_path: Path):
     # Path comparison: on Windows which() may answer the PATHEXT spelling
     # (npm.CMD), which WindowsPath equality folds while a string compare
     # would not.
-    if (
-        found_present is None
-        or Path(found_present) != stub
-        or found_absent is not None
-    ):
+    if found_present is None or Path(found_present) != stub or found_absent is not None:
         raise RuntimeError(
             (
                 "premise: the arms must differ in npm visibility",

@@ -79,9 +79,7 @@ def test_the_trusted_path_of_an_empty_id_is_not_the_stdio_sessions(tmp_path) -> 
     config_file.write_text("{}\n", encoding="utf-8")
     trusted_file = tmp_path / "trusted.yaml"
     trusted_file.write_text("{}\n", encoding="utf-8")
-    _bind_stdio(
-        config_path=str(config_file), trusted_config_path=str(trusted_file)
-    )
+    _bind_stdio(config_path=str(config_file), trusted_config_path=str(trusted_file))
 
     assert profile_registry.resolve_session_trusted_config_path("") is None
     assert profile_registry.resolve_session_trusted_config_path(None) == str(

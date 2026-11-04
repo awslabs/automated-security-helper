@@ -528,9 +528,7 @@ def test_an_ambr_file_outside_a_snapshots_directory_is_not_counted(snapshot_repo
 def _diverge_with_other_side_snapshot(repo: Path) -> None:
     """A branch regenerates the snapshot (with its trailer); main moves on."""
     _repo_git(repo, "checkout", "-q", "-b", "other")
-    (repo / SNAPSHOT_RELPATH).write_text(
-        "# other side regenerated\n", encoding="utf-8"
-    )
+    (repo / SNAPSHOT_RELPATH).write_text("# other side regenerated\n", encoding="utf-8")
     _repo_git(
         repo,
         "commit",

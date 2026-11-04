@@ -72,7 +72,9 @@ def test_trivy_temporary_directory_follows_go_not_python(monkeypatch):
         Path("/temp") / "trivy"
     )
     assert refresh.default_cache_dir(
-        "trivy", {"TMP": "/tmp1", "TEMP": "/temp"}, platform="win32"  # nosec B108
+        "trivy",
+        {"TMP": "/tmp1", "TEMP": "/temp"},
+        platform="win32",  # nosec B108
     ) == (Path("/tmp1") / "trivy")  # nosec B108
 
 

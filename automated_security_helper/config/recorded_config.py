@@ -471,7 +471,5 @@ def take_own_values(
         # "holds", as `ash merge`'s per-shard form words it (configure.md, Read
         # values from the environment: the refusal names the field and the
         # reference).
-        named = "; ".join(
-            f"{field} holds {reference}" for field, reference in missing
-        )
+        named = "; ".join(f"{field} holds {reference}" for field, reference in missing)
         raise unsupplied_refusal(named, missing, refuse_unless_supplied)

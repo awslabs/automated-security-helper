@@ -3551,9 +3551,7 @@ def _unusable_nix_config(opts: ScanOptions) -> Optional[ASHConfigValidationError
     # refused the same way, so no error comes out of the handler that calls
     # this, as promised above.
     try:
-        readable = os.open(
-            opts.config, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
-        )
+        readable = os.open(opts.config, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
     except (OSError, ValueError):
         return ASHConfigValidationError(
             f"Config file cannot be read: {opts.config}. The scan inside the "

@@ -114,7 +114,9 @@ def test_only_what_the_aliases_add_is_counted(monkeypatch):
     assert loaded["use"][0] is loaded["base"]
 
     with pytest.raises(AliasExpansionError):
-        yaml.load(_aliased_items(8), Loader=NoRecursiveAliasLoader)  # 48 added  # nosec B506
+        yaml.load(
+            _aliased_items(8), Loader=NoRecursiveAliasLoader
+        )  # 48 added  # nosec B506
 
 
 def test_a_refusal_names_the_aliases_that_took_the_document_past_the_bound(

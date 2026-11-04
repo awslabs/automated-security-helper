@@ -19698,9 +19698,7 @@ def test_a_terminal_shows_the_characters_it_acts_on_as_escapes(
     else:
         # The text and Markdown reporters wrote the two as escapes at document
         # build, so the document holds the escape text and no raw control.
-        assert "\x1b" not in document and "\x07" not in document, repr(
-            document[:2000]
-        )
+        assert "\x1b" not in document and "\x07" not in document, repr(document[:2000])
         assert "x1b" in document and "x07" in document, repr(document[:2000])
         assert "page-claims" in document, repr(document[:2000])
     shown = out.decode("utf-8", "replace")

@@ -107,7 +107,9 @@ class TestSafeReadJsonFileNamesEachFailure:
 
     def test_a_link_at_the_file_name_is_not_followed(self, tmp_path):
         outside = tmp_path / "outside.json"
-        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")  # pragma: allowlist secret
+        outside.write_text(
+            '{"secret": "elsewhere"}', encoding="utf-8"
+        )  # pragma: allowlist secret
         link = tmp_path / "ASH.ScanResults.json"
         _symlink_or_skip(link, outside)
 
@@ -130,7 +132,9 @@ class TestSafeReadJsonFileNamesEachFailure:
         while the name already holds a link: the reopen by name followed it and
         returned the file outside the tree as the scan's own."""
         outside = tmp_path / "outside.json"
-        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")  # pragma: allowlist secret
+        outside.write_text(
+            '{"secret": "elsewhere"}', encoding="utf-8"
+        )  # pragma: allowlist secret
         link = tmp_path / "ASH.ScanResults.json"
         _symlink_or_skip(link, outside)
         regular = os.lstat(outside)

@@ -2588,9 +2588,7 @@ class TestTheUnitTestMatrixIsSplitByOs:
         }
         return {
             **{
-                k: v
-                for k, v in job.items()
-                if k not in ("strategy", "timeout-minutes")
+                k: v for k, v in job.items() if k not in ("strategy", "timeout-minutes")
             },
             "strategy": strategy,
         }
@@ -2741,9 +2739,7 @@ class TestTheIntegrationAndE2eFamiliesMirrorTheUnitFamily:
             ]
             assert not differing, f"{job_id} differs from {first_id} in {differing}"
 
-    @pytest.mark.parametrize(
-        "job_id", [*INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
-    )
+    @pytest.mark.parametrize("job_id", [*INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS])
     def test_every_sharded_or_e2e_job_keeps_the_timeout_the_shard_arithmetic_assumes(
         self, job_id
     ):

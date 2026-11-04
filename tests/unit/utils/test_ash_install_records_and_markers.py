@@ -198,7 +198,9 @@ class TestCredentialsInHints:
 
     def test_an_ssh_password_is_still_stripped(self):
         assert (
-            ash_install._without_credentials("ssh://deploy:secret@git.example/repo.git")  # pragma: allowlist secret
+            ash_install._without_credentials(
+                "ssh://deploy:secret@git.example/repo.git"
+            )  # pragma: allowlist secret
             == "ssh://git.example/repo.git"
         )
 

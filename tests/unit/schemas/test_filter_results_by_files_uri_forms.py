@@ -361,13 +361,19 @@ class TestWindowsForms:
             pytest.param({"/tmp": "private/tmp"}, True, id="relative-into-the-root"),  # nosec B108
             pytest.param({"/tmp": "/private/tmp"}, True, id="absolute-into-the-root"),  # nosec B108
             pytest.param(
-                {"/tmp": "../private/tmp"}, True, id="collapsed-against-slash"  # nosec B108
+                {"/tmp": "../private/tmp"},
+                True,
+                id="collapsed-against-slash",  # nosec B108
             ),
             pytest.param(
-                {"/tmp": "net/example.com/tmp"}, False, id="into-another-tree"  # nosec B108
+                {"/tmp": "net/example.com/tmp"},
+                False,
+                id="into-another-tree",  # nosec B108
             ),
             pytest.param(
-                {"/tmp": "/net/example.com/tmp"}, False, id="absolute-elsewhere"  # nosec B108
+                {"/tmp": "/net/example.com/tmp"},
+                False,
+                id="absolute-elsewhere",  # nosec B108
             ),
             pytest.param({}, False, id="not-a-link"),
         ],

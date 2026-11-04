@@ -199,12 +199,15 @@ def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
     body is still hidden, line by line and whole."""
     lines = rac._value_lines((_PEM,))
 
-    assert "-----BEGIN PRIVATE KEY-----" not in lines  #gitleaks:allow  # pragma: allowlist secret
+    assert (
+        "-----BEGIN PRIVATE KEY-----" not in lines
+    )  # gitleaks:allow  # pragma: allowlist secret
     assert "-----END PRIVATE KEY-----" not in lines
     assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" in lines
     assert _PEM in lines
     shown = rac._streamed_line(
-        "a finding: -----BEGIN PRIVATE KEY----- in a file", (_PEM,)  # pragma: allowlist secret
+        "a finding: -----BEGIN PRIVATE KEY----- in a file",
+        (_PEM,),  # pragma: allowlist secret
     )
     assert "BEGIN PRIVATE KEY" in shown  # pragma: allowlist secret
 
