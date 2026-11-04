@@ -33,6 +33,8 @@ from typing import List, Set
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 pytestmark = pytest.mark.unit
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
@@ -98,7 +100,9 @@ def _config_less_calls(source: str, label: str) -> List[str]:
 
 def _test_files() -> List[Path]:
     return sorted(
-        path for path in TESTS_ROOT.rglob("*.py") if "__pycache__" not in path.parts
+        path
+        for path in iter_repo_files(TESTS_ROOT, skip_dirs=frozenset({"__pycache__"}))
+        if path.suffix == ".py"
     )
 
 
