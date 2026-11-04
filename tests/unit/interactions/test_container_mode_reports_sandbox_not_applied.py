@@ -45,6 +45,12 @@ RUNNER_NAME = "ash-test-oci-runner"
 WARNING = "is not applied in container mode"
 REFUSAL = "cannot be used with --mode container"
 CHANGED_FILES_REFUSAL = "is not supported with --mode container"
+# The default image stage is non-root, and ci on Windows (_resolve_build_target).
+DEFAULT_IMAGE = (
+    "automated-security-helper:ci"
+    if sys.platform == "win32"
+    else "automated-security-helper:non-root"
+)
 
 _STAND_IN = """\
 import json, os, sys
@@ -754,7 +760,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
     """
 
     def test_the_forwarded_invocation_is_the_exact_handed_over_argv(
-        self, tmp_path, stand_in, project
+        self, tmp_path, stand_in, project, monkeypatch
     ):
         """The runner is asked to run, and every forwarded argument is pinned.
 
@@ -763,6 +769,9 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         the scan inside. COLUMNS and LINES are set in the environment because
         the host forwards the console size it sees.
         """
+        # The wrapper forwards these runner markers when set (RUNNER_MARKERS_ON_ARGV).
+        for marker in ("GITHUB_ACTIONS", "TF_BUILD", "TEAMCITY_VERSION"):
+            monkeypatch.delenv(marker, raising=False)
         (project / ".ash").mkdir()
         (project / ".ash" / ".ash.yaml").write_text(
             'project_name: repo\nsandbox:\n  mode: "bwrap"\n', encoding="utf-8"
@@ -789,6 +798,8 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
             "-e",
             "ASH_DEBUG=NO",
             "-e",
+            "ASH_OUTER_RUN_ID",
+            "-e",
             "ASH_SCAN_SOURCE=",
             "--mount",
             f"type=bind,source={project},destination=/src,readonly",
@@ -798,7 +809,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
             "COLUMNS=80",
             "-e",
             "LINES=24",
-            "automated-security-helper:non-root",
+            DEFAULT_IMAGE,
             "ash",
             "--source-dir",
             "/src",
@@ -806,6 +817,8 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
             "/out",
             "--no-progress",
             "--no-color",
+            "--fail-on-findings",
+            "--fail-on-incomplete-scanners",
             "--phases",
             "convert",
             "--phases",
@@ -841,7 +854,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         (project / ".ash" / ".ash.yaml").write_text(
             "project_name: repo\nsandbox:\n  mode: not-a-mode\n", encoding="utf-8"
         )
-        inner = run_args[run_args.index("automated-security-helper:non-root") + 1 :]
+        inner = run_args[run_args.index(DEFAULT_IMAGE) + 1 :]
         assert inner[0] == "ash", inner
         inner_out = tmp_path / "inner-out"
         mapped = [
