@@ -1810,7 +1810,7 @@ def install_dependencies(
 
     # Said once, after the installs, for packages added to ASH's own environment
     # when the tool that owns it removes them again later (uv tool upgrade, a
-    # rebuilt uvx environment).
+    # rebuilt uvx environment, a uv project's `uv sync`).
     rebuild_note = (
         environment_rebuild_note(ash_environment_requirements)
         if ash_environment_requirements

@@ -185,6 +185,9 @@ def _fake_machine(monkeypatch: pytest.MonkeyPatch, scenario: Scenario) -> None:
 
     monkeypatch.setattr(python_installer, "pip_is_importable", lambda: True)
     monkeypatch.setattr(python_installer, "is_uv_tool_environment", lambda: False)
+    # CI's venv is a uv project's `.venv`, which would add the `uv sync` note; a pip
+    # or pipx install has no such note.
+    monkeypatch.setattr(python_installer, "uv_project_directory", lambda: None)
 
 
 class _FakeUvRunner(UVToolRunner):
