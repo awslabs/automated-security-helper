@@ -160,10 +160,18 @@ class _ItemWithMarker:
 
     def __init__(self, marker: str) -> None:
         self.marker = marker
-        self.keywords = {marker: True}
+        self.nodeid = f"fake-item-{marker}"
+        # Exactly one tier marker per fake, as the collection hook requires of every
+        # item. Never "unit" as the filler: a unit item marked slow is refused.
+        self.markers = (
+            {marker}
+            if marker in ("unit", "integration", "e2e")
+            else {marker, "integration"}
+        )
+        self.keywords = dict.fromkeys(self.markers, True)
 
     def get_closest_marker(self, name):
-        return object() if name == self.marker else None
+        return object() if name in self.markers else None
 
     def add_marker(self, marker) -> None:
         pass

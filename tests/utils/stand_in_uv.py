@@ -141,7 +141,7 @@ PROBE_DRIVER = reaching_the_stand_in(
             config=AshConfig(project_name="stand-in-control"),
         )
     )
-    scanner._resolve_deferred_tool_version()
+    scanner.resolve_deferred_tool_version()
     """
 )
 

@@ -254,8 +254,12 @@ def test_a_corrupt_archive_is_a_failed_input_that_fails_the_scan(corrupt):
     # clash.zip is not a failed input: the converter refuses a member written over
     # a directory alone (archive_converter's _MEMBER_OVER_A_DIRECTORY), so the
     # directory's own member is extracted and scanned.
-    for leftover in ("ok.py", "ok_tar.py"):
+    for leftover in ("ok.py",):
         assert not list((output / "converted").rglob(leftover)), (
             f"partial output left: {leftover}"
         )
+    # cut.tar is extracted in part by design: the listing ends without an
+    # end-of-archive block, the extracted member stays and is scanned, and the archive
+    # is a failed input (archive_converter._record_extracted_in_part keeps the member).
+    assert list((output / "converted").rglob("ok_tar.py"))
     assert "could not convert 2 inputs:" in out

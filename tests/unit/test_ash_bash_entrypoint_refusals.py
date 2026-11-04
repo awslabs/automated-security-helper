@@ -1238,11 +1238,12 @@ def test_a_letter_is_shown_as_typed_in_a_utf8_locale(run_ash, bare_path):
     assert "The image name 'caf\xe9' starts" in result.stderr, result.stderr
 
 
-def test_a_quoted_value_keeps_its_letters_in_a_utf8_locale(run_ash, bare_path):
-    """Quoted for its ESC, in the caller's locale: the letter is not made octal.
+def test_a_value_with_a_control_is_quoted_in_the_c_locale(run_ash, bare_path):
+    """A value holding a control character is quoted in the C locale, even when the
+    caller's locale is UTF-8, so no partial escape sequence reaches the terminal.
 
-    Only a value holding a format character is quoted in the C locale, because only
-    there does a UTF-8 locale's %q leave a character raw.
+    The letter is made octal with the rest: a UTF-8 locale's %q leaves a multibyte
+    control's lead byte raw and escapes only its final byte.
     """
     locale_name = _utf8_locale()
     if locale_name is None:
@@ -1258,7 +1259,9 @@ def test_a_quoted_value_keeps_its_letters_in_a_utf8_locale(run_ash, bare_path):
 
     assert result.returncode == WRAPPER_REFUSAL_EXIT, result.stdout + result.stderr
     assert calls == []
-    assert "The image name '$'caf\xe9\\E[31m'' starts" in result.stderr, result.stderr
+    assert "The image name '$'caf\\303\\251\\E[31m'' starts" in result.stderr, (
+        result.stderr
+    )
 
 
 def _function_source(name: str) -> str:
