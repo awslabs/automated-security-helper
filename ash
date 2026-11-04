@@ -93,8 +93,9 @@ is_relative_path() {
 # to the terminal ($'\E]8;;...' instead of an OSC 8 link). A value holding a format
 # character is quoted in the C locale, which writes every byte above 0x7f as octal:
 # in a UTF-8 locale %q leaves a format character raw, and U+202E shown in place
-# reverses the text after it. Any other value is quoted in the caller's locale, so
-# its letters stay as typed. A printable value holding a backslash or $' is quoted
+# reverses the text after it. A value holding a control character is quoted in the
+# C locale too, so no partial escape sequence reaches the terminal. Any other value
+# is quoted in the caller's locale, so its letters stay as typed. A printable value holding a backslash or $' is quoted
 # too: printed as typed, the text $'a\E[2Jb' looked like the quoting of a real ESC.
 # Every quoted form holds a backslash and no value printed as typed does, so each
 # display reads back to one value, and a path with a space still reads as typed.
@@ -1507,12 +1508,16 @@ create_output_dir
 # link that sits in the scanned tree -- is marked
 # (--config-from-scanned-repository for the --config,
 # --config-file-from-scanned-repository for the ASH_CONFIG file), as the
-# launcher's _config_marks and _env_config_marks mark it. A file in some other git
-# checkout is marked --config-file-from-another-checkout, by its container path,
-# when a local scan would count it as in one (in_another_checkout), as the
-# launcher's _another_checkout_marks marks it. When no --config was
+# launcher's _config_marks and _env_config_marks mark it. A --config file in
+# some other git checkout is marked --config-file-from-another-checkout, by its
+# container path, when a local scan would count it as in one
+# (in_another_checkout), as the launcher's _another_checkout_marks marks it. An
+# ASH_CONFIG file in some other checkout is promoted to the per-file repository
+# mark, as the launcher promotes it: it takes
+# --config-file-from-scanned-repository, never the another-checkout mark, and
+# the chain mark rides with it. When no --config was
 # given, the ASH_CONFIG file is also named to the scan as its --config (with
-# --config-from-scanned-repository when marked), whether or not the source
+# --config-from-scanned-repository when marked in either way), whether or not the source
 # directory holds a config of its own: ASH_CONFIG is the environment variable of
 # the CLI's --config option, so for ./ash (a command-line entry, as `ash --mode
 # container` is) the file is the option's value, and an option wins over
@@ -1642,11 +1647,8 @@ if [[ "${NO_RUN}" = "NO" && ( -z "${SUBCOMMAND}" || "${SUBCOMMAND}" = "scan" ) ]
       CONFIG_RUN_ARGS+=(--mount "${CARRIED_MOUNT}")
     fi
     CONFIG_PROVENANCE_ARGS+=(--ash-config-from-host "${CARRIED_INNER}")
-    if [[ "${CARRIED_MARK}" = "YES" ]]; then
+    if [[ "${CARRIED_MARK}" = "YES" || "${CARRIED_ELSEWHERE}" = "YES" ]]; then
       CONFIG_PROVENANCE_ARGS+=(--config-file-from-scanned-repository "${CARRIED_INNER}")
-    fi
-    if [[ "${CARRIED_ELSEWHERE}" = "YES" ]]; then
-      CONFIG_PROVENANCE_ARGS+=(--config-file-from-another-checkout "${CARRIED_INNER}")
     fi
     # With no --config given, the ASH_CONFIG file is also the scan's --config,
     # as it is for a scan on the host: the CLI reads the variable as the
@@ -1654,7 +1656,7 @@ if [[ "${NO_RUN}" = "NO" && ( -z "${SUBCOMMAND}" || "${SUBCOMMAND}" = "scan" ) ]
     # a discoverable config. An explicit --config already won above.
     if [[ "${CONFIG_GIVEN}" = "NO" ]]; then
       CONFIG_PROVENANCE_ARGS+=(--config "${CARRIED_INNER}")
-      if [[ "${CARRIED_MARK}" = "YES" ]]; then
+      if [[ "${CARRIED_MARK}" = "YES" || "${CARRIED_ELSEWHERE}" = "YES" ]]; then
         CONFIG_PROVENANCE_ARGS+=(--config-from-scanned-repository)
       fi
     fi
