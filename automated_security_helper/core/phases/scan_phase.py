@@ -67,7 +67,10 @@ from automated_security_helper.models.scanner_validation import (
     scanner_display_name,
 )
 from automated_security_helper.core.phases.scanner_selection import operator_selection
-from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
+from automated_security_helper.core.phases.scanner_executor import (
+    ScannerExecutor,
+    _inputs_not_scanned,
+)
 from automated_security_helper.core.phases.scan_result_processor import (
     ScanResultProcessor,
 )
@@ -1939,6 +1942,13 @@ class ScanPhase(EnginePhase):
                             results_container = ScanResultsContainer.for_missing_deps(
                                 display_name, reason=missing_reason
                             )
+                            # The inputs a scanner skipped while its dependency
+                            # check failed (offline, no source manifest audit)
+                            # are on the plugin, and scan() never runs after a
+                            # False, so this is the only place they reach the row.
+                            not_scanned = _inputs_not_scanned(plugin_instance)
+                            if not_scanned:
+                                results_container.inputs_not_scanned = not_scanned
                             if missing_reason:
                                 results_container.add_error(missing_reason)
 
