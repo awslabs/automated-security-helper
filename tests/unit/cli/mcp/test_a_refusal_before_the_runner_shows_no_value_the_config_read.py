@@ -30,7 +30,7 @@ from automated_security_helper.utils.log import ASHLogger
 pytestmark = pytest.mark.unit
 
 SESSION = "refused-before-running"
-SECRET = "a-value-the-session-config-read"
+SECRET = "a-value-the-session-config-read"  # pragma: allowlist secret
 
 
 def _a_scan(tmp_path: Path, registry: ScanRegistry) -> tuple[Path, Path, str]:

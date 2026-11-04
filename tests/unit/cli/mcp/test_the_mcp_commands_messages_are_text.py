@@ -16,6 +16,7 @@ where it is printed.
 
 from __future__ import annotations
 
+import os
 import re
 
 import pytest
@@ -39,10 +40,10 @@ def _invoke(*args):
     return CliRunner().invoke(app, ["mcp", *args])
 
 
-def _assert_shown_once(result, count: int = 1) -> None:
+def _assert_shown_once(result, count: int = 1, needle: str = TEXT) -> None:
     written = _plain(result.output)
     assert "MarkupError" not in written, written
-    assert written.count(TEXT) == count, written
+    assert written.count(needle) == count, written
     # Escaped once: an escape left visible would show as "\[".
     assert "\\[" not in written, written
 
@@ -62,7 +63,10 @@ def test_a_missing_profile_file_is_quoted_as_text(tmp_path):
     result = _invoke("--profile", f"p={missing}")
 
     assert result.exit_code == 3, result.output
-    _assert_shown_once(result)
+    # pathlib splits TEXT's "/" into path separators, so the command can only
+    # show the platform rendering of the built path (os.sep between the
+    # pieces); the escaping under test is unchanged.
+    _assert_shown_once(result, needle=TEXT.replace("/", os.sep))
 
 
 def test_a_failures_class_name_is_quoted_as_text(monkeypatch):

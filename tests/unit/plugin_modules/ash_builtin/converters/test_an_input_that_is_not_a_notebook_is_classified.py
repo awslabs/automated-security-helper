@@ -442,14 +442,17 @@ def test_an_acceptance_of_an_undecodable_name_is_still_registered(world):
     another string wherever the name holds undecodable bytes (a converter
     plugin can hand record_failed_input any path), so a re-match on the record
     could not find the entry that matched."""
-    import os as _os
-
     from automated_security_helper.core.phases.convert_phase import (
         _register_accepted_suppressions,
     )
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-    name = _os.fsdecode(b"an\xffalysis.ipynb")
+    # Built explicitly rather than through os.fsdecode: on Windows the
+    # filesystem encoding is utf-8 with surrogatepass, which refuses the
+    # lone 0xff byte before any product line runs. surrogateescape gives
+    # the same undecodable-bearing name on every platform, and no file of
+    # this name is ever created.
+    name = b"an\xffalysis.ipynb".decode("utf-8", "surrogateescape")
     _accept_with(world, _accepting(name))
     world.converter.record_failed_input(
         str(world.converter.context.source_dir / name),

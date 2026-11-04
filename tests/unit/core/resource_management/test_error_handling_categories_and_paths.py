@@ -107,7 +107,9 @@ class TestSafeReadJsonFileNamesEachFailure:
 
     def test_a_link_at_the_file_name_is_not_followed(self, tmp_path):
         outside = tmp_path / "outside.json"
-        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")
+        outside.write_text(
+            '{"secret": "elsewhere"}', encoding="utf-8"
+        )  # pragma: allowlist secret
         link = tmp_path / "ASH.ScanResults.json"
         _symlink_or_skip(link, outside)
 
@@ -130,7 +132,9 @@ class TestSafeReadJsonFileNamesEachFailure:
         while the name already holds a link: the reopen by name followed it and
         returned the file outside the tree as the scan's own."""
         outside = tmp_path / "outside.json"
-        outside.write_text('{"secret": "elsewhere"}', encoding="utf-8")
+        outside.write_text(
+            '{"secret": "elsewhere"}', encoding="utf-8"
+        )  # pragma: allowlist secret
         link = tmp_path / "ASH.ScanResults.json"
         _symlink_or_skip(link, outside)
         regular = os.lstat(outside)
@@ -261,10 +265,10 @@ class TestValidateDirectoryPathCategories:
 class TestSourceDirectoryErrorOnPathsTheSystemRefuses:
     """The category is this surface's; the text is the one every surface shares.
 
-    utils/directory_refusals.py (the CLI, ./ash and Invoke-ASH) words a NUL as
-    "does not exist" and a name too long as "cannot be entered", and three places
-    promise that source_directory_error gives the same text for the same input;
-    "is not a valid path" was a fourth wording no other surface used.
+    utils/directory_refusals.py (the CLI) words a NUL as "is not a valid path"
+    (exit-codes.md's line for a path the OS cannot take) and a name too long as
+    "cannot be entered", and three places promise that source_directory_error
+    gives the same text for the same input.
     """
 
     def test_an_embedded_nul_is_an_invalid_path_worded_as_the_cli_words_it(self):
@@ -277,7 +281,7 @@ class TestSourceDirectoryErrorOnPathsTheSystemRefuses:
         assert error is not None
         assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
         assert str(error) == source_dir_refusal("proj\x00ect")
-        assert "does not exist" in str(error)
+        assert "is not a valid path" in str(error)
 
     def test_a_name_too_long_is_an_invalid_path_worded_as_the_cli_words_it(
         self, monkeypatch
@@ -301,7 +305,7 @@ class TestSourceDirectoryErrorOnPathsTheSystemRefuses:
 
     def test_no_text_of_this_helper_is_outside_the_shared_list(self):
         """Every problem phrase source_directory_error can produce is one the
-        shared wording module lists; the fourth phrase was not."""
+        shared wording module lists, the NUL refusal's included."""
         import inspect
 
         source = inspect.getsource(source_directory_error)
@@ -311,9 +315,13 @@ class TestSourceDirectoryErrorOnPathsTheSystemRefuses:
                 fromlist=["source_dir_refusal"],
             ).source_dir_refusal
         )
-        for phrase in ("does not exist", "is not a directory", "cannot be entered"):
+        for phrase in (
+            "does not exist",
+            "is not a directory",
+            "cannot be entered",
+            "is not a valid path",
+        ):
             assert phrase in source and phrase in shared
-        assert "is not a valid path" not in source
 
 
 class TestValidateOutputDirectoryPathCategories:

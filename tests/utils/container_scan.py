@@ -19,6 +19,7 @@ play the command they just built.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -46,7 +47,14 @@ CONTAINER_ROOTS = (
     "/ash-env-config",
 )
 
-IMAGE_NAME = "automated-security-helper:non-root"
+#: The image the run command names with ASH_IMAGE_NAME unset:
+#: ``automated-security-helper:`` plus the host's default build target, which
+#: is ``non-root``, and ``ci`` on Windows (run_ash_container's
+#: ``_resolve_build_target``), so the harness finds the image the product
+#: really derives on the runner it is on.
+IMAGE_NAME = "automated-security-helper:" + (
+    "ci" if sys.platform == "win32" else "non-root"
+)
 
 
 def assemble_run_command(

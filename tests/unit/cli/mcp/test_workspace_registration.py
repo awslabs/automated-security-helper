@@ -435,11 +435,17 @@ class TestTheRegistryComparesRealPaths:
         second_dir = tmp_path / "proj-backup"
         first_dir.mkdir()
         second_dir.mkdir()
-        output = tmp_path / "out"
-        output.mkdir()
+        # Each registration gets its own output directory: the registry refuses
+        # a second source directory registering into an output tree another
+        # active scan writes (_shares_an_output_tree), and that refusal is not
+        # this test's subject, which is the directory canonicalisation.
+        first_output = tmp_path / "out"
+        second_output = tmp_path / "out-backup"
+        first_output.mkdir()
+        second_output.mkdir()
 
-        first = self._register(isolated_registry, first_dir, output)
-        second = self._register(isolated_registry, second_dir, output)
+        first = self._register(isolated_registry, first_dir, first_output)
+        second = self._register(isolated_registry, second_dir, second_output)
 
         assert first != second
         assert isolated_registry.get_scan_count() == 2

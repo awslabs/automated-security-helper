@@ -227,7 +227,7 @@ takes.
 
 ```text
 client_supplied: false
-expiration: '2027-01-08'
+expires: '2027-01-08'
 line_end: 6
 line_start: 6
 path: app.py
@@ -250,7 +250,7 @@ global_settings:
       line_start: 6
       line_end: 6
       reason: "MD5 builds a cache key; it does not protect anything"
-      expiration: "2027-06-30"
+      expires: "2027-06-30"
 EOF
 ```
 
@@ -262,7 +262,7 @@ ash config validate
 
 It checks the config a scan of the project would use, the way the scan loads it, and ends
 with `Configuration is valid! A scan accepts it.` It may also warn that `project_name` is not
-set, which a scan accepts. A typo in an optional key such as `expiry` for `expiration` does
+set, which a scan accepts. A typo in an optional key such as `expiry` for `expires` does
 not make the file invalid: validate still accepts it, the entry suppresses nothing until the
 key is fixed, and the scan that loads the config warns, naming the key with a did-you-mean
 (`fail_on_unknown_keys: true` makes it an error, the default from ASH v4). A wrong value or a

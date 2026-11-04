@@ -68,7 +68,7 @@ PROBE_TIMEOUT = getattr(npm_audit_scanner, "_VERSION_PROBE_TIMEOUT_SECONDS", Non
 
 pytestmark = pytest.mark.unit
 
-TOKEN = "Zq7Kx9Lm2Pw4Nv"
+TOKEN = "Zq7Kx9Lm2Pw4Nv"  # gitleaks:allow
 GHSA = "https://github.com/advisories/GHSA-xvch-5gv4-984h"
 
 

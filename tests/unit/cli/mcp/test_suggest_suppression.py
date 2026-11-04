@@ -158,7 +158,7 @@ class TestExpirationDefault:
 
         assert result["success"] is True
         expected = (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
-        assert result["json"]["expiration"] == expected
+        assert result["json"]["expires"] == expected
 
     def test_explicit_expiration_overrides_default(self, tmp_path):
         vuln = _make_vuln()
@@ -172,7 +172,7 @@ class TestExpirationDefault:
         )
 
         assert result["success"] is True
-        assert result["json"]["expiration"] == "2030-12-31"
+        assert result["json"]["expires"] == "2030-12-31"
 
 
 class TestJustification:

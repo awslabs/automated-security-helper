@@ -118,13 +118,28 @@ class TestConfigGetRefusesUnparseableFiles:
 
     INVALID_YAML = "project_name: test\nreporters: [unclosed\n"
 
+    @pytest.fixture(autouse=True)
+    def _wrapping_controlled(self, monkeypatch):
+        """The refusal names the whole path on one line; the sibling module
+        (test_a_constructor_s_value_error_is_a_parse_refusal) pins the same
+        refusal with the console's wrapping controlled, so a long tmp path is
+        not broken across lines before the substring compare below."""
+        monkeypatch.setenv("COLUMNS", "400")
+        monkeypatch.setenv("NO_COLOR", "1")
+
     def _assert_refused(self, result, path):
+        from automated_security_helper.config.config_sources import (
+            describe_config_path,
+        )
+
         assert result.exit_code == 3, result.output
         # The parse refusal is printed as it is: it already names the file and
         # says it could not be parsed, with no restating header (W2).
         assert "could not be parsed" in result.output
         assert "could not parse" not in result.output.replace("could not be parsed", "")
-        assert str(path) in result.output
+        # Compared in the product's own rendering (describe_config_path, the
+        # one form on every platform), not str(path), whose separator differs.
+        assert describe_config_path(path) in result.output
         # The defaults were not printed in its place.
         assert "global_settings" not in result.output
 

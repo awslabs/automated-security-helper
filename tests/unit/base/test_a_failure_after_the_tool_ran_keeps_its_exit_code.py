@@ -109,7 +109,15 @@ TOOL_STDERR = "warning: one\nwarning: two \x1b[31mred\n"
 
 def _tool_with_stderr(exit_code: int) -> List[str]:
     # It prints to stdout too, so the stdout log is the first write that fails.
-    writes = f"sys.stderr.write({TOOL_STDERR!r}); print('ran')"
+    # The stderr bytes go through sys.stderr.buffer: a text-mode write on
+    # Windows translates "\n" to "\r\n", and the product reads the log back as
+    # raw bytes with no newline normalization (plugin_base.read_log_bounded),
+    # so a text-mode write would make the log's bytes differ from TOOL_STDERR
+    # there (and shift what the first bounded bytes are).
+    writes = (
+        f"sys.stderr.buffer.write({TOOL_STDERR.encode('utf-8')!r}); "
+        "sys.stderr.buffer.flush(); print('ran')"
+    )
     return [sys.executable, "-c", f"import sys; {writes}; sys.exit({exit_code})"]
 
 

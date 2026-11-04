@@ -585,6 +585,12 @@ class SymbolResolver:
         # reads either separator; on POSIX a backslash is a character of a file
         # name, and rewriting it to "/" checked a suppression against a file other
         # than the finding's.
+        if "\x00" in file_path:
+            # No file name holds a NUL. Refused here explicitly: whether
+            # Path.resolve() raises ValueError for an embedded NUL varies by
+            # interpreter and platform (3.14 on Windows returns a path), and a
+            # NUL-holding path must never read as inside the source dir.
+            return None
         candidate = Path(undecodable_of_text(file_path))
         if not candidate.is_absolute():
             candidate = self._source_dir / candidate

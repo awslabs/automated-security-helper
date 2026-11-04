@@ -195,10 +195,17 @@ def test_git_is_asked_with_the_repositorys_hooks_and_fsmonitor_turned_off(
 def test_git_is_asked_about_the_repository_the_directory_is_in(tmp_path, monkeypatch):
     """The repository is named on the command line, found from the directory's
     ancestors, so git's own search from inside the directory plays no part; the
-    directory is the pathspec, taken literally."""
+    directory is the pathspec, taken literally.
+
+    The asserted argv is the case-exact filesystem's arm, pinned by stubbing
+    ``output_name_key``: on a case-insensitive filesystem (macOS, Windows)
+    ``_pathspec_options`` passes no ``--literal-pathspecs`` and
+    ``_pathspec_element`` wraps the pathspec as ``:(literal,icase)<relative>``
+    instead, a deliberate per-platform shape (scan_output_dirs:527-552)."""
     from automated_security_helper.utils import scan_output_dirs
     from automated_security_helper.utils import subprocess_utils
 
+    monkeypatch.setattr(scan_output_dirs, "output_name_key", lambda name: name)
     seen = {}
 
     class _Result:

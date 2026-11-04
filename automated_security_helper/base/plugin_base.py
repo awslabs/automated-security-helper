@@ -2210,6 +2210,12 @@ class PluginBase(UVToolMixin, BaseModel):
                     )
                     if uv_result is not None:
                         response = uv_result
+                        # Which arm ran, as data beside the run's own fields:
+                        # the refused-exit-code record names it with the
+                        # resolved program, so a failure can be tied to the
+                        # launch that produced it. setdefault, so a response a
+                        # test double built with the key is left as it said.
+                        uv_result.setdefault("launch_arm", "uv-tool")
                         # Processed exactly once. The uv path hands a run that
                         # returned to _process_command_response itself, but a
                         # failure after its child started, or a response whose
@@ -2259,6 +2265,9 @@ class PluginBase(UVToolMixin, BaseModel):
                 # with these: a limit read from the environment never reaches it.
                 values=run_values,
             )
+            # Which arm ran, beside the runner's own resolved_program: see the
+            # uv branch above.
+            response.setdefault("launch_arm", "direct")
 
             self._process_command_response(response)
             self._record_response(response, timeout, invoked)

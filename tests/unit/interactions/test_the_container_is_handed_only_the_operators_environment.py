@@ -18,6 +18,7 @@ as ``--config`` fires exactly when a local scan would fall back to it.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import List
 
@@ -1514,7 +1515,9 @@ def test_an_unmountable_env_chosen_file_path_shows_no_value(layout, monkeypatch)
         ENVIRONMENT_VALUE_SHOWN,
     )
 
-    value = 'chain"dir'
+    # A single quote: distinctive, and legal in an NTFS name, where a double
+    # quote is not, so the fixture directory can exist on every platform.
+    value = "chain'dir"
     monkeypatch.setenv("ASH_CHAIN_Q", value)
     _write(layout["w"] / value / "base.yaml", "project_name: b\n")
     config = _write(layout["w"] / "ash.yaml", "extends: ${ASH_CHAIN_Q}/base.yaml\n")
@@ -1616,8 +1619,11 @@ def test_the_env_file_holds_the_values_and_only_this_user_reads_it(layout, monke
         layout["out"],
     ) as (directory, path):
         assert path.read_text(encoding="utf-8") == f"{OPERATOR_VAR}={OPERATOR_VALUE}\n"
-        assert stat.S_IMODE(_os.stat(path).st_mode) == 0o600
-        assert stat.S_IMODE(_os.stat(directory).st_mode) == 0o700
+        if sys.platform != "win32":
+            # The 0600/0700 modes are the shipped shape where chmod is
+            # honored; Windows st_mode carries no POSIX permission bits.
+            assert stat.S_IMODE(_os.stat(path).st_mode) == 0o600
+            assert stat.S_IMODE(_os.stat(directory).st_mode) == 0o700
         assert directory.is_relative_to(env_root), directory
 
     with pytest.raises(rac.ContainerInputError, match="--env-file"):

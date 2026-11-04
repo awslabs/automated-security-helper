@@ -32,6 +32,14 @@ from tests.utils.helpers import importing_this_checkout, mark_git_checkout
 
 ESC, BEL = chr(0x1B), chr(0x07)
 
+#: These fixtures write a file NAMED with control characters, which NTFS
+#: refuses, so on Windows the setup fails before any product code runs.
+_posix_file_names = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the forged name holds control characters, which NTFS refuses in "
+    "file names, so the fixture cannot be written there",
+)
+
 #: A raw control left in the text: C0 and C1, other than tab and newline.
 _RAW_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
@@ -88,6 +96,7 @@ _ARCHIVING = (
 
 
 @pytest.mark.unit
+@_posix_file_names
 def test_a_forged_record_in_a_base_name_stays_on_the_warnings_line(tmp_path):
     """ash.log keeps a message's newlines, so a base named
     "b<newline><timestamp><tab>INFO<tab>scan_phase.py:1<tab>FORGED.yaml" is shown
@@ -141,10 +150,14 @@ def test_a_section_keys_controls_are_shown_once_in_ash_log(tmp_path):
         written
     )
     assert "\\\\" not in written, repr(written)
-    assert not _RAW_CONTROL.search(written), repr(written)
+    # The handler is a text-mode FileHandler, which on Windows terminates its
+    # lines with CRLF: that carriage return is the platform line terminator,
+    # not a leaked control, so it is stripped before the raw-control scan.
+    assert not _RAW_CONTROL.search(written.replace("\r\n", "\n")), repr(written)
 
 
 @pytest.mark.unit
+@_posix_file_names
 def test_a_sandbox_grants_file_name_is_shown_once_in_ash_log(tmp_path):
     """The sandbox-grant warning names the extends base that set
     network_scanners: "b<ESC>]<BEL><newline>x.yaml", each control shown once and
@@ -227,6 +240,7 @@ def _the_one_warning(records, start: str) -> logging.LogRecord:
 
 
 @pytest.mark.unit
+@_posix_file_names
 def test_the_sandbox_grant_warning_is_logged_as_text_not_markup(tmp_path):
     """A base named "b[red]<ESC>.yaml": "[red]" is a Rich style tag, which would
     restyle the rest of the line and drop from it. The record carries markup
@@ -283,6 +297,7 @@ mcp_get_config(search_dir=sys.argv[1])
 
 
 @pytest.mark.integration
+@_posix_file_names
 def test_get_config_in_a_fresh_process_writes_no_control_from_a_base_name(tmp_path):
     """A base named "b<ESC>]52;c;ZXZpbA==<BEL><newline>::add-mask::hidden.yaml": an
     OSC 52 clipboard write, and a line GitHub Actions reads as a command. MCP

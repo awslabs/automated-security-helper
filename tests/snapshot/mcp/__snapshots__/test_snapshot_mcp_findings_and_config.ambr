@@ -2042,7 +2042,7 @@
     'result': dict({
       'json': dict({
         'client_supplied': False,
-        'expiration': '2031-01-31',
+        'expires': '2031-01-31',
         'line_end': 12,
         'line_start': 12,
         'path': 'src/app.py',
@@ -2052,7 +2052,7 @@
       'success': True,
       'yaml': '''
         client_supplied: false
-        expiration: '2031-01-31'
+        expires: '2031-01-31'
         line_end: 12
         line_start: 12
         path: src/app.py

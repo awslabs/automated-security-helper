@@ -29,7 +29,7 @@ from tests.unit.workspace.test_execution import (
 
 pytestmark = pytest.mark.unit
 
-SECRET = "hunter2-a-value-a-finding-exposed"
+SECRET = "hunter2-a-value-a-finding-exposed"  # pragma: allowlist secret
 
 
 @pytest.fixture(autouse=True)

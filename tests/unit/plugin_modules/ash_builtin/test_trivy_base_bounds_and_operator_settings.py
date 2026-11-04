@@ -2068,6 +2068,15 @@ def _skip_tokens(argv: list[str]) -> list[str]:
     return [a for a in argv if a.startswith(("--skip-dirs", "--skip-files"))]
 
 
+_DEFERRAL_IS_POSIX = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="where os.sep is not '/' ASH builds no skip token and says no "
+    "deferral, the separately pinned rule in "
+    "test_an_operator_list_left_to_trivy_says_nothing_where_ash_builds_no_skip_token",
+)
+
+
+@_DEFERRAL_IS_POSIX
 def test_an_operator_list_that_does_not_fit_is_left_to_trivy_not_cut_by_the_leftover(
     tmp_path, monkeypatch
 ):
@@ -2121,6 +2130,7 @@ def _count_the_ignored_path_walks(monkeypatch) -> list[str]:
     return walks
 
 
+@_DEFERRAL_IS_POSIX
 def test_an_operator_list_left_to_trivy_does_not_walk_the_ignored_paths(
     tmp_path, monkeypatch
 ):
@@ -2213,6 +2223,7 @@ def test_an_operator_list_left_to_trivy_says_nothing_where_ash_builds_no_skip_to
     _assert_the_warning_blames_the_operators_list(deferred_warning)
 
 
+@_DEFERRAL_IS_POSIX
 def test_the_deferral_warning_is_said_once_for_each_scan_of_the_scanner(
     tmp_path, monkeypatch
 ):
@@ -2241,6 +2252,7 @@ def test_the_deferral_warning_is_said_once_for_each_scan_of_the_scanner(
     assert f"{adds_none}converted scan" in second, second
 
 
+@_DEFERRAL_IS_POSIX
 def test_trivy_repo_also_leaves_an_operator_list_that_does_not_fit_to_trivy(
     tmp_path, monkeypatch
 ):

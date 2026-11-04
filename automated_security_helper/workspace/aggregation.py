@@ -1513,26 +1513,39 @@ class WorkspaceAggregator:
         return key
 
     def _make_spool_dir(self) -> None:
-        """Create the spool directory, replacing anything else at its name.
+        """Create the spool directory; a link at its name is refused, a file replaced.
 
-        A link there, or a file, is removed and never followed. Through a link to
-        a directory elsewhere, every project's run was written into that
-        directory, and the ``rmtree`` in :meth:`write` refused the link and left
-        them there. A committed entry at the spool stops the workspace before it
-        starts (core/committed_output.py); this covers one git does not track.
+        A link there is never followed and never silently removed: through a
+        link to a directory elsewhere, every project's run was written into
+        that directory, and the ``rmtree`` in :meth:`write` refused the link
+        and left them there. The refusal is the one ASH's other output names
+        give a link (``OutputDirLinkRefused``, the family the pre-scan check
+        and fs_guard raise), so nothing is written through it and the link is
+        left where it is for the operator to see. A committed entry at the
+        spool stops the workspace before it starts (core/committed_output.py);
+        this covers one git does not track. A plain file at the name is
+        removed, as before.
 
         Read with ``os.lstat`` and ``scanned_tree._is_link_stat``, not
         ``Path.is_symlink()``, which is False for a Windows junction: one at
         this name was taken for the spool directory and written through.
-        ``unlink`` removes a directory link or junction without entering it.
+        ``unlink`` removes a plain file without entering anything.
         """
+        from automated_security_helper.utils.output_dir_links import (
+            OutputDirLinkRefused,
+        )
         from automated_security_helper.utils.scanned_tree import _is_link_stat
 
         try:
             info: Optional[os.stat_result] = os.lstat(self.spool_dir)
         except FileNotFoundError:
             info = None
-        if info is not None and (_is_link_stat(info) or not stat.S_ISDIR(info.st_mode)):
+        if info is not None and _is_link_stat(info):
+            raise OutputDirLinkRefused(
+                f"{self.spool_dir.as_posix()} is a symlink, and ASH does not "
+                "write its workspace spool through a link"
+            )
+        if info is not None and not stat.S_ISDIR(info.st_mode):
             self.spool_dir.unlink()
         self.spool_dir.mkdir(parents=True, exist_ok=True)
 

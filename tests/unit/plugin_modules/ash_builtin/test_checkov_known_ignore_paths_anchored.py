@@ -7,6 +7,14 @@ skipped every file under any directory whose name merely ends in ``venv``
 (``devenv/``, ``prevenv/``) and ``node_modules/`` every file under
 ``old_node_modules/``, so IaC under such directories was silently left out of the
 scan. ``_skipped`` below applies the values the way checkov does.
+
+The anchor is a leading ``/``, never ``(^|/)`` or ``^``: a Windows launch route
+that re-reads the command line through cmd.exe split the ``(^|/)`` form at its
+unquoted ``|`` (the Install Method Validation failure), and cmd.exe consumes an
+unquoted ``^`` as its escape character. ``/NAME/`` carries no character cmd.exe
+acts on, and matches the same paths for every target ASH gives checkov, which is
+always absolute (``_known_ignore_skip_pattern``'s docstring has the one relative
+shape the old form covered and this one does not).
 """
 
 from __future__ import annotations
@@ -87,9 +95,65 @@ def test_the_known_directories_themselves_are_still_skipped(test_plugin_context,
 def test_every_known_ignore_path_is_anchored_to_a_path_component():
     for entry in KNOWN_IGNORE_PATHS:
         value = checkov_scanner._known_ignore_skip_pattern(entry)
-        assert value.startswith("(^|/)"), value
+        assert value.startswith("/"), value
         assert value.endswith("/"), value
         assert "\\." not in value, f"{value!r}: a dot is written [.], never \\."
+
+
+def test_every_known_ignore_value_survives_a_cmd_exe_re_read():
+    """No value holds a character cmd.exe acts on when it re-reads a line.
+
+    ``< > | & ^ ( )`` act when written bare (``subprocess_utils``'s
+    ``_CMD_CHARACTERS``), and ``%`` can pair into a variable name: the
+    ``(^|/)`` form was split at its ``|`` by a batch interpreter below
+    ``uv tool run`` on windows-latest, and an unquoted ``^`` is cmd.exe's
+    escape character, consumed silently. These values go through every launch
+    route byte-identical or the launch itself is wrong.
+    """
+    for entry in KNOWN_IGNORE_PATHS:
+        value = checkov_scanner._known_ignore_skip_pattern(entry)
+        acted_on = set(value) & set("<>|&^()%\"' \t")
+        assert not acted_on, f"{value!r} holds {sorted(acted_on)!r}"
+
+
+def test_a_root_level_directory_under_an_absolute_target_is_skipped(
+    test_plugin_context,
+):
+    # ASH always hands checkov an absolute target (_execute_scan's abspath), so
+    # every walked path starts with "/" and the leading-slash anchor covers a
+    # known directory at the scan root too.
+    values = _known_ignore_values(test_plugin_context)
+    assert _skipped(values, "/venv/lib/main.tf")
+    assert _skipped(values, "/repo/.venv/bin/template.yaml")
+
+
+def test_the_one_uncovered_shape_is_a_relative_root_named_like_a_known_dir(
+    test_plugin_context,
+):
+    """The documented limit of the leading-slash anchor, pinned on purpose.
+
+    A RELATIVE walked path whose first component is the known name (a scan
+    root directly named ``venv``, scanned by a relative path) was covered by
+    the old ``(^|/)`` form and is not by ``/NAME/``. No ASH invocation
+    produces it: ``_execute_scan`` makes the target absolute and checkov runs
+    from the filesystem root, so this is a limit of the value, not of the
+    scan. If this test ever matters, the walked paths stopped being absolute.
+    """
+    values = _known_ignore_values(test_plugin_context)
+    assert not _skipped(values, "venv/main.tf")
+
+
+def test_the_scanners_own_skip_values_are_the_portable_component_anchors(
+    test_plugin_context,
+):
+    """The argv-level pin: the values the scanner itself puts in its arguments.
+
+    One value per ``KNOWN_IGNORE_PATHS`` name, ``/NAME/`` with dots as ``[.]``,
+    and nothing else under the default config -- the exact bytes the Windows
+    launch route has to carry.
+    """
+    values = _known_ignore_values(test_plugin_context)
+    assert values == ["/[.]venv/", "/venv/", "/node_modules/"]
 
 
 def test_the_anchored_values_compile_in_checkovs_module_finder_regex():

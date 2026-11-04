@@ -512,9 +512,14 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 "line_start",
                 "line_end",
                 "reason",
-                "expiration",
             )
         }
+        # The report's key stays "expiration" (its readers and the committed
+        # report snapshots hold that shape); the value is read under the
+        # canonical "expires", which is how the environment record keys it
+        # (SHOWN_SUPPRESSION_FIELDS), so a date read from the environment is
+        # still quoted by its reference here.
+        data["expiration"] = shown("expires")
         for field in (*PACKAGE_SUPPRESSION_FIELDS, "symbol"):
             if getattr(suppression, field) is not None:
                 data[field] = shown(field)
@@ -626,7 +631,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
                 lines.append(f"- **Reason**: {_one_line(shown['reason'])}")
 
-                if suppression.expiration:
+                if suppression.expires:
                     lines.append(f"- **Expiration**: {_one_line(shown['expiration'])}")
 
                 lines.append("")

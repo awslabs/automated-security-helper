@@ -187,14 +187,20 @@ def test_the_scan_tool_judges_the_named_config_for_the_caller(own, target) -> No
 
 @pytest.mark.parametrize(
     "raw, shown",
-    [(True, f"${{{PROBE_VAR}:unset}}"), (False, f"<from ${{{PROBE_VAR}:unset}}>")],
+    [
+        # Raw output carries mcp_tools.ENV_VALUE_PREFIX ("!ENV ") before a value
+        # the loader takes from the environment, so a client can tell it from a
+        # string that only looks like one.
+        (True, f"!ENV ${{{PROBE_VAR}:unset}}"),
+        (False, f"<from ${{{PROBE_VAR}:unset}}>"),
+    ],
     ids=["raw", "resolved"],
 )
 def test_get_config_judges_the_named_config_for_the_caller(
     own, raw: bool, shown: str
 ) -> None:
-    """Raw shows an operator file's reference as written; resolved, the value it
-    read as the reference, marked, never the value."""
+    """Raw shows an operator file's reference marked as environment-read;
+    resolved, the value it read as the reference, marked, never the value."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     got = mcp_get_config(config_path=str(own), raw=raw, session_id=MINE)

@@ -63,7 +63,7 @@ pytestmark = [
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 
-_SECRET = "PRECHECKSECRET-7712"
+_SECRET = "PRECHECKSECRET-7712"  # pragma: allowlist secret
 
 
 class _Config(ScannerPluginConfigBase):

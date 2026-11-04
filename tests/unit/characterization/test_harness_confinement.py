@@ -1318,8 +1318,22 @@ _WRITES = {
     "chown": lambda out, tmp: os.chown(out / "victim.txt", os.getuid(), os.getgid()),
     "mkfifo": lambda out, tmp: os.mkfifo(out / "fifo"),
     "mknod": lambda out, tmp: os.mknod(out / "node"),
-    "setxattr": lambda out, tmp: os.setxattr(out / "victim.txt", "user.char", b"1"),
-    "removexattr": lambda out, tmp: os.removexattr(out / "victim.txt", "user.char"),
+    # CPython provides the xattr calls on Linux (and FreeBSD) only; elsewhere the
+    # cell would raise AttributeError before any harness guard could refuse.
+    "setxattr": pytest.param(
+        lambda out, tmp: os.setxattr(out / "victim.txt", "user.char", b"1"),
+        marks=pytest.mark.skipif(
+            not hasattr(os, "setxattr"),
+            reason="CPython has no os.setxattr on this platform",
+        ),
+    ),
+    "removexattr": pytest.param(
+        lambda out, tmp: os.removexattr(out / "victim.txt", "user.char"),
+        marks=pytest.mark.skipif(
+            not hasattr(os, "removexattr"),
+            reason="CPython has no os.removexattr on this platform",
+        ),
+    ),
     "copytree": lambda out, tmp: shutil.copytree(_tree(tmp), out / "tree"),
     "copystat": lambda out, tmp: shutil.copystat(_touch(tmp / "t"), out / "victim.txt"),
     "make-archive": lambda out, tmp: shutil.make_archive(
@@ -1792,8 +1806,11 @@ def test_a_source_file_that_was_changed_is_captured_under_its_resolved_name(char
     (char.src / "app.py").write_text("y\n", encoding="utf-8")
     direct = _argv_files(char, char.src / "app.py")
     relative = _argv_files(char, "../src/app.py", cwd=char.work)
-    assert list(direct) == list(relative) == [str(char.src / "app.py")]
-    assert relative[str(char.src / "app.py")].value == {"text": ["y\n"]}
+    # Captures are keyed on os.path.realpath, so a symlinked tmp root (macOS's
+    # /var -> /private/var) must not split the expectation from the capture.
+    expected = os.path.realpath(char.src / "app.py")
+    assert list(direct) == list(relative) == [expected]
+    assert relative[expected].value == {"text": ["y\n"]}
 
 
 def test_a_file_the_test_made_inside_its_tree_is_captured_as_before(char):
@@ -1813,8 +1830,9 @@ def test_dots_after_a_link_in_argv_name_the_parent_of_the_links_target(char):
     (char.work / "x").write_text("work\n", encoding="utf-8")
     (char.work / "deep" / "x").write_text("deep\n", encoding="utf-8")
     files = _argv_files(char, char.work / "link" / ".." / "x")
-    assert list(files) == [str(char.work / "deep" / "x")]
-    assert files[str(char.work / "deep" / "x")].value == {"text": ["deep\n"]}
+    expected = os.path.realpath(char.work / "deep" / "x")
+    assert list(files) == [expected]
+    assert files[expected].value == {"text": ["deep\n"]}
 
 
 def test_dots_after_a_link_that_leads_outside_are_not_judged_as_the_text_reads(
@@ -1839,8 +1857,9 @@ def test_dots_after_a_plain_directory_in_argv_are_captured_under_the_resolved_na
     (char.work / "sub").mkdir()
     (char.work / "x").write_text("work\n", encoding="utf-8")
     files = _argv_files(char, char.work / "sub" / ".." / "x")
-    assert list(files) == [str(char.work / "x")]
-    assert files[str(char.work / "x")].value == {"text": ["work\n"]}
+    expected = os.path.realpath(char.work / "x")
+    assert list(files) == [expected]
+    assert files[expected].value == {"text": ["work\n"]}
 
 
 # -- every audit entry --------------------------------------------------------------

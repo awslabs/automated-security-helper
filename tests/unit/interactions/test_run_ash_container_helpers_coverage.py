@@ -396,7 +396,29 @@ class _StubProcess:
 
 @pytest.fixture
 def stub_process(monkeypatch):
-    """Install a _StubProcess as the process run_cmd_direct will drive."""
+    """Install a _StubProcess as the process run_cmd_direct will drive.
+
+    Also emulates an ``os.waitid`` build whatever the host: CPython leaves
+    ``waitid`` out on macOS, where the discard helpers fall back to
+    ``process.poll()`` and consume the stub's scripted answers at points the
+    expected wait sequences do not model. The stand-in answers as a waitid
+    build does for a stub pid past the kernel's pid space (ECHILD), so the
+    record is dropped at once and the caller's own waits are the only waits,
+    on every platform.
+    """
+
+    def _waitid_echild(idtype, pid, options):
+        raise ChildProcessError("stub pid has no child")
+
+    monkeypatch.setattr(os, "waitid", _waitid_echild, raising=False)
+    for name, value in (
+        ("P_PID", 1),
+        ("WEXITED", 4),
+        ("WNOHANG", 1),
+        ("WNOWAIT", 0x1000000),
+    ):
+        if not hasattr(os, name):
+            monkeypatch.setattr(os, name, value, raising=False)
 
     def install(process: _StubProcess) -> _StubProcess:
         monkeypatch.setattr(

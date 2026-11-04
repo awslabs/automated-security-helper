@@ -135,9 +135,13 @@ def test_main_puts_the_signal_handlers_back(
     with _process_signals_restored():
         with pytest.raises(SystemExit):
             entrypoint.main()
-        # Inside the body ASH's handlers are in place, so the restore below
-        # is doing real work rather than confirming a no-op.
-        assert signal.getsignal(signal.SIGINT) is not signal.default_int_handler
+        if sys.platform != "win32":
+            # Inside the body ASH's handlers are in place, so the restore below
+            # is doing real work rather than confirming a no-op. On Windows
+            # install_sigint_shutdown is a deliberate no-op (core/cancellation.py),
+            # so no ASH handler ever replaces the default there and the restore
+            # confirms exactly that.
+            assert signal.getsignal(signal.SIGINT) is not signal.default_int_handler
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
     assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
     capfd.readouterr()  # drop the report the body printed

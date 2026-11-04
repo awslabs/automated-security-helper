@@ -64,7 +64,7 @@ def _probe_output(tmp_path, monkeypatch, rules_dir) -> tuple[str, str]:
         monkeypatch.setenv("ASH_CFN_GUARD_RULES_DIR", str(rules_dir))
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        exec(compile(program, "<version_probe>", "exec"), {"__name__": "__probe__"})
+        exec(compile(program, "<version_probe>", "exec"), {"__name__": "__probe__"})  # nosec B102
     return out.getvalue(), err.getvalue()
 
 

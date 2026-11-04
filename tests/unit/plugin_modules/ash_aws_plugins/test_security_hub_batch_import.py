@@ -4478,7 +4478,10 @@ def test_in_a_checkout_reads_the_name_and_the_target(tmp_path, layout, inside):
         (checkout / "hop.yaml").symlink_to(outside / "file.yaml")
         path.symlink_to(checkout / "hop.yaml")
     elif layout == "a link in one, then ..":
-        (checkout / "lnk").symlink_to(outside / "sub")
+        # target_is_directory: Windows types a symlink, and a file-type link
+        # to a directory is refused at traversal, which would break the
+        # resolve below and the walk under test; POSIX ignores the argument.
+        (checkout / "lnk").symlink_to(outside / "sub", target_is_directory=True)
         assert path.resolve() == (outside / "file.yaml").resolve()
 
     assert in_a_checkout(path) is inside

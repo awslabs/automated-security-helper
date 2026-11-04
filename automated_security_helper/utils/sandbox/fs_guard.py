@@ -1768,6 +1768,20 @@ def _guarded_read_fd(path: Path) -> int:
     """
     anchored = _registered_anchor(path) if hasattr(os, "fwalk") else None
     if anchored is None or path == anchored[1]:
+        if _NOFOLLOW == 0:
+            # No O_NOFOLLOW (Windows): the open would follow a link at the name
+            # to a regular file, so the refusal is made on an lstat of the name
+            # itself before the open. The window between the two is the same
+            # one O_NOFOLLOW closes atomically elsewhere; without the flag this
+            # is the strongest check the platform offers.
+            try:
+                refused_link = stat.S_ISLNK(os.lstat(path).st_mode)
+            except OSError:
+                refused_link = False
+            if refused_link:
+                raise OSError(
+                    errno.ELOOP, f"{path} is a symbolic link and was not read"
+                )
         return os.open(path, _READ_FLAGS)
     root, anchor = anchored
     relative = path.relative_to(anchor).parts

@@ -8,6 +8,8 @@ its source. This runs checkov itself, so a change in how checkov applies
 ``--skip-path`` shows up here rather than as ASH scanning its own reports again.
 """
 
+import sys
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -40,6 +42,12 @@ def _uris(report):
     ]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="skip_ash_output_dir is documented as having no effect on Windows: "
+    "_output_dir_skip_patterns answers nothing where os.sep is not '/', so no "
+    "--skip-path is emitted and findings there are dropped after the scan",
+)
 @pytest.mark.parametrize("skip", [True, False])
 def test_findings_in_the_output_dir_follow_the_option(tmp_path, skip):
     source = tmp_path / "src"

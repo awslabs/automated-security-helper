@@ -1468,15 +1468,33 @@ def print_incompleteness_message(
                 )
                 + "[/yellow]"
             )
-        if any(
-            not (getattr(row, "kinds", ()) or ()) for row in incomplete_converter_rows
-        ):
+        no_kind_rows = [
+            row
+            for row in incomplete_converter_rows
+            if not (getattr(row, "kinds", ()) or ())
+        ]
+        if no_kind_rows:
+            # A hand-built (name, reason) pair carries no record kinds, so the
+            # reason's own text is what says whether the converter ran: one
+            # whose reason names inputs it could not convert ran, and a corrupt
+            # archive is not fixed by installing a tool, so that remedy is
+            # offered beside the install advice rather than in its place.
+            could_not_convert = any(
+                "could not convert" in str(row[1]) for row in no_kind_rows
+            )
             print(
                 "[yellow]A converter that did not run leaves its inputs unscanned, "
                 "so the scanners saw fewer files than this repository holds. "
                 + ways_out(
                     "Install the converter's tool",
                     "disable the converter if its inputs are not wanted",
+                    *(
+                        (
+                            "fix the files it could not convert or exclude them with ignore_paths",
+                        )
+                        if could_not_convert
+                        else ()
+                    ),
                     *accept_partial,
                 )
                 + ". A converter with nothing to convert never reports here.[/yellow]"
@@ -3520,6 +3538,26 @@ def _unusable_nix_config(opts: ScanOptions) -> Optional[ASHConfigValidationError
             f"Config file cannot be read: {opts.config}. The scan inside the "
             "shell reads it with this process's rights."
         )
+    # os.access answers from the mode bits, which on Windows reflect only the
+    # read-only attribute, so a file an NTFS deny-ACL makes unreadable read as
+    # readable there and the run went on to the Nix launch (exit 1, "requires
+    # Nix") instead of this exit-3 refusal (install.md, Nix mode: "A file that
+    # is missing, cannot be read, does not parse, or is not a valid config
+    # stops the scan with exit code 3"). Opening the file asks the operating
+    # system itself. The stat above says the path is a regular file;
+    # O_NONBLOCK (absent on Windows, so a no-op spelling there) keeps the
+    # probe from waiting on a path that stopped being one between the two
+    # calls. A ValueError is a path no open can take (an embedded NUL),
+    # refused the same way, so no error comes out of the handler that calls
+    # this, as promised above.
+    try:
+        readable = os.open(opts.config, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    except (OSError, ValueError):
+        return ASHConfigValidationError(
+            f"Config file cannot be read: {opts.config}. The scan inside the "
+            "shell reads it with this process's rights."
+        )
+    os.close(readable)
     return None
 
 
@@ -4280,14 +4318,47 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     checked by workspace/execution.py before it is created; here a workspace run's
     ``projects`` and spool directories are checked with the rest.
 
-    Container mode first applies its own link rule: the output directory is mounted
-    read-write at ``/out``, so the scan inside the container would write wherever a
-    link leads (``container_output_dir_refusal``). The general check then runs as
-    in every other mode, for the paths that rule does not name. Either refusal
-    exits OUTPUT_DIR_REFUSED_EXIT_CODE (3).
+    The CLI makes the same refusal earlier, before its writability probe
+    (:func:`refuse_output_dir_links` from ``cli/scan._settle_output_dir``); this
+    one stays for the callers that do not come through the CLI, the MCP scan
+    runner among them.
     """
-    if opts.mode == RunMode.container:
-        refusal = container_output_dir_refusal(opts.source_dir, opts.output_dir)
+    refuse_output_dir_links(
+        opts.source_dir,
+        opts.output_dir,
+        container=opts.mode == RunMode.container,
+        workspace=opts.workspace_plan is not None,
+    )
+
+
+def refuse_output_dir_links(
+    source_dir: str | Path | None,
+    output_dir: str | Path,
+    *,
+    container: bool = False,
+    workspace: bool = False,
+) -> None:
+    """The symlinked-output-directory refusal, for a caller with no ScanOptions yet.
+
+    ``output_dir`` is already settled, never None: ``ScanOptions.output_dir``
+    is a required Path, and ``_settle_output_dir`` defaults a None before it
+    calls here, so there is always a path a link could divert.
+
+    The one implementation every entry point routes through: ``run_ash_scan``
+    (:func:`_refuse_symlinked_output_dir`) and the CLI's ``_settle_output_dir``,
+    which must refuse the link BEFORE its writability probe makes and removes a
+    file in the directory (exit-codes.md: "before the check that the directory
+    can be written"), since that probe follows a link and moves the target's
+    mtime.
+
+    With ``container``, container mode's own link rule runs first: the output
+    directory is mounted read-write at ``/out``, so the scan inside the container
+    would write wherever a link leads (``container_output_dir_refusal``). The
+    general check then runs as in every other mode, for the paths that rule does
+    not name. Either refusal exits OUTPUT_DIR_REFUSED_EXIT_CODE (3).
+    """
+    if container:
+        refusal = container_output_dir_refusal(source_dir, output_dir)
         if refusal is not None:
             secho(str(refusal), fg=typer.colors.RED)
             raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
@@ -4298,9 +4369,9 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
 
     try:
         refuse_linked_output_dir(
-            opts.source_dir,
-            opts.output_dir,
-            workspace=opts.workspace_plan is not None,
+            source_dir,
+            output_dir,
+            workspace=workspace,
         )
     except OutputDirLinkRefused as refusal:
         # The reason names the output directory, whose path is the caller's
@@ -7823,6 +7894,9 @@ def run_ash_scan(
         )
     for name, value, workspace_ok in (
         ("untrusted_config", opts.untrusted_config, False),
+        # Workspace mode resolves each project's own config (the comment
+        # above), so the gate would be dropped there without a word too.
+        ("config_base_gate", opts.config_base_gate, False),
         # Workspace mode carries these to every project through the settings
         # builder.
         ("client_config_policy", opts.client_config_policy, True),

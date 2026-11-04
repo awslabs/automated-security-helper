@@ -167,7 +167,7 @@ class TestAddSuppressionToConfig:
 
         data = yaml.safe_load(config_path.read_text())
         entry = data["global_settings"]["suppressions"][0]
-        assert entry["expiration"] == exp
+        assert entry["expires"] == exp
         assert entry["line_start"] == 10
         assert entry["line_end"] == 20
 
@@ -331,7 +331,7 @@ FIRST = {
     "reason": "asserts in tests",
     "line_start": 10,
     "line_end": 10,
-    "expiration": "2099-01-31",
+    "expires": "2099-01-31",
 }
 
 
@@ -359,7 +359,7 @@ class TestSecondSuppressionForOneRuleAndPath:
         [
             pytest.param({"line_start": 20, "line_end": 25}, id="line-range"),
             pytest.param({"reason": "another reason"}, id="reason"),
-            pytest.param({"expiration": "2099-06-30"}, id="expiration"),
+            pytest.param({"expires": "2099-06-30"}, id="expires"),
         ],
     )
     def test_a_different_one_is_saved(self, tmp_path: Path, name: str, change):
@@ -1459,6 +1459,11 @@ class TestTheSaveWritesItsBytesOnce:
             assert name.endswith(".tmp"), name
         assert [p.name for p in tmp_path.iterdir()] == [config_path.name]
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="staged-copy privacy is not expressible as a POSIX mode there: "
+        "S_IMODE of a writable file reads 0o666 whatever the create asked",
+    )
     def test_an_existing_file_s_staged_copy_starts_no_wider_than_private(
         self, tmp_path: Path, monkeypatch
     ):

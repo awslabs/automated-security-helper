@@ -138,7 +138,8 @@ jobs:
   # ---------------------------------------------------------------------------
   discover:
     name: discover generated artifacts
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 14s on 4-vCPU ubuntu-latest (run 41722066858) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: read
@@ -1523,7 +1524,8 @@ jobs:
       - generated-buildspec-drift
       - terraform-hygiene
       - cdk-nag
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 4s on 4-vCPU ubuntu-latest (run 41722066858) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: read

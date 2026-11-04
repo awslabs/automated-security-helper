@@ -28,7 +28,8 @@ concurrency:
 jobs:
   pr-title:
     name: Validate PR title
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 15s on 4-vCPU ubuntu-latest (run 41724959839) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

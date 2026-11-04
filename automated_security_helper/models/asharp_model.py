@@ -784,7 +784,7 @@ def _unreadable_expirations(stored: Any) -> List[str]:
             location_text(item["loc"], names)
             for item in error.errors(include_url=False)
             if item.get("loc")
-            and item["loc"][-1] == "expiration"
+            and item["loc"][-1] in ("expires", "expiration")
             and item.get("type") == "value_error"
         ]
     return []
@@ -982,6 +982,26 @@ class ReportMetadata(StrippedRecordModel):
             ),
         ),
     ]
+    # Declared for the reasons the `shard` field above states: the committed
+    # AshAggregatedResults.json documents what `ash merge` reads back, and the
+    # console summary prints from a validated field rather than an extra key.
+    # None rather than [] when there is nothing to record, so a results file
+    # says `null` when every name matched or no list was given, which is what
+    # reference/output-files.md documents for it.
+    requested_scanners_not_run: Annotated[
+        List[str] | None,
+        Field(
+            default=None,
+            description=(
+                "The names in --scanners or ASH_SCANNERS that matched no "
+                "registered scanner, recorded by a scan that ran because other "
+                "names matched; sorted, each name once, in the spelling given. "
+                "Null when every name matched or no list was given. `ash merge` "
+                "records every shard's names, united. An unknown "
+                "--exclude-scanners name is never recorded."
+            ),
+        ),
+    ] = None
     plugin_load_errors: Annotated[
         Dict[str, str],
         Field(
@@ -1395,12 +1415,14 @@ class AshAggregatedResults(RecordModel):
                 "configuration file with it is refused."
             )
         for field, reference in unreadable:
+            # In configure.md's words (Read values from the environment): the
+            # command warns that the field reads as its default, then a command
+            # that acts on it refuses or takes its own value.
             ASH_LOGGER.warning(
-                f"The configuration stored in these results records {field} as "
-                f"{reference}, a reference read from the environment where the "
-                "scan ran, which that field cannot hold. It is read with the "
-                "field's default; a command that acts on it takes the value from "
-                "its own configuration.",
+                f"The recorded configuration holds {reference} for {field}, a "
+                "value the scan read from the environment, and the field cannot "
+                "hold a reference, so it reads as its default. A command that "
+                "acts on it takes the value from its own configuration.",
                 extra={"markup": False},
             )
         config._unreadable_references = unreadable

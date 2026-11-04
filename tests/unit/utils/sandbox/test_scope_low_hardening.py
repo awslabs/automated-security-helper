@@ -167,7 +167,7 @@ def test_a_remembered_refusal_keeps_no_traceback(monkeypatch):
 
 def test_backend_unavailable_survives_pickle_and_copy():
     error = scope.SandboxBackendUnavailable("no backend works", "auto")
-    for rebuilt in (pickle.loads(pickle.dumps(error)), copy.copy(error)):
+    for rebuilt in (pickle.loads(pickle.dumps(error)), copy.copy(error)):  # nosec B301
         assert isinstance(rebuilt, scope.SandboxBackendUnavailable)
         assert rebuilt.mode == "auto"
         assert str(rebuilt) == "no backend works"

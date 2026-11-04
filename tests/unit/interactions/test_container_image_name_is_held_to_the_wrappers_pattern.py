@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import sys
 from typing import Any, Dict
 
 import pytest
@@ -198,4 +199,7 @@ def test_an_empty_ash_image_name_names_the_default(runtime, monkeypatch):
     result = CliRunner().invoke(app, SCAN)
 
     assert REFUSAL_TEXT not in result.output, result.output
-    assert runtime["built"] == ["automated-security-helper:non-root"], runtime
+    # The default build target is non-root, and ci on Windows, where the
+    # non-root user creation cannot work (run_ash_container's own default).
+    default_tag = "ci" if sys.platform == "win32" else "non-root"
+    assert runtime["built"] == [f"automated-security-helper:{default_tag}"], runtime

@@ -47,6 +47,10 @@ REAL_TOOL_MODULES = frozenset(
         "base/test_scanner_uv_commands_discover_nothing_from_the_tree.py",
         # Runs the real npm and gem from an empty directory and from the planted
         # repository; a stand-in cannot read a .npmrc or a Gemfile.
+        # test_on_this_host runs the real installation checks against whatever
+        # this host has installed; its docstring declares the probes may start
+        # tools, so the zero-starts teardown is not that test's contract.
+        "cli/mcp/test_check_installation_status.py",
         "cli/test_dependencies_install_commands_start_outside_the_tree.py",
         "cli/test_dependencies_uv_commands_discover_nothing_from_the_tree.py",
         "cli/test_genai_guide_ships_with_install.py",

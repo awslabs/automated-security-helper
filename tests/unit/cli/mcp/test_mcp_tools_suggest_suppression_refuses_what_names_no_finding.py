@@ -127,4 +127,4 @@ def test_a_finding_that_names_its_file_and_rule_is_still_suggested(tmp_path) -> 
     assert response["success"] is True, response
     assert response["json"]["path"] == "src/app.py", response
     assert response["json"]["rule_id"] == "B101", response
-    assert response["json"]["expiration"] == "2030-12-31", response
+    assert response["json"]["expires"] == "2030-12-31", response

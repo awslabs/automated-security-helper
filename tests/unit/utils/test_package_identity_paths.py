@@ -59,7 +59,11 @@ class TestInstallPathStaysInsideTheScanRoot:
         assert install_path("package-lock.json", "") == ""
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX byte file names")
+@pytest.mark.skipif(
+    sys.platform in ("win32", "darwin"),
+    reason="POSIX byte file names; APFS enforces valid UTF-8 names and "
+    "refuses the non-UTF-8 directory create",
+)
 def test_a_lockfile_under_a_non_utf8_directory_is_found(tmp_path):
     # A directory whose name is latin-1 bytes, listed by Python as a lone
     # surrogate; a record spells it as the six-character escape.

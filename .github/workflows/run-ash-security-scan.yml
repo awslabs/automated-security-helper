@@ -1104,7 +1104,7 @@ jobs:
 
       - name: Install uv
         id: setup-uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # Named here, because with no `version` setup-uv installs the uv that the
           # checkout's pyproject.toml or uv.toml asks for (`required-version`), and
@@ -1639,12 +1639,21 @@ jobs:
       # them would mean interpolating booleans into shell to rebuild the condition.
       # The second `uvx` call reuses the environment the first one resolved.
       #
-      # Both run from RUNNER_TEMP with ASH_CONFIG unset, as Install OpenGrep below
-      # does. `ash dependencies install` takes its source directory from the working
-      # directory, resolves its config from ASH_CONFIG or by discovery there, and
-      # imports every plugin module that config names. Run from the checkout with
-      # the caller's config, the scanned repository chose what this step installed
-      # and what code ran while installing it.
+      # Both run from an empty directory under RUNNER_TEMP with ASH_CONFIG unset, as
+      # Install OpenGrep below does. `ash dependencies install` takes its source
+      # directory from the working directory, resolves its config from ASH_CONFIG or
+      # by discovery there, and imports every plugin module that config names. Run
+      # from the checkout with the caller's config, the scanned repository chose what
+      # this step installed and what code ran while installing it.
+      #
+      # An empty subdirectory, not RUNNER_TEMP itself: the install's in-tree tool
+      # guard treats the working directory as the scanned tree and refuses a tool
+      # under it, and ASH_TOOL_BIN sits under RUNNER_TEMP. Run from RUNNER_TEMP, the
+      # install wrote grype to the --bin-path it was given and then refused to find
+      # it there ("Not running grype from inside the scanned tree
+      # /home/runner/work/_temp"), failing every pull request's scan job at this
+      # step. From the subdirectory, ash-tools is a sibling, outside the registered
+      # tree, and nothing in the subdirectory can steer the install.
       #
       # ASH_TOOL_BIN is added to PATH the same way the OpenGrep step below does it.
       # The previous form installed into /usr/local/bin, which is already on PATH, so
@@ -1656,7 +1665,7 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+          (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
             uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
               --tool grype \
               --bin-path "${ASH_TOOL_BIN}")
@@ -1694,7 +1703,7 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+          (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
             uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
               --tool syft \
               --bin-path "${ASH_TOOL_BIN}")
@@ -1734,7 +1743,7 @@ jobs:
             if [ -n "${tool}" ]; then tools+=("${tool}"); fi
           done
           install_tools() {
-            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
               uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
                 "$@" \
                 --bin-path "${ASH_TOOL_BIN}")
@@ -1830,7 +1839,7 @@ jobs:
             # .ash.yaml is not loaded. This step installs the version ASH pins and
             # checks it against that pin below; a config naming another opengrep
             # version would install that one instead and fail the check.
-            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
               uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
                 --tool opengrep \
                 --bin-path "$INSTALL_DIR")

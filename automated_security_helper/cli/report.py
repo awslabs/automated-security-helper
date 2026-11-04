@@ -347,6 +347,43 @@ def _presence(path: Path) -> Optional[bool]:
     return True
 
 
+def _output_dir_refusal(output_dir: str) -> tuple[Optional[str], bool]:
+    """Why an ``--output-dir`` (or ``ASH_OUTPUT_DIR``) cannot be searched at all,
+    and whether it counts as missing, per how-to/read-results.md and exit-codes.md
+    (ash report).
+
+    The refusal text, quoting the path as given, is one of the page's three
+    usage errors (exit 5): a path the system cannot look up, such as one holding
+    a NUL character (``is not a valid path``); a directory that exists and is a
+    file (``is not a directory``); one that exists but cannot be entered, no
+    search permission (``cannot be entered``). None of them creates anything,
+    and each is asked before the results places are probed: a NUL ended the
+    probe in a ValueError traceback, and the other two read their places as
+    found-nothing or unsearched and answered for the missing results instead.
+
+    The second value is True for an output directory UNDER a directory the user
+    cannot search (stat answers PermissionError for it, whether or not it is
+    there): the page says it counts as missing, so the caller reads every
+    results place in it as absent and prints ``No scan results found`` (exit 1)
+    where the open of the first place answered ``Permission denied`` before. A
+    directory that is simply not there is (None, False): the places are absent
+    on their own, and a scan's output directory may be made later.
+    """
+    try:
+        mode = os.stat(output_dir).st_mode
+    except ValueError:
+        return f"Output directory is not a valid path: {output_dir}", False
+    except PermissionError:
+        return None, True
+    except OSError:
+        return None, False
+    if not stat.S_ISDIR(mode):
+        return f"Output directory is not a directory: {output_dir}", False
+    if not os.access(output_dir, os.X_OK):
+        return f"Output directory cannot be entered: {output_dir}", False
+    return None, False
+
+
 def _working_directory() -> Path:
     """The working directory, or the usage-error refusal when it is gone.
 
@@ -725,11 +762,22 @@ def report_command(
     # and .ash/ash_output/ash_output/..., which no scan writes.
     cwd = _working_directory()
     results_file = None
+    counts_as_missing = False
     if output_dir is None:
         output_dir = cwd.joinpath(".ash", "ash_output").as_posix()
         output_dir_path = Path(output_dir)
         results_file_paths = [output_dir_path.joinpath("ash_aggregated_results.json")]
     else:
+        # A named output directory the command cannot search at all is a usage
+        # error, refused before any results place is probed and before anything
+        # is created (how-to/read-results.md, exit-codes.md: ash report). One
+        # under a directory the user cannot search counts as missing instead:
+        # every place in it reads as absent, so the missing-results message
+        # below answers (exit 1), not the open's "Permission denied".
+        refusal, counts_as_missing = _output_dir_refusal(output_dir)
+        if refusal is not None:
+            _print_refusal("[red]{}[/red]", refusal)
+            raise typer.Exit(ASH_EXIT_USAGE_ERROR)
         output_dir_path = Path(output_dir)
         results_file_paths = [
             output_dir_path.joinpath(
@@ -753,7 +801,13 @@ def report_command(
     # ranks above it may hold the scan this command is meant to report on, and
     # reporting on the lower file instead would be a stale report with exit 0, so
     # it is refused below.
-    presences = [(path, _presence(path)) for path in results_file_paths]
+    # An output directory under a directory the user cannot search counts as
+    # missing (how-to/read-results.md), so its places read as absent and the
+    # missing-results message below answers, as for one that is not there.
+    presences = [
+        (path, False if counts_as_missing else _presence(path))
+        for path in results_file_paths
+    ]
     found_results_files = [path for path, found in presences if found]
     unsearched_results_paths = [path for path, found in presences if found is None]
     if found_results_files:

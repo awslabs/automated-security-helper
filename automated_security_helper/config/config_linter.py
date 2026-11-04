@@ -124,6 +124,9 @@ class LintCategory(str, Enum):
     SUPPRESSION_UNUSED = "suppression-unused"
     SUPPRESSION_MULTILINE_REASON = "suppression-multiline-reason"
     SUPPRESSION_SYMBOL = "suppression-symbol"
+    # An entry written with the deprecated "expiration" spelling of "expires"
+    # (models/core.py); the alias still loads and is removed in ASH v4.
+    DEPRECATED_SPELLING = "deprecated-spelling"
     IGNORE_PATH_ISSUE = "ignore-path-issue"
     LEGACY_NAME_VARIANT = "legacy-name-variant"
     LEGACY_NAME_CONFLICT = "legacy-name-conflict"
@@ -1988,13 +1991,30 @@ class ConfigLinter:
                     )
                 )
 
-            # Check: expired suppressions
+            # Check: the deprecated "expiration" spelling (models/core.py). The
+            # alias still loads on 3.x and is removed in ASH v4; the message
+            # names only the key, never the file's value.
+            if "expiration" in suppression:
+                result.issues.append(
+                    cls._deprecated_spelling_issue(
+                        "Suppression",
+                        path_prefix,
+                        entry_id=cls._make_suppression_id(suppression),
+                    )
+                )
+
+            # Check: expired suppressions. The file may write the canonical
+            # "expires" or its deprecated alias "expiration" (models/core.py);
+            # the canonical spelling wins when both are present, as the load's
+            # equal-duplicate rule keeps it (a disagreement is a validation
+            # error before the lint walks the entry).
+            spelling = "expires" if "expires" in suppression else "expiration"
             cls._check_expiration(
-                suppression.get("expiration"),
+                suppression.get(spelling),
                 path_prefix,
                 "Suppression",
                 result,
-                shown=shown.get("expiration", ENVIRONMENT_VALUE_SHOWN),
+                shown=shown.get(spelling, ENVIRONMENT_VALUE_SHOWN),
                 entry_id=cls._make_suppression_id(suppression),
             )
 
@@ -2037,13 +2057,24 @@ class ConfigLinter:
                 shown_entries = cls._shown_entries(entries, shown_data, spelled)
                 for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
                     if isinstance(entry, dict):
+                        # The deprecated spelling, as the suppression walk
+                        # reports it.
+                        if "expiration" in entry:
+                            result.issues.append(
+                                cls._deprecated_spelling_issue(
+                                    subject, f"{'.'.join(keys)}[{i}]"
+                                )
+                            )
+                        # Either spelling, canonical first, as the suppression
+                        # walk above reads it.
+                        spelling = "expires" if "expires" in entry else "expiration"
                         cls._check_expiration(
-                            entry.get("expiration"),
+                            entry.get(spelling),
                             f"{'.'.join(keys)}[{i}]",
                             subject,
                             result,
                             shown=cls._shown_entry(entry, shown).get(
-                                "expiration", ENVIRONMENT_VALUE_SHOWN
+                                spelling, ENVIRONMENT_VALUE_SHOWN
                             ),
                         )
 
@@ -2065,6 +2096,32 @@ class ConfigLinter:
             for name in segment
             if isinstance(name, str) and folded_section_name(name) == wanted
         ]
+
+    @classmethod
+    def _deprecated_spelling_issue(
+        cls, subject: str, path: str, entry_id: Optional[str] = None
+    ) -> LintIssue:
+        """The issue for an entry written with the deprecated ``expiration`` key.
+
+        INFO: the alias still loads (models/core.py warns about it too) and is
+        removed in ASH v4. Not fixable: renaming a key inside a list entry is
+        not a fix the fixers make (the expired-suppression remover addresses
+        the same entries by index and id, and a rename ahead of it would change
+        what those were computed from), so the operator renames it by hand, as
+        with LEGACY_NAME_CONFLICT. The message names the key only, never the
+        entry's values, which can be read from the environment.
+        """
+        return LintIssue(
+            severity=LintSeverity.INFO,
+            category=LintCategory.DEPRECATED_SPELLING,
+            message=(
+                f"{subject} is written with the deprecated 'expiration' "
+                "spelling; write 'expires'. The alias is removed in ASH v4; "
+                "`ash config lint --fix` does not rename it"
+            ),
+            path=path,
+            entry_id=entry_id,
+        )
 
     @classmethod
     def _check_expiration(

@@ -736,6 +736,11 @@ def test_every_documented_uv_cache_command_runs_from_the_root():
     with UV_PROJECT exported `(cd / && uv cache dir)` names the repository's
     cache-dir. A PowerShell block unsets both before it changes to the system
     drive's root.
+
+    The fenced recipes were dropped from the docs; the run-from-root behavior
+    is now a prose statement in advanced-usage.md, pinned below. The fence scan
+    is zero-expect: any fenced ``uv cache`` command that returns must carry the
+    root-and-unset shape.
     """
     import re
 
@@ -763,8 +768,13 @@ def test_every_documented_uv_cache_command_runs_from_the_root():
                     continue
                 seen["posix"] += 1
                 assert POSIX_CACHE_RECIPE in line, where
-    assert seen["posix"], "no uv cache command found in the docs"
-    assert seen["powershell"], "no PowerShell uv cache recipe in the docs"
+    prose = " ".join(
+        (docs / "docs" / "advanced-usage.md").read_text(encoding="utf-8").split()
+    )
+    assert (
+        "`uv cache dir`, which names the cache the `uv tool` commands use, runs "
+        "from the filesystem root" in prose
+    ), "advanced-usage.md no longer states the run-from-root behavior"
 
 
 @pytest.mark.unit

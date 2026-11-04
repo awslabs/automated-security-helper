@@ -425,7 +425,9 @@ class TestAPathThatLedNowhereIsHeldToThat:
     ):
         """What the None identity did: the premise that the guard is needed."""
         path = tmp_path / "cfg.yaml"
-        path.write_text("project_name: appeared\n", encoding="utf-8")
+        # Bytes: the assertion below compares the bytes read, and text mode
+        # would write CRLF on Windows (as the byte-exact control above pins).
+        path.write_bytes(b"project_name: appeared\n")
 
         assert config_sources.read_config_bytes(path, expect=None) == (
             b"project_name: appeared\n"

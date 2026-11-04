@@ -522,8 +522,8 @@ class TestScanTimestampsAreUtc:
 class TestVulnerabilityIdsAreTheSharedFindingIds:
     def test_two_findings_of_one_rule_at_one_line_get_distinct_ids(self, reporter):
         model = _model(
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
         )
 
         first, second = json.loads(reporter.report(model))["vulnerabilities"]
@@ -545,8 +545,8 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         scanner's rule identifier and the location, so their distinct ids do not
         by themselves keep both in GitLab."""
         model = _model(
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
         )
 
         first, second = json.loads(reporter.report(model))["vulnerabilities"]
@@ -563,8 +563,8 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         """With no scanner name there is no rule identifier, so the ids are the
         only identifiers the two vulnerabilities carry and they differ."""
         results = [
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
         ]
         for result in results:
             result.properties = None
@@ -667,8 +667,8 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         The first keeps the legacy id as it was; the second gets an occurrence of
         its own, as the shared ids and the OCSF fallback uids already do."""
         model = _model(
-            _result("B105", "password = 'first'"),
-            _result("B105", "password = 'second'"),
+            _result("B105", "password = 'first'"),  # pragma: allowlist secret
+            _result("B105", "password = 'second'"),  # pragma: allowlist secret
             _result("B106", "other"),
         )
 

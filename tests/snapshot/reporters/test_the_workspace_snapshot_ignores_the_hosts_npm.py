@@ -57,26 +57,49 @@ def _flat_json_document(arm_dir: Path, path_value: str) -> Tuple[str, Optional[s
         patcher.undo()
 
 
+def _npm_names() -> list:
+    """Every name ``shutil.which("npm")`` could answer for "npm" on this host.
+
+    On Windows ``which`` resolves names through PATHEXT, so a host npm is
+    ``npm.cmd`` (or another PATHEXT form) and an extensionless file is not
+    what it answers.
+    """
+    names = ["npm"]
+    if os.name == "nt":
+        pathext = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        names += [f"npm{ext}" for ext in pathext.split(os.pathsep) if ext]
+    return names
+
+
 def test_the_workspace_output_is_identical_with_and_without_npm(tmp_path: Path):
+    npm_names = _npm_names()
     without_npm = os.pathsep.join(
         entry
         for entry in os.environ.get("PATH", "").split(os.pathsep)
-        if entry and not (Path(entry) / "npm").exists()
+        if entry and not any((Path(entry) / name).exists() for name in npm_names)
     )
     stub_dir = tmp_path / "stub-bin"
     stub_dir.mkdir()
-    stub = stub_dir / "npm"
     # Never run -- nothing in the fixture build looks npm up, which is the
-    # point. It exists so the "present" arm is real on any host.
-    stub.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    # point. It exists so the "present" arm is real on any host. On Windows
+    # the name carries a PATHEXT suffix so which() can answer it.
+    if os.name == "nt":
+        stub = stub_dir / "npm.cmd"
+        stub.write_text("@exit /b 99\n", encoding="utf-8")
+    else:
+        stub = stub_dir / "npm"
+        stub.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+        stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     with_npm = os.pathsep.join([str(stub_dir), without_npm])
 
     present_dir = tmp_path / "with-npm"
     absent_dir = tmp_path / "without-npm"
     present, found_present = _flat_json_document(present_dir, with_npm)
     absent, found_absent = _flat_json_document(absent_dir, without_npm)
-    if found_present != str(stub) or found_absent is not None:
+    # Path comparison: on Windows which() may answer the PATHEXT spelling
+    # (npm.CMD), which WindowsPath equality folds while a string compare
+    # would not.
+    if found_present is None or Path(found_present) != stub or found_absent is not None:
         raise RuntimeError(
             (
                 "premise: the arms must differ in npm visibility",

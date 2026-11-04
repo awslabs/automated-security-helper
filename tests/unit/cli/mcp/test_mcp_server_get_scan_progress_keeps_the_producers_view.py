@@ -177,7 +177,7 @@ def test_a_skipped_scanners_reason_is_redacted_on_the_tool_path(
     results file."""
     from automated_security_helper.cli import mcp_server
 
-    secret = "s3cr3t-Value-zqxj-ptlm-rwvn"
+    secret = "s3cr3t-Value-zqxj-ptlm-rwvn"  # pragma: allowlist secret
     output = tmp_path / "project" / ".ash" / "ash_output"
     output.mkdir(parents=True)
     scan_id = get_scan_registry().register_scan(

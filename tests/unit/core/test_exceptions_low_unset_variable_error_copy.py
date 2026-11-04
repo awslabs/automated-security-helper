@@ -37,7 +37,7 @@ def _error() -> ASHConfigUnsetVariableError:
 
 def _round_trips():
     return {
-        "pickle": lambda error: pickle.loads(pickle.dumps(error)),
+        "pickle": lambda error: pickle.loads(pickle.dumps(error)),  # nosec B301
         "copy": copy.copy,
         "deepcopy": copy.deepcopy,
     }
@@ -69,7 +69,7 @@ def test_a_rebuilt_error_is_still_a_config_source_error(how):
 def test_an_error_built_without_a_file_or_detail_round_trips():
     original = ASHConfigUnsetVariableError("VAR is not set", variable="VAR")
 
-    clone = pickle.loads(pickle.dumps(original))
+    clone = pickle.loads(pickle.dumps(original))  # nosec B301
 
     assert clone.variable == "VAR"
     assert clone.config_file is None

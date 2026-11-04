@@ -20,7 +20,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
-SECRET = "ENVCANARY-low4-values"
+SECRET = "ENVCANARY-low4-values"  # pragma: allowlist secret
 
 
 @pytest.fixture

@@ -600,7 +600,10 @@ class TestAConfigInAnotherCheckoutIsMarkedAsSuch:
     link or a directory holding HEAD, at the file's directory or above it, found
     from the name the operator gave, from the real path, or from where a link the
     name goes through sits. The mark holds the path inside the container and
-    nothing else.
+    nothing else. A file of ``ASH_CONFIG``'s chain is counted as written by a
+    repository wherever the checkout is and carries the per-file repository mark
+    instead, ``--config-file-from-scanned-repository`` (run-in-a-container.md,
+    The config file, pinned by tests/unit/docs/test_page_claims.py).
     """
 
     @pytest.fixture
@@ -849,6 +852,10 @@ class TestAConfigInAnotherCheckoutIsMarkedAsSuch:
     def test_an_ash_config_file_in_another_checkout_is_marked(
         self, fake_runner, scanned, ops
     ):
+        """The per-file repository mark, as for the scanned checkout's file: any
+        checkout's file of ASH_CONFIG's chain is a repository's for the scan
+        inside. The file is the scan's config here, so the chain mark rides too,
+        as it does for a marked ASH_CONFIG file the scanned checkout wrote."""
         (ops / "ash.yaml").write_text("project_name: p\n")
 
         inner = self._inner(
@@ -860,9 +867,9 @@ class TestAConfigInAnotherCheckoutIsMarkedAsSuch:
 
         assert _flag(inner, "--ash-config-from-host") == "/ash-env-config/ash.yaml"
         assert _flag(inner, "--config") == "/ash-env-config/ash.yaml"
-        assert _flag_values(inner, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
-        assert SCANNED_CHAIN_FLAG not in inner
-        assert SCANNED_FILE_FLAG not in inner
+        assert _flag_values(inner, SCANNED_FILE_FLAG) == ["/ash-env-config/ash.yaml"]
+        assert ELSEWHERE_FLAG not in inner
+        assert SCANNED_CHAIN_FLAG in inner
 
     def test_an_ash_config_name_that_resolves_into_a_checkout_is_marked(
         self, fake_runner, scanned, ops, tmp_path
@@ -880,7 +887,8 @@ class TestAConfigInAnotherCheckoutIsMarkedAsSuch:
             {"ASH_CONFIG": str(tmp_path / "plain" / "cfg.yaml")},
         )
 
-        assert _flag_values(inner, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
+        assert _flag_values(inner, SCANNED_FILE_FLAG) == ["/ash-env-config/ash.yaml"]
+        assert ELSEWHERE_FLAG not in inner
 
     def test_an_ash_config_file_is_marked_beside_an_operators_own_config(
         self, fake_runner, scanned, ops, tmp_path
@@ -899,11 +907,14 @@ class TestAConfigInAnotherCheckoutIsMarkedAsSuch:
         )
 
         assert _flag(inner, "--config") == "/ash-config/ash.yaml"
-        assert _flag_values(inner, ELSEWHERE_FLAG) == ["/ash-env-config/ash.yaml"]
+        assert _flag_values(inner, SCANNED_FILE_FLAG) == ["/ash-env-config/ash.yaml"]
+        assert ELSEWHERE_FLAG not in inner
 
     def test_both_files_in_another_checkout_are_each_marked(
         self, fake_runner, scanned, ops
     ):
+        """The one-directory --config keeps the another-checkout mark; the
+        ASH_CONFIG file takes the per-file repository mark."""
         (ops / "ash.yaml").write_text("project_name: p\n")
         (ops / "env.yaml").write_text("project_name: p\n")
 
@@ -914,10 +925,8 @@ class TestAConfigInAnotherCheckoutIsMarkedAsSuch:
             {"ASH_CONFIG": str(ops / "env.yaml")},
         )
 
-        assert sorted(_flag_values(inner, ELSEWHERE_FLAG)) == [
-            "/ash-config/ash.yaml",
-            "/ash-env-config/env.yaml",
-        ]
+        assert _flag_values(inner, ELSEWHERE_FLAG) == ["/ash-config/ash.yaml"]
+        assert _flag_values(inner, SCANNED_FILE_FLAG) == ["/ash-env-config/env.yaml"]
 
     def test_an_ash_config_file_in_the_scanned_checkout_is_not_marked_as_another(
         self, fake_runner, scanned

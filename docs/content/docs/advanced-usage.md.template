@@ -122,7 +122,13 @@ ASH looks up each program it starts, scanners and `uv` included, in this order:
    `.exe`, `.bat`, and `.cmd` before the bare name.
 2. ASH's bin directory: the directory in `ASH_BIN_PATH`, or `~/.ash/bin` if it is not
    set or is empty. This is where `ash dependencies install` puts tools, so you do not
-   need to add it to `PATH`.
+   need to add it to `PATH`. A `~` at the start of the value is expanded.
+   `~/.ash/bin`, and a `~` in `ASH_BIN_PATH`, need a usable home directory: `HOME`
+   when it is set to an absolute path, or, when `HOME` is not set, the home in your
+   passwd entry if that is absolute (on Windows, the profile directory). With `HOME`
+   empty or relative, or unset with no absolute home in the passwd entry, ASH logs a
+   warning and uses nothing under `~`, so this step uses only an absolute
+   `ASH_BIN_PATH`.
 3. `/usr/local/bin`, except on Windows.
 
 Only an executable file counts. In each of these directories, a file of the tool's name
@@ -168,6 +174,23 @@ For each scanner, converter, and reporter that has an install step, it:
   with, and ASH checks no digest for it either.
 - for cdk-nag, installs the `cdk` extra's packages (aws-cdk-lib, cdk-nag, and
   constructs) into ASH's own environment.
+
+`--tool` installs only the tools you name, such as `ash dependencies install
+--tool grype --tool syft`, and `--bin-path` chooses the directory they are
+installed into. A relative `--bin-path` is read against the directory you run the
+command in. A scan looks for tools in a `--bin-path` directory only when
+`ASH_BIN_PATH` names it, and the command prints how to set that. The command records
+each install in a receipt under `~/.ash`, which a later install checks the tool
+against, so with no usable home directory it installs nothing, even with `--bin-path`,
+and exits with code 3, saying why.
+
+An unknown name stops the command with exit code 2: it names the unknown tool and
+lists the ones it knows, installs nothing, and starts no program.
+
+<!-- doctest: run expect-exit=2 -->
+```bash
+ash dependencies install --tool gryp
+```
 
 See [`ash dependencies install`](../reference/cli.md#dependencies-install) for every
 option, and [Scanners reference](../reference/scanners.md) for the per-scanner options
@@ -714,7 +737,20 @@ jobs:
       - name: Install ASH
         run: pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
       - name: Run ASH scan
-        run: ash --mode local
+        # Workflow commands are stopped around the scan, as the reusable scan
+        # workflow does: tool output is untrusted, and a `::`-line in it would
+        # otherwise be acted on by the runner.
+        run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          ash --mode local 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       - name: Upload scan results
         # Also when ASH exits non-zero on findings: without a status function
         # GitHub skips this step after any failed step.

@@ -135,8 +135,8 @@ def _names_a_key(line: str, before: str, end: int) -> bool:
     A key is followed by ``=`` or ``:`` (so also ``=>``), past the quote that
     closes it when *before*, the character ahead of the token, opened one, and
     past spaces and tabs. Reading only the one character after the token took
-    ``password = password``, ``{"password": "password"}``, ``"password" =
-    "password"`` and ``'password' => 'password'`` for values, so the column
+    ``password = password``, ``{"password": "password"}``, ``"password" =  # pragma: allowlist secret
+    "password"`` and ``'password' => 'password'`` for values, so the column  # pragma: allowlist secret
     pointed at the key, and two secrets on one such line could share it.
     """
     cursor = end

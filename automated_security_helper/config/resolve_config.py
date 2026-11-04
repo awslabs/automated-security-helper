@@ -2316,8 +2316,19 @@ def resolve_config(
         )
 
         rules_chain, rules_named, _ = default_views()
+        # The views hold the load's resolved paths, so a delivered link
+        # ASH_CONFIG names would otherwise be judged only by the file it points
+        # at: the name the environment carries is judged too, as the trusted
+        # route judges it (client_config_policy.trusted_default_config), and
+        # config_is_client_supplied reads a path by every name on its way.
+        env_named = os.environ.get("ASH_CONFIG")
         if any(
-            config_is_client_supplied(path) for path in (*rules_chain, *rules_named)
+            config_is_client_supplied(path)
+            for path in (
+                *rules_chain,
+                *rules_named,
+                *([Path(env_named)] if env_named else []),
+            )
         ):
             for path in rules_chain:
                 key = Path(path).resolve()
@@ -5092,7 +5103,11 @@ def _resolve_config(
                 # expected of the file, as before.
                 expect = discovery.selected.identity
                 confinement_dir = source_dir
-                discovered_label = discovery.selected.label
+                # The resolved form: a file ASH finds on its own is announced
+                # by its resolved path, every symbolic link followed, which
+                # platform-teams.md's `pwd -P` check greps for; a --config is
+                # announced as named (run_ash_scan), never through this label.
+                discovered_label = discovery.selected.resolved_label
                 ASH_LOGGER.verbose(
                     f"Found configuration file at: {config_path.as_posix()}",
                     extra=NO_MARKUP,
@@ -7415,11 +7430,21 @@ def _whose_file(
             f" '{shared.as_posix()}'" if shared is not None else ""
         )
         return f"was delivered by an MCP client, under {place}", place
-    # A scanned tree is a checkout's top, or the scan root when it is in none
-    # (sandbox_grants._outermost_checkout).
-    in_checkout = os.path.lexists(tree / ".git")
+    # The place to move out of is the outermost checkout around the tree: a
+    # workspace root inside a git checkout is scanned as its own tree, and
+    # naming the root alone sent the operator to a place still inside the
+    # checkout, where the file is refused the same way (scale-large-repos.md,
+    # run-in-a-container.md: move it outside the checkout, or outside the
+    # workspace root, which the error calls the scanned directory, when that
+    # is in no checkout). For an ordinary scan the tree is already a
+    # checkout's top, or the scan root when it is in none, so this names what
+    # it always named (sandbox_grants._outermost_checkout).
+    from automated_security_helper.config.sandbox_grants import _outermost_checkout
+
+    around = _outermost_checkout(tree)
+    in_checkout = os.path.lexists(around / ".git")
     kind = "the checkout" if in_checkout else "the scanned directory"
-    place = f"{kind} '{tree.as_posix()}'"
+    place = f"{kind} '{around.as_posix()}'"
     if any(is_within(path, each) for each in trees):
         return f"is inside {place}", place
     return f"is reached through a link inside {place}", place

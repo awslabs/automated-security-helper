@@ -111,7 +111,10 @@ def test_severity_filtering():
     assert filtered["summary_stats"]["medium"] == 0
     assert filtered["summary_stats"]["low"] == 0
     assert filtered["summary_stats"]["info"] == 0
-    assert filtered["summary_stats"]["total"] == 55  # Non-severity field preserved
+    # The total is the findings in the selected buckets, not the whole
+    # scan's (result_filters: a view that lists only critical and high
+    # findings does not report findings it does not show).
+    assert filtered["summary_stats"]["total"] == 15
 
     # Verify scanner severity_counts only contains requested severities
     scanner_counts = filtered["raw_results"]["scanner_results"]["bandit"][
@@ -174,8 +177,10 @@ def test_combined_scanner_and_severity_filtering():
     assert "bandit" not in filtered["scanner_reports"]
     assert len(filtered["scanner_reports"]) == 1
 
-    # Verify only critical severity is present
-    assert filtered["summary_stats"]["critical"] == 5
+    # Verify only critical severity is present. The summary follows the
+    # scanners kept (result_filters recounts it from the kept scanner rows),
+    # so critical is semgrep's 3, not the whole scan's 5.
+    assert filtered["summary_stats"]["critical"] == 3
     assert filtered["summary_stats"]["high"] == 0
     assert filtered["summary_stats"]["medium"] == 0
 

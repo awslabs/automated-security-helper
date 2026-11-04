@@ -52,7 +52,7 @@ def test_a_new_workspace_and_the_root_it_creates_are_private(tmp_path) -> None:
 def test_an_existing_root_keeps_the_mode_it_has(tmp_path) -> None:
     root = tmp_path / "ws-root"
     root.mkdir()
-    os.chmod(root, 0o755)
+    os.chmod(root, 0o755)  # nosec B103
     previous = os.umask(0o022)
     try:
         sandbox = mark_session_workspace(root / "session-b")
@@ -66,7 +66,7 @@ def test_an_existing_root_keeps_the_mode_it_has(tmp_path) -> None:
 def test_marking_an_existing_workspace_again_changes_nothing(tmp_path) -> None:
     sandbox = tmp_path / "ws-root" / "session-c"
     sandbox.mkdir(parents=True)
-    os.chmod(sandbox, 0o750)
+    os.chmod(sandbox, 0o750)  # nosec B103
 
     mark_session_workspace(sandbox)
 
@@ -110,7 +110,7 @@ def test_an_existing_root_other_accounts_can_list_is_warned_about_once(
     monkeypatch.setattr(session_paths, "_listable_parents_warned", set())
     root = tmp_path / "ws-root"
     root.mkdir()
-    os.chmod(root, 0o755)
+    os.chmod(root, 0o755)  # nosec B103
 
     with caplog.at_level(logging.WARNING):
         mark_session_workspace(root / "session-e")

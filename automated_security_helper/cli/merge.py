@@ -338,6 +338,7 @@ from automated_security_helper.utils.error_text import (
     config_environment_values,
     text_without_values,
 )
+from automated_security_helper.utils.directory_refusals import output_dir_invalid_path
 from automated_security_helper.utils.inner_run_outcome import without_run_records
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
@@ -1801,6 +1802,19 @@ def merge_shard_results(
     merged.metadata.plugin_load_errors = combined_plugin_load_errors(
         shard.metadata.plugin_load_errors for _, shard, _ in shards
     )
+    # Every shard's requested names that matched no scanner, united and sorted
+    # (reference/output-files.md: "`ash merge` records the names of all the
+    # shards"). Set from every shard rather than inherited from the base copy,
+    # because each shard warns only about its own command line; None when no
+    # shard recorded any, as a single scan writes it.
+    requested_not_run = sorted(
+        {
+            name
+            for _, shard, _ in shards
+            for name in (shard.metadata.requested_scanners_not_run or [])
+        }
+    )
+    merged.metadata.requested_scanners_not_run = requested_not_run or None
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
     merged.metadata.report_id = _union_report_id(shards)
@@ -2779,7 +2793,7 @@ def _named_with_shards(
             f"{_shard_label(results)} ({path.as_posix()})"
         )
     return "; ".join(
-        f"{field} is recorded as {reference} in {_listed(places)}"
+        f"{field} holds {reference} in {_listed(places)}"
         for (field, reference), places in recorded_in.items()
     )
 
@@ -3447,6 +3461,16 @@ def merge_command(
         print(f"[red]Invalid configuration: {escape_markup(str(exc))}[/red]")
         raise typer.Exit(3)
 
+    # Before the directory is resolved below: a path the OS cannot take at all
+    # (an embedded NUL, which a --cli-json-input document can carry and a command
+    # line cannot) raises the same ValueError from Path.resolve as from os.stat,
+    # so without this question the merge ended in that traceback where
+    # exit-codes.md (ash merge) promises the scan's "Output directory" line on
+    # standard output, with the path as given, exit 5, and nothing created.
+    invalid_output = output_dir_invalid_path(output_dir)
+    if invalid_output is not None:
+        print(f"[red]{escape_markup(str(invalid_output))}[/red]")
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
     # The merged results file must not be one of the shard results files it is
     # merged from: an --output-dir that holds a --results file would replace that

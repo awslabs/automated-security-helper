@@ -7,9 +7,10 @@ A shell expands ``~``; a quoted value, or ``ASH_BIN_PATH`` set to one, reaches t
 command unexpanded, and ``Path.expanduser`` takes HOME as given. An empty HOME
 made ``~/.ash/bin`` the filesystem's ``/.ash/bin``, and a relative HOME put it
 under the working directory, the repository being scanned. The command expands a
-leading ``~`` only from a usable home (``core.constants.usable_home``), and
-otherwise refuses with the no-bin-directory text and the invalid-configuration
-code before anything is created, as it does when no bin path was given at all.
+leading ``~`` only from a usable home (``core.constants.usable_home``). Without
+one it now refuses even earlier, before anything is printed or created: it has
+nowhere to keep install receipts, so it exits with the no-receipt-store text and
+the invalid-configuration code, whatever ``--bin-path`` says.
 
 The installer runs with ``--tool sarif``, one reporter with nothing to install.
 """
@@ -30,7 +31,7 @@ from automated_security_helper.cli.dependencies import (
     dependencies_app,
 )
 from automated_security_helper.utils import subprocess_utils, uv_tool_runner
-from automated_security_helper.utils.download_utils import NO_BIN_DIRECTORY
+from automated_security_helper.utils.download_utils import NO_RECEIPT_STORE
 
 pytestmark = pytest.mark.unit
 
@@ -91,7 +92,7 @@ def test_an_empty_home_refuses_a_bin_path_under_tilde(project, monkeypatch):
     result = _install("~/.ash/bin")
 
     assert result.exit_code == EXIT_INVALID_CONFIG, result.output
-    assert _flat(NO_BIN_DIRECTORY) in _flat(result.output), result.output
+    assert _flat(NO_RECEIPT_STORE) in _flat(result.output), result.output
     assert made == [], made
 
 
@@ -102,7 +103,7 @@ def test_a_relative_home_refuses_a_bin_path_under_tilde(project, monkeypatch):
     result = _install("~/.ash/bin")
 
     assert result.exit_code == EXIT_INVALID_CONFIG, result.output
-    assert _flat(NO_BIN_DIRECTORY) in _flat(result.output), result.output
+    assert _flat(NO_RECEIPT_STORE) in _flat(result.output), result.output
     assert not (project / "home").exists(), sorted(project.rglob("*"))
 
 

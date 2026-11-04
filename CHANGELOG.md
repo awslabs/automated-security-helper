@@ -404,6 +404,20 @@
 
 ### Breaking changes
 
+- **`expires` is the canonical spelling of a suppression's or ignore path's
+  expiration date; `expiration` is a deprecated alias, removed in ASH v4.** The
+  swap reverses the earlier shape, where `expiration` was the field and
+  `expires` the alias. Both spellings are still read from a config or a stored
+  results file; reading `expiration` from a config warns with a
+  `DeprecationWarning` naming `expires` and the v4 removal, records the same
+  notice on the configuration's resolution warnings (printed at scan start),
+  and `ash config lint` reports the spelling as a `deprecated-spelling` issue;
+  an entry that sets both spellings to different values is still refused. Entries are now
+  written, stored and documented as `expires`, so results files, `ash config
+  get` output and the suppression entries `ash inspect findings` or the MCP
+  `suggest_suppression` tool add change their key from `expiration` to
+  `expires`; the published JSON schemas describe `expires` as the field and
+  `expiration` as the deprecated alias.
 - **`set_source_git` clones only from the hosts `ASH_MCP_GIT_ALLOWED_HOSTS` names.**
   The variable is unset by default, so a server whose operator has not set it clones
   from no host and answers every `set_source_git` call with `error_type`
@@ -5594,6 +5608,15 @@
   stale line, and a `--slim` baseline's entries no longer fail the scan.
 
 ### Fixes
+
+- **`ash dependencies install` says when a later `uv sync` removes what it
+  installed.** Run from a uv project's `.venv` (the layout of a container that runs
+  `RUN uv sync`), the install adds cdk-nag's packages, and any other package it
+  installs into ASH's environment, and a plain `uv sync` of that project then removes
+  them, because its lockfile does not list them. The command now ends with a note
+  saying so, as it already did for uv tool and uvx installs: `uv run` and
+  `uv sync --inexact` keep the packages, and declaring them in the project keeps
+  them through `uv sync`.
 
 - **A certificate setting you made is readable inside every sandbox backend.** Only
   sandbox-exec granted reading the file `SSL_CERT_FILE` names. Under bwrap, firejail

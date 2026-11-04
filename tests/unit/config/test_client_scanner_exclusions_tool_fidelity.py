@@ -582,9 +582,7 @@ def test_an_operator_mapping_the_model_refuses_is_not_written_in_unvalidated():
     model takes on its own is taken over (the operator's expiration, and its
     reason when that is text) and the client's reason stays for one that is
     not."""
-    client = IgnorePathWithReason(
-        path="legacy", reason="client", expiration="2088-01-01"
-    )
+    client = IgnorePathWithReason(path="legacy", reason="client", expires="2088-01-01")
 
     named = _spelled_like(client, "legacy")
     assert isinstance(named, IgnorePathWithReason)
@@ -621,9 +619,7 @@ def test_a_live_looking_expiration_the_model_refuses_keeps_the_operators_reason(
     is recorded as the unreadable text it is, so the entry reads as expired
     and is not applied. The control is the same entry with a day the model
     takes."""
-    client = IgnorePathWithReason(
-        path="legacy", reason="client", expiration="2088-01-01"
-    )
+    client = IgnorePathWithReason(path="legacy", reason="client", expires="2088-01-01")
     assert not _entry_expired(written)
 
     refused = _spelled_like(

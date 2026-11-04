@@ -3663,10 +3663,15 @@ def _ends_refused_operator_config(output: str, where: str, place: Path) -> bool:
 
 def _granting_config(directory: Path, checkout: bool = False) -> Path:
     """``directory/ash.yaml`` holding ``_GRANTING_ROOT``, with its base beside it, and
-    ``directory`` a git checkout of its own if ``checkout``."""
+    ``directory`` a git checkout of its own if ``checkout``.
+
+    A git-shaped checkout (``_mark_git_checkout``): a bare empty ``.git``
+    directory bounds nothing, so a fixture that planted one made no checkout
+    and every cell that rests on one tested a tree without it.
+    """
     directory.mkdir(parents=True)
     if checkout:
-        (directory / ".git").mkdir()
+        _mark_git_checkout(directory)
     (directory / "base.yaml").write_text(
         yaml.safe_dump(_GRANTING_BASE), encoding="utf-8"
     )
@@ -3678,11 +3683,18 @@ def _granting_config(directory: Path, checkout: bool = False) -> Path:
 def _workspace_in_a_checkout(tmp_path: Path, checkout: bool = True) -> Path:
     """The workspace file of ``repo/ws``, inside the git checkout ``repo``, or in no
     checkout unless ``checkout``. It lists ``api``, which has no config of its own, and
-    ``web``, which has one."""
+    ``web``, which has one.
+
+    The checkout is git-shaped (``_mark_git_checkout``): with the bare empty
+    ``.git`` an earlier cut planted, ``scanned_trees`` saw no checkout around
+    the workspace root, so a ``--config`` in the checkout outside the root, or
+    reached through a link, was never the repository's, and the refusals these
+    cells pin named "the scanned directory" instead of the checkout.
+    """
     repo = tmp_path / "repo"
     repo.mkdir()
     if checkout:
-        (repo / ".git").mkdir()
+        _mark_git_checkout(repo)
     root = repo / "ws"
     for name in ("api", "web"):
         (root / name).mkdir(parents=True)
@@ -4439,7 +4451,10 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
     from automated_security_helper.config.resolve_config import resolve_config
 
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    # Git-shaped, as _mark_git_checkout says: a bare empty .git bounds nothing
+    # (sandbox_grants._git_shaped), so the base below would be outside every
+    # checkout and no judgment could mark it.
+    _mark_git_checkout(repo)
     source = repo / "app"
     source.mkdir()
     (source / "main.py").write_text("x = 1\n", encoding="utf-8")
@@ -5150,19 +5165,27 @@ ASH_SCANNERS = [UnevaluatingScanner]
 
 
 @pytest.mark.integration
-def test_workspace_mode_does_not_check_for_rules_that_could_not_be_evaluated(
+def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
     tmp_path: Path,
 ) -> None:
     """exit-codes.md (ash scan; Workspace mode).
 
     A plugin scanner reports one rule it could not evaluate. Scanned alone, the project
     exits 1 and names the rule, which is the control: it shows the notification reaches
-    the gate. Scanned as the one project of a workspace, the same project exits 0.
+    the gate. Scanned as the one project of a workspace, the same project exits 1 too:
+    workspace mode checks the same unconditional causes as a single scan.
     """
-    assert_on_page(EXIT_CODES, "| 1 | A rule could not be evaluated |")
     assert_on_page(
         EXIT_CODES,
-        "Workspace mode does not check for rules that could not be evaluated.",
+        "| 1 | A rule could not be evaluated, or a scanner tool ASH could not stop "
+        "(also with `fail_on_incomplete_scanners` off) |",
+    )
+    assert_on_page(
+        EXIT_CODES,
+        "Workspace mode checks the same unconditional causes as a single scan: a rule "
+        "a scanner could not evaluate, a scanner tool ASH could not stop, and a stale "
+        "content database under a `fail` policy each fail the project whatever "
+        "`fail_on_incomplete_scanners` says.",
     )
     path = _plugin_path(tmp_path, "page_claim_scanners", _UNEVALUATING_PLUGIN)
     project = tmp_path / "workspace" / "api"
@@ -5212,7 +5235,7 @@ def test_workspace_mode_does_not_check_for_rules_that_could_not_be_evaluated(
         cwd=tmp_path,
         PYTHONPATH=path,
     )
-    assert in_a_workspace.returncode == 0, _output_tail(in_a_workspace)
+    assert in_a_workspace.returncode == 1, _output_tail(in_a_workspace)
 
 
 # --------------------------------------------------------------------------- #
@@ -6702,7 +6725,7 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
             None, 0, "Configuration is valid! A scan accepts it.", id="as-written"
         ),
         pytest.param(
-            ("expiration:", "expiry:"),
+            ("expires:", "expiry:"),
             0,
             "Configuration is valid! A scan accepts it.",
             id="a-misspelled-key",
@@ -6731,7 +6754,7 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
     ``ash config validate`` as written and with one field broken in each way the
     page's sentence lists. A wrong value and a missing required field exit 3 and
     name the field, and a scan, resolving the same file, refuses it too. A typo
-    in an optional key (``expiry`` for ``expiration``) is the warn-then-refuse
+    in an optional key (``expiry`` for ``expires``) is the warn-then-refuse
     rollout's default: validate accepts the file, a scan accepts it too, the
     scan's resolution warning names the key with a did-you-mean, and the entry
     is kept but applies to nothing (``has_unknown_keys``). The page's ``sed``
@@ -6745,7 +6768,7 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         "It checks the config a scan of the project would use, the way the scan loads it, "
         "and ends with `Configuration is valid! A scan accepts it.` It may also warn that "
         "`project_name` is not set, which a scan accepts. A typo in an optional key such as "
-        "`expiry` for `expiration` does not make the file invalid: validate still accepts "
+        "`expiry` for `expires` does not make the file invalid: validate still accepts "
         "it, the entry suppresses nothing until the key is fixed, and the scan that loads "
         "the config warns, naming the key with a did-you-mean (`fail_on_unknown_keys: true` "
         "makes it an error, the default from ASH v4). A wrong value or a missing required "
@@ -6798,17 +6821,22 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
 
 
 @pytest.mark.parametrize(
-    "page, heading, written",
+    # ``key`` is the spelling the page's block writes: a suppression writes the
+    # canonical ``expires`` (models/core.py); a staleness override's field is
+    # still named ``expiration`` (config/ash_config.py).
+    "page, heading, key, written",
     [
         pytest.param(
             _CONFIG_LOCAL_PAGE,
             "## 7. Suppress the false positive",
+            "expires",
             '"2027-04-30"',
             id="a-suppression",
         ),
         pytest.param(
             _OFFLINE_PAGE,
             "## Allow a stale database",
+            "expiration",
             '"2027-06-30"',
             id="a-staleness-override",
         ),
@@ -6823,7 +6851,13 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
 )
 @pytest.mark.integration
 def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
-    tmp_path: Path, page: str, heading: str, written: str, quoted: bool, verdict: int
+    tmp_path: Path,
+    page: str,
+    heading: str,
+    key: str,
+    written: str,
+    quoted: bool,
+    verdict: int,
 ) -> None:
     """local.md (7. Suppress the false positive) and run-offline.md (Allow a stale
     database).
@@ -6843,7 +6877,7 @@ def test_an_unquoted_expiration_date_makes_ash_refuse_the_whole_config(
         "Quote the date: an unquoted date makes the whole config invalid.",
     )
     block = _config_yaml_block(page, heading)
-    assert f"expiration: {written}" in block, block
+    assert f"{key}: {written}" in block, block
     text = block if quoted else block.replace(written, written.strip('"'))
     tree = _config_scan_tree(tmp_path, {"app.py": "x = 1\n", ".ashrc.yaml": text})
 
@@ -6874,7 +6908,7 @@ def test_a_suppression_whose_expiration_date_has_passed_is_accepted_and_does_not
     from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
     block = _config_yaml_block(_CONFIG_LOCAL_PAGE, "## 7. Suppress the false positive")
-    assert 'expiration: "2027-04-30"' in block, block
+    assert 'expires: "2027-04-30"' in block, block
     next_year = (date.today() + timedelta(days=365)).isoformat()
     for when, suppressed in (("2020-01-01", False), (next_year, True)):
         tree = _tree_with_config(tmp_path / when, block.replace("2027-04-30", when))
@@ -8876,6 +8910,12 @@ _MCP_CHILD_SECONDS = 300
 _MCP_STOP_SECONDS = 120
 
 
+#: SGR color codes, which uvicorn puts inside the phrases the readers wait for
+#: (its listen line arrives as ``\x1b[1mhttp://...\x1b[0m`` in CI), so a line is
+#: matched with them removed. The lines are kept as they arrived.
+_SGR_COLORS = re.compile(r"\x1b\[[0-9;]*m")
+
+
 class _Lines:
     """Every line a child's pipe gives, read on a thread of its own, so the pipe never
     fills and blocks the child, and a test can wait for one line."""
@@ -8894,8 +8934,8 @@ class _Lines:
         self._new.put(None)
 
     def wait_for(self, pattern: "re.Pattern[str]") -> Optional["re.Match[str]"]:
-        """The first match of ``pattern`` in a new line, or None at the end of the
-        pipe or after ``_MCP_CHILD_SECONDS``."""
+        """The first match of ``pattern`` in a new line, its SGR color codes
+        removed, or None at the end of the pipe or after ``_MCP_CHILD_SECONDS``."""
         deadline = time.monotonic() + _MCP_CHILD_SECONDS
         while (remaining := deadline - time.monotonic()) > 0:
             try:
@@ -8904,7 +8944,7 @@ class _Lines:
                 return None
             if line is None:
                 return None
-            match = pattern.search(line)
+            match = pattern.search(_SGR_COLORS.sub("", line))
             if match:
                 return match
         return None
@@ -9710,6 +9750,25 @@ def _wait_for_file(path: Path, what: str) -> None:
         time.sleep(0.05)
 
 
+def _read_pid(path: Path, what: str) -> int:
+    """The pid in ``path``, once the file exists and holds one.
+
+    The stand-in tool creates the file and then writes its pid (``write_text``
+    opens, then writes), so a read right after the file appears can see it
+    empty; wait until it parses instead of reading once.
+    """
+    _wait_for_file(path, what)
+    deadline = time.monotonic() + _MCP_CHILD_SECONDS
+    while True:
+        text = path.read_text(encoding="utf-8").strip()
+        if text.isdigit():
+            return int(text)
+        assert time.monotonic() < deadline, (
+            f"{what}, but {path.name} never held a pid: {text!r}"
+        )
+        time.sleep(0.05)
+
+
 def _wait_until_stopped(pid: int, held: Path) -> None:
     """Until the stand-in tool with ``pid`` is gone and nothing is set aside in
     ``held``: the scan has stopped and put back what it was going to put back."""
@@ -9856,8 +9915,7 @@ def test_a_signal_stops_a_stdio_scan_while_the_client_keeps_the_connection_open(
     try:
         begun = client.tool("run_ash_scan", source_dir=str(setup.project))
         assert begun.get("success") is True, begun
-        _wait_for_file(setup.control / "tool.pid", "the scanner's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the scanner's tool starting")
         assert client.process.poll() is None and _process_alive(pid)
         if stop == "ctrl-c":
             go.write_text("now", encoding="utf-8")
@@ -10011,9 +10069,7 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
             assert "ash.sarif" in written and "ash.unused-suppressions.md" in written, (
                 written
             )
-        else:
-            _wait_for_file(setup.control / "tool.pid", "the scanner's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the scanner's tool starting")
         cancelled = client.tool("cancel_scan", scan_id=begun["scan_id"])
         assert cancelled.get("success") is True, cancelled
         (setup.control / "go").write_text("", encoding="utf-8")
@@ -10259,8 +10315,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
         client = _McpHttpClient(port)
         begun = client.tool("run_ash_scan", source_dir=str(setup.project))
         assert begun.get("success") is True, begun
-        _wait_for_file(setup.control / "tool.pid", "the scanner's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the scanner's tool starting")
         if held_open:
             held = _hold_a_request_open(client)
         assert process.poll() is None and _process_alive(pid)
@@ -10357,8 +10412,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     try:
         begun = nextscan.tool("run_ash_scan", source_dir=str(setup.project))
         assert begun.get("success") is True, begun
-        _wait_for_file(setup.control / "tool.pid", "the next scan's tool starting")
-        pid = int((setup.control / "tool.pid").read_text(encoding="utf-8"))
+        pid = _read_pid(setup.control / "tool.pid", "the next scan's tool starting")
         cancelled = nextscan.tool("cancel_scan", scan_id=begun["scan_id"])
         assert cancelled.get("success") is True, cancelled
         _wait_until_stopped(pid, held_dir)
@@ -11222,23 +11276,26 @@ def _mcp_page_host() -> str:
         ),
         pytest.param(
             ["--host", _PAGE_HOST],
-            {"ASH.example.com": 200, "other.example.com": 200},
+            None,
             id="control-the-page-host-without-the-option",
         ),
     ],
 )
 @pytest.mark.unit
 def test_allowed_host_accepts_exactly_the_host_headers_the_mcp_page_says(
-    _mcp_cli: Callable[..., Any], options: List[str], expected: Dict[str, int]
+    _mcp_cli: Callable[..., Any], options: List[str], expected: Optional[Dict[str, int]]
 ) -> None:
     """mcp-server.md (Serve clients on another host).
 
     The app ``ash mcp --transport streamable-http`` would serve is taken from the
     command, without binding a port, and sent an ``initialize`` request with each Host
     header: 200 is accepted and 421 refused. The non-loopback cases listen where the
-    page's own command does, on its ``--host``. The controls are the same server
-    without the option, which accepts the loopback names on loopback and any name on
-    the page's address, so the refusals come from the option.
+    page's own command does, on its ``--host``. The loopback control is the same
+    server without the option, which accepts the loopback names, so the refusals
+    come from the option. The page-host control (``expected`` None) is the page's
+    non-loopback ``--host`` with neither option, which ``_validate_bind``
+    (cli/mcp) refuses before a server starts: exit 5, naming ``--allowed-host``
+    and ``--trust-upstream-host-check``.
     """
     assert_on_page(
         MCP_SERVER,
@@ -11265,6 +11322,12 @@ def test_allowed_host_accepts_exactly_the_host_headers_the_mcp_page_says(
     result, served = _mcp_cli(
         "--transport", "streamable-http", "--stateless-http", "--quiet", *options
     )
+    if expected is None:
+        assert result.exit_code == 5, result.output[-1500:]
+        assert "--allowed-host" in result.output, result.output[-1500:]
+        assert "--trust-upstream-host-check" in result.output, result.output[-1500:]
+        assert served == [], served
+        return
     assert result.exit_code == 0, result.output[-1500:]
     [(kind, app)] = served
     assert kind == "http"
@@ -11507,8 +11570,12 @@ _SANDBOX_HOW_TO = "docs/scanner-sandbox.md"
 
 _SANDBOX_MODES_SENTENCE = (
     "The values are `off`, `auto`, `bwrap`, `firejail`, `landlock`, and `sandbox-exec`, "
-    'lowercase. Quote `"off"`. YAML reads an unquoted `off` as the boolean false, which a '
-    "scan refuses with exit code 3:"
+    "lowercase. YAML reads an unquoted `off` as the boolean false, which ASH reads as "
+    "the mode `off`; an unquoted `on`, `yes` or `true` names no mode, so a scan "
+    "refuses it with exit code 3 and a hint to quote the value."
+)
+_SANDBOX_VALIDATE_SENTENCE = (
+    "`ash config validate` gives the same verdict, with the same exit code."
 )
 
 
@@ -11523,21 +11590,23 @@ def _sandbox_config_file(parent: Path, mode_line: str) -> Path:
 @pytest.mark.parametrize(
     "mode_line, expected",
     [
-        pytest.param("mode: off", 3, id="unquoted-off"),
+        pytest.param("mode: off", 0, id="unquoted-off"),
+        pytest.param("mode: on", 3, id="unquoted-on"),
         pytest.param("mode: AUTO", 3, id="not-lowercase"),
         pytest.param('mode: "off"', 0, id="control-quoted-off"),
     ],
 )
 @pytest.mark.integration
-def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
+def test_an_unquoted_off_sandbox_mode_is_read_as_the_mode_off(
     tmp_path: Path, mode_line: str, expected: int
 ) -> None:
-    """scanner-sandbox.md (Turn it on in a config file).
+    """scanner-sandbox.md (the config-file paragraph).
 
     The modes the page lists must be the ones the config model allows. A detect-secrets
-    scan run with a config file whose ``sandbox.mode`` is an unquoted ``off`` or not
-    lowercase must exit 3. The control is the same file with ``"off"`` quoted, which
-    scans a tree with nothing to find and exits 0.
+    scan run with a config file whose ``sandbox.mode`` is an unquoted ``off`` must exit
+    0, like the quoted ``"off"`` control: YAML hands the loader the boolean false,
+    which ASH reads as the mode ``off``. An unquoted ``on``, which YAML reads as true
+    and so names no mode, and a mode that is not lowercase must exit 3.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
     from automated_security_helper.config.ash_config import SandboxConfig
@@ -11573,7 +11642,8 @@ def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
 @pytest.mark.parametrize(
     "mode_line, expected",
     [
-        pytest.param("mode: off", 3, id="unquoted-off"),
+        pytest.param("mode: off", 0, id="unquoted-off"),
+        pytest.param("mode: on", 3, id="unquoted-on"),
         pytest.param('mode: "off"', 0, id="control-quoted-off"),
     ],
 )
@@ -11581,18 +11651,16 @@ def test_an_unquoted_off_sandbox_mode_makes_a_scan_exit_3(
 def test_ash_config_validate_gives_an_unquoted_off_sandbox_mode_the_scan_verdict(
     tmp_path: Path, mode_line: str, expected: int
 ) -> None:
-    """scanner-sandbox.md (Turn it on in a config file).
+    """scanner-sandbox.md (the config-file paragraph).
 
     ``ash config validate`` of a config file whose ``sandbox.mode`` is an unquoted
-    ``off`` must exit 3, as the scan does. The control is the same file with ``"off"``
-    quoted, which validates with 0. Both files set ``project_name``, so the verdict is
-    the mode's.
+    ``off`` must exit 0, as the scan does: the boolean false YAML hands the loader is
+    read as the mode ``off``. An unquoted ``on`` must exit 3, as a scan refuses it.
+    The control is the same file with ``"off"`` quoted, which validates with 0. All
+    three files set ``project_name``, so the verdict is the mode's.
     """
     assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_MODES_SENTENCE)
-    assert_on_page(
-        _SANDBOX_HOW_TO,
-        "`ash config validate` gives the same verdict, with the same exit code:",
-    )
+    assert_on_page(_SANDBOX_HOW_TO, _SANDBOX_VALIDATE_SENTENCE)
     result = _ash(
         [
             "config",
@@ -16462,13 +16530,14 @@ def test_a_container_scan_passes_only_the_aws_settings_the_operators_config_read
     assert names == passed, names
     if not names:
         return
-    directory, env_file = container._write_env_file(
+    # _env_file, not _write_env_file plus an rmtree of our own: the writer puts
+    # the file on the die-now cleanup record, and the context manager both
+    # removes the directory and drops that record, which the die-now guard in
+    # tests/conftest.py checks is empty when a test ends.
+    with container._env_file(
         names, dict(os.environ), "docker", source, tmp_path / "output"
-    )
-    try:
+    ) as (_directory, env_file):
         written = env_file.read_text(encoding="utf-8").splitlines()
-    finally:
-        shutil.rmtree(directory, ignore_errors=True)
     assert written == [f"{name}={set_here[name]}" for name in passed], written
 
 
@@ -17658,12 +17727,25 @@ def _workflow_inputs(workflow: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _workflow_value(value: Any, inputs: Dict[str, Any], given: Dict[str, Any]) -> Any:
-    """``value`` with a whole-value ``${{ inputs.<name> }}`` resolved: the caller's
-    ``with:`` value, else the input's default."""
+    """``value`` with a whole-value ``${{ inputs.<name> }}``, or a whole-value
+    ``${{ steps.inputs.outputs.<name> }}``, resolved: the caller's ``with:`` value,
+    else the input's default.
+
+    The scan workflow's ``inputs`` step (the workflow-command refusal) writes each
+    string input back out unchanged as ``<name with - as _>``, so a step reading
+    ``steps.inputs.outputs.artifact_name`` reads ``inputs.artifact-name``.
+    """
     match = re.fullmatch(r"\$\{\{\s*inputs\.([\w-]+)\s*\}\}", str(value))
-    if not match:
-        return value
-    return given.get(match[1], (inputs.get(match[1]) or {}).get("default"))
+    if match:
+        name = match[1]
+    else:
+        passed = re.fullmatch(
+            r"\$\{\{\s*steps\.inputs\.outputs\.(\w+)\s*\}\}", str(value)
+        )
+        if not passed:
+            return value
+        name = passed[1].replace("_", "-")
+    return given.get(name, (inputs.get(name) or {}).get("default"))
 
 
 def _workflow_called(uses: str) -> str:
@@ -17704,9 +17786,10 @@ def test_the_ci_tutorial_names_the_job_check_and_artifact_ci_creates() -> None:
     GitHub shows is the caller's job id and the called job's name; the JUnit check is
     the ``check_name`` of the report step, which runs by default; the artifact is the
     upload step's name, and the SARIF job downloads the same name, each with an
-    ``${{ inputs.* }}`` value resolved from the block's ``with:`` or the input's
-    default. The control is that the tutorial's blocks yield one scan job and one SARIF
-    job that call workflows in this repository.
+    ``${{ inputs.* }}`` value, or a ``${{ steps.inputs.outputs.* }}`` value the scan
+    workflow's inputs step passes through, resolved from the block's ``with:`` or
+    the input's default. The control is that the tutorial's blocks yield one scan
+    job and one SARIF job that call workflows in this repository.
     """
     assert_on_page(
         CI_TUTORIAL,
@@ -19328,7 +19411,10 @@ def test_ash_report_writes_the_reporters_output_unless_a_color_terminal_renders_
         headings = re.findall(r"^#{1,6} (.+)$", document, re.MULTILINE)
         assert headings, document[:2000]
         assert not re.findall(r"^#{1,6} \S", shown, re.MULTILINE), shown[:3000]
-        assert "ASH Security Scan Report" in shown, shown[:3000]
+        # The live heading is sentence case since the #830 restyle
+        # (markdown_reporter.py writes "# ASH security scan report"); the page
+        # claims only that Markdown is rendered, not the heading's case.
+        assert "ASH security scan report" in shown, shown[:3000]
         return
     # The control: the reporter wrote the JSON on one line.
     assert "\n  " not in document, document[:500]
@@ -19336,11 +19422,19 @@ def test_ash_report_writes_the_reporters_output_unless_a_color_terminal_renders_
     assert json.loads(shown) == json.loads(document)
 
 
+#: read-results.md on what the human reporters do as they build the document.
+_HUMAN_REPORTS_NEUTRALIZE_AT_BUILD = (
+    "The text, Markdown and HTML reporters neutralize a finding's scanner text as "
+    "they build the document: a control character is written as a visible escape, "
+    "and a CI command form is broken where it stands, so no line of the document is "
+    "one a CI runner reads as a command."
+)
 #: read-results.md on the report a regular file gets.
 _REPORT_TO_A_FILE_AS_WRITTEN = (
-    "To get the report exactly as the reporter wrote it, command lines included, "
-    "redirect standard output to a file, as in the command above: ASH then writes the "
-    "reporter's output unchanged, so the command above writes a SARIF file."
+    "A JSON report, such as SARIF, carries scanner text as data, command forms "
+    "included. To get the report exactly as the reporter wrote it, redirect standard "
+    "output to a file, as in the command above: ASH then writes the reporter's output "
+    "unchanged, so the command above writes a SARIF file."
 )
 #: read-results.md on a report's CI command lines on a pipe.
 _REPORT_CHANGES_COMMAND_LINES_ON_A_PIPE = (
@@ -19422,15 +19516,19 @@ def test_ash_report_writes_ci_command_lines_as_written_only_to_a_file(
     """read-results.md (Print a report in the terminal with ``ash report``).
 
     ``ash report`` over a stored scan whose file names hold every CI command form,
-    with the child recording the document the reporter returned in the same run. To a
-    regular file, with and without ``GITHUB_ACTIONS``, standard output is that document
-    byte for byte, command lines included. To a pipe, with and without
+    with the child recording the document the reporter returned in the same run. A
+    SARIF document carries the command forms as data; a text or Markdown document
+    holds none, since the #830 hardening has the reporter break each form as it
+    builds the document (``commands_broken`` in utils/terminal_text.py), the names
+    still in it. To a regular file, with and without ``GITHUB_ACTIONS``, standard
+    output is the recorded document byte for byte. To a pipe, with and without
     ``GITHUB_ACTIONS``, and, on POSIX, to a terminal with ``GITHUB_ACTIONS``,
-    ``TF_BUILD`` or ``TEAMCITY_VERSION`` set, no line of it is one a runner reads as a
-    command, and the names are still there. The control is the document itself: the
-    reporter wrote command lines into it. A terminal with no CI variable is no page
-    claim and has no case here.
+    ``TF_BUILD`` or ``TEAMCITY_VERSION`` set, no line written is one a runner reads
+    as a command, and the names are still there. The control is the SARIF document:
+    the reporter wrote command lines into it, so the probe names do reach the
+    reporters. A terminal with no CI variable is no page claim and has no case here.
     """
+    assert_on_page(READ_RESULTS, _HUMAN_REPORTS_NEUTRALIZE_AT_BUILD)
     assert_on_page(READ_RESULTS, _REPORT_TO_A_FILE_AS_WRITTEN)
     assert_on_page(READ_RESULTS, _REPORT_CHANGES_COMMAND_LINES_ON_A_PIPE)
     if sink == "terminal":
@@ -19454,7 +19552,17 @@ def test_ash_report_writes_ci_command_lines_as_written_only_to_a_file(
         f"{len(documents)} documents recorded:\n{stderr[-2000:]}"
     )
     document = documents[0]
-    assert _ci_command_lines(document), document[:2000]
+    if report_format == "sarif":
+        # The control: the SARIF reporter carries the names as data, command
+        # forms included, so any neutralizing on this format is a sink's.
+        assert _ci_command_lines(document), document[:2000]
+    else:
+        # The text and Markdown reporters neutralize the forms at document
+        # build: the "#" of a "##name[" form is written as "\x23" and a
+        # path's line feed as "\x0a", so no line of the document is one a
+        # runner reads as a command, and the names are still in it.
+        assert _ci_command_lines(document) == [], _ci_command_lines(document)
+        assert "add-mask" in document and "teamcity" in document, document[:2000]
     if expected == "as-written":
         assert out == document.replace("\n", os.linesep).encode("utf-8"), out.decode(
             "utf-8", "replace"
@@ -19518,9 +19626,10 @@ def test_a_json_report_on_a_pipe_parses_to_the_reporters_document(
 #: read-results.md on what a terminal shows of the characters it acts on.
 _A_TERMINAL_SHOWS_CONTROLS_AS_ESCAPES = (
     "On a terminal, with or without color, no character a terminal acts on is written "
-    "as it is: it is shown as an escape, such as `\\x1b` for an escape character in a "
-    "file name, or in a JSON report as JSON's own escape, such as `\\u001b`. Rendered "
-    "Markdown leaves such characters out."
+    "as it is: a text or Markdown report already holds it as the escape the reporter "
+    "wrote, such as `\\x1b` for an escape character in a file name, and a JSON report "
+    "shows it as JSON's own escape, such as `\\u001b`. A Markdown report that holds "
+    "such escape text is written as that text, not rendered."
 )
 #: A scanned file name holding an escape character and a bell: a terminal would read
 #: them as a sequence that sets its title, one no console styling writes.
@@ -19531,15 +19640,9 @@ _ESCAPE_IN_A_NAME = "title\x1b]0;page-claims\x07.txt"
 @pytest.mark.parametrize(
     "how, report_format, shown_as",
     [
-        pytest.param(
-            "no-color", "text", "\\x1b]0;page-claims\\x07", id="no-color-text"
-        ),
-        pytest.param(
-            "no-color", "markdown", "\\x1b]0;page-claims\\x07", id="no-color-markdown"
-        ),
-        pytest.param(
-            "color-on", "text", "\\x1b]0;page-claims\\x07", id="color-on-text"
-        ),
+        pytest.param("no-color", "text", None, id="no-color-text"),
+        pytest.param("no-color", "markdown", None, id="no-color-markdown"),
+        pytest.param("color-on", "text", None, id="color-on-text"),
         pytest.param(
             "no-color", "sarif", "\\u001b]0;page-claims\\u0007", id="no-color-json"
         ),
@@ -19557,10 +19660,14 @@ def test_a_terminal_shows_the_characters_it_acts_on_as_escapes(
 
     ``ash report`` over a stored scan whose file name holds an escape character, ``]0;``
     and a bell, to a terminal of the test's own, with ``--no-color`` and with color on.
-    No escape character may start ``]0;`` and no bell may be written. A text or Markdown
-    report must show the two as ``\\x1b`` and ``\\x07``, and a JSON report as JSON's
-    ``\\u001b`` and ``\\u0007``; rendered Markdown shows neither. The control is the
-    document the reporter returned: it holds the raw characters.
+    No escape character may start ``]0;`` and no bell may be written. Since the #830
+    hardening the text and Markdown reporters write the two as the escapes ``\\x1b``
+    and ``\\x07`` in the document itself (``shown_on_one_line`` in
+    utils/terminal_text.py), and that escape text is what reaches the terminal: a
+    Markdown report that holds it is written unrendered (cli/report.py), and the
+    terminal sink doubles the backslash of text that reads as an escape, so only the
+    escapes' letters are pinned on the shown side. A JSON document holds the raw
+    characters as data, shown on the terminal as JSON's ``\\u001b`` and ``\\u0007``.
     """
     assert_on_page(READ_RESULTS, _A_TERMINAL_SHOWS_CONTROLS_AS_ESCAPES)
     workdir = tmp_path / "work"
@@ -19587,15 +19694,23 @@ def test_a_terminal_shows_the_characters_it_acts_on_as_escapes(
     if report_format == "sarif":
         # The reporter's JSON holds the name as JSON escapes: look in its strings.
         document = "\n".join(_json_strings(json.loads(document)))
-    assert "\x1b]0;page-claims\x07" in document, repr(document[:2000])
+        assert "\x1b]0;page-claims\x07" in document, repr(document[:2000])
+    else:
+        # The text and Markdown reporters wrote the two as escapes at document
+        # build, so the document holds the escape text and no raw control.
+        assert "\x1b" not in document and "\x07" not in document, repr(document[:2000])
+        assert "x1b" in document and "x07" in document, repr(document[:2000])
+        assert "page-claims" in document, repr(document[:2000])
     shown = out.decode("utf-8", "replace")
     # Rendered Markdown's own links are OSC 8 sequences, so only the name's are looked for.
     assert "\x1b]0;" not in shown and "\x07" not in shown, repr(shown[:2000])
     plain = _CSI_SEQUENCE.sub("", shown)
+    assert "page-claims" in plain, repr(plain[:2000])
     if shown_as is None:
-        # "rendered Markdown shows neither": not the escape, and not the bell.
-        assert "page-claims" in plain, repr(plain[:2000])
-        assert "\\x1b" not in plain and "\\x07" not in plain, repr(plain[:2000])
+        # A text or Markdown report reaches the terminal as the escape text the
+        # reporter wrote; the sink doubles the backslash of text that reads as
+        # an escape, so only the escapes' letters are pinned.
+        assert "x1b" in plain and "x07" in plain, repr(plain[:2000])
     else:
         assert shown_as in plain, repr(plain[:2000])
 

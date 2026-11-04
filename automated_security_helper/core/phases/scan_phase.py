@@ -1321,6 +1321,21 @@ class ScanPhase(EnginePhase):
                     list(enabled_scanners), known_names, selection_origin
                 )
 
+                # The names that matched nothing, recorded for the results file
+                # and the console summary (how-to/choose-scanners.md,
+                # reference/output-files.md). After the two refusals above, so a
+                # run that was refused records nothing, and only when a name was
+                # left unresolved: the field keeps its None (written as null)
+                # when every name matched, which is how a reader tells "nothing
+                # went unmatched" from "nothing was requested". Sorted and
+                # deduplicated, in the spelling given. Exclusions are warned
+                # about below and never recorded: an unknown exclusion excludes
+                # nothing, so there is nothing the run did not serve.
+                if unresolved:
+                    aggregated_results.metadata.requested_scanners_not_run = sorted(
+                        set(unresolved)
+                    )
+
                 # The third silent-zero shape: names that resolve, and a
                 # Python-only run that leaves every one of them out. The two
                 # refusals above cannot see it (each name matches a scanner), and
@@ -1368,11 +1383,15 @@ class ScanPhase(EnginePhase):
                 {_scanner_display_name(instance) for instance in scanner_instances}
                 | set(construction_failed),
             )
-            if unmatched_exclusions:
+            # One line per name, in the wording how-to/choose-scanners.md's bullet
+            # promises ("a warning names it"): the sentence names the excluded
+            # name itself rather than the flag, so the CLI and the MCP tool warn
+            # in the same words, and the tail still names the caller's own input.
+            for unmatched_exclusion in unmatched_exclusions:
                 ASH_LOGGER.warning(
-                    f"No registered scanner matches the {names.exclusion} name "
-                    f"{', '.join(unmatched_exclusions)}, so it excludes nothing. "
-                    "Check the spelling: names use hyphens, not underscores."
+                    f"No registered scanner matches excluded {unmatched_exclusion}, "
+                    f"so nothing is excluded for it. Check the {names.exclusion} "
+                    "spelling: names use hyphens, not underscores."
                 )
 
             # Apply the shard selection here, and not earlier.

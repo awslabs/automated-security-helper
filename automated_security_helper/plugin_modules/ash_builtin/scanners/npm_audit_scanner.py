@@ -147,7 +147,7 @@ def _usable_cvss_score(cvss: Any) -> float | None:
     return float(score)
 
 
-# The userinfo of a URL (``https://user:token@host``), masked in log excerpts.
+# The userinfo of a URL (``https://user:token@host``), masked in log excerpts.  # pragma: allowlist secret
 _URL_USERINFO = re.compile(r"(://)[^\s/@]+@")
 
 
@@ -156,7 +156,7 @@ def _shown_tool_text(text: Any, values: Sequence[str] | None) -> str:
 
     Redacted of ``values`` (the env-read values, ``shown_tool_stderr``) and
     then with any URL's userinfo masked whole. A registry URL a tool quotes
-    can carry its credentials inline (``https://user:token@host/``), and the
+    can carry its credentials inline (``https://user:token@host/``), and the  # pragma: allowlist secret
     user part is not one of the env-read values, so the redaction alone showed
     it. The mask ran on the debug summary's first stderr line only; the audit
     failure's reason, the yarn error detail and a raised exception's text
@@ -3455,9 +3455,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             f"Failed to run npm audit in {package_dir}: {described}",
                             extra=NO_MARKUP,
                         )
+                        # The record form (posix separators), as the
+                        # refused-inputs branch shows the same lockfile: str()
+                        # on the Path rendered the platform separator.
                         audit_failures.append(
-                            f"{lock_file}: the audit raised {type(e).__name__}: "
-                            f"{described}"
+                            f"{self._shown_path(lock_file, target_type)}: "
+                            f"the audit raised {type(e).__name__}: {described}"
                         )
 
             # Save the combined results

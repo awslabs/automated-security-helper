@@ -22,6 +22,7 @@ import sys
 import pytest
 
 from automated_security_helper.utils.directory_refusals import (
+    output_dir_invalid_path,
     output_dir_refusal,
     source_dir_refusal,
 )
@@ -36,10 +37,16 @@ def test_an_empty_output_dir_is_refused_as_mkdir_refuses_it():
 
 
 def test_a_path_holding_a_nul_is_refused_not_raised():
-    assert source_dir_refusal("a\x00b") == "Source directory does not exist: a\x00b"
+    assert (
+        source_dir_refusal("a\x00b") == "Source directory is not a valid path: a\x00b"
+    )
     refusal = output_dir_refusal("a\x00b")
     assert refusal is not None
-    assert refusal.startswith("Output directory cannot be created: a\x00b (")
+    # exit-codes.md's line for a path the OS cannot take at all: no mkdir could
+    # ever make it, so "cannot be created (<reason>)" undersold the problem.
+    assert refusal == "Output directory is not a valid path: a\x00b"
+    assert output_dir_invalid_path("a\x00b") == refusal
+    assert output_dir_invalid_path("plain") is None
 
 
 def _link(link, target) -> None:

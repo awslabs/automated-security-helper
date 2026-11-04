@@ -984,7 +984,9 @@ def receipt_root() -> Path:
     HOME with no passwd entry raised RuntimeError out of every install. With no
     usable home there is no receipt store: this raises ``ReceiptStoreUnavailable``,
     which ``read_receipt`` reads as no receipt and ``write_receipt`` as a receipt it
-    could not write, so an install still installs and is reported as it went.
+    could not write, so an install a scan itself performs still installs and is
+    reported as it went. ``ash dependencies install`` refuses to start without a
+    usable home (:data:`NO_RECEIPT_STORE`), so nothing it installs goes unrecorded.
 
     Raises:
         ReceiptStoreUnavailable: there is no usable home directory.
@@ -2216,6 +2218,13 @@ NO_BIN_DIRECTORY = (
     "absolute path, and HOME is empty or relative, so ~/.ash/bin is not used. Set "
     "ASH_BIN_PATH or HOME to an absolute path, or give ash dependencies install a "
     "--bin-path."
+)
+
+#: Why ``ash dependencies install`` installs nothing with no usable home directory.
+NO_RECEIPT_STORE = (
+    "ASH has no usable home directory, so nowhere to keep install receipts: HOME is "
+    "empty or relative, or unset with no absolute home in the passwd entry. Nothing "
+    "is installed, whatever --bin-path says. Set HOME to an absolute path."
 )
 
 

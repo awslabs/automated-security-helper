@@ -38,7 +38,7 @@ global_settings:
         resource_type: "AWS::IAM::Policy"
 ```
 
-`resource_id` and `resource_type` are universal: ASH matches them itself against the identity the finding carries, whatever engine produced it. Both are literal matches first, then globs with `[` and `]` taken literally; `resource_id` is case-sensitive, `resource_type` is not. A finding that carries no resource identity never matches a resource-scoped entry, the same safe direction as a finding with no line and a line-scoped suppression, and an engine gains support by writing the `ash_resource_id` and `ash_resource_type` properties into its SARIF results, not by changing ASH. The common case has first-class sugar: a top-level `resource_id` on the entry is folded into `scope.resource_id` (setting both to different values is an error), and `expires` is accepted as an alias of `expiration` when a config is read.
+`resource_id` and `resource_type` are universal: ASH matches them itself against the identity the finding carries, whatever engine produced it. Both are literal matches first, then globs with `[` and `]` taken literally; `resource_id` is case-sensitive, `resource_type` is not. A finding that carries no resource identity never matches a resource-scoped entry, the same safe direction as a finding with no line and a line-scoped suppression, and an engine gains support by writing the `ash_resource_id` and `ash_resource_type` properties into its SARIF results, not by changing ASH. The common case has first-class sugar: a top-level `resource_id` on the entry is folded into `scope.resource_id` (setting both to different values is an error), and `expiration` is accepted as a deprecated alias of `expires` when a config is read; the alias is removed in ASH v4.
 
 A scope may also carry per-engine blocks, keyed by scanner name and owned by that scanner's plugin:
 
@@ -71,9 +71,9 @@ ASH applies these rules to each scanner's SARIF as it arrives, and again to the 
 
 ## Expiration
 
-A suppression's `expiration` is a date. On that date, by the host's local clock, the suppression stops matching, and the finding counts toward the gate again on the next scan. The config stays valid: the scan fails on the finding, and a warning at the start of the scan lists every suppression and ignore path that has expired. ASH also logs a warning at the start of a scan for the entries that expire within the next 30 days, and `ash config lint` reports suppressions and ignore paths that have already expired.
+A suppression's `expires` is a date. On that date, by the host's local clock, the suppression stops matching, and the finding counts toward the gate again on the next scan. The config stays valid: the scan fails on the finding, and a warning at the start of the scan lists every suppression and ignore path that has expired. ASH also logs a warning at the start of a scan for the entries that expire within the next 30 days, and `ash config lint` reports suppressions and ignore paths that have already expired.
 
-An ignore path's `expiration` works the same way: on that date it stops applying, and the findings it dropped come back on the next scan. The entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude` expire the same way, and stop excluding their files. An expired entry stays in the config file and in the results; only its effect stops.
+An ignore path's `expires` works the same way: on that date it stops applying, and the findings it dropped come back on the next scan. The entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude` expire the same way, and stop excluding their files. An expired entry stays in the config file and in the results; only its effect stops.
 
 Results written by another ASH version can hold an entry that this version refuses in a config file, such as one with an unknown key or a date in another format. `ash report`, `ash merge`, and the other commands that read results still load them, with a warning that names the problem, and never apply that entry.
 

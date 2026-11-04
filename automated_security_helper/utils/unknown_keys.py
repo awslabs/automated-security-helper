@@ -69,6 +69,13 @@ WARN_UNKNOWN_KEYS_TAIL = (
     "fail_on_unknown_keys: true to make this an error."
 )
 
+#: Accepted keys that are deprecated alias spellings. They still load (the
+#: refusal check honors them), but a "did you mean" and the "Accepted keys"
+#: listing leave them out: a typo's correction must not point at a spelling
+#: that is removed in ASH v4 ("expiration" is the alias of "expires").
+DEPRECATED_KEYS: FrozenSet[str] = frozenset({"expiration"})
+
+
 #: What a kept unknown key records under TOLERATE_STORED_CONFIG, once per key.
 #: Not the key: a stored key is the results file's data, so the results loader
 #: names the section that holds it instead (models/asharp_model.py). A config
@@ -380,6 +387,10 @@ def refuse_unknown_keys(
     unknown = [key for key in data if isinstance(key, str) and key not in known]
     if not unknown:
         return data
+    # The message's suggestions and its "Accepted keys" listing steer to the
+    # canonical spellings only; a deprecated alias (DEPRECATED_KEYS) still
+    # loads, which the acceptance check above already covered.
+    suggestible = [key for key in known if key not in DEPRECATED_KEYS]
     notes = tolerated_notes(info)
     if notes is not None:
         notes.extend(UNKNOWN_KEY_NOTE for _ in unknown)
@@ -392,7 +403,7 @@ def refuse_unknown_keys(
         # never applies (IgnorePathWithReason.has_unknown_keys), the same
         # fail-closed direction the stored-config tolerance takes.
         warnings.append(
-            unknown_keys_message(unknown, known, where) + WARN_UNKNOWN_KEYS_TAIL
+            unknown_keys_message(unknown, suggestible, where) + WARN_UNKNOWN_KEYS_TAIL
         )
         return data
-    raise ValueError(unknown_keys_message(unknown, known, where))
+    raise ValueError(unknown_keys_message(unknown, suggestible, where))

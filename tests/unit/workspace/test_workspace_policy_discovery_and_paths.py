@@ -164,6 +164,12 @@ class TestALinkToALoopOutsideTheGateIsRefusedLikeAnyOutsideTarget:
         assert "cannot be resolved" not in str(excinfo.value)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the Win32 path parser collapses the link-then-dotdot spelling "
+    "lexically before the filesystem sees the link, so the OS itself reads "
+    "the collapsed file there",
+)
 class TestAPolicyPathIsReadAsNamed:
     """``ws/L/../pol.yaml`` with ``L`` a link into ``ws/elsewhere/sub`` names
     ``ws/elsewhere/pol.yaml`` to the filesystem; collapsed as text it is
