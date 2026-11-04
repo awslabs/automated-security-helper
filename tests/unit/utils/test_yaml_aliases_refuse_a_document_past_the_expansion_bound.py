@@ -45,7 +45,7 @@ def test_a_document_past_the_bound_is_refused_while_composing():
     assert len(text) < 1000
 
     with pytest.raises(AliasExpansionError) as refused:
-        yaml.load(text, Loader=NoRecursiveAliasLoader)
+        yaml.load(text, Loader=NoRecursiveAliasLoader)  # nosec B506
     assert isinstance(refused.value, ComposerError)
     assert str(MAX_EXPANDED_NODES) in str(refused.value)
     assert refused.value.problem_mark is not None
@@ -54,20 +54,20 @@ def test_a_document_past_the_bound_is_refused_while_composing():
 def test_a_shared_alias_under_the_bound_still_loads():
     text = _nested_aliases(levels=3, width=3) + "b: [*a3, *a3]\n"
 
-    loaded = yaml.load(text, Loader=NoRecursiveAliasLoader)
+    loaded = yaml.load(text, Loader=NoRecursiveAliasLoader)  # nosec B506
     assert loaded["b"][0] is loaded["a3"]
     assert loaded["a3"]["k0"]["k0"]["k0"] == {"leaf": 1}
 
 
 def test_a_cyclic_alias_is_still_refused_by_name():
     with pytest.raises(RecursiveAliasError):
-        yaml.load("a: &a [*a]\n", Loader=NoRecursiveAliasLoader)
+        yaml.load("a: &a [*a]\n", Loader=NoRecursiveAliasLoader)  # nosec B506
 
 
 def test_a_plain_document_of_ordinary_size_still_loads():
     text = "items:\n" + "".join(f"  - {n}\n" for n in range(2000))
 
-    loaded = yaml.load(text, Loader=NoRecursiveAliasLoader)
+    loaded = yaml.load(text, Loader=NoRecursiveAliasLoader)  # nosec B506
     assert len(loaded["items"]) == 2000
 
 
@@ -99,7 +99,7 @@ def test_the_bound_counts_each_document_of_a_stream_on_its_own(monkeypatch):
     # through: one document holding the three documents' aliases (90 nodes) is
     # refused under the same patch.
     with pytest.raises(AliasExpansionError):
-        yaml.load(_aliased_items(15), Loader=NoRecursiveAliasLoader)
+        yaml.load(_aliased_items(15), Loader=NoRecursiveAliasLoader)  # nosec B506
 
 
 def test_only_what_the_aliases_add_is_counted(monkeypatch):
@@ -109,12 +109,14 @@ def test_only_what_the_aliases_add_is_counted(monkeypatch):
     monkeypatch.setattr(yaml_aliases, "MAX_EXPANDED_NODES", 40)
     large = _plain_items(500) + _aliased_items(2)
 
-    loaded = yaml.load(large, Loader=NoRecursiveAliasLoader)
+    loaded = yaml.load(large, Loader=NoRecursiveAliasLoader)  # nosec B506
     assert len(loaded["items"]) == 500
     assert loaded["use"][0] is loaded["base"]
 
     with pytest.raises(AliasExpansionError):
-        yaml.load(_aliased_items(8), Loader=NoRecursiveAliasLoader)  # 48 added
+        yaml.load(
+            _aliased_items(8), Loader=NoRecursiveAliasLoader
+        )  # 48 added  # nosec B506
 
 
 def test_a_refusal_names_the_aliases_that_took_the_document_past_the_bound(
@@ -123,7 +125,7 @@ def test_a_refusal_names_the_aliases_that_took_the_document_past_the_bound(
     monkeypatch.setattr(yaml_aliases, "MAX_EXPANDED_NODES", 40)
 
     with pytest.raises(AliasExpansionError) as refused:
-        yaml.load(_aliased_items(8), Loader=NoRecursiveAliasLoader)
+        yaml.load(_aliased_items(8), Loader=NoRecursiveAliasLoader)  # nosec B506
 
     text = str(refused.value)
     assert "past 40 nodes" in text, text
@@ -137,6 +139,6 @@ def test_a_large_document_with_no_alias_loads():
     count = MAX_EXPANDED_NODES + 1
     text = "items:\n" + "".join(f"  - {n}\n" for n in range(count))
 
-    loaded = yaml.load(text, Loader=NoRecursiveAliasLoader)
+    loaded = yaml.load(text, Loader=NoRecursiveAliasLoader)  # nosec B506
 
     assert len(loaded["items"]) == count

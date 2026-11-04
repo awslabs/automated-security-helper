@@ -481,6 +481,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: Files this scanner asked ASH to own (``_neutral_tool_file``), by path, with
     #: the text each holds. Written when the arguments are resolved.
     _neutral_files: Dict[str, str] = PrivateAttr(default_factory=dict)
+    #: How the target's run was launched, for the refused-exit-code record:
+    #: the arm (``launch_arm``: "uv-tool" or "direct") and the program the
+    #: spawn layer resolved (``resolved_program``, the spawned argv's first
+    #: element), as the run's response carried them. Written beside the exit
+    #: code (``_record_target_exit_code``), None when the response said
+    #: neither (a test double, an override that builds its own response).
+    _scan_launch: Optional[Tuple[Optional[str], Optional[str]]] = PrivateAttr(
+        default=None
+    )
 
     # --- Suppression-scope hooks (utils/suppression_scope_registry.py) ---
     # A suppression's scope.engines block for this scanner is opaque to ASH's
@@ -1234,6 +1243,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         The attribute, which is what judging code reads, records the flag's
         own conventional code so the 0 default cannot read as an accepted
         run. The flags are checked in the runner's own precedence order.
+
+        The launch is recorded beside the code (``_scan_launch``): the arm
+        that ran (uv-tool or direct) and the program the spawn layer resolved,
+        read from the response's ``launch_arm`` and ``resolved_program``, so
+        a refused exit code's message can name WHICH resolved file returned
+        it. Recorded here, where every refusing caller already hands the
+        response in, rather than threaded through new parameters.
         """
         code = response.get("returncode") if isinstance(response, dict) else None
         if not is_exit_code(code):
@@ -1243,6 +1259,18 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             code = flagged_returncode(response)
         if is_exit_code(code):
             self.exit_code = exit_status(code)
+        # The launch beside the code, for the refused-exit-code record: the
+        # arm _run_subprocess tagged and the program the spawn layer resolved.
+        # Set for every response, None included, so a response that carries
+        # neither (a test double, an override's own dict) never reads as the
+        # previous target's launch.
+        arm = response.get("launch_arm") if isinstance(response, dict) else None
+        program = (
+            response.get("resolved_program") if isinstance(response, dict) else None
+        )
+        arm = arm if isinstance(arm, str) and arm else None
+        program = program if isinstance(program, str) and program else None
+        self._scan_launch = (arm, program) if (arm or program) else None
 
     def _refuse_rejected_exit_code(self, results_file: Optional["Path"] = None) -> None:
         """Raise ScannerError when the tool's exit code is outside its success set.
@@ -1254,7 +1282,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         zero-byte report when it cannot load its database -- and "found nothing"
         and "never scanned" read the same in it.
 
-        The message names the code. With ``results_file``, for an override whose own
+        The message names the code and, when the run's response carried them,
+        the launch that produced it: the arm (uv-tool or direct) and the
+        program the spawn layer resolved (``_launch_clause``). With
+        ``results_file``, for an override whose own
         handler does not describe the failure, it also carries the accepted set and
         the tool's stderr (``_describe_scan_failure``); the template's handler adds
         those itself.
@@ -1272,7 +1303,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if ash_judged is not None:
             origin = f"its run {ash_judged}, so ASH recorded exit code {self.exit_code}"
         else:
-            origin = f"its tool exited with code {self.exit_code}"
+            origin = (
+                f"its tool{self._launch_clause()} exited with code {self.exit_code}"
+            )
         rejected = _RejectedResultError(
             f"{origin}, which this scanner "
             "does not accept as a completed run, so its results file is not graded"
@@ -1280,6 +1313,32 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if results_file is None:
             raise rejected
         raise ScannerError(self._describe_scan_failure(rejected, results_file))
+
+    def _launch_clause(self) -> str:
+        """The refused run's launch as a parenthetical clause, or "".
+
+        Built from what ``_record_target_exit_code`` recorded off the run's
+        response: the arm ``_run_subprocess`` took (uv-tool or direct) and the
+        program the spawn layer resolved, the spawned argv's first element.
+        Without it, "exited with code N" named the code but not WHICH resolved
+        file produced the run, so a CI read could not tell a tool uv ran from
+        the one on PATH, and a diagnosis started from the wrong binary. Empty
+        when the response carried neither: an override that builds its own
+        response, or a test double.
+        """
+        launch = getattr(self, "_scan_launch", None)
+        if not launch:
+            return ""
+        arm, program = launch
+        how = {"uv-tool": "through uv tool run", "direct": "directly"}.get(arm or "")
+        if program and how:
+            return f" (launched {how} as {program})"
+        if program:
+            return f" (launched as {program})"
+        if how:
+            return f" (launched {how})"
+        # An arm this reader does not know is still worth naming as recorded.
+        return f" (launched through its {arm} arm)"
 
     # Log level used for the empty-target preamble message. Defaults to INFO;
     # bandit overrides to VERBOSE since python-only repos commonly trip it.

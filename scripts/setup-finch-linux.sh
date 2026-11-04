@@ -3,11 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Installs Finch on Ubuntu 24.04 (noble) for CI environments.
-# Checks that a Finch package is available for this host first, then removes
-# Docker Engine (it conflicts with Finch's containerd dependency), installs
-# Finch from the official APT repo, starts the units and probes the daemon and
-# the builder. The workflow that calls this runs finch through `sudo` itself
-# (OCI_RUNNER_WRAPPER); no wrapper is created here.
+# Checks that the Finch install resolves for this host first, then removes
+# Docker Engine and installs Finch from the official APT repo with Ubuntu's
+# containerd and runc in Docker's place: Docker's containerd.io declares
+# `Conflicts: containerd` and its bundled runc does not satisfy runfinch-finch's
+# `runc (>= 1.1.5)`, so the swap is what makes Finch installable at all. The
+# units are then started and the daemon and the builder probed. The workflow
+# that calls this runs finch through `sudo` itself (OCI_RUNNER_WRAPPER); no
+# wrapper is created here.
 #
 # This script is destructive to the host it runs on: it removes the Docker
 # packages and the Docker client configuration under /root and /home/runner,
@@ -49,11 +52,23 @@ curl -fsSL https://artifact.runfinch.com/deb/GPG_KEY.pub | gpg --dearmor --batch
 echo "deb [signed-by=${KEYRING} arch=${ARCH}] https://artifact.runfinch.com/deb noble main" | tee "${SOURCES}"
 apt-get update -q
 
-# Download Finch before Docker is removed. A host with no Finch package for its
-# architecture, or a repository that cannot be reached, fails here while Docker
-# is still installed, instead of after the only container runtime is gone.
-echo "=== Fetching the Finch package (Docker is still installed) ==="
-"${APT_INSTALL[@]}" --download-only runfinch-finch
+# Download Finch and its containerd/runc replacements before Docker is removed.
+# A host with no Finch package for its architecture, or a repository that
+# cannot be reached, fails here while Docker is still installed, instead of
+# after the only container runtime is gone.
+#
+# containerd and runc are NAMED on this command line, and that is load-bearing.
+# Docker's containerd.io declares `Conflicts: containerd`, and runfinch-finch
+# depends on `runc (>= 1.1.5)`, which containerd.io's bundled copy does not
+# satisfy. Asked for runfinch-finch alone, apt refuses with
+# "pkgProblemResolver::Resolve generated breaks" rather than deciding on its
+# own to remove containerd.io; apt resolves a Conflicts by removal only when
+# the command line names the replacements. --download-only performs none of
+# that removal -- Docker stays installed, as the banner says -- it only proves
+# the end state resolves and fills the apt cache the post-removal install
+# reads from.
+echo "=== Fetching Finch with containerd and runc (Docker is still installed; its containerd.io is swapped for them at the install below) ==="
+"${APT_INSTALL[@]}" --download-only runfinch-finch containerd runc
 
 echo "=== Removing Docker Engine (conflicts with Finch containerd) ==="
 # Only the packages that are installed: under set -e, `apt-get remove` of a
@@ -75,8 +90,11 @@ else
 fi
 rm -rf /root/.docker /home/runner/.docker
 
-echo "=== Installing Finch ==="
-"${APT_INSTALL[@]}" runfinch-finch
+# One transaction naming the same set the download step proved and cached, so
+# the resolver here sees the end state it already resolved: Finch on Ubuntu's
+# containerd and runc, with Docker's containerd.io already purged above.
+echo "=== Installing Finch with containerd and runc in Docker's place ==="
+"${APT_INSTALL[@]}" runfinch-finch containerd runc
 
 echo "=== Starting Finch services ==="
 # A failed start is reported by the wait below, with the unit's status and

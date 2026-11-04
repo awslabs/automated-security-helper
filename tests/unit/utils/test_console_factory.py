@@ -760,6 +760,9 @@ def _run_on_a_fake_terminal(body: str) -> str:
     for name in ("FORCE_COLOR", "TTY_COMPATIBLE", "TTY_INTERACTIVE", "NO_COLOR"):
         env.pop(name, None)
     env.update(TERM="xterm-256color", COLUMNS="80", LINES="40")
+    # The panel holds rich box-drawing characters; a Windows child's stdout
+    # otherwise encodes as cp1252 and the child's own print dies on them.
+    env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
     try:
         done = subprocess.run(

@@ -181,7 +181,9 @@ class TestMatchingFollowsAsh:
 class TestKeywordPattern:
     def test_quoted_and_dotted_keywords_are_matched(self, validator):
         """At the base a quote or a dot before the keyword never matched."""
-        assert validator.SECRET_KEYWORD_PATTERN.search('"api_key": "value"')
+        assert validator.SECRET_KEYWORD_PATTERN.search(
+            '"api_key": "value"'
+        )  # pragma: allowlist secret
         assert validator.SECRET_KEYWORD_PATTERN.search("self.api_key = value")
         assert validator.SECRET_KEYWORD_PATTERN.search("password = value")
 

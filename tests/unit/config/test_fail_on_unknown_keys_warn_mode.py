@@ -70,7 +70,9 @@ class TestWarnModeDefault:
             w for w in config._resolution_warnings if "Unknown key 'expiraton'" in w
         ]
         assert len(warnings) == 1
-        assert "did you mean 'expiration'?" in warnings[0]
+        # The suggestion steers to the canonical spelling, never the deprecated
+        # "expiration" alias (utils/unknown_keys.DEPRECATED_KEYS).
+        assert "did you mean 'expires'?" in warnings[0]
         assert "fail_on_unknown_keys" in warnings[0]
 
     def test_the_kept_entry_never_applies(self):

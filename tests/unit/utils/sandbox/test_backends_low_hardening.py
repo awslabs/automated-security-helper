@@ -1747,9 +1747,9 @@ def test_a_listed_name_passes_the_callers_value_and_an_entry_with_a_value_sets_o
 @pytest.mark.parametrize(
     "entry",
     [
-        "HTTPS_PROXY=http://MARKER-user:MARKER-pw@proxy:3128",
+        "HTTPS_PROXY=http://MARKER-user:MARKER-pw@proxy:3128",  # pragma: allowlist secret
         "https_proxy=https://MARKER-user@proxy",
-        "MY_TOOL_URL=socks5://MARKER-user:MARKER-pw@host:1080",
+        "MY_TOOL_URL=socks5://MARKER-user:MARKER-pw@host:1080",  # pragma: allowlist secret
     ],
 )
 def test_an_entry_that_sets_a_url_with_a_user_name_is_refused_not_dropped(
@@ -1922,7 +1922,7 @@ def test_the_tmpdir_refusal_says_what_each_backend_does():
         "MARKER value with spaces",
         "A B=MARKER-value",
         "MARKER-not-a-name=MARKER-value",
-        "MARKER-scheme://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+        "MARKER-scheme://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",  # pragma: allowlist secret
         "MARKER+padded/ref==",
     ],
 )

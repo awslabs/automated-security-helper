@@ -20,9 +20,12 @@ one string, which the spawn helpers, the sandbox plan and the callers of
 :func:`resolve_command` do not carry, so an argument that ``list2cmdline`` would not
 quote is refused instead of rewritten.
 
-When the lookup resolves the program to a batch file, :func:`_resolve_for_spawn` checks
-the argument list once, so every helper below applies the same rule and hands ``Popen``
-the list as it was:
+When the lookup resolves the program to a batch file, :func:`_resolve_for_spawn` first
+replaces it with a launch the batch interpreter never sees, when one exists: the
+``.exe`` beside the shim, or the running interpreter with ``-m <name>`` for a shim
+whose name is importable here (:func:`_non_batch_substitute`). The arguments are not
+touched. Only with no substitute does it check the argument list, once, so every
+helper below applies the same rule and hands ``Popen`` the list as it was:
 
 * an argument that ``list2cmdline`` puts in double quotes (it is empty or holds a space
   or tab) is passed as it is: inside double quotes cmd.exe reads ``< > | & ^ ( )`` as
@@ -54,6 +57,7 @@ import contextvars
 import enum
 import errno
 import gc
+import importlib.util
 import locale
 import logging
 import ntpath
@@ -95,6 +99,7 @@ from automated_security_helper.core.cancellation import (
     current_cancel_event,
     discard_tool_group,
     discard_tool_pid,
+    interrupt_stop_in_progress,
     raise_if_cancelled,
     record_tool_group,
     stop_grace_in_progress,
@@ -724,6 +729,41 @@ def signal_death(returncode: Any, cmd_str: str) -> Optional[Tuple[int, str]]:
         return None
     number, text = ending
     return number, f"{text}, a signal ASH did not send"
+
+
+def describe_signal(number: int) -> str:
+    """``SIGKILL (signal 9)`` for a number :mod:`signal` has a member for, else
+    ``signal 9``.
+
+    Read from the ``signal`` module, so the name is the platform's own, and the
+    fallback keeps the builder from raising where the number has no ``Signals``
+    member (Windows has few), so a message can be built for any number anywhere.
+    """
+    try:
+        name = signal.Signals(number).name
+    except ValueError:
+        return f"signal {number}"
+    return f"{name} (signal {number})"
+
+
+def inferred_signal_death_message(signum: int, returncode: int) -> str:
+    """The read-back's reason for a sandboxed tool whose exit code says a signal
+    ended it: the one wording source, which the docs tests import
+    (tests/unit/docs/test_page_claims.py), so a reword moves both.
+
+    ``returncode`` is the exit code the sandbox reported, usually
+    ``128 + signum``, the shell convention for a death by that signal. The death
+    is inferred from that convention rather than seen, so the reason says
+    "likely" and names the exit code it was read from; and ASH's own stops
+    raise instead of returning a code, so a signal here is one ASH did not
+    send, which the reason says too, as :func:`signal_death` does for a direct
+    negative code.
+    """
+    return (
+        f"the tool was likely ended by {describe_signal(signum)}, a signal ASH "
+        f"did not send: the sandbox reported exit code {returncode}, the shell "
+        "convention for a death by that signal"
+    )
 
 
 def _signaled_failure(
@@ -1769,24 +1809,33 @@ def stop_after_interrupt(
                 process.send_signal(signal.SIGINT)
         except OSError:
             pass  # it has already exited
-    try:
-        _wait_out(process, grace)
-    except KeyboardInterrupt:
-        discard_tool_pid_once_exited(process)
-        if _kill_unless_refused(process):
-            # Observed, discarded, then reaped: the die-now record must not
-            # outlive the reap (discard_tool_pid_before_reap). The reap is
-            # bounded: a child SIGKILL did not end, in uninterruptible sleep
-            # say, is not waited for without end (_wait_after_kill).
+    # Inside interrupt_stop_in_progress: a second Ctrl-C during this wait must
+    # land HERE as KeyboardInterrupt, so the arm below kills the child at once
+    # with no further interrupt delivered to it, as exit-codes.md promises
+    # ("a second Ctrl-C during the wait kills it at once"). Without the
+    # registration the SIGINT handler's die-now branch would take it: that
+    # branch interrupts a recorded launcher child once more and leaves one
+    # that ignores the interrupt running, and the process died of raw SIGINT
+    # with no interrupted-scan message instead of the documented 130.
+    with interrupt_stop_in_progress():
+        try:
+            _wait_out(process, grace)
+        except KeyboardInterrupt:
+            discard_tool_pid_once_exited(process)
+            if _kill_unless_refused(process):
+                # Observed, discarded, then reaped: the die-now record must not
+                # outlive the reap (discard_tool_pid_before_reap). The reap is
+                # bounded: a child SIGKILL did not end, in uninterruptible sleep
+                # say, is not waited for without end (_wait_after_kill).
+                discard_tool_pid_before_reap(process)
+                _wait_after_kill(process)
+            raise
+        except Exception:
+            discard_tool_pid_once_exited(process)
+            if not _kill_unless_refused(process):
+                return False
             discard_tool_pid_before_reap(process)
             _wait_after_kill(process)
-        raise
-    except Exception:
-        discard_tool_pid_once_exited(process)
-        if not _kill_unless_refused(process):
-            return False
-        discard_tool_pid_before_reap(process)
-        _wait_after_kill(process)
     return True
 
 
@@ -2029,6 +2078,43 @@ def _starts_through_cmd_exe(program: str) -> bool:
     )
 
 
+def _non_batch_substitute(program: str) -> Optional[List[str]]:
+    """How to start ``program``, a batch file, without cmd.exe, or None.
+
+    Windows starts a ``.bat``/``.cmd`` file by running cmd.exe on it, and cmd.exe
+    re-reads the whole command line (module docstring), so a regex-shaped
+    argument stops being one argument: checkov's ``--skip-path`` values launched
+    through a ``checkov.cmd`` shim ended with cmd.exe printing that a fragment of
+    one value "is not recognized as an internal or external command" and the
+    launch returning 255 before checkov ever started. A batch shim is therefore
+    replaced with a launch the batch interpreter never sees, the arguments left
+    exactly as they are:
+
+    * the ``.exe`` beside the shim, when one exists: an installer that writes a
+      batch wrapper usually writes the real program next to it;
+    * else the running interpreter with ``-m <name>``, when the shim's name is
+      importable here: a pip-installed console script such as checkov is, and
+      runs the same code the shim would have started.
+
+    None when neither exists; the caller then keeps the cmd.exe argument check
+    as the last line of defense. The shim's path is read with ``ntpath``: it is
+    a Windows path by construction (``_starts_through_cmd_exe``), whatever host
+    the tests run this on.
+    """
+    root, _suffix = ntpath.splitext(os.fspath(program))
+    exe = root + ".exe"
+    if _is_executable_file(exe):
+        return [exe]
+    name = ntpath.basename(root)
+    try:
+        importable = bool(name) and importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        importable = False
+    if importable:
+        return [sys.executable, "-m", name]
+    return None
+
+
 def _text_of_argument(argument: Any) -> Optional[str]:
     """The text ``subprocess`` writes for ``argument``, or None when it is not text.
 
@@ -2102,10 +2188,15 @@ def _resolve_for_spawn(
 ) -> Optional[OSError]:
     """Point ``args[0]`` at the file :func:`find_executable` finds for it.
 
-    When that file is a batch file on Windows, the arguments are checked for cmd.exe
-    (see the module docstring), once, here, so every helper that starts a process
-    applies the same rule. Only ``args[0]`` is ever rewritten. An argument cmd.exe
-    would read differently is returned as an ``OSError`` with ``errno.EINVAL``.
+    When that file is a batch file on Windows it is replaced with the non-batch
+    launch :func:`_non_batch_substitute` finds (the ``.exe`` beside the shim, or
+    the interpreter with ``-m``), so cmd.exe never re-reads the arguments; only
+    with no substitute are the arguments checked for cmd.exe (see the module
+    docstring), once, here, so every helper that starts a process applies the
+    same rule. Only the program's element is ever rewritten (the ``-m`` form
+    replaces it with the interpreter, ``-m`` and the name); the arguments after
+    it are never touched. An argument cmd.exe would read differently is returned
+    as an ``OSError`` with ``errno.EINVAL``.
 
     Returned, for the caller to raise where it reports a command that could not
     start, as the ``FileNotFoundError`` ``subprocess`` raises for a missing
@@ -2141,6 +2232,10 @@ def _resolve_for_spawn(
     if found:
         args[0] = found
         if _starts_through_cmd_exe(found):
+            substitute = _non_batch_substitute(found)
+            if substitute is not None:
+                args[:1] = substitute
+                return None
             return _refusal_for_cmd_exe(args)
         return None
     refusal = in_tree_refusal(name)
@@ -2216,8 +2311,9 @@ def resolve_command(
     """A copy of ``args`` with its program resolved as the spawn helpers resolve it.
 
     For a caller that starts the process itself. When the program is a batch file on
-    Windows the arguments have been checked for cmd.exe (see the module docstring),
-    and the copy goes to ``subprocess`` as it is. A string is the program's name,
+    Windows it has been replaced with the non-batch launch
+    :func:`_non_batch_substitute` finds, or the arguments have been checked for
+    cmd.exe (see the module docstring), and the copy goes to ``subprocess`` as it is. A string is the program's name,
     as the spawn helpers read one (``_argv_list``); ``list()`` of it made it its
     characters.
 
@@ -5358,6 +5454,13 @@ def run_command_with_output_handling(
         returncode = result.returncode
 
         response = {"returncode": returncode}
+        # The program that ran, as the spawn layer resolved it: the copied
+        # argv's first element after _resolved_or_refused replaced it in
+        # place. A caller judging the exit code (a scanner refusing one
+        # outside its success set) can then record WHICH resolved file
+        # returned it, which the bare code never said.
+        if isinstance(command, list) and command:
+            response["resolved_program"] = str(command[0])
         # A signal ASH did not send ended the tool: its negative code is kept, and
         # the flag and reason say so, since no exit code describes it.
         death = signal_death(returncode, cmd_str)

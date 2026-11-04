@@ -432,6 +432,7 @@ class ScanExecutionEngine:
         # execution events and never a phase event.
         from automated_security_helper.plugins.loader import (
             masked_module_scope,
+            refuse_plugin_name_clashes,
             scan_handler_filter,
             scan_plugin_filter,
         )
@@ -456,6 +457,19 @@ class ScanExecutionEngine:
                     "reporter", self._plugin_filter
                 ),
             }
+            # With every module of this run imported and this scan's share of
+            # the registry resolved: two plugins of one type whose names are
+            # the same or that the config lookup reads as one would read each
+            # other's config section, so the scan refuses them here, before
+            # any converter, scanner or reporter is built or run, with exit 3
+            # (plugins/index.md "Package a third-party plugin"; exit-codes.md's
+            # name-clash rows). Judged over this scan's own plugins -- the
+            # built-ins plus its modules', the scope self._plugin_filter
+            # resolves with -- never the whole process-wide registry, which
+            # under the MCP server holds other sessions' classes. Inside the
+            # masked scope, so a module an entry read from the environment is
+            # named by its mask in the refusal.
+            refuse_plugin_name_clashes(self._plugin_filter)
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
         # Logged, because a plugin left out here otherwise leaves no trace: no row,

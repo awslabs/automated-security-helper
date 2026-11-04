@@ -4,7 +4,9 @@
 """One rule for when two spellings of a known plugin's section are one name.
 
 The model reads any spelling of a declared plugin's section (case and the
-``-``/``_`` separators dropped) as that plugin's section
+``-``/``_`` separators dropped, and one trailing Converter, Scanner or Reporter
+word ignored, so ``CsvReporter`` names ``csv`` and ``DetectSecretsScanner``
+names ``detect-secrets``) as that plugin's section
 (ash_config._PluginConfigSegment). The record of what a file read from the
 environment keys each reference and rewrite by the section's place, and
 ``extends`` merges sections by key, so they all have to agree on the spelling.
@@ -21,7 +23,7 @@ name no winner, so they are refused as ambiguous.
 """
 
 import string
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from pydantic import BaseModel
 
@@ -77,6 +79,41 @@ def folded_section_name(name: str) -> str:
     return ascii_lower(name.replace("-", "").replace("_", ""))
 
 
+#: The plugin-type words a section's spelling may end with, which the page says
+#: are ignored (configure.md, Share settings with ``extends``: ``CsvReporter``
+#: names ``csv`` and ``DetectSecretsScanner`` names ``detect-secrets``). Checked
+#: on the FOLDED form, so the word is matched whole and in one case.
+_TYPE_WORDS: Tuple[str, ...] = ("converter", "scanner", "reporter")
+
+
+def _without_type_word(folded: str) -> Optional[str]:
+    """``folded`` without one trailing plugin-type word, or None when it carries
+    none or is nothing but the word. Trailing only, the class-name convention
+    the page's examples use: a word split by a separator
+    (``bedrock-summary-repo_rter``) still names no plugin, as
+    ``reduced_plugin_name``'s docstring states for the lookup side."""
+    for word in _TYPE_WORDS:
+        if folded.endswith(word) and len(folded) > len(word):
+            return folded[: -len(word)]
+    return None
+
+
+def declared_target(declared_by_fold: Dict[str, str], key: str) -> Optional[str]:
+    """The declared section ``key`` is a spelling of, or None.
+
+    By the folded form first, and then with one trailing Converter, Scanner or
+    Reporter word dropped, the rule configure.md states: case, punctuation and
+    those words are ignored, so ``CsvReporter`` names ``csv`` and
+    ``DetectSecretsScanner`` names ``detect-secrets``.
+    """
+    folded = folded_section_name(key)
+    target = declared_by_fold.get(folded)
+    if target is not None:
+        return target
+    stripped = _without_type_word(folded)
+    return declared_by_fold.get(stripped) if stripped is not None else None
+
+
 def declared_section_names(segment_key: str) -> Dict[str, str]:
     """The declared plugin section names under ``segment_key``, by their folded
     form. Read from the segment model's fields (the alias where one is
@@ -103,14 +140,17 @@ def plugin_key_in(container: Any, parent_key: Any, key: str) -> "str | None":
     if parent_key not in PLUGIN_SEGMENT_KEYS or not isinstance(key, str):
         return None
     declared_by_fold = declared_section_names(parent_key)
-    folded = folded_section_name(key)
-    if folded not in declared_by_fold:
+    target = declared_target(declared_by_fold, key)
+    if target is None:
         return None
     if isinstance(container, dict):
         for existing in container:
-            if isinstance(existing, str) and folded_section_name(existing) == folded:
+            if (
+                isinstance(existing, str)
+                and declared_target(declared_by_fold, existing) == target
+            ):
                 return existing
-    return declared_by_fold[folded]
+    return target
 
 
 def _merged_raw(variant: Any, declared: Any) -> Any:
@@ -144,7 +184,7 @@ def fold_known_plugin_sections(data: Any) -> Any:
         for key in list(result):
             if not isinstance(key, str) or key in declared_by_fold.values():
                 continue
-            target = declared_by_fold.get(folded_section_name(key))
+            target = declared_target(declared_by_fold, key)
             if target is None:
                 continue
             earlier = seen_variant.get(target)

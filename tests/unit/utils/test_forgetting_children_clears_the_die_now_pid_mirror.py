@@ -62,8 +62,12 @@ def test_the_die_now_kill_signals_recorded_pids_one_at_a_time(monkeypatch):
     sent: list = []
     killed_groups: list = []
     monkeypatch.setattr("os.kill", lambda pid, sig: sent.append((pid, sig)))
+    # raising=False: os.killpg does not exist on Windows, where the spy still
+    # proves the default-kill branch reaches for no group kill.
     monkeypatch.setattr(
-        "os.killpg", lambda pgid, sig: killed_groups.append((pgid, sig))
+        "os.killpg",
+        lambda pgid, sig: killed_groups.append((pgid, sig)),
+        raising=False,
     )
     monkeypatch.setattr(cancellation, "_TOOL_GROUPS", ())
     monkeypatch.setattr(cancellation, "_TOOL_PIDS", (), raising=False)

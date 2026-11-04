@@ -163,6 +163,10 @@ def _scan(
         "utf-8", "backslashreplace"
     )
     started = starts.read_text(encoding="utf-8").splitlines() if starts.exists() else []
+    # On Windows, Python's platform module probes the OS version by running
+    # ``cmd /c ver`` inside the child. That start is the interpreter's own,
+    # not a program ASH started for the scan, so it is not part of the answer.
+    started = [line for line in started if '/c "ver"' not in line]
     return child.returncode, said, output, started
 
 
@@ -178,11 +182,24 @@ def _outside_every_repository(source: Path) -> None:
 
 
 def _root_lookups(started: List[str], source: Path) -> List[str]:
-    """The refused starts of ``git rev-parse --show-toplevel`` in *source*."""
+    """The refused starts of ``git rev-parse --show-toplevel`` in *source*.
+
+    Each line is the repr of the audit event's arguments. On POSIX the argv is
+    a list, so the lookup reads ``'rev-parse', '--show-toplevel'``; on Windows
+    Popen hands the audit hook the joined command line, so the same lookup is a
+    string. The run's directory is a Path, whose repr spells a Windows path
+    with forward slashes, which is why ``as_posix`` is matched alongside
+    ``str``.
+    """
+    spellings = {str(source), source.as_posix()}
     return [
         line
         for line in started
-        if "'rev-parse', '--show-toplevel'" in line and str(source) in line
+        if (
+            "'rev-parse', '--show-toplevel'" in line
+            or "rev-parse --show-toplevel" in line
+        )
+        and any(spelling in line for spelling in spellings)
     ]
 
 

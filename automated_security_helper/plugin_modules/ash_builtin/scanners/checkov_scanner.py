@@ -111,15 +111,37 @@ def _known_ignore_skip_pattern(entry: str) -> str:
     walked path (``filter_ignored_paths``), so the bare ``venv/`` skipped every
     file under any directory whose name merely ends in ``venv`` (``devenv/``,
     ``prevenv/``), and ``node_modules/`` every file under ``old_node_modules/``.
-    Anchored to a path component instead: ``(^|/)venv/`` matches ``venv/`` as a
+    Anchored to a path component instead: ``/venv/`` matches ``venv/`` as a
     whole directory name at any depth and nothing else, and the substring half
-    of checkov's test cannot match a real path either. Every dot is ``[.]``, not
-    ``\\.``, for the reason ``_link_skip_patterns`` gives. The group is balanced,
-    so the regex checkov's terraform module finder builds from every value still
-    compiles (``_module_finder_compiles``).
+    of checkov's test matches exactly the same paths the regex half does.
+
+    The anchor is a leading ``/``, never a ``(^|/)`` group or a bare ``^``:
+    a Windows launch route that re-reads the command line through cmd.exe (the
+    Install Method Validation run's uv arm did, somewhere below ``uv tool run``,
+    where ASH resolves no program) splits an unquoted value at ``|`` -- cmd.exe
+    printed that ``'/)[.]venv/'`` is not a recognized command and the launch
+    returned 255 before checkov started -- and consumes an unquoted ``^`` as its
+    escape character, which would silently turn ``^venv/`` back into the
+    over-matching bare form. ``/`` ``[`` ``]`` and the name's letters are
+    characters cmd.exe passes through as written (``subprocess_utils``'s
+    ``_CMD_CHARACTERS`` is the model), so this value survives every launch
+    route byte-identical.
+
+    The matched path set is the old form's for every path ASH gives checkov:
+    ``_execute_scan`` hands checkov an absolute target (``os.path.abspath``)
+    and checkov runs from the filesystem root (``_subprocess_cwd``), so every
+    walked path starts with ``/`` and the ``^NAME/`` start-of-string
+    alternative never fired. The one shape it covered that ``/NAME/`` does
+    not -- a relative walked path whose first component is the name, a scan
+    root directly named ``venv`` scanned by a relative path -- cannot arise
+    from an ASH invocation.
+
+    Every dot is ``[.]``, not ``\\.``, for the reason ``_link_skip_patterns``
+    gives. No group, no alternation: the regex checkov's terraform module
+    finder builds from every value still compiles (``_module_finder_compiles``).
     """
     name = entry.strip("/")
-    return "(^|/)" + re.escape(name).replace("\\.", "[.]") + "/"
+    return "/" + re.escape(name).replace("\\.", "[.]") + "/"
 
 
 def _module_finder_compiles(values: List[str]) -> bool:

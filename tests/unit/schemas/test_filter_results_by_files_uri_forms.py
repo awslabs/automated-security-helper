@@ -245,12 +245,12 @@ class TestWindowsForms:
         and the result was dropped as if it named another tree. A top-level
         directory that is a symlink lets the candidate be resolved; the same
         call with no link at ``/tmp`` still compares it as spelled."""
-        links = {"/tmp": "private/tmp"}
+        links = {"/tmp": "private/tmp"}  # nosec B108
         original = Path.resolve
 
         def fake_resolve(self, *args, **kwargs):
             text = self.as_posix()
-            if text.startswith("/tmp/"):
+            if text.startswith("/tmp/"):  # nosec B108
                 return Path("/private" + text)
             return original(self, *args, **kwargs)
 
@@ -258,7 +258,7 @@ class TestWindowsForms:
         _link_top_levels(monkeypatch, links)
 
         assert (
-            _resolved_relative_text(
+            _resolved_relative_text(  # nosec B108
                 "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
             )
             == "src/a.py"
@@ -266,7 +266,7 @@ class TestWindowsForms:
 
         links.clear()
         assert (
-            _resolved_relative_text(
+            _resolved_relative_text(  # nosec B108
                 "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
             )
             is None
@@ -280,12 +280,12 @@ class TestWindowsForms:
 
         def fake_resolve(self, *args, **kwargs):
             text = self.as_posix()
-            if text.startswith("/tmp/"):
+            if text.startswith("/tmp/"):  # nosec B108
                 return Path("/private" + text)
             return original(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "resolve", fake_resolve)
-        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})
+        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})  # nosec B108
         report = _report("file:///tmp/proj/src/a.py", "/work/other/b.py")
 
         report.filter_results_by_files({"src/a.py"}, Path("/private/tmp/proj"))
@@ -309,10 +309,10 @@ class TestWindowsForms:
             return Path("/private" + self.as_posix())
 
         monkeypatch.setattr(Path, "resolve", recording_resolve)
-        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})
+        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})  # nosec B108
 
         assert (
-            _resolved_relative_text(
+            _resolved_relative_text(  # nosec B108
                 "/tmp/../../net/example.com/x.py",
                 "/private/tmp/proj",
                 False,
@@ -323,12 +323,12 @@ class TestWindowsForms:
         assert resolved == []
 
         assert (
-            _resolved_relative_text(
+            _resolved_relative_text(  # nosec B108
                 "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
             )
             == "src/a.py"
         )
-        assert resolved == ["/tmp/proj/src/a.py"]
+        assert resolved == ["/tmp/proj/src/a.py"]  # nosec B108
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-rooted paths")
     def test_a_result_with_a_parent_step_is_filtered_without_a_resolve(
@@ -344,7 +344,7 @@ class TestWindowsForms:
             return original(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "resolve", recording_resolve)
-        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})
+        _link_top_levels(monkeypatch, {"/tmp": "private/tmp"})  # nosec B108
         report = _report(
             "file:///tmp/../../net/example.com/x.py", "/private/tmp/proj/src/a.py"
         )
@@ -358,16 +358,22 @@ class TestWindowsForms:
     @pytest.mark.parametrize(
         ("links", "kept"),
         [
-            pytest.param({"/tmp": "private/tmp"}, True, id="relative-into-the-root"),
-            pytest.param({"/tmp": "/private/tmp"}, True, id="absolute-into-the-root"),
+            pytest.param({"/tmp": "private/tmp"}, True, id="relative-into-the-root"),  # nosec B108
+            pytest.param({"/tmp": "/private/tmp"}, True, id="absolute-into-the-root"),  # nosec B108
             pytest.param(
-                {"/tmp": "../private/tmp"}, True, id="collapsed-against-slash"
+                {"/tmp": "../private/tmp"},
+                True,
+                id="collapsed-against-slash",  # nosec B108
             ),
             pytest.param(
-                {"/tmp": "net/example.com/tmp"}, False, id="into-another-tree"
+                {"/tmp": "net/example.com/tmp"},
+                False,
+                id="into-another-tree",  # nosec B108
             ),
             pytest.param(
-                {"/tmp": "/net/example.com/tmp"}, False, id="absolute-elsewhere"
+                {"/tmp": "/net/example.com/tmp"},
+                False,
+                id="absolute-elsewhere",  # nosec B108
             ),
             pytest.param({}, False, id="not-a-link"),
         ],
@@ -388,12 +394,12 @@ class TestWindowsForms:
         monkeypatch.setattr(Path, "resolve", recording_resolve)
         _link_top_levels(monkeypatch, links)
 
-        found = _resolved_relative_text(
+        found = _resolved_relative_text(  # nosec B108
             "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
         )
 
         assert found == ("src/a.py" if kept else None)
-        assert resolved == (["/tmp/proj/src/a.py"] if kept else [])
+        assert resolved == (["/tmp/proj/src/a.py"] if kept else [])  # nosec B108
 
     def test_a_remote_mount_result_is_filtered_without_a_resolve(self, monkeypatch):
         resolved: list[str] = []

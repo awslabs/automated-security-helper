@@ -43,9 +43,14 @@ def test_a_text_read_without_an_identity_is_bounded(
 
 
 def test_a_small_text_still_reads_whole(tmp_path: Path) -> None:
-    """The control."""
+    """The control.
+
+    read_config_text reads bytes with no newline translation (the bounded
+    reader's documented shape), so the control pins the on-disk bytes:
+    newline="\\n" keeps Windows write_text from writing "\\r\\n".
+    """
     config_path = tmp_path / ".ash.yaml"
-    config_path.write_text("fail_on_findings: false\n", encoding="utf-8")
+    config_path.write_text("fail_on_findings: false\n", encoding="utf-8", newline="\n")
 
     assert read_config_text(config_path) == "fail_on_findings: false\n"
 

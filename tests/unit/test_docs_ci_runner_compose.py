@@ -363,7 +363,7 @@ def test_github_actions_caching_steps_merge_into_the_plain_steps_job():
         "Restore grype's database",
         "Run ASH",
         "Save grype's database",
-        "Upload the output directory",
+        "Upload the reports and the results file",
         "Upload SARIF to code scanning",
     ]
 

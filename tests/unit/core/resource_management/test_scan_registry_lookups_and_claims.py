@@ -46,7 +46,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
 
 pytestmark = pytest.mark.unit
 
-SECRET = "a-value-read-from-the-environment"
+SECRET = "a-value-read-from-the-environment"  # pragma: allowlist secret
 
 
 def _project(tmp_path: Path, name: str) -> Path:

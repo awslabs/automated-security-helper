@@ -26,6 +26,7 @@ from automated_security_helper.core.resource_management.exceptions import (
 from automated_security_helper.utils.directory_refusals import (
     REFUSED_CANNOT_BE_CREATED,
     REFUSED_NOT_A_DIRECTORY,
+    REFUSED_NOT_A_VALID_PATH,
     output_dir_refusal,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -597,15 +598,16 @@ def source_directory_error(
 
     In the words the CLI uses for ``--source-dir``, quoting the path as given:
     "Source directory does not exist" (a link to nothing included), "Source
-    directory is not a directory", and "Source directory cannot be entered" for
+    directory is not a directory", "Source directory cannot be entered" for
     one whose entries cannot be listed and read, or that sits below a directory
-    that cannot be. For source directories only: validate_directory_path, which
-    output-directory lookups also use, keeps its own words.
+    that cannot be, and "Source directory is not a valid path" for one the OS
+    cannot take at all. For source directories only: validate_directory_path,
+    which output-directory lookups also use, keeps its own words.
 
     A string the operating system refuses as a path at all is worded as the
-    CLI words it (utils/directory_refusals.py, ./ash and Invoke-ASH say the
-    same): one with an embedded NUL (``ValueError`` from stat) "does not
-    exist", and one longer than the system allows (``ENAMETOOLONG``) "cannot be
+    CLI words it (utils/directory_refusals.py): one with an embedded NUL
+    (``ValueError`` from stat) "is not a valid path", as exit-codes.md says,
+    and one longer than the system allows (``ENAMETOOLONG``) "cannot be
     entered". Both carry the ``invalid_path`` category, since neither names a
     directory that is absent or closed to this process; the text is the
     surfaces' shared one, the category is this surface's.
@@ -614,8 +616,11 @@ def source_directory_error(
         status = os.stat(directory_path)
     except (ValueError, OSError) as error:
         category = lookup_error_category(error) or ErrorCategory.PERMISSION_DENIED
-        if isinstance(error, ValueError) or category is ErrorCategory.FILE_NOT_FOUND:
-            # An embedded NUL is worded as the CLI words it: nothing is there.
+        if isinstance(error, ValueError):
+            # An embedded NUL is worded as the CLI words it: a path no stat
+            # can take is not a valid path (utils/directory_refusals.py).
+            problem = "is not a valid path"
+        elif category is ErrorCategory.FILE_NOT_FOUND:
             problem = "does not exist"
         else:
             # A name past the limit (invalid_path), or any other refusal.
@@ -653,7 +658,8 @@ def validate_output_directory_path(
     a path that is there and is not a directory is ``invalid_path``; a directory
     that is there and is refused (it cannot be entered, or nothing can be made in
     it) is ``permission_denied``, as is a path stat itself refuses; a path that
-    cannot be made because of what is on the way to it is ``invalid_path``. Every
+    cannot be made because of what is on the way to it is ``invalid_path``, and
+    so is one the OS cannot take at all (an embedded NUL). Every
     refusal used to be ``invalid_parameter``, so a client was told to check its
     parameter for a directory it had no permission to write.
     """
@@ -694,7 +700,7 @@ def _output_directory_refusal_category(
         number = getattr(refusal, "error_number", None)
         if number in _OUT_OF_SPACE_ERRNOS:
             return ErrorCategory.RESOURCE_EXHAUSTED
-        if kind == REFUSED_NOT_A_DIRECTORY:
+        if kind in (REFUSED_NOT_A_DIRECTORY, REFUSED_NOT_A_VALID_PATH):
             return ErrorCategory.INVALID_PATH
         if kind == REFUSED_CANNOT_BE_CREATED:
             # Refused for what is on the way to it, unless stat itself was

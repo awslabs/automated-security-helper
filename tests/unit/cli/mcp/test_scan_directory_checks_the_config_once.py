@@ -232,8 +232,9 @@ def test_the_load_check_repeats_no_value_it_found(
 ):
     """check_config_input's result gives no value it found: for a file the client
     named outside the config roots, for one in the scanned directory, and for an
-    operator's file in a config root outside the tree. The operator's keeps
-    pydantic's text, which names the field and the problem but not the input."""
+    operator's file in a config root outside the tree. The operator's keeps the
+    loader's validation text, which names the field and the problem but not the
+    input."""
     from automated_security_helper.cli.mcp.sandbox import check_config_input
 
     if source == "client":
@@ -254,7 +255,9 @@ def test_the_load_check_repeats_no_value_it_found(
     _no_canary_anywhere(checked.load_error)
     assert "ignore_paths" in str(checked.load_error)
     if source == "operator":
-        assert "validation error for AshConfig" in str(checked.load_error)
+        # The loader rewrites pydantic's text into its own wording, which still
+        # names the field and the problem and never the input value.
+        assert "Configuration validation failed for" in str(checked.load_error)
 
 
 @pytest.mark.parametrize(

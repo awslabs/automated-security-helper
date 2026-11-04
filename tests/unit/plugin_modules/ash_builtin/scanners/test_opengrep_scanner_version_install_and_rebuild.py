@@ -157,7 +157,9 @@ def test_the_rebuild_with_a_usable_cache_carries_metrics_off(
     ]
 
     assert "--metrics" in argv and argv[argv.index("--metrics") + 1] == "off", argv
-    assert cache.as_posix() in argv, argv
+    # The argv words are str(Path), so compare the cache in the platform's own
+    # spelling: as_posix never matches str(WindowsPath) on Windows.
+    assert str(cache) in argv, argv
 
 
 def test_an_in_tree_copy_is_recorded_as_the_missing_reason(

@@ -1088,12 +1088,13 @@ def confine_plugin_modules(
     remedy = (
         source.modules_remedy
         if source is not None
-        # A file in another checkout is already outside the tree, so "a config
-        # file outside the tree" is no way to name a module from it.
+        # The page's one remedy (trust-model.md, Why the repository tier
+        # exists): every warning that ignores a repository setting says how to
+        # keep it the same way, the module hint included. The in-tree arm used
+        # to say "a config file outside the tree", which for a file in another
+        # checkout named no way to keep the module, and for the scanned tree's
+        # own file lacked the shared keep-a-setting sentence.
         else IN_TREE_OR_DELIVERED.modules_remedy
-        if outside_membership
-        else "Name other modules with --ash-plugin-modules, --config-overrides "
-        "or a config file outside the tree."
     )
     ASH_LOGGER.warning(
         shown_on_one_line(

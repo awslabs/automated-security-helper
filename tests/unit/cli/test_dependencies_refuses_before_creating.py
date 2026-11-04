@@ -497,7 +497,7 @@ def test_a_command_iterable_that_raises_raises_inside_the_check():
 def test_a_custom_command_keeps_its_shell_flag():
     """The flag was dropped before the installer saw the command."""
     commands = _well_formed_commands(
-        [CustomCommand(args=["echo $HOME"], shell=True), ["pip", "install", "x"]]
+        [CustomCommand(args=["echo $HOME"], shell=True), ["pip", "install", "x"]]  # nosec B604
     )
 
     assert commands == [(["echo $HOME"], True), (["pip", "install", "x"], False)]
@@ -520,7 +520,7 @@ def test_a_shell_command_reaches_the_runner_as_one_command_line(monkeypatch):
     monkeypatch.setattr(subprocess_utils, "run_command", fake_run)
     monkeypatch.setattr(subprocess_utils, "run_succeeded", lambda result: True)
 
-    code = dependencies.run_command(["echo $HOME"], shell=True)
+    code = dependencies.run_command(["echo $HOME"], shell=True)  # nosec B604
 
     assert code == 0
     assert seen["args"] == "echo $HOME", seen["args"]

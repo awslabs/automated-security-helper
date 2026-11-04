@@ -245,6 +245,10 @@ def test_control_on_linux_the_pathspec_is_literal_and_case_exact(tmp_path, monke
 def test_the_repository_is_found_from_where_the_directory_really_is(
     tmp_path, monkeypatch
 ):
+    # Pinned to the case-exact arm: on a case-insensitive filesystem (macOS,
+    # Windows) the pathspec is the deliberate ``:(literal,icase)sub/out``
+    # instead (the per-arm element tests above cover that shape).
+    monkeypatch.setattr(sys, "platform", "linux")
     repo = _repository(tmp_path)
     (repo / "sub" / "out").mkdir(parents=True)
     alias = repo.parent / "alias"
@@ -269,7 +273,11 @@ def test_a_directory_that_is_itself_a_link_is_asked_about_by_its_own_name(
 ):
     """``.ash/ash_output`` committed as a link to ``../src``: git tracks the link
     as an entry, listed as ``""`` below the link's own path. Asked about ``src``
-    instead, git listed src's files and never that entry."""
+    instead, git listed src's files and never that entry.
+
+    Pinned to the case-exact arm; on macOS/Windows the element is the
+    deliberate ``:(literal,icase).ash/ash_output``."""
+    monkeypatch.setattr(sys, "platform", "linux")
     repo = _repository(tmp_path)
     (repo / "src").mkdir()
     (repo / ".ash").mkdir()
@@ -291,7 +299,11 @@ def test_a_link_whose_parent_sits_through_a_link_is_asked_where_the_parent_is(
     tmp_path, monkeypatch
 ):
     """The parent is resolved, as any directory is; only the last component, the
-    link itself, is kept as spelled."""
+    link itself, is kept as spelled.
+
+    Pinned to the case-exact arm; on macOS/Windows the element is the
+    deliberate ``:(literal,icase)sub/out``."""
+    monkeypatch.setattr(sys, "platform", "linux")
     repo = _repository(tmp_path)
     (repo / "sub" / "src").mkdir(parents=True)
     (repo / "sub" / "out").symlink_to(repo / "sub" / "src", target_is_directory=True)
@@ -312,6 +324,9 @@ def test_a_link_whose_parent_sits_through_a_link_is_asked_where_the_parent_is(
 def test_control_a_directory_below_a_link_is_still_asked_about_where_it_really_is(
     tmp_path, monkeypatch
 ):
+    # Pinned to the case-exact arm; on macOS/Windows the element is the
+    # deliberate ``:(literal,icase)src/deep``.
+    monkeypatch.setattr(sys, "platform", "linux")
     repo = _repository(tmp_path)
     (repo / "src" / "deep").mkdir(parents=True)
     (repo / "linked").symlink_to(repo / "src", target_is_directory=True)

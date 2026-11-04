@@ -202,7 +202,11 @@ def test_every_cli_module_runs_through_the_entry_point_when_run_as_main():
                 if isinstance(call, ast.Call)
                 and isinstance(call.func, (ast.Name, ast.Attribute))
             }
-            if not called & {"main", "run_module_app", "run_mcp_server"}:
+            # _run_as_main is cli/main.py's wrapper: it registers the module
+            # under its import name and routes through entrypoint.main(), so a
+            # block calling it runs through the entry point too.
+            allowed = {"main", "run_module_app", "run_mcp_server", "_run_as_main"}
+            if not called & allowed:
                 offenders.append(f"{source.relative_to(package)}: {sorted(called)}")
 
     assert blocks >= 4, blocks

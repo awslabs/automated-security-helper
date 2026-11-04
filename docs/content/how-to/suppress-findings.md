@@ -16,7 +16,7 @@ global_settings:
       line_start: 40
       line_end: 48
       reason: The command is a constant; no user input reaches it
-      expiration: "2027-01-31"
+      expires: "2027-01-31"
     - path: tests/**
       rule_id: B101
       reason: assert is how the tests check results
@@ -29,14 +29,14 @@ global_settings:
 | `reason` | yes | Why the finding is suppressed. It appears in the reports. |
 | `rule_id` | no | The rule to suppress, as ASH reports it. Without it, the entry suppresses every rule in its path. |
 | `line_start`, `line_end` | no | Lines the finding must overlap, inclusive. `line_start` alone runs to the end of the file. |
-| `expiration` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching |
+| `expires` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching. `expiration` is a deprecated alias, removed in ASH v4. |
 | `symbol` | no | Only findings inside this function, class, or method; see [Scope a suppression to a symbol](#symbol) |
 | `package_name`, `package_version`, `package_path` | no | Only findings about this dependency, for dependency scanners such as grype and npm-audit |
 
 - Paths match case-sensitively: `tests/**` does not match `Tests/`. In a pattern without `**`, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`; `**` matches any depth. A path that starts with `./` matches nothing, and neither does an empty path, `.` or `./`. A trailing slash is literal, unlike in an ignore path: `tests/` matches no finding, and the scan warns that it matched nothing and gives `tests/**/*`, the pattern for the files under the directory. A bare directory name such as `tests` names only the path `tests` itself and matches nothing inside it. When the directory exists in the scanned directory, `ash config validate` and `ash config lint` warn about either one with that pattern and exit 0. They warn in the same way, saying what to write instead, about a path that starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or `.`. A path whose leading names match the tree only in another case (`tests/**` against `Tests/`) gets a warning that names the tree's spelling and says that patterns match case-sensitively.
 - A file whose name is not valid UTF-8 is reported with each such byte written as `\udcNN` (a latin-1 `secr\xe9t.py` as `secr\udce9t.py`). A `path` matches it written that way, since the `\` of a `\udcNN` escape is part of the name and not a separator, or with `?` for that `\` (`secr?udce9t.py`), or by a glob such as `secr*t.py`. An ignore path matches such a file the same way when ASH lists the files to scan. A UTF-8 file name that spells the same `\udcNN` text reads as the same name, so in a tree that holds both files, both are reported under that name, and a path that matches one matches both.
 - `rule_id` is a case-insensitive pattern with no scanner prefix. It matches any scanner that reports that rule ID.
-- Quote the `expiration` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ash config lint` and `ash config get` name the problem.
+- Quote the `expires` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ash config lint` and `ash config get` name the problem.
 - A key that is not in the table warns at config load, and when a known key is close, the warning names it: `ruleId` warns with `Unknown key 'ruleId' (did you mean 'rule_id'?)`, and the entry suppresses nothing until the key is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error (exit 3) instead; ASH v4 makes that the default. The same holds for an ignore path.
 
 To try a suppression before you write it into the file, pass it for one run. In a repository where detect-secrets reports `SECRET-SECRET-KEYWORD` in `app.py`, this run passes:
@@ -56,14 +56,14 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 
 ### Expiration {#expiration}
 
-On its `expiration` date, by the local clock of the machine that runs the scan (UTC in the container image, which sets `TZ=UTC`), a suppression stops matching, and the finding fails the next scan again. At the start of a scan, ASH logs one warning that lists every suppression and ignore path that has expired, including those whose date is today, and then a warning for the ignore paths and one for the suppressions that expire within the next 30 days. With `--ignore-suppressions`, these warnings leave suppressions out. `ash config lint` reports suppressions that have expired, and `ash config lint --fix` removes them.
+On its `expires` date, by the local clock of the machine that runs the scan (UTC in the container image, which sets `TZ=UTC`), a suppression stops matching, and the finding fails the next scan again. `expires` is the canonical spelling of the field; `expiration` is accepted as a deprecated alias when a config is read, and the alias is removed in ASH v4. At the start of a scan, ASH logs one warning that lists every suppression and ignore path that has expired, including those whose date is today, and then a warning for the ignore paths and one for the suppressions that expire within the next 30 days. With `--ignore-suppressions`, these warnings leave suppressions out. `ash config lint` reports suppressions that have expired, and `ash config lint --fix` removes them.
 
 An expired suppression no longer applies, so this run fails on the finding and names the entry:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \
-  --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password", "expiration": "2020-01-01"}]'
+  --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password", "expires": "2020-01-01"}]'
 ```
 
 ```text
@@ -163,12 +163,12 @@ global_settings:
 
 `path` and `reason` are required, and paths match the way suppression paths do. The findings an ignore path drops include a dependency scanner's findings about a package installed under it: a `node_modules/` ignore path also drops grype's findings located in `node_modules/<package>/package.json`.
 
-An ignore path can also have an `expiration`, which works the way a suppression's does: on that date the ignore path stops applying, so the files it covered are scanned again and their findings count on the next scan. The same holds for the entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude`. This expired ignore path no longer drops the finding in `app.py`:
+An ignore path can also have an `expires` date, which works the way a suppression's does: on that date the ignore path stops applying, so the files it covered are scanned again and their findings count on the next scan. The same holds for the entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude`. This expired ignore path no longer drops the finding in `app.py`:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \
-  --config-overrides 'global_settings.ignore_paths+=[{"path": "app.py", "reason": "Fixture value, not a real password", "expiration": "2020-01-01"}]'
+  --config-overrides 'global_settings.ignore_paths+=[{"path": "app.py", "reason": "Fixture value, not a real password", "expires": "2020-01-01"}]'
 ```
 
 A trailing slash names the files under a directory. With a copy of `app.py` in `vendor/`, the ignore path `vendor/` drops the copy's finding, and the suppression from the earlier example covers the original, so the run passes:

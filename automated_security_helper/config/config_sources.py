@@ -1363,6 +1363,21 @@ class ConfigSource:
     def label(self) -> str:
         return describe_config_path(self.path)
 
+    @property
+    def resolved_label(self) -> str:
+        """The label with the path resolved, every symbolic link followed (and,
+        on Windows, short names expanded): how a file ASH found on its own is
+        announced. platform-teams.md (3. Check that a repository cannot change
+        the gate): a file named with ``--config`` appears as it was named, a
+        discovered file by its resolved path, which the page's ``pwd -P`` check
+        greps for. A path the filesystem refuses to resolve is shown as found.
+        """
+        try:
+            resolved = self.path.resolve()
+        except OSError:
+            resolved = self.path
+        return describe_config_path(resolved)
+
 
 @dataclass
 class ConfigDiscovery:
@@ -2056,7 +2071,10 @@ def log_config_discovery(
     if selected is None:
         return []
     if announce_selected:
-        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+        # A discovered file is announced by its resolved path (resolved_label):
+        # only a file ASH found on its own is announced here, and the page's
+        # check greps for the `pwd -P` form (platform-teams.md).
+        ASH_LOGGER.info(f"Using ASH configuration from {selected.resolved_label}")
     warnings = discovery_warnings(discovery)
     for message in warnings:
         ASH_LOGGER.warning(message)

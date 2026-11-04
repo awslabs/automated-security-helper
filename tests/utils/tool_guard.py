@@ -273,6 +273,12 @@ def _through_env(
         if option in ("C", "--chdir"):
             cwd = os.path.join(cwd or os.getcwd(), value)
         elif option in ("S", "--split-string"):
+            # POSIX shlex strips backslashes, which on Windows are the path
+            # separators of any assignment value in the string (an
+            # ASH_BIN_PATH naming the home loses them and the guard misses
+            # it), so they are escaped first there to survive the split.
+            if os.name == "nt":
+                value = value.replace("\\", "\\\\")
             args[index:index] = shlex.split(value)
 
     while index < len(args):

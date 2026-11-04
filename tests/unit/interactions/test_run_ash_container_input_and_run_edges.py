@@ -187,7 +187,7 @@ def test_short_and_blank_lines_of_a_value_are_not_hidden_on_their_own():
 
 
 _PEM = (
-    "-----BEGIN PRIVATE KEY-----\n"
+    "-----BEGIN PRIVATE KEY-----\n"  # pragma: allowlist secret #gitleaks:allow
     "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n"
     "-----END PRIVATE KEY-----"
 )
@@ -199,14 +199,17 @@ def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
     body is still hidden, line by line and whole."""
     lines = rac._value_lines((_PEM,))
 
-    assert "-----BEGIN PRIVATE KEY-----" not in lines
+    assert (
+        "-----BEGIN PRIVATE KEY-----" not in lines
+    )  # gitleaks:allow  # pragma: allowlist secret
     assert "-----END PRIVATE KEY-----" not in lines
     assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" in lines
     assert _PEM in lines
     shown = rac._streamed_line(
-        "a finding: -----BEGIN PRIVATE KEY----- in a file", (_PEM,)
+        "a finding: -----BEGIN PRIVATE KEY----- in a file",
+        (_PEM,),  # pragma: allowlist secret
     )
-    assert "BEGIN PRIVATE KEY" in shown
+    assert "BEGIN PRIVATE KEY" in shown  # pragma: allowlist secret
 
 
 def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
@@ -234,7 +237,7 @@ def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
         '  "version": 2,\n'
         '  "enabled": true,\n'
         '  "aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",\n'
-        '  "password": "not-a-real-password",\n'
+        '  "password": "not-a-real-password",\n'  # pragma: allowlist secret
         '  "pin": 123456\n'
         "}"
     )
@@ -244,7 +247,7 @@ def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
     assert '"version": 2,' not in lines
     assert '"enabled": true,' not in lines
     assert '"aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",' in lines
-    assert '"password": "not-a-real-password",' in lines
+    assert '"password": "not-a-real-password",' in lines  # pragma: allowlist secret
     assert '"pin": 123456' in lines
     assert value in lines
 

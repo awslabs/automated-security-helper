@@ -103,7 +103,7 @@ def test_merge_refuses_an_unreadable_config_with_exit_3(runner_env):
         config.chmod(0o600)
 
     assert result.exit_code == 3, result.output
-    assert "could not read" in result.output, result.output
+    assert "could not be read" in result.output, result.output
     assert "unreadable.yaml" in result.output, result.output
     assert "Traceback" not in result.output, result.output
 

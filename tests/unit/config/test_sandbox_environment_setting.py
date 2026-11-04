@@ -69,7 +69,10 @@ def test_an_empty_list_is_accepted_and_replaces_the_default():
         ("DB_PASSWORD=hunter2", "DB_PASSWORD"),
         ("TMPDIR=/somewhere", "TMPDIR"),
         (OUTER_RUN_ID_ENV, OUTER_RUN_ID_ENV),
-        ("HTTPS_PROXY=http://user:hunter2@proxy:3128", "HTTPS_PROXY"),
+        (
+            "HTTPS_PROXY=http://user:hunter2@proxy:3128",
+            "HTTPS_PROXY",
+        ),  # pragma: allowlist secret
     ],
 )
 def test_a_refused_entry_is_named_and_its_value_is_not_shown(entry, name):
@@ -85,7 +88,7 @@ def test_a_refused_entry_is_named_and_its_value_is_not_shown(entry, name):
     [
         "A B=MARKER-value",
         "MARKER-not-a-name=MARKER-value",
-        "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+        "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",  # pragma: allowlist secret
         "MARKER+padded/ref==",
     ],
 )
@@ -354,7 +357,7 @@ def test_a_delivered_entry_the_server_lacks_is_refused_by_variable_only(tmp_path
     assert [key for key, _ in refusals] == ["sandbox.environment"], refusals
     reason = refusals[0][1]
     assert "LD_PRELOAD" in reason
-    assert "/tmp/x.so" not in reason
+    assert "/tmp/x.so" not in reason  # nosec B108
     assert "HTTP_PROXY" not in reason
 
 
@@ -369,7 +372,7 @@ def test_a_delivered_entry_that_starts_with_no_name_is_refused_by_position_only(
             "environment": [
                 "HTTP_PROXY",
                 "MARKER-not-a-name=MARKER-value",
-                "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",
+                "https://MARKER-user:MARKER-pw@MARKER-host/x?MARKER-key=MARKER-value",  # pragma: allowlist secret
                 "LD_PRELOAD=MARKER-path",
                 7,
             ]

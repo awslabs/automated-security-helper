@@ -488,7 +488,7 @@ def _suppression_for(
         rule_id=_suppression_rule_id(finding["rule_id"]),
         path=_suppression_path(finding["file"]),
         reason=reason,
-        expiration=expiration,
+        expires=expiration,
         line_start=line_number,
         line_end=line_number,
     )

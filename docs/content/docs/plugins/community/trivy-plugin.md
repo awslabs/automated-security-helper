@@ -1629,7 +1629,7 @@ global_settings:
     - rule_id: "CVE-2023-12345"
       path: "**/*"
       reason: "Patched in our custom build"
-      expiration: "2024-12-31"
+      expires: "2024-12-31"
     
     # Suppress by severity and path
     - rule_id: "GHSA-*"

@@ -35,7 +35,7 @@ from tests.utils.npm_audit_reports import NPM_CLEAN
 pytestmark = pytest.mark.unit
 
 STDOUT_MARKER = "stdout-marker-4d1f"
-TOKEN = "Zq7Kx9Lm2Pw4Nv"
+TOKEN = "Zq7Kx9Lm2Pw4Nv"  # gitleaks:allow
 
 
 class _Messages(logging.Handler):

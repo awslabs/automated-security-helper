@@ -75,8 +75,11 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _write(path: Path, text: str) -> Path:
+    # newline="\n" so the bytes on disk equal the constant on every platform;
+    # the check returns what the file holds, so a platform-translated \r\n
+    # would come back in check.texts.
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
     return path
 
 

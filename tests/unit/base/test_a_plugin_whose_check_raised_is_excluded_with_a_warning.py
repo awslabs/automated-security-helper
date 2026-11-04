@@ -26,7 +26,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 
 pytestmark = pytest.mark.unit
 
-SECRET = "tok-secretvalue-from-the-environment"
+SECRET = "tok-secretvalue-from-the-environment"  # pragma: allowlist secret
 
 
 class _Phase(EnginePhase):

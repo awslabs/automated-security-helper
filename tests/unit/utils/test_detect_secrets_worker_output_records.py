@@ -36,7 +36,7 @@ def _secret(filename: str, value, line: int = 1, kind: str = "Secret Keyword"):
         secret_value=value,
         line_number=line,
         type=kind,
-        secret_hash="h-" + (value or "baseline"),
+        secret_hash="h-" + (value or "baseline"),  # pragma: allowlist secret
         is_secret=None,
         json=lambda: {"filename": filename, "line_number": line, "type": kind},
     )
@@ -54,9 +54,9 @@ def _secret(filename: str, value, line: int = 1, kind: str = "Secret Keyword"):
         # JSON, TOML / HCL and PHP write it: the quote and the spaces between the
         # key and its operator do not make the key a value.
         ("password = password", "password", 11),
-        ('{"password": "password"}', "password", 14),
-        ('"password" = "password"', "password", 14),
-        ("'password' => 'password'", "password", 15),
+        ('{"password": "password"}', "password", 14),  # pragma: allowlist secret
+        ('"password" = "password"', "password", 14),  # pragma: allowlist secret
+        ("'password' => 'password'", "password", 15),  # pragma: allowlist secret
         # A quoted value followed by a comma or a bracket is still the value.
         ('["password", "other"]', "password", 2),
         # The only occurrence, bounded or not, is still found.

@@ -365,6 +365,11 @@ class TestGrypeWithNoRunIsAnError:
         monkeypatch.setattr(scanner, "_execute_scan", capture)
         monkeypatch.setattr(scanner, "_run_subprocess", tool)
         monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+        # The executor holds grype's declared content database to its age bound
+        # after the scan (utils/content_db_staleness.py, fail-closed). There is
+        # no grype executable here for the probe to ask, and the shape under
+        # test is the SARIF grading, so this run declares no database to probe.
+        monkeypatch.setattr(scanner, "content_databases_in_use", list)
         return _row(context, scanner)
 
     @pytest.mark.parametrize(

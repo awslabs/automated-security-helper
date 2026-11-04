@@ -18,6 +18,12 @@ sandbox:
   mode: auto
 ```
 
+The values are `off`, `auto`, `bwrap`, `firejail`, `landlock`, and `sandbox-exec`,
+lowercase. YAML reads an unquoted `off` as the boolean false, which ASH reads as the
+mode `off`; an unquoted `on`, `yes` or `true` names no mode, so a scan refuses it with
+exit code 3 and a hint to quote the value. `ash config validate` gives the same
+verdict, with the same exit code.
+
 If you ask for a sandbox and ASH cannot provide one, the affected scanners are recorded
 `MISSING` with the reason, and the scan exits 1 like any other incomplete scan. ASH
 never falls back to running a scanner unsandboxed after you asked for a sandbox. That

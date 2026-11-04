@@ -828,7 +828,7 @@ def test_a_shell_command_refused_under_a_scope_is_counted():
     token = sandbox_scope._ACTIVE.set(scope)
     try:
         with pytest.raises(sandbox_scope.SandboxUnavailable):
-            spu._prepare_spawn("tool --x", None, None, shell=True)
+            spu._prepare_spawn("tool --x", None, None, shell=True)  # nosec B604
     finally:
         sandbox_scope._ACTIVE.reset(token)
     assert scope.refused_spawns == 1

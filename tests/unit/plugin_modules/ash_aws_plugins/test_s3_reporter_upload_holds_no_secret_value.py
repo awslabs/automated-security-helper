@@ -52,7 +52,7 @@ from tests.utils.secret_bearing_scan import (
 pytestmark = pytest.mark.unit
 
 #: A source line a bandit finding with no secret in it reports.
-NON_SECRET_LINE = "subprocess.call(cmd, shell=True)"
+NON_SECRET_LINE = "subprocess.call(cmd, shell=True)"  # pragma: allowlist secret
 
 
 @pytest.fixture

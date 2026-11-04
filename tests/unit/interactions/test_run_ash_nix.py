@@ -168,6 +168,11 @@ class TestResolveFlakeRef:
         # path (below); an ordinary directory name is its own encoding.
         assert resolve_flake_ref() == "path:" + quote(str(tmp_path), safe="/")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="'?' is not a legal Windows file-name character, so the checkout "
+        "this cell encodes cannot exist here",
+    )
     def test_a_checkout_under_a_url_delimiter_is_percent_encoded(
         self, monkeypatch, tmp_path
     ):
@@ -270,7 +275,7 @@ class TestShownFlakeRef:
                 id="access-token-between-others",
             ),
             pytest.param(
-                "git+https://alice:hunter2@host/repo?API_KEY=hunter2",
+                "git+https://alice:hunter2@host/repo?API_KEY=hunter2",  # pragma: allowlist secret
                 "git+https://<userinfo>@host/repo?API_KEY=<hidden>",
                 id="userinfo-and-query",
             ),
@@ -671,7 +676,10 @@ class TestRunAshNix:
         with scanning_tree(repo):
             run_ash_nix(argv=["scan"])
 
-        assert entered_shell.env["PATH"] == "/usr/bin"
+        # ``system`` is what the cell put on PATH: os.path.abspath("/usr/bin"),
+        # which is a drive-lettered spelling on Windows, so the kept entry is
+        # compared against the computed value, not the POSIX literal.
+        assert entered_shell.env["PATH"] == system
         assert entered_shell.env[ASH_IN_NIX_ENV_VAR] == "1"
 
     def test_the_flake_reference_is_logged_without_its_userinfo(
@@ -689,7 +697,8 @@ class TestRunAshNix:
         monkeypatch.setattr(module, "ASH_LOGGER", recorder)
         monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
         monkeypatch.setenv(
-            ASH_NIX_FLAKE_REF_ENV_VAR, "git+https://user:token-1@host/org/repo"
+            ASH_NIX_FLAKE_REF_ENV_VAR,
+            "git+https://user:token-1@host/org/repo",  # pragma: allowlist secret
         )
         monkeypatch.setattr(module, "find_executable", lambda _: "/usr/bin/nix")
 
@@ -704,7 +713,9 @@ class TestRunAshNix:
             for m in logged
         )
         # The shell is given the reference as the operator wrote it.
-        assert "git+https://user:token-1@host/org/repo" in entered_shell.cmd
+        assert (
+            "git+https://user:token-1@host/org/repo" in entered_shell.cmd
+        )  # pragma: allowlist secret
 
     def test_the_operators_pythonpath_is_handed_to_the_inner_command(
         self, monkeypatch, entered_shell

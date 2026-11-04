@@ -205,7 +205,10 @@ def test_a_report_to_a_regular_file_is_the_report_phases_bytes(
 
     monkeypatch.setattr(report_module, "_write_report", recording)
     path = tmp_path / "stdout"
-    with open(path, "w", encoding="utf-8") as stdout:
+    # newline="" keeps the capture untranslated, as write_text_atomically writes
+    # its side, so the byte compare below measures the report content and not the
+    # platform's newline translation.
+    with open(path, "w", encoding="utf-8", newline="") as stdout:
         _report(stdout, results_dir_with_hash_names, report_format, monkeypatch)
 
     expected = tmp_path / "written-report"

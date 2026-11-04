@@ -123,7 +123,16 @@ def unmakeable(tmp_path, request):
     if request.param == "under-a-file":
         (tmp_path / "blocker").write_text("x\n", encoding="utf-8")
         out = tmp_path / "blocker" / "out"
-        yield out, f"Output directory cannot be created: {out} (Not a directory)"
+        # The reason is the system's own strerror for this mkdir, which is not
+        # the POSIX "Not a directory" everywhere; take it from the same failing
+        # operation instead of pinning the POSIX literal.
+        try:
+            os.mkdir(out)
+        except OSError as error:
+            reason = error.strerror
+        else:  # pragma: no cover - a file blocks the way by construction
+            pytest.fail("mkdir under a file unexpectedly succeeded")
+        yield out, f"Output directory cannot be created: {out} ({reason})"
         return
     _without_permissions_skip()
     parent = tmp_path / "read-only"
@@ -288,11 +297,17 @@ def test_ash_scan_refuses_ash_source_dir_the_same_way(tmp_path):
 #: read as a second message saying all is well.
 _FORGED = "n\nSource directory is fine"
 
+_NEEDS_NEWLINE_NAMES = pytest.mark.skipif(
+    os.name == "nt",
+    reason="NTFS forbids control characters in names, so the forged name cannot exist",
+)
+
 
 def _one_line(path: Path) -> str:
     return str(path).replace("\n", "\\x0a")
 
 
+@_NEEDS_NEWLINE_NAMES
 @pytest.mark.parametrize(
     "command",
     [pytest.param(_SCAN, id="scan"), pytest.param(("config", "validate"), id="config")],
@@ -308,6 +323,7 @@ def test_a_source_dir_refusal_stays_on_one_line(tmp_path, command):
     assert "Source directory is fine" not in result.stderr.splitlines(), result.stderr
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_an_output_dir_refusal_stays_on_one_line(tmp_path):
     (tmp_path / "src").mkdir()
     blocker = tmp_path / _FORGED
@@ -334,6 +350,7 @@ def _no_forged_line(stderr: str) -> None:
     ), stderr
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_the_use_existing_refusal_names_the_output_dir_on_one_line(tmp_path):
     """--use-existing with no results there exits 1 naming where it looked, on one
     line whatever the --output-dir holds."""
@@ -356,6 +373,7 @@ def test_the_use_existing_refusal_names_the_output_dir_on_one_line(tmp_path):
     _no_forged_line(result.stderr)
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_ash_report_without_results_names_the_output_dir_on_one_line(tmp_path):
     out = tmp_path / _FORGED
     out.mkdir()
@@ -368,6 +386,7 @@ def test_ash_report_without_results_names_the_output_dir_on_one_line(tmp_path):
     _no_forged_line(result.stderr)
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_ash_report_that_cannot_read_its_results_names_them_on_one_line(tmp_path):
     out = tmp_path / _FORGED
     out.mkdir()

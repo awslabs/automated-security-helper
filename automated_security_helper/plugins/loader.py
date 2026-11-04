@@ -16,6 +16,7 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
+    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -1118,6 +1119,134 @@ def refuse_plugin_modules_outside_namespace(
     )
     refusal.entries = tuple(refused_entries)
     raise refusal
+
+
+class PluginNameClashError(ASHConfigValidationError):
+    """Two plugins of one type have the same name, or names that read as one.
+
+    ``AshConfig.get_plugin_config`` finds a plugin's section by
+    ``reduced_plugin_name`` (config/ash_config.py), so two plugins of one type
+    whose names reduce to one value would read each other's section; a run that
+    loads both cannot say which values either runs with, so it is refused. A
+    subclass of ``ASHConfigValidationError``, so every command that refuses an
+    invalid configuration refuses this one with exit 3 (plugins/index.md
+    "Package a third-party plugin"; exit-codes.md's name-clash rows), before
+    anything is scanned, merged or reported.
+    """
+
+
+def refuse_plugin_name_clashes(
+    filter_callback: Callable[[Any], bool],
+    plugin_types: Iterable[Literal["converter", "scanner", "reporter"]] = (
+        "converter",
+        "scanner",
+        "reporter",
+    ),
+) -> None:
+    """Refuse a run two of whose resolved plugins of one type share a name.
+
+    The one checked-names pass behind every entry point that resolves plugins
+    for a run: the scan engine (``ScanExecutionEngine.__init__``, after its
+    plugin modules are loaded), and the workspace prewarm
+    (``workspace.execution.prewarm_plugin_registry``), which the workspace run,
+    ``--dry-run`` and the MCP ``run_ash_workspace_scan`` tool all go through
+    before any project starts. ``mcp_resolve_workspace`` deliberately does NOT
+    call it: it imports no project's plugin module, and its response says
+    ``plugin_names_checked`` false (scale-large-repos.md, "Workspace scans
+    over MCP").
+
+    Judged over the run's own plugins, which is what ``filter_callback`` scopes:
+    the registry is process-wide, and under the MCP server it holds classes
+    other sessions loaded. Callers pass ``scan_plugin_filter(<the run's
+    modules>)`` or ``plugins_of(<the run's modules>)``, after those modules are
+    imported, so the resolved set here is the set the run would build plugins
+    from.
+
+    Two shapes, each naming both plugins and the modules that define them
+    (plugins/index.md):
+
+    * Different classes with the very same declared name -- a subclass that
+      keeps its base's config keeps its base's name -- are named
+      ``'<name>' (class <Class> in <module>)``.
+    * Different names that ``reduced_plugin_name`` reads as one (``csv_``
+      beside ``csv``, ``Detect_Secrets`` beside ``detect-secrets``) are named
+      ``'<name>' (<module>)``, and the message says the config lookup reads
+      them as the same plugin, as the client-config policy's own refusal does
+      (config/client_config_policy.py).
+
+    One class resolved twice is one plugin, never a clash: a module that
+    selects a built-in class again (plugins/index.md's ``ash_reporter_plugin(
+    CsvReporter)`` example) resolves the same object, so the pass deduplicates
+    by identity. A class that declares no string name is skipped: it is
+    configured under a name only its built config carries, which this pass
+    cannot read without running plugin code, the same deferral
+    ``workspace.execution.refuse_unresolvable_scanner_selection`` makes.
+
+    Raises:
+        PluginNameClashError: Naming each clashing plugin and its module. Every
+            caller maps ``ASHConfigValidationError`` to exit code 3.
+    """
+    from automated_security_helper.base.plugin_config import declared_plugin_name
+    from automated_security_helper.config.ash_config import reduced_plugin_name
+    from automated_security_helper.plugins.plugin_manager import (
+        without_masked_modules,
+    )
+
+    for plugin_type in plugin_types:
+        resolved = ash_plugin_manager.plugin_modules(plugin_type, filter_callback)
+        # By identity: the same class reaches the resolved list once per module
+        # that binds it, and one class selected twice is one plugin.
+        classes: List[type] = []
+        seen: set = set()
+        for candidate in resolved:
+            if not isinstance(candidate, type) or id(candidate) in seen:
+                continue
+            seen.add(id(candidate))
+            classes.append(candidate)
+        by_lookup: Dict[str, List[Tuple[str, type]]] = {}
+        for cls in classes:
+            name = declared_plugin_name(cls)
+            if name is None:
+                continue
+            # A name that reduces to nothing (only type words and punctuation)
+            # is indexed under no reduced spelling by plugin_key_lookup_names,
+            # so such names do not read as one; they are grouped by the exact
+            # name alone, which still catches two plugins with the very same
+            # name. The NUL prefix cannot collide with a reduced value, which
+            # never holds one.
+            reduced = reduced_plugin_name(name)
+            by_lookup.setdefault(reduced or f"\x00{name}", []).append((name, cls))
+        for _, members in sorted(by_lookup.items()):
+            if len(members) < 2:
+                continue
+            names = {name for name, _ in members}
+            if len(names) == 1:
+                shown = ", ".join(
+                    f"'{name}' (class {cls.__name__} in {cls.__module__})"
+                    for name, cls in members
+                )
+                message = (
+                    f"These {plugin_type}s have the very same name, so each "
+                    f"would be configured by the other's section: {shown}. "
+                    "One class selected twice is one plugin, but these are "
+                    "different classes. To run a subclass beside its base, "
+                    "give it a config class of its own with its own name."
+                )
+            else:
+                shown = ", ".join(
+                    f"'{name}' ({cls.__module__})" for name, cls in members
+                )
+                message = (
+                    f"These {plugin_type}s have names that the config lookup "
+                    f"reads as the same plugin: {shown}. The section lookup "
+                    "ignores case, punctuation, and the words Scanner, "
+                    "Reporter, and Converter, so each would read the other's "
+                    "config section. Give each plugin a name of its own."
+                )
+            # A module name an entry read from the environment is shown by its
+            # masked form wherever the caller's scope masks it; outside such a
+            # scope this is a no-op.
+            raise PluginNameClashError(without_masked_modules(message))
 
 
 def load_additional_plugin_modules(

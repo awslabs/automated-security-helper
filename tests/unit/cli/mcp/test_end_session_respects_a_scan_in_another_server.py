@@ -530,8 +530,13 @@ def test_an_error_with_no_errno_is_described_by_its_type() -> None:
 def test_an_error_that_names_a_file_is_described_with_it() -> None:
     error = OSError(errno.ESTALE, "FAKE stale file handle", "FAKE-registry-dir")
 
+    # The expected name is built as _describe_os_error builds it:
+    # errno.errorcode maps a NUMBER to one name per platform, so the literal
+    # "ESTALE" does not hold where another name shares the number.
+    name = errno.errorcode.get(errno.ESTALE, "unnamed")
+
     assert sessions._describe_os_error(error) == (
-        f"errno {errno.ESTALE} ESTALE: FAKE stale file handle: FAKE-registry-dir"
+        f"errno {errno.ESTALE} {name}: FAKE stale file handle: FAKE-registry-dir"
     )
 
 

@@ -22,7 +22,7 @@ from automated_security_helper.plugins.discovery import discover_plugins
 
 pytestmark = pytest.mark.unit
 
-_SECRET = "quoted-env-value-7f"
+_SECRET = "quoted-env-value-7f"  # pragma: allowlist secret
 
 
 def _package_whose_import_quotes_the_value(tmp_path, monkeypatch) -> str:

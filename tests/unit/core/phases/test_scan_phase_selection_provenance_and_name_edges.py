@@ -648,9 +648,13 @@ class TestSelectionRefusals:
         _run(phase, excluded_scanners=["detect_secrets", "bandit"])
 
         warnings = " ".join(_lines(logger, "warning"))
-        # Red at the base: nothing was said.
-        assert "No registered scanner matches the --exclude-scanners name" in warnings
-        assert "detect_secrets" in warnings
+        # Red at the base: nothing was said. The wording is the one
+        # how-to/choose-scanners.md's page pin quotes ("No registered scanner
+        # matches excluded <name>, so nothing is excluded for it"), with the
+        # caller's own input named in the spelling hint.
+        assert "No registered scanner matches excluded detect_secrets" in warnings
+        assert "nothing is excluded for it" in warnings
+        assert "--exclude-scanners spelling" in warnings
         assert "bandit," not in warnings
 
     def test_python_only_that_leaves_the_allowlist_nothing_is_refused(self, ctx):

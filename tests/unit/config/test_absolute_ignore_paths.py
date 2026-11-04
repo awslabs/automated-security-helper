@@ -13,6 +13,7 @@ the scan root when the pattern is under it, otherwise the pattern without its
 leading slashes. The matcher is unchanged.
 """
 
+import sys
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -113,7 +114,18 @@ def test_lint_and_validate_name_the_relative_spelling(tmp_path, pattern, relativ
         # "/x" names x under the root only when x is there.
         pytest.param("/elsewhere/vendor/**", id="leading-slash-naming-nothing"),
         # A POSIX path's case is the path: an upper-cased root is another one.
-        pytest.param("{upper_root}/vendor/**", id="root-in-another-case"),
+        # On a case-insensitive filesystem the upper-cased root names the same
+        # directory, so the checker resolves "vendor/**" and offers it instead
+        # of the no-spelling lint this case pins.
+        pytest.param(
+            "{upper_root}/vendor/**",
+            id="root-in-another-case",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="the filesystem is case-insensitive, so the upper-cased "
+                "root names the scan root and a relative spelling is offered",
+            ),
+        ),
         # ".." leaves the root: no spelling under it names that directory.
         pytest.param("/../{outside}/**", id="leading-slash-dot-dot"),
         pytest.param("{root}/../{outside}/**", id="under-the-root-dot-dot"),

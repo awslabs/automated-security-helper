@@ -301,11 +301,11 @@ global_settings:
     - rule_id: B324
       path: app.py
       reason: MD5 only names cache entries here. It is not used for security.
-      expiration: "2027-04-30"
+      expires: "2027-04-30"
 ```
 
 `rule_id` and `path` select the findings to suppress. `reason` is required.
-`expiration` is optional: from that date the suppression stops applying and the
+`expires` is optional: from that date the suppression stops applying and the
 finding counts again, so set it to a date a few months from today, when you want
 to look at the decision again. Keep the date in quotes: unquoted, YAML reads it as a
 date rather than text, and ASH rejects the whole file with exit code 3. A date in the

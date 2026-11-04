@@ -83,7 +83,7 @@ class TestTheShareSpelling:
 
     @pytest.mark.parametrize(
         "text",
-        [
+        [  # nosec B108
             "C:\\repo",
             "\\\\?\\C:\\repo",
             "\\\\.\\C:\\repo..\\x",

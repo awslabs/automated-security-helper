@@ -3325,6 +3325,42 @@ def shows_a_refusal(block: Block) -> bool:
     )
 
 
+def bad_selection_exit() -> int | None:
+    """The exit code of a selection ASH refuses: an unknown ``--tool`` name of
+    ``ash dependencies install`` (``core.constants.ASH_EXIT_BAD_SELECTION``).
+
+    The number is also a scan's actionable-findings code, so unlike
+    ``usage_error_exit`` this code proves a refusal only for a command that never
+    scans; ``shows_a_selection_refusal``'s caller gates on the command.
+    """
+    try:
+        from automated_security_helper.core import constants
+    except ImportError:
+        return None
+    code = getattr(constants, "ASH_EXIT_BAD_SELECTION", None)
+    return code if isinstance(code, int) else None
+
+
+def shows_a_selection_refusal(block: Block) -> bool:
+    """Whether a block runs a refused selection on purpose, to show ASH refusing it.
+
+    ``ash dependencies install`` refuses an unknown ``--tool`` name with the
+    bad-selection code (``cli/dependencies.py``), not the usage-error code, and it
+    never scans, so on that command the code cannot mean actionable findings. A run
+    block whose expect-exit is that code proves such a refusal, which the runner
+    then checks; the exemption applies only to ``dependencies`` invocations
+    (``_block_cli_findings``), so a scan in the same block keeps its value checks:
+    its exit 2 would mean findings, and a typo there would pass unproven.
+    """
+    selection = bad_selection_exit()
+    return (
+        selection is not None
+        and block.marker is not None
+        and block.mode == "run"
+        and str(block.marker.keys.get("expect-exit")) == str(selection)
+    )
+
+
 def output_samples(page: Page) -> dict[int, Block]:
     """id() of each block marked output that directly follows a block the runner runs,
     mapped to that block.
@@ -3360,18 +3396,25 @@ def _block_cli_findings(
     # A block runs under set -e, so it ends at its first refused command, and that
     # command alone is shown refusing. A refused value in any other is reported.
     refusal_shown = not shows_a_refusal(block)
+    # The bad-selection code proves a refusal only on a command that never scans
+    # (shows_a_selection_refusal), so only a ``dependencies`` invocation may claim it.
+    selection_shown = not shows_a_selection_refusal(block)
     metavars = reads_ash_lines(block, output_sample)
     for invocation in invocations:
         line = _invocation_line(block, invocation)
         if invocation.problem:
             findings.append(Finding("cli", rel, line, invocation.problem))
         problems = ash_args_problems(invocation.args, cli, metavars=metavars)
-        if not refusal_shown:
+        exempt = not refusal_shown or (
+            not selection_shown and invocation.args[:1] == ["dependencies"]
+        )
+        if exempt:
             without_values = ash_args_problems(
                 invocation.args, cli, check_values=False, metavars=metavars
             )
             if without_values != problems:
-                problems, refusal_shown = without_values, True
+                problems = without_values
+                refusal_shown = selection_shown = True
         for problem in problems:
             findings.append(Finding("cli", rel, line, problem))
     return findings
@@ -6446,6 +6489,24 @@ def _resolve_from(
                     config_cls = _model_of(current.model_fields[field_name].annotation)[
                         1
                     ]
+            if config_cls is None:
+                # A key reaches a plugin's section the way a section's name is
+                # matched (AshConfig.get_plugin_config): `reporters.CSV.enabled`
+                # sets the `csv` section's (docs/content/how-to/configure.md).
+                # Only a spelling exactly one shipped plugin's name reduces to
+                # resolves; anything else still fails with the message below.
+                from automated_security_helper.config.ash_config import (
+                    reduced_plugin_name,
+                )
+
+                wanted = reduced_plugin_name(segment)
+                reduced = [
+                    cls
+                    for name, cls in models.plugin_configs.get(section, {}).items()
+                    if reduced_plugin_name(name) == wanted
+                ]
+                if len(reduced) == 1:
+                    config_cls = reduced[0]
             if config_cls is None:
                 known = sorted(models.plugin_configs.get(section, {}))
                 close = difflib.get_close_matches(segment, known, n=1)

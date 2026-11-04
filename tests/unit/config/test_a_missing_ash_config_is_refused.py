@@ -294,7 +294,13 @@ def test_report_refuses_a_config_option_that_does_not_exist(
 
     assert result.exit_code == 3, result.output
     flat = _flat(result.output)
-    assert f"Invalid configuration: Configuration file not found: {named}" in flat
+    # The refusal is built with describe_config_path, which answers the
+    # path's as_posix form on every platform (config_sources.py), so the
+    # expectation uses the same spelling rather than str()'s os form.
+    assert (
+        f"Invalid configuration: Configuration file not found: {named.as_posix()}"
+        in flat
+    )
 
 
 def test_only_whitespace_is_refused(missing, monkeypatch):
