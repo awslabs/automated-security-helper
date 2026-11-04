@@ -30,7 +30,7 @@ MERGE_MARKER = "ash_occurrence_context_version"
 CONTEXT_VERSION = 1
 
 
-def _region_attr(attr: str, order: Iterable[Optional[Region]]) -> Optional[Any]:
+def region_attr(attr: str, order: Iterable[Optional[Region]]) -> Optional[Any]:
     """Read the first non-None coordinate from finding region, then context."""
     for candidate in order:
         if candidate is None:
@@ -100,7 +100,7 @@ def _location_identity(location: Any) -> Dict[str, Any]:
             ),
         )
         for attr in ("startLine", "endLine"):
-            value = _region_attr(attr, (physical.region, physical.contextRegion))
+            value = region_attr(attr, (physical.region, physical.contextRegion))
             if value is not None:
                 region[attr] = value
         if artifact:
@@ -317,11 +317,6 @@ def _has_used_arguments(template: Any, arguments: Any) -> bool:
     return False
 
 
-def _message_identity(result: Any, scanner: str, run: Any) -> Tuple[str, Optional[str]]:
-    text, message_id, _ = _message_resolution(result, scanner, run)
-    return text, message_id
-
-
 def _safe_message(template: str, arguments: Any, rule_id: Optional[str]) -> str:
     """Use the template's secret boundaries, never delimiters inserted by args."""
     base_rule = rule_id.split("/", 1)[0] if isinstance(rule_id, str) else None
@@ -356,6 +351,7 @@ def _safe_message(template: str, arguments: Any, rule_id: Optional[str]) -> str:
 
 
 def is_composed_run(run: Any) -> bool:
+    """Whether the run carries the current merge marker."""
     value = getattr(getattr(run, "properties", None), MERGE_MARKER, None)
     return type(value) is int and value == CONTEXT_VERSION
 
@@ -492,6 +488,7 @@ def _valid(value: Any, schema: Any) -> bool:
 
 
 def valid_context(value: Any) -> bool:
+    """Whether a stored context matches the exact allowlist and carries evidence."""
     return (
         _valid(value, _CONTEXT_SCHEMA)
         and value.get("version") == CONTEXT_VERSION
@@ -500,6 +497,7 @@ def valid_context(value: Any) -> bool:
 
 
 def persisted_context(result: Any, run: Any) -> Optional[Dict[str, Any]]:
+    """The result's stored context, only when its run is composed and it validates."""
     context = getattr(getattr(result, "properties", None), CONTEXT_PROPERTY, None)
     return context if is_composed_run(run) and valid_context(context) else None
 

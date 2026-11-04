@@ -55,6 +55,13 @@
 
 from __future__ import annotations
 
+from automated_security_helper.utils.occurrence_context import (
+    CONTEXT_PROPERTY,
+    CONTEXT_VERSION,
+    MERGE_MARKER,
+    is_composed_run,
+    occurrence_context,
+)
 from automated_security_helper.utils.severity_ladder import MISSING_SARIF_LEVEL
 from automated_security_helper.utils.undecodable_text import (
     RecordModel,
@@ -2894,15 +2901,10 @@ class SarifReport(RecordModel):
     ) -> None:
         """Fold one run into this report's first run; see ``merge_sarif_report``."""
         report_tool = report_run.tool
-        from automated_security_helper.utils.occurrence_context import (
-            CONTEXT_PROPERTY,
-            MERGE_MARKER,
-            CONTEXT_VERSION,
-            is_composed_run,
-            occurrence_context,
-        )
 
-        def curated_dump(res, source_run, drop_rule_index=True):
+        def curated_dump(
+            res: "Result", source_run: "Run", drop_rule_index: bool = True
+        ) -> Dict[str, Any]:
             """One curated dump for every copy a merge makes of a result.
 
             A full dump, not one of the set fields only: pydantic marks a field
@@ -2916,7 +2918,7 @@ class SarifReport(RecordModel):
             record of a result.
             """
             clean_result = res.model_dump(
-                exclude=["ruleIndex"] if drop_rule_index else []
+                exclude={"ruleIndex"} if drop_rule_index else set()
             )
             if "level" not in res.model_fields_set:
                 clean_result.pop("level", None)
@@ -2930,7 +2932,9 @@ class SarifReport(RecordModel):
                 clean_result["properties"] = properties
             return clean_result
 
-        def curated_copy(res, source_run, drop_rule_index=True):
+        def curated_copy(
+            res: "Result", source_run: "Run", drop_rule_index: bool = True
+        ) -> "Result":
             return Result(**curated_dump(res, source_run, drop_rule_index))
 
         # Copies, never the incoming objects: ash merge promises not to mutate
