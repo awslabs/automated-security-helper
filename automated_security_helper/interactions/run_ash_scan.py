@@ -4333,12 +4333,16 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
 
 def refuse_output_dir_links(
     source_dir: str | Path | None,
-    output_dir: str | Path | None,
+    output_dir: str | Path,
     *,
     container: bool = False,
     workspace: bool = False,
 ) -> None:
     """The symlinked-output-directory refusal, for a caller with no ScanOptions yet.
+
+    ``output_dir`` is already settled, never None: ``ScanOptions.output_dir``
+    is a required Path, and ``_settle_output_dir`` defaults a None before it
+    calls here, so there is always a path a link could divert.
 
     The one implementation every entry point routes through: ``run_ash_scan``
     (:func:`_refuse_symlinked_output_dir`) and the CLI's ``_settle_output_dir``,

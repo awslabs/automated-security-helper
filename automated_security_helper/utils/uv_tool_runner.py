@@ -2525,9 +2525,11 @@ class UVToolRunner:
                 # this arm) rides the conversion as the typed result's own
                 # field, like could_not_stop above, so the mixin's response
                 # can say which resolved file produced a refused exit code.
+                # No CompletedProcess type declares the field: it is dynamic
+                # on every arm, and the mixin reads it back with getattr.
                 program = response.get("resolved_program")
                 if isinstance(program, str) and program:
-                    result.resolved_program = program
+                    setattr(result, "resolved_program", program)
 
             except Exception as e:
                 if response.get("spawn_failed"):

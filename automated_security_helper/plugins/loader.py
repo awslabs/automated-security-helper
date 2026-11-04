@@ -16,6 +16,7 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
+    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -1136,7 +1137,11 @@ class PluginNameClashError(ASHConfigValidationError):
 
 def refuse_plugin_name_clashes(
     filter_callback: Callable[[Any], bool],
-    plugin_types: Iterable[str] = ("converter", "scanner", "reporter"),
+    plugin_types: Iterable[Literal["converter", "scanner", "reporter"]] = (
+        "converter",
+        "scanner",
+        "reporter",
+    ),
 ) -> None:
     """Refuse a run two of whose resolved plugins of one type share a name.
 
