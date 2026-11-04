@@ -169,9 +169,19 @@ class _ItemWithMarker:
             else {marker, "integration"}
         )
         self.keywords = dict.fromkeys(self.markers, True)
+        # The hook reads .kwargs on a ci_runner marker, so a marker is not a bare object.
+        self._marks = {
+            name: types.SimpleNamespace(name=name, args=(), kwargs={})
+            for name in self.markers
+        }
 
     def get_closest_marker(self, name):
-        return object() if name in self.markers else None
+        return self._marks.get(name)
+
+    def iter_markers(self, name):
+        mark = self._marks.get(name)
+        if mark is not None:
+            yield mark
 
     def add_marker(self, marker) -> None:
         pass
