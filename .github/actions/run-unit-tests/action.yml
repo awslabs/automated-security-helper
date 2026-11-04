@@ -139,9 +139,10 @@ runs:
     # and multi-project gates install on windows-latest, and semgrep publishes no Windows
     # build (semgrep_scanner.py), so it cannot be in that list.
     #
-    # The unit tier runs no real scanner. The integration tier is left as it is: its
-    # real-tool tests skip when the tool is absent, and the integration-test job in
-    # ash-unified-ci.yml is the one that installs them and requires them.
+    # The unit tier runs no real scanner. The integration tier gets bandit alone, in the
+    # step after this one. The other real-tool integration tests skip when their tool is
+    # absent, and the integration-test job in ash-unified-ci.yml is the one that
+    # installs those and requires them.
     - name: Install the scanners the e2e tier runs for real
       if: inputs.marker == 'e2e'
       shell: bash
@@ -152,6 +153,14 @@ runs:
           uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
         fi
         uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
+
+    # The docs tutorial twin (tests/integration/docs/test_local_tutorial_twin.py) fails
+    # rather than skips when bandit is absent, so that a run that scanned nothing cannot
+    # be green. It runs in the integration tier, which installed nothing before this step.
+    - name: Install bandit for the integration tier's real-tool test
+      if: inputs.marker == 'integration'
+      shell: bash
+      run: uv run ash dependencies install --tool bandit
 
     # ASH_REQUIRE_SYMBOLS_EXTRA and ASH_REQUIRE_CDK_EXTRA turn the skip-when-absent of the
     # tests that need each extra into a hard failure, so a leg that stops installing an extra
