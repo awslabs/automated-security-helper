@@ -5799,7 +5799,7 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </span><span id="__span-52-10"><a id="__codelineno-52-10" name="__codelineno-52-10" href="#__codelineno-52-10"></a><span class="w">  </span><span class="nt">ignore_paths</span><span class="p">:</span>
 </span><span id="__span-52-11"><a id="__codelineno-52-11" name="__codelineno-52-11" href="#__codelineno-52-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;tests/test_data/**&#39;</span>
 </span><span id="__span-52-12"><a id="__codelineno-52-12" name="__codelineno-52-12" href="#__codelineno-52-12"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Test</span><span class="nv"> </span><span class="s">data</span><span class="nv"> </span><span class="s">only&#39;</span>
-</span><span id="__span-52-13"><a id="__codelineno-52-13" name="__codelineno-52-13" href="#__codelineno-52-13"></a><span class="w">      </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">  </span><span class="c1"># Optional: ISO date string</span>
+</span><span id="__span-52-13"><a id="__codelineno-52-13" name="__codelineno-52-13" href="#__codelineno-52-13"></a><span class="w">      </span><span class="nt">expires</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">  </span><span class="c1"># Optional: ISO date string</span>
 </span><span id="__span-52-14"><a id="__codelineno-52-14" name="__codelineno-52-14" href="#__codelineno-52-14"></a>
 </span><span id="__span-52-15"><a id="__codelineno-52-15" name="__codelineno-52-15" href="#__codelineno-52-15"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
 </span><span id="__span-52-16"><a id="__codelineno-52-16" name="__codelineno-52-16" href="#__codelineno-52-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;src/app.py&#39;</span>
@@ -5807,7 +5807,7 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </span><span id="__span-52-18"><a id="__codelineno-52-18" name="__codelineno-52-18" href="#__codelineno-52-18"></a><span class="w">      </span><span class="nt">line_start</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">42</span>
 </span><span id="__span-52-19"><a id="__codelineno-52-19" name="__codelineno-52-19" href="#__codelineno-52-19"></a><span class="w">      </span><span class="nt">line_end</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">42</span>
 </span><span id="__span-52-20"><a id="__codelineno-52-20" name="__codelineno-52-20" href="#__codelineno-52-20"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;False</span><span class="nv"> </span><span class="s">positive</span><span class="nv"> </span><span class="s">-</span><span class="nv"> </span><span class="s">debug</span><span class="nv"> </span><span class="s">mode</span><span class="nv"> </span><span class="s">only</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">development&#39;</span>
-</span><span id="__span-52-21"><a id="__codelineno-52-21" name="__codelineno-52-21" href="#__codelineno-52-21"></a><span class="w">      </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;2026-12-31&#39;</span><span class="w">  </span><span class="c1"># Optional: ISO date string</span>
+</span><span id="__span-52-21"><a id="__codelineno-52-21" name="__codelineno-52-21" href="#__codelineno-52-21"></a><span class="w">      </span><span class="nt">expires</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;2026-12-31&#39;</span><span class="w">  </span><span class="c1"># Optional: ISO date string</span>
 </span><span id="__span-52-22"><a id="__codelineno-52-22" name="__codelineno-52-22" href="#__codelineno-52-22"></a>
 </span><span id="__span-52-23"><a id="__codelineno-52-23" name="__codelineno-52-23" href="#__codelineno-52-23"></a><span class="nt">scanners</span><span class="p">:</span>
 </span><span id="__span-52-24"><a id="__codelineno-52-24" name="__codelineno-52-24" href="#__codelineno-52-24"></a><span class="w">  </span><span class="nt">bandit</span><span class="p">:</span>
@@ -5856,7 +5856,7 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 - <code>line_start</code>: Optional - specific line number
 - <code>line_end</code>: Optional - end line for multi-line suppressions
 - <code>reason</code>: Required - explanation for suppression
-- <code>expiration</code>: Optional - ISO date when suppression expires (<code>expires</code> is accepted as an alias when a config is read)
+- <code>expires</code>: Optional - ISO date when suppression expires (<code>expiration</code> is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4)
 - <code>resource_id</code>: Optional - only suppress findings about this resource identity (for cdk-nag, the CDK construct path); sugar for <code>scope.resource_id</code>
 - <code>scope</code>: Optional - narrow the entry to a resource identity, a resource type, or named engines' findings:</p>
 <!-- doctest: config kind=ash-fragment at=global_settings -->
@@ -5924,7 +5924,7 @@ message instead of the keys below. Adapt the calls to your MCP client:</p>
 </span><span id="__span-57-2"><a id="__codelineno-57-2" name="__codelineno-57-2" href="#__codelineno-57-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;src/legacy/old_api.py&#39;</span>
 </span><span id="__span-57-3"><a id="__codelineno-57-3" name="__codelineno-57-3" href="#__codelineno-57-3"></a><span class="w">    </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;B501&#39;</span>
 </span><span id="__span-57-4"><a id="__codelineno-57-4" name="__codelineno-57-4" href="#__codelineno-57-4"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Legacy</span><span class="nv"> </span><span class="s">code</span><span class="nv"> </span><span class="s">-</span><span class="nv"> </span><span class="s">will</span><span class="nv"> </span><span class="s">be</span><span class="nv"> </span><span class="s">refactored</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">Q2</span><span class="nv"> </span><span class="s">2026&#39;</span>
-</span><span id="__span-57-5"><a id="__codelineno-57-5" name="__codelineno-57-5" href="#__codelineno-57-5"></a><span class="w">    </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;2026-06-30&#39;</span>
+</span><span id="__span-57-5"><a id="__codelineno-57-5" name="__codelineno-57-5" href="#__codelineno-57-5"></a><span class="w">    </span><span class="nt">expires</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;2026-06-30&#39;</span>
 </span></code></pre></div>
 <h3 id="suppression-workflow">Suppression Workflow<a class="headerlink" href="#suppression-workflow" title="Permanent link">&para;</a></h3>
 <ol>
@@ -6570,7 +6570,7 @@ its file and lines, or the fingerprints its scanner reports. For example,
 <p>Call <code>suggest_suppression</code> with the finding's <code>id</code>, <code>results_path</code> set to the
 <code>ash_aggregated_results.json</code> file (not the directory), and the user's reason as
 <code>justification</code>. It writes nothing and returns one entry as <code>yaml</code> and <code>json</code>. Its
-<code>expiration</code> defaults to 90 days from today. Leave out the <code>client_supplied</code> key it includes,
+<code>expires</code> defaults to 90 days from today. Leave out the <code>client_supplied</code> key it includes,
 and put the entry under <code>global_settings.suppressions</code> in the project's config:</p>
 <!-- doctest: save-as=.ashrc.yaml -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-83-1"><a id="__codelineno-83-1" name="__codelineno-83-1" href="#__codelineno-83-1"></a><span class="nt">global_settings</span><span class="p">:</span>
@@ -6580,7 +6580,7 @@ and put the entry under <code>global_settings.suppressions</code> in the project
 </span><span id="__span-83-5"><a id="__codelineno-83-5" name="__codelineno-83-5" href="#__codelineno-83-5"></a><span class="w">      </span><span class="nt">line_start</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
 </span><span id="__span-83-6"><a id="__codelineno-83-6" name="__codelineno-83-6" href="#__codelineno-83-6"></a><span class="w">      </span><span class="nt">line_end</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
 </span><span id="__span-83-7"><a id="__codelineno-83-7" name="__codelineno-83-7" href="#__codelineno-83-7"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Test</span><span class="nv"> </span><span class="s">fixture</span><span class="nv"> </span><span class="s">value,</span><span class="nv"> </span><span class="s">not</span><span class="nv"> </span><span class="s">a</span><span class="nv"> </span><span class="s">real</span><span class="nv"> </span><span class="s">credential&quot;</span>
-</span><span id="__span-83-8"><a id="__codelineno-83-8" name="__codelineno-83-8" href="#__codelineno-83-8"></a><span class="w">      </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2027-06-30&quot;</span>
+</span><span id="__span-83-8"><a id="__codelineno-83-8" name="__codelineno-83-8" href="#__codelineno-83-8"></a><span class="w">      </span><span class="nt">expires</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2027-06-30&quot;</span>
 </span></code></pre></div>
 <ul>
 <li><code>path</code> and <code>reason</code> are required. <code>path</code> is relative to the scanned directory and may use
@@ -6588,7 +6588,7 @@ and put the entry under <code>global_settings.suppressions</code> in the project
 <li><code>rule_id</code> matches without regard to case and may use glob patterns.</li>
 <li><code>line_start</code> and <code>line_end</code> tie the suppression to those lines. Leave them out to match the
   rule anywhere in the path.</li>
-<li>Write <code>expiration</code> as a quoted <code>YYYY-MM-DD</code> date. From that date on, the suppression no
+<li>Write <code>expires</code> as a quoted <code>YYYY-MM-DD</code> date. From that date on, the suppression no
   longer applies and the finding counts again. An expired suppression is listed in
   <code>reports/ash.unused-suppressions.json</code>, with the ones that matched nothing.</li>
 <li><code>ignore_paths</code> entries also need <code>path</code> and <code>reason</code>, and drop every finding in the matching

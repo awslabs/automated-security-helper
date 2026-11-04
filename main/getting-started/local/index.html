@@ -3575,10 +3575,10 @@ what a suppression names in the next step. To browse the findings interactively,
 </span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B324</span>
 </span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app.py</span>
 </span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MD5 only names cache entries here. It is not used for security.</span>
-</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">      </span><span class="nt">expiration</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2027-04-30&quot;</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">      </span><span class="nt">expires</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2027-04-30&quot;</span>
 </span></code></pre></div>
 <p><code>rule_id</code> and <code>path</code> select the findings to suppress. <code>reason</code> is required.
-<code>expiration</code> is optional: from that date the suppression stops applying and the
+<code>expires</code> is optional: from that date the suppression stops applying and the
 finding counts again, so set it to a date a few months from today, when you want
 to look at the decision again. Keep the date in quotes: unquoted, YAML reads it as a
 date rather than text, and ASH rejects the whole file with exit code 3. A date in the

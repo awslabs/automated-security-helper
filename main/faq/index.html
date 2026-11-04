@@ -3485,7 +3485,7 @@ value under that scanner's options, <code>scanners.&lt;name&gt;.options.scan_tim
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/build.py</span>
 </span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">The command is a constant string; no user input reaches it.</span>
 </span></code></pre></div>
-<p><code>ash report</code> shows each finding's rule ID. You can add <code>expiration</code> with a date in quotes,
+<p><code>ash report</code> shows each finding's rule ID. You can add <code>expires</code> with a date in quotes,
 such as <code>"2027-06-30"</code>; from that date the suppression stops applying, and
 <code>ash config lint</code> reports it as expired. ASH also honors inline <code>ash-ignore</code> comments, and
 scanners honor their own, such as bandit's <code># nosec</code>. See

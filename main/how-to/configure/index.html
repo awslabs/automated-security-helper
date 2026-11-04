@@ -3389,7 +3389,7 @@ SOFTWARE.
 </span></code></pre></div>
 <p>The form is <code>key.path=value</code>:</p>
 <ul>
-<li>The key is a dotted path into the config, such as <code>scanners.bandit.options.confidence_level</code>. Plugin names use their hyphenated config names (<code>detect-secrets</code>, <code>cdk-nag</code>), and a key reaches a plugin's section by that name, so <code>reporters.csv.enabled</code> sets the <code>csv</code> section's. There is no list indexing.</li>
+<li>The key is a dotted path into the config, such as <code>scanners.bandit.options.confidence_level</code>. Plugin names use their hyphenated config names (<code>detect-secrets</code>, <code>cdk-nag</code>), and a key reaches a plugin's section the way a section's name is matched, so <code>reporters.CSV.enabled</code> sets the <code>csv</code> section's. There is no list indexing.</li>
 <li>The value is split from the key at the first <code>=</code>. <code>true</code>, <code>false</code>, <code>null</code>, and <code>none</code>, in any case, become booleans and null; numbers become numbers; and a value wrapped in <code>[...]</code> or <code>{...}</code> is read as JSON (a <code>[...]</code> that is not valid JSON is split at its commas). Anything else is a string. Threshold values are case-sensitive, so <code>HIGH</code> is a threshold and <code>high</code> is an error.</li>
 <li><code>key.path+=value</code> appends to an existing list instead of replacing it: <code>--config-overrides 'global_settings.ignore_paths+=[{"path": "vendor/**", "reason": "Third-party code"}]'</code>. On a key that is not a list yet, it sets the value.</li>
 </ul>

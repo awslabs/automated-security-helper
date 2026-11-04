@@ -3579,6 +3579,11 @@ scanner subprocess inside an OS-level sandbox instead. It is off by default.</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">sandbox</span><span class="p">:</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
 </span></code></pre></div>
+<p>The values are <code>off</code>, <code>auto</code>, <code>bwrap</code>, <code>firejail</code>, <code>landlock</code>, and <code>sandbox-exec</code>,
+lowercase. YAML reads an unquoted <code>off</code> as the boolean false, which ASH reads as the
+mode <code>off</code>; an unquoted <code>on</code>, <code>yes</code> or <code>true</code> names no mode, so a scan refuses it with
+exit code 3 and a hint to quote the value. <code>ash config validate</code> gives the same
+verdict, with the same exit code.</p>
 <p>If you ask for a sandbox and ASH cannot provide one, the affected scanners are recorded
 <code>MISSING</code> with the reason, and the scan exits 1 like any other incomplete scan. ASH
 never falls back to running a scanner unsandboxed after you asked for a sandbox. That
