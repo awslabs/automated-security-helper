@@ -184,6 +184,10 @@ def run_suite(report: pathlib.Path, workers: str) -> int:
         # not import. pytest.ini measures nothing by default; --no-cov keeps it
         # that way here even if coverage options are added to addopts again.
         "--no-cov",
+        # The moto-server tests carry the integration tier marker, and tests/conftest.py
+        # skips every integration and e2e test unless this option is given. Without it
+        # the suite collects, skips 248 tests and this gate (zero skips) fails.
+        "--run-integration",
         "-q",
         "-p",
         "no:cacheprovider",
