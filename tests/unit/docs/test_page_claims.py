@@ -18116,6 +18116,14 @@ _PAGES_STEPS_THAT_RUN_A_TOOL = {
         "Install ASH",
         "Merge the shards",
     ],
+    ADVANCED_USAGE: ["Run ASH scan"],
+    "docs/plugins/community/snyk-plugin.md": ["Run ASH with Snyk Code"],
+    "docs/plugins/community/ferret-scan-plugin.md": ["Run ASH with Ferret Scan"],
+    "docs/plugins/community/trivy-plugin.md": [
+        "Scan changed files",
+        "Run ASH with Trivy",
+        "Run Trivy Security Scan",
+    ],
 }
 
 
@@ -18169,7 +18177,7 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
     Every GitHub Actions block of every page is read. Each step that runs ``uv`` or
     ``ash`` makes its token, and prints its stop and resume lines, the way the scan
     workflow's helper does, with every ``uv`` and ``ash`` command between the two; the
-    two pages hold the steps named in _PAGES_STEPS_THAT_RUN_A_TOOL, and
+    pages hold the steps named in _PAGES_STEPS_THAT_RUN_A_TOOL, and
     github-actions.md's one other ``run`` step writes the date to GITHUB_OUTPUT and
     prints nothing. Each step is run with ``bash -e``, as a GitHub runner runs a step,
     with a ``uv`` and an ``ash`` on PATH that print a workflow command on stdout and

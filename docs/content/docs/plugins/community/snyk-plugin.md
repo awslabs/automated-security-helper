@@ -381,8 +381,20 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
           ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
         # ASH's output outside the checkout, so snyk-code scans the source.
+        # Workflow commands are stopped around the scan, as the reusable scan
+        # workflow does: tool output is untrusted, and a `::`-line in it would
+        # otherwise be acted on by the runner.
         run: |
-          uv run ash --scanners snyk-code --output-format sarif --output-dir "${{ runner.temp }}/ash_output"
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          uv run ash --scanners snyk-code --output-format sarif --output-dir "${{ runner.temp }}/ash_output" 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       - name: Upload SARIF results
         # Also when ASH exits non-zero on findings: without a status function
         # GitHub skips this step after any failed step.
