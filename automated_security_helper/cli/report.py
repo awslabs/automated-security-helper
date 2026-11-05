@@ -1226,6 +1226,31 @@ def report_command(
             _print_debug_trace(e)
         raise typer.Exit(1)
 
+    # The reporter's pre-flight check runs first, as a scan's report phase runs it
+    # (engine_phase filters on validate_plugin_dependencies). A reporter whose check
+    # refuses (a missing setting, credentials it cannot find) sends nothing: the
+    # check logs its own reason, and the command says it did not run and exits 1.
+    # Reporters whose check passes go on to the produced-no-report path below.
+    try:
+        dependencies_ok = reporter_plugin.validate_plugin_dependencies()
+    except Exception as e:
+        ASH_LOGGER.error(
+            "Reporter '%s' dependency check raised %s: %s",
+            report_format,
+            type(e).__name__,
+            e,
+        )
+        if debug:
+            _print_debug_trace(e)
+        dependencies_ok = False
+    if not dependencies_ok:
+        _print_error(
+            "[red]Error: reporter '{}' cannot run: its dependency check refused. "
+            "See the log above for the reason.[/red]",
+            report_format,
+        )
+        raise typer.Exit(1)
+
     # Generate the report
     try:
         # The report goes to stdout, but a reporter that writes files of its own
