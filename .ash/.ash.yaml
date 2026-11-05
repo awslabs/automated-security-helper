@@ -13,12 +13,12 @@ global_settings:
     # GuardDog's heuristics read source text, so test code that writes a fake
     # credentials file matches them. Pinned to the one line GuardDog reports, so a
     # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 775 and 991; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 775 only.
+    # twice, at lines 731 and 947; GuardDog 3.2.0 drops a match whose code snippet
+    # is the same as one it already reported, so it reports 731 only.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 775
-      line_end: 775
+      line_start: 731
+      line_end: 731
       reason: >-
         False positive. The line writes a creds.env holding a fake AWS key id and
         secret, generated per run with secrets.choice, into the test's temporary
@@ -3411,24 +3411,19 @@ global_settings:
     # needs its line updated, which is the point of not using a range or a glob.
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 253
-      line_end: 253
-      reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
-    - rule_id: threat-process-download-exec
-      path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 701
-      line_end: 701
+      line_start: 1030
+      line_end: 1030
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 973
-      line_end: 973
+      line_start: 1518
+      line_end: 1518
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 925
-      line_end: 925
-      reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+      line_start: 1612
+      line_end: 1612
+      reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 367
@@ -3441,43 +3436,38 @@ global_settings:
       reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 264
-      line_end: 264
+      line_start: 266
+      line_end: 266
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 272
-      line_end: 272
+      line_start: 274
+      line_end: 274
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 782
-      line_end: 782
+      line_start: 784
+      line_end: 784
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1469
-      line_end: 1469
+      line_start: 1471
+      line_end: 1471
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
-      line_start: 404
-      line_end: 404
+      line_start: 406
+      line_end: 406
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1131
-      line_end: 1131
-      reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
-    - rule_id: threat-filesystem-read
-      path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 472
-      line_end: 472
+      line_start: 1170
+      line_end: 1170
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 392
-      line_end: 392
+      line_start: 417
+      line_end: 417
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
