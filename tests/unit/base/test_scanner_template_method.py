@@ -200,7 +200,13 @@ class TestTemplateScanExecuteScanHook:
 
         with patch.object(scanner, "_pre_scan", return_value=True):
             scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
+            # scan() resets exit_code to None and a run only sets it from the
+            # response's own code, so the stand-in returns a completed run.
+            with patch.object(
+                scanner,
+                "_run_subprocess",
+                return_value={"returncode": 0, "stdout": "", "stderr": ""},
+            ):
                 scanner.scan(target=target, target_type="source")
 
         assert len(calls) == 1
@@ -229,7 +235,13 @@ class TestTemplateScanExecuteScanHook:
 
         with patch.object(scanner, "_pre_scan", return_value=True):
             scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
+            # scan() resets exit_code to None and a run only sets it from the
+            # response's own code, so the stand-in returns a completed run.
+            with patch.object(
+                scanner,
+                "_run_subprocess",
+                return_value={"returncode": 0, "stdout": "", "stderr": ""},
+            ):
                 scanner.scan(
                     target=target,
                     target_type="source",
@@ -263,7 +275,13 @@ class TestTemplateScanInjectsInvocation:
 
         with patch.object(scanner, "_pre_scan", return_value=True):
             scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
+            # scan() resets exit_code to None and a run only sets it from the
+            # response's own code, so the stand-in returns a completed run.
+            with patch.object(
+                scanner,
+                "_run_subprocess",
+                return_value={"returncode": 0, "stdout": "", "stderr": ""},
+            ):
                 result = scanner.scan(target=target, target_type="source")
 
         assert isinstance(result, SarifReport)
@@ -342,7 +360,13 @@ class TestTemplateScanCallsPostScan:
 
         with patch.object(scanner, "_pre_scan", return_value=True):
             scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
+            # scan() resets exit_code to None and a run only sets it from the
+            # response's own code, so the stand-in returns a completed run.
+            with patch.object(
+                scanner,
+                "_run_subprocess",
+                return_value={"returncode": 0, "stdout": "", "stderr": ""},
+            ):
                 scanner.scan(target=target, target_type="source")
 
         assert len(post_scan_calls) >= 1
