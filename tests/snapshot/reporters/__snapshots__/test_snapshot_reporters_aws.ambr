@@ -2095,7 +2095,6 @@
                 'policies': list([
                 ]),
                 'properties': dict({
-                  'ash_occurrence_context_version': 1,
                   'tags': list([
                   ]),
                 }),
