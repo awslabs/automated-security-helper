@@ -120,7 +120,7 @@ Columns:
 | `GIT_INDEX_FILE` |  |  | `automated_security_helper/utils/get_scan_set.py` (`_layout_environ`) | A kept copy never carries GIT_INDEX_FILE: the diff compares two commits and reads no index, so the variable is left out as defense in depth, and no git started here reads an index exported for another purpose (a pre-commit hook's temporary index names the files being committed, not the tree). (`automated_security_helper/utils/get_scan_set.py`, `_layout_environ`) |
 | `GIT_WORK_TREE` |  |  | `automated_security_helper/utils/get_scan_set.py` (`_layout_environ`) | Variables that point git at a repository whatever its working directory is. (`automated_security_helper/utils/get_scan_set.py`) |
 | `GRYPE_DB_CACHE_DIR` |  | `/deps/.grype` (core) | `automated_security_helper/utils/offline_mode_validator.py` (`_cache_directory`)<br>`utils/grype-docker-execute.sh` (top level) | Purpose not documented in code. |
-| `HOME` |  | `${ASHUSER_HOME}` (non-root) | `automated_security_helper/core/constants.py` (`usable_home`)<br>`automated_security_helper/utils/sandbox/policy.py` (`_policy_home`)<br>`automated_security_helper/utils/sandbox/scope.py` (`scanner_sandbox_scope`) | On POSIX it is HOME when HOME is set, not empty, and absolute. (`automated_security_helper/core/constants.py`, `usable_home`) |
+| `HOME` |  | `${ASHUSER_HOME}` (non-root) | `automated_security_helper/core/constants.py` (`usable_home`)<br>`automated_security_helper/utils/sandbox/policy.py` (`_policy_home`) | On POSIX it is HOME when HOME is set, not empty, and absolute. (`automated_security_helper/core/constants.py`, `usable_home`) |
 | `JENKINS_URL` |  |  | `automated_security_helper/utils/log.py` (`_on_a_ci_runner`) | Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (`automated_security_helper/utils/log.py`) |
 | `JSII_NODE` |  |  | `automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py` (`_jsii_node_value`)<br>`automated_security_helper/utils/cdk_nag_wrapper.py` (`run_cdk_nag_against_cfn_template`) | The value of `JSII_NODE`, or "" when it is unset or empty. (`automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py`, `_jsii_node_value`) |
 | `LC_ALL` |  |  | `utils/ash_helpers.ps1` (`Invoke-ASH.Get-AshFirstLine`) | Purpose not documented in code. |
@@ -169,7 +169,7 @@ Columns:
 | `WITH_RETRY_DELAY` | `5` |  | `automated_security_helper/assets/with-retry.sh` (top level) | Overridable so the retry behaviour can be exercised without waiting out the real backoff. Defaults are what every Dockerfile caller gets. Five attempts, not three. (`automated_security_helper/assets/with-retry.sh`) |
 | `WITH_RETRY_MAX_ATTEMPTS` | `5` |  | `automated_security_helper/assets/with-retry.sh` (top level) | Overridable so the retry behaviour can be exercised without waiting out the real backoff. Defaults are what every Dockerfile caller gets. Five attempts, not three. (`automated_security_helper/assets/with-retry.sh`) |
 | `WITH_RETRY_NO_RETRY_EXITS` | `2 3` |  | `automated_security_helper/assets/with-retry.sh` (top level) | Exit statuses that are never retried, and are passed through as the script's own status. A retry is for a failure the next attempt can cure: a reset connection, a host that did not resolve. (`automated_security_helper/assets/with-retry.sh`) |
-| `WRAPPER_WORDS` |  |  | `ash` (top level) | A relative first word names a file under the working directory, usually the repository being scanned. It is refused, as the ash CLI refuses it: not run, and the runtime does not start without the wrapper the operator asked for. (`ash`) |
+| `WRAPPER_WORDS` |  |  | `ash` (top level) | Purpose not documented in code. |
 | `WRITE_CHECK` |  |  | `ash` (`create_output_dir`) | Purpose not documented in code. |
 | `WRITE_ERROR` |  |  | `ash` (`create_output_dir`) | Purpose not documented in code. |
 | `WRITE_REASON` | `a file could not be made there` |  | `ash` (`create_output_dir`) | Purpose not documented in code. |
@@ -199,12 +199,12 @@ automated_security_helper/config/config_validator.py (_reference_variable_is_set
 automated_security_helper/config/environment_record.py (_value_read) [environ.get] value = os.environ.get(name)
 automated_security_helper/core/constants.py (warn_if_home_unusable) [environ.get] value = os.environ.get(variable)
 automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, "")
-automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name, "")
-automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name.upper(), "")
+automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = os.environ.get(name, "")
 automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
 automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, "") for char in "\n\r\0"):
 automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
 automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f"{name}={environ[name]}\n")
+automated_security_helper/interactions/run_ash_container.py (run_ash_container) [environ.get] for value in (os.environ.get(name, ""),)
 automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
 automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
 automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
