@@ -1146,7 +1146,12 @@ class TestTheGuardReadsThroughWrappers:
     @pytest.mark.unit
     @pytest.mark.parametrize("form", ["-S", "--split-string"])
     def test_env_splitting_a_string(self, home_guard_violations, into_home, form):
-        line = f"ASH_BIN_PATH={into_home} ash dependencies install --help"
+        import shlex
+
+        # env -S splits its string with POSIX shell rules, in which an unquoted
+        # backslash escapes the next character: a Windows path (C:\Users\...) must
+        # be quoted to reach the guard as written.
+        line = f"ASH_BIN_PATH={shlex.quote(into_home)} ash dependencies install --help"
         argv = ["env", "-S", line] if form == "-S" else ["env", f"{form}={line}"]
         self._refused(home_guard_violations, self._start(argv), "ASH_BIN_PATH")
 

@@ -87,7 +87,10 @@ class TestPreBuild:
         )
         assert integrator.pre_build_check() is False
         out = capsys.readouterr().out
-        assert "1 template(s) were not generated: docs/guide.md.template" in out
+        # The script prints the path as the platform writes it (docs\guide... on
+        # Windows), so the expected text is built the same way.
+        failed = Path("docs/guide.md.template")
+        assert f"1 template(s) were not generated: {failed}" in out
         assert "completed successfully" not in out
 
 
