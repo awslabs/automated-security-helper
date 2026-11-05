@@ -2169,7 +2169,20 @@ async def mcp_scan_directory(
     )
 
     counted: Optional[Any] = None
-    limit = per_session_scan_limit(session_id)
+    try:
+        limit = per_session_scan_limit(session_id)
+    except BaseException:
+        # The claim above is held and no task exists to give it back: give it
+        # back here, or a clear_source is refused as "a scan is running" forever.
+        if claimed_session is not None:
+            await _release_what_the_scan_held_off_the_loop(
+                None,
+                claimed_session,
+                session_id,
+                scan_id=None,
+                environment_values=environment_values,
+            )
+        raise
     if claimed_session is not None:
         if limit is None:
             # No limit applies, and with none try_start_scan always counts. The
