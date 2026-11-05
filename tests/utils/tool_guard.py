@@ -227,10 +227,29 @@ def _inside_the_landlock_wrapper(args: Sequence[str]) -> list[str] | None:
     return None
 
 
+def _is_this_interpreter(program: object) -> bool:
+    """Whether *program* names this process's interpreter.
+
+    The spelling is not compared as written: on Windows the same file is spelled with
+    either separator and in any letter case, and a start that names it by its
+    absolute path is still the interpreter ASH's worker children run on.
+    """
+    if program == sys.executable:
+        return True
+    if not isinstance(program, (str, os.PathLike)):
+        return False
+    try:
+        return os.path.normcase(
+            os.path.abspath(os.fspath(program))
+        ) == os.path.normcase(os.path.abspath(sys.executable))
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def _the_start_to_judge(program: str, argv: object) -> tuple[str, object] | None:
     """The program and arguments a start runs: None for one of ASH's worker children,
     the wrapped command for ASH's Landlock wrapper, otherwise the start itself."""
-    if program != sys.executable or not isinstance(argv, (list, tuple)):
+    if not _is_this_interpreter(program) or not isinstance(argv, (list, tuple)):
         return program, argv
     args = [_as_text(a) for a in argv[1:]]
     if _is_an_ash_worker(args):

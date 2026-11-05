@@ -53,11 +53,14 @@ def test_a_lookup_cached_before_the_guard_resolves_to_the_guard(
     from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 
     host = tmp_path_factory.mktemp("host-bin")
-    _host_tool(host, "semgrep")
-    _host_tool(host, "grype")
+    # A lookup finds a Windows launcher by its extension (PATHEXT), not by an
+    # executable bit, so on Windows the host's copies are named as batch files.
+    suffix = ".bat" if _on_windows() else ""
+    host_semgrep = _host_tool(host, f"semgrep{suffix}")
+    host_grype = _host_tool(host, f"grype{suffix}")
     monkeypatch.setenv("PATH", f"{host}{os.pathsep}{os.environ.get('PATH', '')}")
-    assert subprocess_utils.find_executable("semgrep") == (host / "semgrep").as_posix()
-    assert uv_tool_runner.find_executable("grype") == (host / "grype").as_posix()
+    assert Path(subprocess_utils.find_executable("semgrep")) == host_semgrep
+    assert Path(uv_tool_runner.find_executable("grype")) == host_grype
 
     guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
 
@@ -263,12 +266,16 @@ def test_a_tool_inside_the_landlock_wrapper_is_judged_by_itself(
 
     _popen_event([*wrapper, str(host / "some-tool"), "--version"])
     _popen_event([*wrapper, str(guard.directory / "semgrep"), "scan"])
-    # The line the stand-in writes when the wrapper runs it.
+    # The line the stand-in writes when the wrapper runs it: its name and arguments
+    # on POSIX, its name alone from a Windows batch stand-in.
+    semgrep_line = guard._as_logged(
+        "semgrep", [str(guard.directory / "semgrep"), "scan"]
+    )
     with guard.log.open("a", encoding="utf-8") as log:
-        log.write("semgrep scan\n")
+        log.write(f"{semgrep_line}\n")
 
     assert guard.started == [
-        "semgrep scan",
+        semgrep_line,
         f"{host / 'some-tool'} --version (not through a stand-in)",
     ], guard.started
 
@@ -395,11 +402,17 @@ def test_a_probe_through_the_landlock_wrapper_is_a_probe(monkeypatch, tmp_path_f
     _popen_event([*wrapper, str(stand_in), "--version"])
     _popen_event([*wrapper, *more])
     # The lines the stand-in writes when the wrapper runs it: for the probe it
-    # answers, and with more arguments.
-    with guard.probe_log.open("a", encoding="utf-8") as log:
-        log.write(f"{stand_in}\n")
-    with guard.log.open("a", encoding="utf-8") as log:
-        log.write(guard._as_logged("grype", more) + "\n")
+    # answers, and with more arguments. A Windows batch stand-in writes one line
+    # to the log for every call, a probe included, and keeps no probe log.
+    if _on_windows():
+        with guard.log.open("a", encoding="utf-8") as log:
+            log.write("grype\n")
+            log.write(guard._as_logged("grype", more) + "\n")
+    else:
+        with guard.probe_log.open("a", encoding="utf-8") as log:
+            log.write(f"{stand_in}\n")
+        with guard.log.open("a", encoding="utf-8") as log:
+            log.write(guard._as_logged("grype", more) + "\n")
 
     # Only exactly [<path>, "--version"] after the -- is a probe.
     assert guard.probes == ["grype --version"], guard.probes
