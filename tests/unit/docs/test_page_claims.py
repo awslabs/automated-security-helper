@@ -12922,19 +12922,28 @@ def test_the_pages_list_the_tools_ash_installs_with_uv(
     )
 
     uv: Dict[str, str] = {}
+    scanner_names: Set[str] = set()
     names = _uv_documented_names()
     for attribute in ("ASH_SCANNERS", "ASH_CONVERTERS"):
         for module, plugin in _instantiated_plugins(tmp_path, monkeypatch, attribute):
             if module != "ash_builtin":
                 continue
             names.add(plugin.config.name)
+            if attribute == "ASH_SCANNERS":
+                scanner_names.add(plugin.config.name)
             for argv in plugin.get_installation_commands(
                 get_platform(), get_architecture()
             ):
                 if list(argv[:3]) == ["uv", "tool", "install"]:
                     uv[_uv_installed_package(list(argv))] = plugin.config.name
     names |= set(uv)
-    scanners = {package for package, plugin in uv.items() if package == plugin}
+    # A scanner installs under its own name; a converter that does the same (jupyter
+    # on an arm host) is a tool, which the second list below names, not a scanner.
+    scanners = {
+        package
+        for package, plugin in uv.items()
+        if package == plugin and plugin in scanner_names
+    }
     assert scanners, "no built-in scanner installs with uv: the probe found nothing"
     for page, sentence in _UV_SCANNER_SENTENCES:
         listed = _uv_listed(sentence, names)
