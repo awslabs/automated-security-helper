@@ -1866,6 +1866,13 @@ def _project_verdicts(
     verdicts: List[Dict[str, Any]] = []
     for entry in payload.projects:
         verdict = entry.model_dump(mode="json", include=projected)
+        # ``scanner_reasons`` is declared ``exclude=True`` so the workspace results
+        # file does not carry a second copy of the rolled-up scanner_results, and
+        # pydantic's ``include=`` does not override a field's own exclude. It is
+        # exactly what an MCP client reads to learn why a scanner gave no result,
+        # so it is put back here, from the field, not from a hand-kept list.
+        if "scanner_reasons" in projected:
+            verdict["scanner_reasons"] = dict(entry.scanner_reasons or {})
         if not name_process_ids and verdict.get("unstoppable_tools"):
             verdict["unstoppable_tools"] = {
                 name: without_process_ids(str(reason))
