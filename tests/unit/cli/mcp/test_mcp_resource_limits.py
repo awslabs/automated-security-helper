@@ -872,7 +872,7 @@ def _child_process_scans(
         def __init__(self, **kwargs: Any) -> None:
             self.key = Path(kwargs["source_dir"]).name
 
-        def execute_scan(self, phases=None):
+        def execute_scan(self, phases=None, **settle):
             from automated_security_helper.utils.subprocess_utils import run_command
 
             started[self.key].set()
