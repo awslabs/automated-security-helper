@@ -821,9 +821,13 @@ def _discovery_layouts():
             True,
             id="pyproject-without-an-ash-table",
         ),
-        pytest.param(dangling_link, True, id="dangling-link-with-a-config-name"),
+        # A name that exists is a source whatever it is: discovery selects a
+        # dangling link or a directory at a config name and the scan refuses it
+        # when it reads it, rather than skipping it as though there were no config
+        # (config_sources, "Failure"), so ASH_CONFIG is not the scan's config.
+        pytest.param(dangling_link, False, id="dangling-link-with-a-config-name"),
         pytest.param(
-            directory_named_like_a_config, True, id="directory-with-a-config-name"
+            directory_named_like_a_config, False, id="directory-with-a-config-name"
         ),
     ]
 
