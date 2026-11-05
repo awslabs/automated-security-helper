@@ -202,7 +202,8 @@ def _assert_refused_unread(server, result: Any, read: List[Path]) -> None:
     host_file = (server["host"] / "ash.yaml").resolve()
     assert result.get("success") is False, result
     assert result.get("error_type") == "config_input_not_permitted", result
-    assert result.get("exit_code") == 4, result
+    # config_input_not_permitted carries exit 3 in every MCP tool (_error_response).
+    assert result.get("exit_code") == 3, result
     assert host_file not in read
     assert CANARY not in repr(result)
     assert str(server["host"]) not in repr(result)
@@ -404,7 +405,7 @@ def test_a_linked_pyproject_is_refused_alike_whatever_it_reaches(
 
     assert not any(was_opened for _, was_opened, *_ in responses), responses
     assert len({tuple(r[2:]) for r in responses}) == 1, responses
-    assert responses[0][2:5] == (False, 4, "config_input_not_permitted"), responses
+    assert responses[0][2:5] == (False, 3, "config_input_not_permitted"), responses
     assert _MARKER not in json.dumps(responses, default=str)
     assert "Errno" not in json.dumps(responses, default=str)
 
@@ -448,7 +449,7 @@ def test_a_linked_ash_directory_is_refused_alike_whatever_it_holds(
         dirs["unreadable"].chmod(0o755)
 
     assert len({tuple(r[1:]) for r in responses}) == 1, responses
-    assert responses[0][1:4] == (False, 4, "config_input_not_permitted"), responses
+    assert responses[0][1:4] == (False, 3, "config_input_not_permitted"), responses
     assert _MARKER not in json.dumps(responses, default=str)
 
 
