@@ -147,7 +147,15 @@ class TestSpecialFilesAreNotRead:
         with pytest.raises(ASHConfigSourceError) as excinfo:
             resolve_config(config_path=path, source_dir=tmp_path)
 
-        assert f'in "{path}", line 2' in str(excinfo.value)
+        # The shared refusal's words (config_sources.unparsed_config_reason):
+        # "<path> could not be parsed (<error type> at line N, column M; started
+        # at line K, column J)". It names the file and the lines, and quotes
+        # nothing the file holds, which the parser's `in "<path>", line 2` mark
+        # text did not promise.
+        message = str(excinfo.value)
+        assert message.startswith(f"{path} could not be parsed (")
+        assert "line 3" in message
+        assert "started at line 2" in message
 
 
 def _record_opens(monkeypatch) -> list:
