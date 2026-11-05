@@ -5187,7 +5187,9 @@ def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
         "content database under a `fail` policy each fail the project whatever "
         "`fail_on_incomplete_scanners` says.",
     )
-    path = _plugin_path(tmp_path, "page_claim_scanners", _UNEVALUATING_PLUGIN)
+    path = _plugin_path(
+        tmp_path, "page_claim_scanners_ash_plugins", _UNEVALUATING_PLUGIN
+    )
     project = tmp_path / "workspace" / "api"
     project.mkdir(parents=True)
     (project / "main.py").write_text(
@@ -5197,7 +5199,7 @@ def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
     plugin_args = [
         "--ash-plugin-modules",
-        "page_claim_scanners",
+        "page_claim_scanners_ash_plugins",
         "--scanners",
         "unevaluating",
     ]
@@ -6086,10 +6088,10 @@ def test_scanner_rows_say_whether_the_tool_was_found_was_left_out_and_how_it_exi
     result = _outputs_scan(
         source,
         "--ash-plugin-modules",
-        "page_claims_scanners",
+        "page_claims_scanners_ash_plugins",
         scanners="detect-secrets,page-claims-absent-tool",
         PYTHONPATH=_plugin_path(
-            tmp_path, "page_claims_scanners", _OUTPUTS_ABSENT_TOOL_SCANNER
+            tmp_path, "page_claims_scanners_ash_plugins", _OUTPUTS_ABSENT_TOOL_SCANNER
         ),
     )
     rows = _outputs_results(source)["scanner_results"]
@@ -12920,19 +12922,28 @@ def test_the_pages_list_the_tools_ash_installs_with_uv(
     )
 
     uv: Dict[str, str] = {}
+    scanner_names: Set[str] = set()
     names = _uv_documented_names()
     for attribute in ("ASH_SCANNERS", "ASH_CONVERTERS"):
         for module, plugin in _instantiated_plugins(tmp_path, monkeypatch, attribute):
             if module != "ash_builtin":
                 continue
             names.add(plugin.config.name)
+            if attribute == "ASH_SCANNERS":
+                scanner_names.add(plugin.config.name)
             for argv in plugin.get_installation_commands(
                 get_platform(), get_architecture()
             ):
                 if list(argv[:3]) == ["uv", "tool", "install"]:
                     uv[_uv_installed_package(list(argv))] = plugin.config.name
     names |= set(uv)
-    scanners = {package for package, plugin in uv.items() if package == plugin}
+    # A scanner installs under its own name; a converter that does the same (jupyter
+    # on an arm host) is a tool, which the second list below names, not a scanner.
+    scanners = {
+        package
+        for package, plugin in uv.items()
+        if package == plugin and plugin in scanner_names
+    }
     assert scanners, "no built-in scanner installs with uv: the probe found nothing"
     for page, sentence in _UV_SCANNER_SENTENCES:
         listed = _uv_listed(sentence, names)
@@ -15325,15 +15336,18 @@ _A_CHILDS_SPELLING_IS_THAT_SECTION = (
 )
 #: The same paragraph, on a file that writes two spellings.
 _TWO_SPELLINGS_ARE_REFUSED = (
-    "A file that writes two such spellings, such as `detect-secrets` and "
-    "`DETECT_SECRETS`, is refused with exit 3 by a scan and by `ash config validate`, "
-    "which name both spellings and none of their values."
+    "A file that writes two such spellings, neither of them the plugin's own name, "
+    "such as `DetectSecrets` and `DETECT_SECRETS`, is refused with exit 3 by a scan "
+    "and by `ash config validate`, which name both spellings and none of their "
+    "values. When one of the two is the plugin's own name (`detect-secrets`), the "
+    "file is not refused: the plugin's own name wins key by key where both set a "
+    "value."
 )
 #: exit-codes.md's ash scan row and ash config row on that refusal.
 _TWO_SPELLINGS_ROWS = [
     (
-        "and so does one plugin's section written under two spellings, such as "
-        "`detect-secrets` and `DETECT_SECRETS`"
+        "and so does one plugin's section written under two spellings, neither of "
+        "them the plugin's own name, such as `DetectSecrets` and `DETECT_SECRETS`"
     ),
     (
         "it or an override does not validate (one plugin's section written under two "
@@ -15450,7 +15464,11 @@ def test_a_childs_spelling_of_a_section_its_base_writes_is_that_section(
 
 
 @pytest.mark.parametrize("command", ["scan", "validate"])
-@pytest.mark.parametrize("spellings", [2, 1], ids=["two-spellings", "control-one"])
+@pytest.mark.parametrize(
+    "spellings",
+    [2, 1, 3],
+    ids=["two-spellings", "control-one", "control-own-name-and-a-variant"],
+)
 @pytest.mark.integration
 def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
     tmp_path: Path, command: str, spellings: int
@@ -15458,19 +15476,22 @@ def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
     """configure.md (Share settings with `extends`), and exit-codes.md (ash scan, ash
     config).
 
-    An operator config writes detect-secrets' section as ``detect-secrets`` and as
-    ``DETECT_SECRETS``, the second with a ``baseline_file`` value. A scan and ``ash
-    config validate`` with that file must exit 3, naming both spellings and not the
-    value. The control writes ``DETECT_SECRETS`` alone, which both accept.
+    An operator config writes detect-secrets' section as ``DetectSecrets`` and as
+    ``DETECT_SECRETS``, neither of them the plugin's own name, the second with a
+    ``baseline_file`` value. A scan and ``ash config validate`` with that file must
+    exit 3, naming both spellings and not the value. The controls write
+    ``DETECT_SECRETS`` alone, and the plugin's own name ``detect-secrets`` beside
+    ``DETECT_SECRETS``, which both accept: the plugin's own name wins key by key.
     """
     assert_on_page(CONFIGURE, _TWO_SPELLINGS_ARE_REFUSED)
     for row in _TWO_SPELLINGS_ROWS:
         assert_on_page(EXIT_CODES, row)
     value = "page-claims-spelling-value-7c41.json"
     sections: Dict[str, Any] = {"DETECT_SECRETS": {"enabled": True}}
-    if spellings == 2:
+    if spellings in (2, 3):
+        first = "DetectSecrets" if spellings == 2 else "detect-secrets"
         sections = {
-            "detect-secrets": {"enabled": True},
+            first: {"enabled": True},
             "DETECT_SECRETS": {"enabled": True, "options": {"baseline_file": value}},
         }
     config = _operator_config(
@@ -15486,13 +15507,12 @@ def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
     result = _ash(args, cwd=tmp_path)
     text = _squeezed(result.stdout + result.stderr)
 
-    if spellings == 1:
+    if spellings in (1, 3):
         assert result.returncode == 0, _output_tail(result)
         return
     assert result.returncode == 3, _output_tail(result)
-    assert _squeezed("'DETECT_SECRETS' and 'detect-secrets'") in text, _output_tail(
-        result
-    )
+    for named in ("scanners.DetectSecrets", "scanners.DETECT_SECRETS", "ambiguous"):
+        assert _squeezed(named) in text, _output_tail(result)
     assert value not in result.stdout + result.stderr, _output_tail(result)
 
 
@@ -18105,6 +18125,14 @@ _PAGES_STEPS_THAT_RUN_A_TOOL = {
         "Install ASH",
         "Merge the shards",
     ],
+    ADVANCED_USAGE: ["Run ASH scan"],
+    "docs/plugins/community/snyk-plugin.md": ["Run ASH with Snyk Code"],
+    "docs/plugins/community/ferret-scan-plugin.md": ["Run ASH with Ferret Scan"],
+    "docs/plugins/community/trivy-plugin.md": [
+        "Scan changed files",
+        "Run ASH with Trivy",
+        "Run Trivy Security Scan",
+    ],
 }
 
 
@@ -18158,7 +18186,7 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
     Every GitHub Actions block of every page is read. Each step that runs ``uv`` or
     ``ash`` makes its token, and prints its stop and resume lines, the way the scan
     workflow's helper does, with every ``uv`` and ``ash`` command between the two; the
-    two pages hold the steps named in _PAGES_STEPS_THAT_RUN_A_TOOL, and
+    pages hold the steps named in _PAGES_STEPS_THAT_RUN_A_TOOL, and
     github-actions.md's one other ``run`` step writes the date to GITHUB_OUTPUT and
     prints nothing. Each step is run with ``bash -e``, as a GitHub runner runs a step,
     with a ``uv`` and an ``ash`` on PATH that print a workflow command on stdout and
@@ -20051,7 +20079,7 @@ _DRY_RUN_IMPORTS_THE_MODULES = (
         ),
         pytest.param(
             "no-import",
-            "which could not be imported",
+            "which failed to import",
             id="a-module-that-does-not-import",
         ),
         pytest.param(
@@ -21363,9 +21391,18 @@ def test_a_sandbox_ash_cannot_provide_is_an_error_with_code_127(
         assert "dependencies are not satisfied" not in text, _output_tail(result)
         assert row["missing_reason"] is None, row
     if cell in ("a-backend-this-host-lacks", "the-gate-off-keeps-the-row"):
-        assert f"{unavailable} is not available" in text, _output_tail(result)
+        assert _squeezed(f"{unavailable} is not available") in _squeezed(text), (
+            _output_tail(result)
+        )
+        # The page's line, for this host's backend and system name; read without
+        # whitespace, as the console wraps a line this long at its width.
+        start_failure = (
+            f"detect-secrets could not start its tool on source: {unavailable} is "
+            f"not available: {unavailable} is not available on {platform.system()}"
+        )
         if sys.platform == "linux":
-            assert _THE_START_FAILURE_LINE in text, _output_tail(result)
+            assert start_failure == _THE_START_FAILURE_LINE
+        assert _squeezed(start_failure) in _squeezed(text), _output_tail(result)
     if cell in ("a-relative-home", "a-empty-home"):
         assert "HOME is not an absolute path" in text, _output_tail(result)
 

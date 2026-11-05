@@ -661,12 +661,23 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install ferret-scan
-          pip install uv
+          pip install ferret-scan "uv>=0.4"
       - name: Run ASH with Ferret Scan
+        # Workflow commands are stopped around the scan, as the reusable scan
+        # workflow does: tool output is untrusted, and a `::`-line in it would
+        # otherwise be acted on by the runner.
         run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
           uv run ash --scanners ferret-scan --output-format sarif \
-            --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]"
+            --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]" 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       - name: Upload SARIF results
         # Also when ASH exits non-zero on findings: without a status function
         # GitHub skips this step after any failed step.
