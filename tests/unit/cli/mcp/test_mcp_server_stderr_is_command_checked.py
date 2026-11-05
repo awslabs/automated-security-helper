@@ -553,7 +553,11 @@ def _stream_in_place(monkeypatch, name: str, encoding: str, errors: str = "stric
     monkeypatch.setattr(
         sys,
         name,
-        io.TextIOWrapper(raw, encoding=encoding, errors=errors, write_through=True),
+        # newline="": the bytes compared are the ones written, not Windows' CRLF
+        # translation of a "\n".
+        io.TextIOWrapper(
+            raw, encoding=encoding, errors=errors, write_through=True, newline=""
+        ),
     )
     return raw
 
@@ -881,7 +885,7 @@ def test_a_write_in_the_held_tail_emits_window_leaves_the_tail_with_its_line():
     from automated_security_helper.utils.command_safe_stream import CommandSafeStream
 
     raw = io.BytesIO()
-    target = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
+    target = io.TextIOWrapper(raw, encoding="utf-8", write_through=True, newline="")
     state: dict = {"wrap": None, "armed": False}
 
     def targets():

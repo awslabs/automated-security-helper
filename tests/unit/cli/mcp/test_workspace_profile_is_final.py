@@ -182,7 +182,7 @@ class _Orchestrator:
         self.kwargs = kwargs
         built.append(self)
 
-    def execute_scan(self, phases=None):
+    def execute_scan(self, phases=None, **settle):
         from automated_security_helper.models.asharp_model import (
             AshAggregatedResults,
             ScannerTargetStatusInfo,

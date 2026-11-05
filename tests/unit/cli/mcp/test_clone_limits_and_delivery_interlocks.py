@@ -927,7 +927,9 @@ def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> 
 @pytest.mark.unit
 def test_a_clear_and_a_write_still_refuse_each_other(workspace) -> None:
     with sd._no_scan_running(SESSION):
-        with pytest.raises(sessions.SessionChangeInProgressError):
+        # One error with one retry rule for both holds (the sweep and a change that
+        # removes the workspace): writing_session_state raises the base class.
+        with pytest.raises(sessions.SessionWorkspaceBusyError):
             with sessions.writing_session_state(SESSION):
                 pass
 
