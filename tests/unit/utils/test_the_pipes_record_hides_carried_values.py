@@ -15,6 +15,7 @@ is: the hiding is driven by the carried values, never by the text's shape.
 
 from __future__ import annotations
 
+import sys
 from typing import List
 
 import pytest
@@ -48,7 +49,10 @@ def recorded(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
 
 def _mount_argv(path_piece: str) -> List[str]:
     return [
-        "/bin/true",
+        # An absolute program on every platform: Windows reads "/bin/true" as a
+        # path rooted on the current drive, which is relative to the working
+        # directory there, and refuses it before the record is emitted.
+        sys.executable,
         "run",
         "--mount",
         f"type=bind,source=/host/{path_piece},destination=/src/{path_piece}",

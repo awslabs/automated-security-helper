@@ -20,6 +20,7 @@ Control characters are built with chr() here, so this file holds none itself.
 
 import contextlib
 import logging
+import os
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -73,7 +74,11 @@ def test_the_file_is_named_as_given(name):
 
 def test_both_files_of_a_rename_are_named_as_given():
     source, target = "/out/a" + ESC, "/out/b" + BACKSLASH + "c"
-    error = FileExistsError(17, "File exists", source, None, target)
+    # The second name is set as the attribute, not as the fourth argument:
+    # that position is the Windows error number, and giving it (even None)
+    # makes Windows word the error "[WinError None]" in place of "[Errno 17]".
+    error = FileExistsError(17, "File exists", source)
+    error.filename2 = target
 
     assert error_text(error) == f"[Errno 17] File exists: '{source}' -> '{target}'"
 
@@ -209,7 +214,10 @@ def test_a_reporter_that_cannot_write_its_file_names_it_once(tmp_path):
 
     # "[/x]" holds a slash, so this is "out[" with "x][bold]..." inside it.
     # A lone ESC: a complete code in a name is stripped in every print.
-    output_dir = tmp_path / ("out[/x][bold]" + ESC + "x")
+    # Windows cannot hold a control character in a path, so there the name keeps
+    # the markup text and the path's own backslashes (every one doubles in a
+    # repr) and drops the ESC.
+    output_dir = tmp_path / ("out[/x][bold]" + ("" if os.name == "nt" else ESC) + "x")
     blocked = output_dir / "reports" / "ash.stub.json"
 
     class _StubConfig(ReporterPluginConfigBase):

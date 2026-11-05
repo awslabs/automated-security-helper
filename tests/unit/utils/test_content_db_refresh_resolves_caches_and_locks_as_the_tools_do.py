@@ -39,8 +39,12 @@ pytestmark = pytest.mark.unit
 
 
 def test_grype_expands_a_leading_tilde_in_xdg_cache_home():
+    # The platform is the host's own: the tilde expands to this host's home, whose
+    # path a "linux" rule reads as relative when the host is Windows (a drive
+    # letter), and that read is not the case under test.
+    platform = "win32" if os.name == "nt" else "linux"
     cache = refresh.default_cache_dir(
-        "grype", {"XDG_CACHE_HOME": "~/caches"}, platform="linux"
+        "grype", {"XDG_CACHE_HOME": "~/caches"}, platform=platform
     )
     assert cache == Path.home() / "caches" / "grype" / "db"
 

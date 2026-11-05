@@ -471,13 +471,19 @@ def test_an_unusable_home_is_the_passwd_home_or_the_root(layout, monkeypatch):
     passwd.mkdir()
     for module in (policy_module, backends_module):
         monkeypatch.setattr(module, "_passwd_home", lambda: passwd, raising=False)
-    monkeypatch.setenv("HOME", "relative/home")
+    # Path.home() reads HOME on POSIX and USERPROFILE on Windows, which ignores
+    # HOME, so the variable a test sets is the one the platform reads.
+    home_variable = "USERPROFILE" if os.name == "nt" else "HOME"
+    monkeypatch.setenv(home_variable, "relative/home")
     assert policy_module._policy_home() == passwd
     assert _policy(layout).home == passwd
 
-    monkeypatch.setenv("HOME", "/")
-    assert policy_module._policy_home() == Path("/")
-    assert _policy(layout).home == Path("/")
+    # The root: "/" on POSIX; on Windows a bare "/" names no drive and is not
+    # absolute, so the root there is the drive's.
+    root = Path(passwd.anchor) if os.name == "nt" else Path("/")
+    monkeypatch.setenv(home_variable, str(root))
+    assert policy_module._policy_home() == root
+    assert _policy(layout).home == root
 
     for module in (policy_module, backends_module):
         monkeypatch.setattr(module, "_passwd_home", lambda: None, raising=False)

@@ -12,6 +12,7 @@ boundary set; a period inside a name (``/home/a.bak``) still is not.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -42,10 +43,13 @@ def test_a_string_that_does_not_exist_comes_back_as_given(tmp_path):
 def test_the_home_before_a_sentence_period_is_rewritten(monkeypatch):
     from automated_security_helper.core import constants
 
-    monkeypatch.setattr(constants, "usable_home", lambda: Path("/home/u"))
+    # A home that is absolute on the host: "/home/u" has no drive on Windows, so
+    # home_as_tilde leaves it alone there as not a home.
+    home = Path("C:/home/u") if os.name == "nt" else Path("/home/u")
+    monkeypatch.setattr(constants, "usable_home", lambda: home)
 
-    assert home_as_tilde("looked under /home/u.") == "looked under ~."
-    assert home_as_tilde("looked under /home/u. Then gave up") == (
+    assert home_as_tilde(f"looked under {home.as_posix()}.") == "looked under ~."
+    assert home_as_tilde(f"looked under {home.as_posix()}. Then gave up") == (
         "looked under ~. Then gave up"
     )
 

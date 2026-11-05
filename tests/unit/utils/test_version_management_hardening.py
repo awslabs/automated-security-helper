@@ -131,10 +131,14 @@ class TestAnUnreadableDistributionDoesNotBreakTheImport:
 
 def _pyproject(root: Path, version: str = "1.2.3", name: str = NAME) -> Path:
     path = root / "pyproject.toml"
-    path.write_text(
-        f'[project]\nname = "{name}"\nversion = "{version}"\n\n'
-        f'[tool.commitizen]\nversion = "{version}"\n',
-        encoding="utf-8",
+    # Bytes, so the file is LF on every platform: write_text translates "\n" to
+    # "\r\n" on Windows, which made the "LF stays LF" cell start from a CRLF file
+    # and the CRLF cell start from "\r\r\n".
+    path.write_bytes(
+        (
+            f'[project]\nname = "{name}"\nversion = "{version}"\n\n'
+            f'[tool.commitizen]\nversion = "{version}"\n'
+        ).encode("utf-8")
     )
     return path
 
