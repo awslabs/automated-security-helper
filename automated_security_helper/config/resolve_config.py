@@ -5129,6 +5129,11 @@ def _resolve_config(
         # Process config file
         unparsed: Optional[str] = None
         try:
+            # Path("") is the working directory, which would be refused below
+            # as "not a regular file"; an empty path is named as what it is,
+            # as check_config_path names it for the readers that skip this load.
+            if isinstance(config_path, str) and not config_path.strip():
+                raise _empty_config_path()
             config_path = (
                 Path(config_path) if not isinstance(config_path, Path) else config_path
             )
