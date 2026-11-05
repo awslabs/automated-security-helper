@@ -369,7 +369,6 @@ def print_converter_refusals(
     from automated_security_helper.utils.converter_refusals import (
         SHOWN_IN_SUMMARY,
         converter_refusals,
-        inert_text,
     )
 
     refusals = converter_refusals(asharp_model)
@@ -379,7 +378,9 @@ def print_converter_refusals(
             if refusal.scan_incomplete
             else "[bold yellow]Not scanned:[/bold yellow]"
         )
-        console.print(f"{label} {escape(inert_text(refusal.message()))}")
+        # escape() shows the name once; showing it first with inert_text would
+        # double the backslash of every escape it wrote.
+        console.print(f"{label} {escape(refusal.message())}")
     if len(refusals) > SHOWN_IN_SUMMARY:
         console.print(
             f"[bold yellow]Not scanned:[/bold yellow] {len(refusals) - SHOWN_IN_SUMMARY} "
