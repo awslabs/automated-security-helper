@@ -5187,7 +5187,7 @@ def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
         "content database under a `fail` policy each fail the project whatever "
         "`fail_on_incomplete_scanners` says.",
     )
-    path = _plugin_path(tmp_path, "page_claim_scanners", _UNEVALUATING_PLUGIN)
+    path = _plugin_path(tmp_path, "page_claim_scanners_ash_plugins", _UNEVALUATING_PLUGIN)
     project = tmp_path / "workspace" / "api"
     project.mkdir(parents=True)
     (project / "main.py").write_text(
@@ -5197,7 +5197,7 @@ def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
     plugin_args = [
         "--ash-plugin-modules",
-        "page_claim_scanners",
+        "page_claim_scanners_ash_plugins",
         "--scanners",
         "unevaluating",
     ]
@@ -6086,10 +6086,10 @@ def test_scanner_rows_say_whether_the_tool_was_found_was_left_out_and_how_it_exi
     result = _outputs_scan(
         source,
         "--ash-plugin-modules",
-        "page_claims_scanners",
+        "page_claims_scanners_ash_plugins",
         scanners="detect-secrets,page-claims-absent-tool",
         PYTHONPATH=_plugin_path(
-            tmp_path, "page_claims_scanners", _OUTPUTS_ABSENT_TOOL_SCANNER
+            tmp_path, "page_claims_scanners_ash_plugins", _OUTPUTS_ABSENT_TOOL_SCANNER
         ),
     )
     rows = _outputs_results(source)["scanner_results"]
