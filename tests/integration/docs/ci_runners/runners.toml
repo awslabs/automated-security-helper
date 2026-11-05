@@ -82,9 +82,9 @@ license = "unknown"
 source = "the 3.12 tag, ECR Public's copy of the Docker Official Image; an index of 8 platforms; linux/amd64 is sha256:3d361d7fea344d55ac7a0f51ed7faa99213808ccc96fc9b9170adb95b6570b96, 0.41 GB compressed; the gallery text points to Python's license and says the image holds other software under other licenses"
 
 [images.python-3-12-slim-bookworm]
-ref = "public.ecr.aws/docker/library/python@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+ref = "public.ecr.aws/docker/library/python@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df"
 license = "unknown"
-source = "the Dockerfile's ARG BASE_IMAGE_DIGEST, for building the image with --build-arg BASE_IMAGE=<this ref>; must equal that ARG; an index of 5 platforms; linux/amd64 is sha256:1aaa65a85fda306ffb8b910824d4e93bdce61e212c7e87168123ea3073b41a1a, 0.05 GB compressed"
+source = "the Dockerfile's ARG BASE_IMAGE_DIGEST, for building the image with --build-arg BASE_IMAGE=<this ref>; must equal that ARG; an index of 5 platforms; linux/amd64 is sha256:0f086103b026048cc50cb5da25ec435c023c5241a83fc44daea593377abc61c4, 0.05 GB compressed"
 
 [images.debian-bookworm-slim]
 ref = "public.ecr.aws/docker/library/debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587"
