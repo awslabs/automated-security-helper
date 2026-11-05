@@ -483,12 +483,18 @@ def _settle_output_dir(
     # this is where the refusal has to come first: exit 3, nothing made, the link's
     # target keeps its entries and mtime. One implementation, shared with
     # run_ash_scan (refuse_output_dir_links).
-    refuse_output_dir_links(
-        source_dir,
-        output_dir,
-        container=mode is not None and RunMode(mode) == RunMode.container,
-        workspace=workspace,
-    )
+    #
+    # Not asked of a path that holds a NUL: no link can be on the way to a path
+    # the OS takes no stat of, and the link check words such a path as a link
+    # refusal with exit 3. exit-codes.md gives it exit 5, "Output directory is not
+    # a valid path:", from the usage refusal below, which no probe precedes.
+    if "\x00" not in os.fspath(output_dir):
+        refuse_output_dir_links(
+            source_dir,
+            output_dir,
+            container=mode is not None and RunMode(mode) == RunMode.container,
+            workspace=workspace,
+        )
     output_resolved = _resolved(output_dir)
     for working_dir in OUTPUT_WORKING_DIRS:
         cleared = output_resolved.joinpath(working_dir)
