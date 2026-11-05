@@ -217,7 +217,11 @@ def test_a_summary_line_shows_the_path_it_quotes(monkeypatch, errors):
 
     from automated_security_helper.interactions import run_ash_scan
 
-    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors=errors)
+    # newline="\n": a text stream translates "\n" to os.linesep on Windows, and
+    # the CR of that terminator is the platform's, not a control the product left raw.
+    stream = io.TextIOWrapper(
+        io.BytesIO(), encoding="utf-8", errors=errors, newline="\n"
+    )
     monkeypatch.setattr(sys, "stdout", stream)
     path = "out" + chr(0xDC80) + HOSTILE
 
@@ -258,7 +262,14 @@ def _assert_shown_once(text: str) -> None:
     """HOSTILE's controls are each shown once: it holds no backslash of its own."""
     _assert_shown(text)
     assert "\\x1b]52;c;ZXZpbA==\\x07\\x9b2K" in text, text
-    assert "\\\\x" not in text, text
+    # Traceback frame lines quote the interpreter's own file names, and a Windows
+    # one ("...\Python\3.12\x64\Lib\...") gets its backslash doubled before the "x"
+    # by design (see test_terminal_text's windows-x64 case). They carry none of
+    # HOSTILE, so the check reads the rest.
+    rest = "\n".join(
+        line for line in text.splitlines() if not line.startswith('  File "')
+    )
+    assert "\\\\x" not in rest, text
 
 
 @pytest.mark.unit
