@@ -13,6 +13,7 @@ for real, and then through ScanPhase, which is what ``--python-only`` reaches.
 
 from __future__ import annotations
 
+import platform
 from typing import ClassVar, Literal
 from unittest.mock import MagicMock, patch
 
@@ -229,7 +230,12 @@ def test_python_only_runs_exactly_the_python_only_set(context):
             patch.stopall()
         queued = {name for name, _, _ in executor.call_args.kwargs["scanner_tasks"]}
 
-    assert queued == PYTHON_ONLY
+    # semgrep is off by default on Windows (enabled = platform.system() is not
+    # Windows) and a scanner that is not enabled is not queued, so the set that
+    # runs there is the Python-only set without it.
+    off_here = {"semgrep"} if platform.system().lower() == "windows" else set()
+    expected = PYTHON_ONLY - off_here
+    assert queued == expected
     for name in NOT_PYTHON_ONLY:
         row = results.scanner_results[name]
         assert row.status == ScannerStatus.SKIPPED, (name, row)
