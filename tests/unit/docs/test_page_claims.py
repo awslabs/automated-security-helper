@@ -4313,9 +4313,10 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     in one, the file and its base must be mounted read-only under ``/ash-env-config``,
     and the scan inside must be passed ``--ash-config-from-host
     /ash-env-config/ash.yaml``. Each of the two files must be marked on its own with
-    ``--config-file-from-scanned-repository`` when they are in another git checkout or
-    in the scanned one, and neither when they are outside every checkout. ``--config``
-    is marked in no case.
+    ``--config-file-from-scanned-repository`` when they are in the scanned checkout,
+    with ``--config-file-from-another-checkout`` when they are in another git checkout,
+    and neither when they are outside every checkout. ``--config`` is marked in no
+    case.
     """
     assert_on_page(
         RUN_IN_A_CONTAINER,
@@ -4392,9 +4393,18 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     assert inner[inner.index("--ash-config-from-host") + 1] == (
         "/ash-env-config/ash.yaml"
     ), inner
-    assert file_marks == (
-        ["/ash-env-config/ash.yaml", "/ash-env-config/base.yaml"] if marked else []
-    ), inner
+    elsewhere_marks = sorted(
+        inner[i + 1]
+        for i, arg in enumerate(inner[:-1])
+        if arg == "--config-file-from-another-checkout"
+        and inner[i + 1].startswith("/ash-env-config/")
+    )
+    both_files = ["/ash-env-config/ash.yaml", "/ash-env-config/base.yaml"]
+    # The scanned checkout's files carry the scanned-repository mark; another
+    # checkout's carry the another-checkout mark, which keeps what only restricts.
+    assert file_marks == (both_files if place == "the-scanned-checkout" else []), inner
+    assert elsewhere_marks == (both_files if place == "another-checkout" else []), inner
+    assert marked == (place != "outside-every-checkout")
     assert "--config-from-scanned-repository" not in inner, inner
 
 

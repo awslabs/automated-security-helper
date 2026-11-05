@@ -473,12 +473,13 @@ def test_the_file_ash_config_names_is_the_base_inside_as_on_the_host(
         assert marked == []
         assert elsewhere == []
     elif layout == "env-in-another-checkout":
-        # Written by a repository, so it carries the per-file repository mark
-        # (run-in-a-container.md, The config file: any checkout's file of
-        # ASH_CONFIG's chain, file by file): the grants come from the defaults.
+        # In a checkout other than the scanned one, so it carries the
+        # another-checkout mark (run-in-a-container.md, The config file): it
+        # cannot grant, so the grants come from the defaults, and it keeps what
+        # only restricts.
         assert settings["sandbox.extra_read_paths"] == []
-        assert marked == ["/ash-env-config/ash-env.yaml"]
-        assert elsewhere == []
+        assert marked == []
+        assert elsewhere == ["/ash-env-config/ash-env.yaml"]
     else:
         # Repository-written as well: the grants come from the defaults.
         assert settings["sandbox.extra_read_paths"] == []
