@@ -206,16 +206,16 @@ class TestTheExpansion:
 
     def test_an_axis_product_less_its_excludes(self):
         # 25 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
-        # images and 1 Windows image, each on 5 Python versions. The unit tier runs each
-        # combination whole (unsharded, on the maintainer's word; the note above
-        # unit-test-linux in the workflow); the integration tier splits each into 4
-        # shards (tests/unit/test_unit_test_shards.py holds that axis to one list of
-        # four and the unit jobs to no axis); the e2e tier runs once per image, on one
-        # Python version.
+        # images and 1 Windows image, each on 5 Python versions. The Linux and macOS unit
+        # pools run each combination whole (unsharded, on the maintainer's word; the note
+        # above unit-test-linux in the workflow); the Windows unit pool and the
+        # integration tier split each into 4 shards (tests/unit/test_unit_test_shards.py
+        # holds those axes to one list of four and the Linux and macOS unit jobs to no
+        # axis); the e2e tier runs once per image, on one Python version.
         assert LEGS["unit-test-linux"] == 2 * 5
         assert LEGS["unit-test-macos"] == 2 * 5
-        assert LEGS["unit-test-windows"] == 1 * 5
-        assert UNIT_TEST_LEGS == 25
+        assert LEGS["unit-test-windows"] == 1 * 5 * 4
+        assert UNIT_TEST_LEGS == 10 + 10 + 20
         assert LEGS["integration-test-linux"] == 2 * 5 * 4
         assert LEGS["integration-test-macos"] == 2 * 5 * 4
         assert LEGS["integration-test-windows"] == 1 * 5 * 4
@@ -227,7 +227,7 @@ class TestTheExpansion:
         assert sorted(PYTEST_JOB_IDS) == sorted(
             [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
         ), PYTEST_JOB_IDS
-        assert PYTEST_CHECK_RUNS == 25 + 100 + 5
+        assert PYTEST_CHECK_RUNS == 40 + 100 + 5
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
@@ -512,8 +512,6 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 344 check",
             "344 is this",
             # Before the unit tier was cut into four shards: its PR check figures.
-            # ("expands to 216 jobs" is not in this list: the unsharded unit tier is
-            # back, so 216 is the CURRENT push figure, not a superseded one.)
             "contributes 158 check",
             "158 is this",
             # Before the cover's macOS image moved to macOS 14 (unit-coverage -1).
@@ -525,6 +523,13 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 211 check",
             "211 is this",
             "136 on a pull request",
+            # Before the Windows unit pool was sharded four ways (unit-test 25 -> 40).
+            # ("109 on a pull request" is not in this list: the history sentence in the
+            # required-checks note still states it as the superseded figure.)
+            "expands to 216 jobs",
+            "contributes 157 check",
+            "157 is this",
+            "~442 runner jobs",
         ):
             assert stale not in COMMENTS
 
