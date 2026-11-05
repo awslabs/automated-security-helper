@@ -14,10 +14,9 @@ the operator's reporter section, because the operator's deep patch no longer
 fits the document (that refusal is the contract), so each reader must refuse the
 same chain with the same reason, and take the chain without the twin.
 
-The last cell pins the ownership compare's join rule: deep_merge joins an
-incoming key onto an existing key that is its uniform "-"/"_" swap, so the
-operator's write can end up standing under the repository's spelling, and the
-compare has to read that key as carrying the operator's write.
+The last cell pins the ownership compare's join rule: deep_merge keeps the
+operator's spelling when the repository wrote the uniform "-"/"_" swap of it,
+and the compare has to read that key as carrying the operator's write.
 
 Premises raise RuntimeError, so only the behavior under test fails a cell.
 """
@@ -219,9 +218,9 @@ def test_an_operator_key_joined_under_the_repository_s_swap_spelling_is_owned(
 ):
     """The repository file comes first and spells the section as the whole
     "-"/"_" swap of the operator's, so deep_merge joins the operator's write
-    under the repository's spelling. The ownership compare's swap arm is what
-    still finds that key owned, so the operator's patch lands and the reporter
-    runs it."""
+    under the operator's own spelling. The ownership compare reads that key as
+    carrying the operator's write, so the operator's patch lands and the
+    reporter runs it."""
     from automated_security_helper.config.operator_only_options import (
         _reporter_section_of,
         reporter_section,
@@ -265,10 +264,10 @@ def test_an_operator_key_joined_under_the_repository_s_swap_spelling_is_owned(
         for key in reporters
         if isinstance(key, str) and folded_section_name(key) == hub_fold
     )
-    if hubs != ["aws_security_hub"]:
+    if hubs != ["aws-security-hub"]:
         raise RuntimeError(
             "deep_merge did not join the operator's write under the "
-            "repository's spelling: " + str(hubs)
+            "operator's spelling: " + str(hubs)
         )
     key = plugin_config_key(SecurityHubReporter)
     shown = _reporter_section_of(config, key)
