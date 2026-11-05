@@ -214,7 +214,9 @@ def _trivy_argv(tmp_path: Path, source: Path, scanner_name: str, options=None) -
     scanner.dependencies_satisfied = True
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+        # A completed run, as the sibling trivy-repo tests stub it: a response with
+        # no code is a run the scanner does not grade (scanner_plugin).
+        patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         scanner.scan(target=source, target_type="source")
     return [str(a) for a in run.call_args.kwargs["command"]]

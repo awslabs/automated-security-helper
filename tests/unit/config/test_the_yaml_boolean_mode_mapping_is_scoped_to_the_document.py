@@ -15,7 +15,10 @@ operator types.
 
 from __future__ import annotations
 
+import re
+
 import pytest
+from pydantic import ValidationError
 
 from automated_security_helper.config.ash_config import (
     AshConfig,
@@ -49,33 +52,46 @@ def _mode_op(value):
     return {"op": "replace", "path": "/sandbox/mode", "value": value}
 
 
-def test_a_patch_value_of_false_is_refused_by_the_model():
+# /sandbox is in ALWAYS_DENIED_PATHS (config/ash_config.py): RuntimeOverridesConfig
+# adds it to every denied_paths list, so a JSON-Patch can never write the mode and
+# the policy refuses the op before the model sees its value. A boolean therefore
+# never reaches the model through a patch; the mode's own type is what refuses a
+# boolean, and it is checked directly.
+_SANDBOX_DENIED = "denied_paths entry '/sandbox'"
+
+
+@pytest.mark.parametrize("value", [False, True])
+def test_a_patch_value_of_a_boolean_is_refused(value):
     with pytest.raises(RuntimePatchDeniedError) as refused:
         apply_runtime_patch(
             AshConfig(sandbox={"mode": "bwrap"}),
-            [_mode_op(False)],
+            [_mode_op(value)],
             allowlist=_MODE_PATH_OPEN,
         )
-    assert "patched config failed validation" in str(refused.value), str(refused.value)
+    assert _SANDBOX_DENIED in str(refused.value), str(refused.value)
 
 
-def test_a_patch_value_of_true_is_refused_by_the_model():
+@pytest.mark.parametrize("value", [False, True])
+def test_a_boolean_that_reaches_the_model_is_refused_by_the_mode_s_type(value):
+    with pytest.raises(ValidationError):
+        AshConfig.model_validate({"sandbox": {"mode": value}})
+
+
+def test_control_a_patch_value_naming_a_mode_is_refused_by_the_same_rule():
+    """The refusal is the path's, whatever the value: the value never decides it."""
     with pytest.raises(RuntimePatchDeniedError) as refused:
         apply_runtime_patch(
-            AshConfig(sandbox={"mode": "bwrap"}),
-            [_mode_op(True)],
+            AshConfig(),
+            [_mode_op("bwrap")],
             allowlist=_MODE_PATH_OPEN,
         )
-    assert "patched config failed validation" in str(refused.value), str(refused.value)
+    assert _SANDBOX_DENIED in str(refused.value), str(refused.value)
 
 
-def test_control_a_patch_value_naming_a_mode_still_applies():
-    patched = apply_runtime_patch(
-        AshConfig(),
-        [_mode_op("bwrap")],
-        allowlist=_MODE_PATH_OPEN,
+def test_control_the_model_takes_a_mode_name():
+    assert AshConfig.model_validate({"sandbox": {"mode": "bwrap"}}).sandbox.mode == (
+        "bwrap"
     )
-    assert patched.sandbox.mode == "bwrap"
 
 
 @pytest.mark.parametrize("spelling", ["false", "true"])
@@ -104,6 +120,13 @@ def test_a_value_pattern_for_the_mode_matches_what_an_unquoted_file_loads_as(
     override_path = _write(tmp_path / "override.yaml", "sandbox:\n  mode: off\n")
     _, base = load_config_file(base_path)
     _, override = load_config_file(override_path)
+    # What the pattern is matched against is the string the file loaded as.
+    assert base.sandbox.mode == "bwrap"
+    assert override.sandbox.mode == "off"
+    assert re.search("^off$", override.sandbox.mode)
+    # /sandbox is always denied (ALWAYS_DENIED_PATHS), so the override is refused
+    # by the path rule, which is checked before the value patterns: the pattern
+    # can no longer be the reason, and the override never applies.
     allowlist = RuntimeOverridesConfig(
         enabled=True,
         allowed_paths=["/sandbox/**"],
@@ -112,4 +135,4 @@ def test_a_value_pattern_for_the_mode_matches_what_an_unquoted_file_loads_as(
     )
     with pytest.raises(RuntimePatchDeniedError) as refused:
         apply_runtime_override(base, override, allowlist=allowlist)
-    assert "denied_value_patterns" in str(refused.value), str(refused.value)
+    assert _SANDBOX_DENIED in str(refused.value), str(refused.value)

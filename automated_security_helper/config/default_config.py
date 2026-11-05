@@ -155,7 +155,10 @@ def _load_as_the_ash_config_files(
         is_config_parse_error,
         unparsed_config_reason,
     )
-    from automated_security_helper.core.exceptions import ASHConfigValidationError
+    from automated_security_helper.core.exceptions import (
+        ASHConfigSourceError,
+        ASHConfigValidationError,
+    )
     from automated_security_helper.utils.error_text import (
         os_error_without_named_file,
     )
@@ -169,7 +172,9 @@ def _load_as_the_ash_config_files(
     except OSError as e:
         # The file could not be read, so there is no syntax to send a reader
         # to; raised from the OSError, unlike the parse arm below.
-        refused = ASHConfigValidationError(
+        # ASHConfigSourceError (a validation error): a config source that could
+        # not be read, as resolve_config refuses a named file it cannot read.
+        refused = ASHConfigSourceError(
             f"could not read {describe_config_path(named)}: "
             f"{os_error_without_named_file(e, config_env_var)}"
         )

@@ -61,7 +61,15 @@ class TestOtherConfigInputs:
             target.mkdir()
         monkeypatch.setenv("ASH_CONFIG", str(target))
 
-        with pytest.raises(ASHConfigSourceError, match="ash.yaml"):
+        # A directory is refused in ASH_CONFIG's own words ("ASH_CONFIG names it,
+        # and it is not a file", default_config.refuse_unless_ash_config_names_a_file,
+        # pinned by test_an_ash_config_naming_a_directory_is_refused_in_its_words),
+        # as an ASHConfigValidationError; a missing file or a link to nothing is
+        # the narrower ASHConfigSourceError. Both are validation errors.
+        expected = (
+            ASHConfigValidationError if names == "a-directory" else ASHConfigSourceError
+        )
+        with pytest.raises(expected, match="ash.yaml"):
             get_default_config()
 
     @pytest.mark.parametrize("empty", ["", "   "])

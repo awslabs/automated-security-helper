@@ -1374,7 +1374,9 @@ class ConfigSource:
         """
         try:
             resolved = self.path.resolve()
-        except OSError:
+        except (OSError, RuntimeError):
+            # RuntimeError: before Python 3.13, Path.resolve raises it for a
+            # symbolic link that leads back to itself.
             resolved = self.path
         return describe_config_path(resolved)
 
