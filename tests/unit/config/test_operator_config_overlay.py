@@ -340,7 +340,7 @@ def test_a_project_config_that_cannot_be_read_is_refused(tmp_path):
     project.write_text("fail_on_findings: [unclosed\n", encoding="utf-8")
     operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
 
-    with pytest.raises(ASHConfigSourceError, match="could not parse") as raised:
+    with pytest.raises(ASHConfigSourceError, match="could not be parsed") as raised:
         _resolve(tmp_path, project, operator)
 
     assert ".ash.yaml" in str(raised.value)
