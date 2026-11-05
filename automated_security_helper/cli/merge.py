@@ -327,7 +327,9 @@ from automated_security_helper.plugins.loader import (
     combined_plugin_load_errors,
     load_plugins,
     plugin_module_fix,
+    plugins_of,
     refuse_plugin_modules_outside_namespace,
+    refuse_plugin_name_clashes,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.display_text import (
@@ -3543,12 +3545,22 @@ def merge_command(
     # config names (the operator's, confined above). The registry is
     # process-wide, so it can also hold another run's reporters
     # (reporter_classes_for_run).
+    run_modules = split_plugin_modules(
+        getattr(merged.ash_config, "ash_plugin_modules", None) or []
+    )
     reporter_plugins = reporter_classes_for_run(
-        split_plugin_modules(
-            getattr(merged.ash_config, "ash_plugin_modules", None) or []
-        ),
+        run_modules,
         manager=ash_plugin_manager,
     )
+    # Two reporters of this merge with the same name, or names the config lookup
+    # reads as one, would each read the other's section: refused with exit 3, as
+    # a scan refuses them (exit-codes.md, ash merge), before anything is written.
+    try:
+        refuse_plugin_name_clashes(plugins_of(run_modules), plugin_types=("reporter",))
+    except ASHConfigValidationError as exc:
+        message = f"{exc} Nothing was merged and no merged results file was written."
+        print(f"[red]Refusing to merge: {escape_markup(message)}[/red]")
+        raise typer.Exit(3)
     # The plugin modules are loaded, so the destination options each reporter
     # declares are known. Before the merged results are written, so they record
     # these as confined too.

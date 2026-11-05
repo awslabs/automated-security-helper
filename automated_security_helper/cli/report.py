@@ -70,6 +70,7 @@ from automated_security_helper.plugins.loader import (
     load_plugins,
     plugin_module_fix,
     plugins_of,
+    refuse_plugin_name_clashes,
 )
 from automated_security_helper.utils.command_safe_stream import (
     CommandSafeStream,
@@ -992,6 +993,15 @@ def report_command(
     run_modules = list(getattr(ash_config, "ash_plugin_modules", None) or [])
     run_scope = plugins_of(run_modules)
     run_reporters = reporter_classes_for_run(run_modules, manager=ash_plugin_manager)
+
+    # Two reporters of this run with the same name, or names the config lookup
+    # reads as one, would each read the other's section: refused with exit 3, as a
+    # scan refuses them (exit-codes.md, ash report), before a report is rendered.
+    try:
+        refuse_plugin_name_clashes(run_scope, plugin_types=("reporter",))
+    except ASHConfigValidationError as e:
+        _print_refusal("[red]Invalid configuration: {}[/red]", e)
+        raise typer.Exit(3)
 
     # The options of a plugin loaded from ash_plugin_modules are checked only once
     # it is loaded, as the scan engine checks them (config/plugin_option_check.py).
