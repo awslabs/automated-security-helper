@@ -36,10 +36,14 @@ if TYPE_CHECKING:
 # Type variable for the return type of the function
 T = TypeVar("T")
 
-#: (reporter key, option) pairs already named by :func:`report_missing_setting`
-#: in this process. A workspace builds and checks a reporter for each project,
-#: and one missing setting should produce one message.
-_MISSING_SETTINGS_NAMED: Set[Tuple[str, str]] = set()
+#: (run log scope, reporter key, option) triples already named by
+#: :func:`report_missing_setting`. A workspace builds and checks a reporter for each
+#: project, and one missing setting should produce one message for the run (aws.md:
+#: "A run is one `ash scan`, `ash report`, or `ash merge`"). The scope is the run's
+#: own (``utils.log.current_run_log_scope``), so a second scan in the same process,
+#: as an MCP server runs them, names it again; outside every run it is None, and the
+#: setting is named once per process.
+_MISSING_SETTINGS_NAMED: Set[Tuple[Optional[str], str, str]] = set()
 _MISSING_SETTINGS_LOCK = threading.Lock()
 
 
@@ -52,7 +56,7 @@ def reset_missing_setting_notices() -> None:
 def report_missing_setting(
     reporter_key: str, option: str, environment: Sequence[str]
 ) -> None:
-    """Say, once per process, that an enabled reporter lacks a setting it needs.
+    """Say, once per run, that an enabled reporter lacks a setting it needs.
 
     For an AWS reporter's ``validate_plugin_dependencies``, before it returns
     False because ``option`` is unset. The report phase then leaves the reporter
@@ -66,10 +70,13 @@ def report_missing_setting(
     changed: it stays a verdict on the scanned code. Only names are logged,
     never a value.
     """
+    from automated_security_helper.utils.log import current_run_log_scope
+
+    named = (current_run_log_scope(), reporter_key, option)
     with _MISSING_SETTINGS_LOCK:
-        if (reporter_key, option) in _MISSING_SETTINGS_NAMED:
+        if named in _MISSING_SETTINGS_NAMED:
             return
-        _MISSING_SETTINGS_NAMED.add((reporter_key, option))
+        _MISSING_SETTINGS_NAMED.add(named)
     from_environment = ""
     if environment:
         from_environment = (
