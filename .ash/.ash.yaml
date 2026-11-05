@@ -473,22 +473,17 @@ global_settings:
         container image. npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit
         when a fix ships; see the block comment above.
     # === Time-boxed: minimatch GHSA-g3hv-75wg-m249 bundled inside aws-cdk-lib (expires 2026-11-27) ===
-    # minimatch below 11.0.1 is affected (globparts amplification denial of service) and
-    # 11.0.1 is the fix. The copies our lockfiles resolve themselves are overridden to
-    # 11.x in deploy/cdk and deploy/cdk-constructs (the `minimatch` and `glob` entries in
-    # each package.json `overrides`), so the only affected copy left is the one BUNDLED
-    # inside the aws-cdk-lib package (package-lock entries marked `inBundle`, installed at
-    # node_modules/aws-cdk-lib/node_modules/minimatch). npm `overrides` cannot replace a
+    # minimatch below 11.0.1 is affected (globparts amplification denial of service).
+    # The copies our lockfiles resolve are overridden to 11.x in deploy/cdk and
+    # deploy/cdk-constructs, so the only affected copy left is the one BUNDLED inside
+    # aws-cdk-lib (`inBundle` lockfile entries). npm `overrides` cannot replace a
     # bundled dependency, and every aws-cdk-lib release through 2.275.0 (the latest at
-    # 2026-11-03) bundles minimatch ^10, so no upgrade removes it. It is deploy tooling
-    # only: aws-cdk-lib is used to synthesize the deploy/cdk templates and as a dev
-    # dependency of deploy/cdk-constructs; none of it ships in the wheel or the container
-    # image. One npm-audit entry per lockfile (package_path pins one install path); grype
-    # and trivy each report the same bundled copy against deploy/cdk/package-lock.json
-    # under their own id spellings, one entry per spelling. The transitive
-    # `npm-audit-transitive-<package>` findings that reach it (aws-cdk-lib, cdk-nag) are
-    # covered by these root entries, as the braces block above explains. Revisit when an
-    # aws-cdk-lib release bundles minimatch 11.0.1 or later.
+    # 2026-11-03) bundles minimatch ^10. It is deploy tooling only: none of it ships in
+    # the wheel or the container image. One npm-audit entry per lockfile; grype and
+    # trivy each report the same bundled copy against deploy/cdk/package-lock.json
+    # under their own id spellings, one entry per spelling. The transitive findings are
+    # covered by these root entries, as the braces block above explains. Revisit when
+    # an aws-cdk-lib release bundles minimatch 11.0.1 or later.
     - rule_id: "GHSA-g3hv-75wg-m249"
       path: "node_modules/aws-cdk-lib/minimatch/package.json"
       package_name: "minimatch"
@@ -772,19 +767,15 @@ global_settings:
         above.
     # === detect-secrets: broad patterns by path ===
     #
-    # This header used to claim detect-secrets had "no inline nosec support".
-    # It does have one: `# pragma: allowlist secret` on the offending line, and
-    # detect-secrets drops the finding when it is present. That claim steered
-    # contributors here, to a config entry covering a whole path, when a marker
-    # on the line itself was available and narrower.
+    # detect-secrets does support an inline marker: `# pragma: allowlist secret` on
+    # the offending line drops the finding.
     #
     # Prefer the inline pragma. It sits at the value it protects, so a reviewer
     # reading the line sees the decision; it travels with the code when the line
     # moves; and it leaves the rest of the file scanned, so a real secret added
     # later is still found. This repository already depends on it -- the 16
     # release checksums in automated_security_helper/utils/tool_downloads.py are
-    # each marked that way, and the comment above them explains why per-line
-    # beats suppressing the file.
+    # each marked that way.
     #
     # Reach for a path entry below only where per-line marking is not available:
     # a generated or vendored file nobody hand-edits, a format with no comment
@@ -794,11 +785,10 @@ global_settings:
     # `scripts/**` hid 31 findings; each is now a pragma on its line, and
     # tests/unit/config/test_no_directory_glob_secret_suppressions.py fails if a
     # directory glob for this rule family comes back. Some sit on the line above
-    # as `# pragma: allowlist nextline secret` instead, in two cases: where ruff
-    # format would wrap the line and carry a trailing pragma off the line it
-    # covers, and where ferret-scan reads the file, because ferret counts the
-    # word "secret" in a trailing comment as evidence and raised three such
-    # lines to high confidence.
+    # as `# pragma: allowlist nextline secret` instead, where ruff format would
+    # wrap the line and carry a trailing pragma off it, and where ferret-scan reads
+    # the file, because ferret counts the word "secret" in a trailing comment as
+    # evidence.
     # === detect-secrets: specific source files ===
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
@@ -1619,19 +1609,17 @@ global_settings:
     # so nothing there wanted the subnet default.
     #
     # CFN_NAG_W40 on the ECS task's security group, by pinning its egress to TCP 443
-    # instead of every IP protocol. The PORT is pinned and not just the protocol
-    # because narrowing to all-TCP trades one finding for another: CFN_NAG_W29 passes
-    # only when FromPort equals ToPort, and IpProtocol -1 had satisfied it by naming
-    # no ports at all. That was measured, not assumed -- the all-TCP form was
-    # synthesized and scanned first, and it reported W29. Pinning 443 clears both.
+    # instead of every IP protocol. The PORT is pinned too, because all-TCP trades
+    # one finding for another: CFN_NAG_W29 passes only when FromPort equals ToPort,
+    # and IpProtocol -1 had satisfied it by naming no ports. Measured: the all-TCP
+    # form reported W29. Pinning 443 clears both.
     #
     # What follows is the remainder, where no code change satisfies the rule.
     #
     # === cfn-nag cannot see a logs grant that lives in its own IAM::Policy ===
     #
-    # CFN_NAG_W58 is a false positive on all four functions, and it is worth being
-    # exact about why, because "the function cannot write its logs" would be a real
-    # defect rather than a scanner artifact.
+    # CFN_NAG_W58 is a false positive on all four functions, not a function that
+    # cannot write its logs.
     #
     # LambdaFunctionCloudWatchLogsRule inspects two places and no others: the role's
     # inline Policies array, and an allowlist of seven AWS managed policy ARNs. Every
@@ -1711,10 +1699,7 @@ global_settings:
     # AwsSolutions-IAM5, in ECR_AUTHORIZATION_TOKEN_REASON: IAM defines
     # ecr:GetAuthorizationToken with no resource ARN, so "*" is the only value the action
     # accepts. Reused here because it genuinely applies; the two rules read the same
-    # statements. (That reason has moved twice. It was a numbered list, and this comment
-    # cited "item (3)"; then one role-scoped string covering wildcard ACTIONS as well as
-    # wildcard RESOURCES; and now one string per policy, so the constant is named rather
-    # than a clause pointed at.)
+    # statements.
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -1838,15 +1823,12 @@ global_settings:
 
     # === cdk-nag on the synthesized CloudFormation templates ===
     #
-    # WHY THIS BLOCK ARRIVED SO LATE, WHEN checkov AND cfn-nag WERE DONE ABOVE
+    # WHY THIS BLOCK ARRIVED AFTER checkov AND cfn-nag
     #
     # cdk-nag reports MISSING in the `ash / SAST, SCA, and IaC Scan` check, because
     # that leg installs no `cdk` extra and the scanner needs aws-cdk-lib, cdk-nag and
-    # constructs to run at all. A MISSING scanner contributes no findings, so whoever
-    # wrote the checkov and cfn-nag blocks above was reading a report in which cdk-nag
-    # had produced nothing. Its 437 findings on these same five templates were never
-    # visible to that work. They surface only in a run where the extra is installed,
-    # which is the run this block was derived from.
+    # constructs. Its 437 findings on these five templates surface only in a run where
+    # the extra is installed, which is the run this block was derived from.
     #
     # WHAT ASH EVALUATES HERE THAT THE TEMPLATES WERE NOT AUTHORED AGAINST
     #
@@ -1859,13 +1841,11 @@ global_settings:
     # compliance regimes and a payment-card standard that no part of this project
     # claims to implement.
     #
-    # Saying that plainly matters more than it might look. Clearing a HIPAA or PCI rule
-    # id is not the same as being HIPAA- or PCI-compliant, and suppressing one is not a
-    # claim of non-compliance either. ASH has adopted no compliance posture; these
-    # packs are enabled here because they exercise more of the scanner. The entries
-    # below therefore say what each rule wants, what satisfying it would cost, and why
-    # it is out of scope for a template an adopter parameterizes -- not that a risk was
-    # weighed and accepted against a control ASH is audited on.
+    # Clearing a HIPAA or PCI rule id is not the same as being HIPAA- or PCI-compliant,
+    # and suppressing one is not a claim of non-compliance either. ASH has adopted no
+    # compliance posture; these packs are enabled here because they exercise more of
+    # the scanner. The entries below say what each rule wants, what satisfying it would
+    # cost, and why it is out of scope for a template an adopter parameterizes.
     #
     # 116 of the 437 findings are already suppressed and do not appear below. Those
     # carry reviewed reasons in the templates' own Metadata.cdk_nag blocks, written by
@@ -1892,14 +1872,12 @@ global_settings:
     #
     # PATHS ARE NAMED FILE BY FILE, AND SO ARE RULES
     #
-    # No entry below globs. `deploy/cdk/templates/**` with a `*-IAMNoInlinePolicy` rule
-    # id would collapse 20 entries into one, and it was written that way first; the
-    # problem is that a sixth template, or a fifth pack, then inherits a suppression
-    # nobody read. The five files and the four pack-qualified rule ids are named
-    # individually for the same reason the detect-secrets block below gives. Counts
-    # quoted per entry are the counts measured on THIS revision -- `cdk synth`
-    # regenerates these templates, so treat a drifted count as a prompt to re-measure
-    # rather than as a defect in the reason.
+    # No entry below globs. A `deploy/cdk/templates/**` entry with a
+    # `*-IAMNoInlinePolicy` rule id would collapse 20 entries into one, but a sixth
+    # template, or a fifth pack, would then inherit a suppression nobody read. The
+    # five files and the four pack-qualified rule ids are named individually. Counts
+    # quoted per entry were measured on THIS revision; `cdk synth` regenerates the
+    # templates, so a drifted count is a prompt to re-measure, not a defect.
     #
     # --- IAMNoInlinePolicy: the rule's own subject is not what these templates hold ---
     #
@@ -1907,13 +1885,11 @@ global_settings:
     # rule reads "The IAM Group, User, or Role contains an inline policy" and asks for
     # customer-managed policies instead, for reusability, versioning and rollback.
     #
-    # Measured before writing this, not assumed: not one AWS::IAM::Role in any of the
-    # five templates carries a `Policies` array. Every finding is on a standalone
-    # AWS::IAM::Policy resource attached through `Roles`, which is what CDK emits for
-    # `grant*` and `addToPolicy`, and the per-file finding counts equal the
-    # AWS::IAM::Policy counts exactly -- 5, 4, 15, 7 and 4. So the rule is not reacting
-    # to a policy embedded in a role; it treats a role's separately-attached Policy
-    # resource as one.
+    # Measured: no AWS::IAM::Role in any of the five templates carries a `Policies`
+    # array. Every finding is on a standalone AWS::IAM::Policy resource attached
+    # through `Roles` (what CDK emits for `grant*` and `addToPolicy`), and the per-file
+    # finding counts equal the AWS::IAM::Policy counts exactly -- 5, 4, 15, 7 and 4.
+    # So the rule treats a role's separately-attached Policy resource as inline.
     #
     # Two reasons no code change here is the right answer. First, the CDK grant model
     # produces these: a customer-managed policy per grant would mean hand-writing every
@@ -2963,40 +2939,30 @@ global_settings:
     #
     # WHY THE RULES THROW
     #
-    # These templates are environment-agnostic on purpose -- deploy/cdk/scripts/
-    # synth-templates.sh depends on it, because a template with a baked-in account id
-    # is neither reproducible nor launchable by an adopter -- and they are
-    # parameterized so an adopter can point them at their own key, CIDR and image tag.
-    # The consequence is that the properties these rules want to inspect are
-    # CloudFormation intrinsics rather than literals: an Fn::Join over ECR repository
-    # attributes, a Ref to a parameter, an Fn::If over a condition. Three of the four
-    # messages say exactly that, naming the value that "resolved to a non-primitive".
-    # The fourth, "items.map is not a function", is the same shape reaching a rule that
-    # does not handle it.
+    # These templates are environment-agnostic and parameterized on purpose
+    # (deploy/cdk/scripts/synth-templates.sh depends on it), so the properties these
+    # rules inspect are CloudFormation intrinsics rather than literals: an Fn::Join
+    # over ECR repository attributes, a Ref to a parameter, an Fn::If over a
+    # condition. Three of the four messages say so, naming the value that "resolved to
+    # a non-primitive". The fourth, "items.map is not a function", is the same shape
+    # reaching a rule that does not handle it.
     #
     # WHY THE TEMPLATE'S OWN SUPPRESSION DOES NOT ALREADY COVER THEM
     #
-    # It looks as though it should, and this is the part worth being precise about.
-    # Every resource named below already carries a reviewed in-template suppression for
-    # exactly this case: Metadata.cdk_nag.rules_to_suppress with id
-    # CdkNagValidationFailure, written by deploy/cdk/lib/ash-nag-suppressions.ts, whose
-    # reason names the intrinsics and the affected rules. ASH honors in-template
-    # suppressions -- 116 of this scanner's 437 findings are suppressed that way -- but
-    # the honoring is keyed by rule id: _template_suppression_reason in
-    # automated_security_helper/utils/cdk_nag_wrapper.py compares the suppression's id
-    # against the finding's rule id, and against that id with any bracketed scope
-    # stripped. cdk-nag emits a validation failure under the CRASHED RULE's own id, so
-    # a record arrives as AwsSolutions-EC23 while the suppression covering it is filed
-    # under CdkNagValidationFailure. The two never compare equal, and the reviewed
-    # reason sitting in the same file is never reached.
+    # Every resource named below carries a reviewed in-template suppression for this
+    # case: Metadata.cdk_nag.rules_to_suppress with id CdkNagValidationFailure, written
+    # by deploy/cdk/lib/ash-nag-suppressions.ts. ASH honors in-template suppressions,
+    # but keyed by rule id (_template_suppression_reason in
+    # automated_security_helper/utils/cdk_nag_wrapper.py). cdk-nag emits a validation
+    # failure under the CRASHED RULE's own id, so a record arrives as
+    # AwsSolutions-EC23 while the suppression is filed under CdkNagValidationFailure.
+    # The two never compare equal.
     #
-    # That is a mechanism worth fixing upstream of these entries rather than papering
-    # over indefinitely -- either by having the wrapper treat a CdkNagValidationFailure
-    # suppression as covering any rule that threw on that resource, or by having it
-    # report crashes under a rule id of their own so they are filterable as a class.
-    # Until one of those lands, naming the records here is the only way to keep the
-    # exit code honest, and it is why they are grouped and labelled separately instead
-    # of being mixed in with the compliance findings above.
+    # Worth fixing upstream of these entries: have the wrapper treat a
+    # CdkNagValidationFailure suppression as covering any rule that threw on that
+    # resource, or report crashes under a rule id of their own. Until then, naming the
+    # records here keeps the exit code honest, and they are grouped and labelled
+    # separately from the compliance findings above.
     - rule_id: AwsSolutions-CB5
       path: deploy/cdk/templates/AshDistributedPipeline.template.json
       reason: >-
@@ -3254,67 +3220,46 @@ global_settings:
     # would be far worse than the cost of checking the whole set.
     #
     # Two mechanisms produce the base64 matches, and a reviewer can confirm each
-    # one against the file. Deliberately NOT stating a count, per file or in total:
-    # `cdk synth` regenerates these templates, so any count written here rots the
-    # same way a line range does. An earlier revision stated per-file counts in the
-    # reasons below anyway, and they went stale the first time a suppression reason
-    # changed shape.
+    # one against the file. No count is stated, per file or in total: `cdk synth`
+    # regenerates these templates, so any count written here rots like a line range.
     #
-    # A third mechanism used to appear here and no longer does: `aws:cdk:path`
-    # metadata values such as `AshFargate/Vpc/PublicSubnet1/NATGateway` were
-    # flagged as base64 high-entropy strings. `"pathMetadata": false` in
-    # deploy/cdk/cdk.json removed them, which was done for template size rather
-    # than for this rule but eliminates those findings as a side effect. See the
-    # header of deploy/cdk/test/ash-template-size.test.ts.
+    # A third mechanism no longer appears: `aws:cdk:path` metadata values such as
+    # `AshFargate/Vpc/PublicSubnet1/NATGateway` were flagged as base64 strings.
+    # `"pathMetadata": false` in deploy/cdk/cdk.json removed them (done for template
+    # size; see the header of deploy/cdk/test/ash-template-size.test.ts).
     #
-    #   1. CDK logical resource ids — a CamelCase construct path concatenated
+    #   1. CDK logical resource ids -- a CamelCase construct path concatenated
     #      with a deterministic hash, e.g. `ConfigMcpAuthHeaderSecret99D04B65`,
     #      `Shard1ProjectRoleDefaultPolicy4B7CA148`,
     #      `VpcPrivateSubnet2RouteTableA678073B`. These are JSON object KEYS in
     #      the Resources block, not values.
-    #   2. cdk-nag suppression reasons — upstream cdk-nag base64-encodes some
-    #      reason text and records that it did so with a sibling
-    #      `"is_reason_encoded": true`. That marker is the structural proof: it
-    #      sits in the same JSON object as any such match. The plaintext is ours,
-    #      in `deploy/cdk/lib/ash-nag-suppressions.ts`.
+    #   2. cdk-nag suppression reasons -- upstream cdk-nag base64-encodes some
+    #      reason text and records that with a sibling `"is_reason_encoded": true`
+    #      in the same JSON object. The plaintext is ours, in
+    #      `deploy/cdk/lib/ash-nag-suppressions.ts`.
     #
     #      THIS MECHANISM CURRENTLY CONTRIBUTES NOTHING. The app synthesizes zero
     #      `"is_reason_encoded": true` entries: every reason it writes is pure
-    #      ASCII, so nothing gets encoded. It is documented anyway because it is
-    #      one em dash away from coming back, and because a reviewer who finds a
-    #      base64 blob in a template needs to know this is where it came from.
+    #      ASCII. It is documented because it is one em dash away from coming back.
     #
-    #      WHICH reasons get encoded is worth stating precisely, because an
-    #      earlier version of this comment got it wrong and claimed only
-    #      `CdkNagValidationFailure` reasons are encoded. That is false; the
-    #      suppression id does not predict it. What does, measured when the set
-    #      was non-empty: every encoded reason decoded to text containing a
-    #      non-ASCII character (U+2014, an em dash), and every un-encoded one was
-    #      pure ASCII. A clean split with no exceptions. Since confirmed against
-    #      cdk-nag 2.38.2 by synthesizing one plain reason beside one carrying an
-    #      em dash, so this is no longer only an observation from the output side.
-    #
-    #      Practical consequence, and the reason the set is empty: an em dash in
-    #      any reason moves it into the encoded set and can create a new finding
-    #      here. It also reaches an adopter as an opaque blob in the artifact they
-    #      launch, which is the worse half — a justification nobody can read is
-    #      not doing its job. Keeping reasons ASCII avoids both.
+    #      What decides encoding is not the suppression id (an earlier version of
+    #      this comment claimed that) but non-ASCII text: every encoded reason
+    #      decoded to text containing U+2014, an em dash, and every un-encoded one
+    #      was pure ASCII. Confirmed against cdk-nag 2.38.2 by synthesizing one
+    #      plain reason beside one carrying an em dash. An em dash in any reason can
+    #      create a new finding here and reaches an adopter as an opaque blob in the
+    #      artifact they launch. Keeping reasons ASCII avoids both.
     #
     # PATHS ARE NAMED FILE BY FILE, NOT GLOBBED
     #
-    # `deploy/cdk/templates/**` would be one entry instead of five, and it was
-    # written that way first. The problem is what a trailing `**` means: it is a
-    # whole-subtree match at any depth, so a sixth template added later inherits
-    # the suppression without anyone having looked at it. Naming the five files
-    # costs four extra entries and makes a new template fail loudly instead.
-    # This also matches the convention the rest of this file already uses for
-    # entries justified by inspection; the broad globs above (`tests/**`,
-    # `docs/**`) are category suppressions, which is a different claim.
+    # A `deploy/cdk/templates/**` entry would be one instead of five, but a trailing
+    # `**` matches the whole subtree, so a sixth template added later would inherit
+    # the suppression unread. Naming the five files costs four extra entries and
+    # makes a new template fail loudly. The broad globs above (`tests/**`, `docs/**`)
+    # are category suppressions, which is a different claim.
     #
-    # Line ranges would be the wrong way to narrow further: `cdk synth`
-    # regenerates these files and the line numbers drift, and a `line_start`
-    # with no `line_end` covers to end of file — so a range would silently widen
-    # rather than narrow.
+    # Line ranges would not narrow further: `cdk synth` regenerates these files, the
+    # line numbers drift, and a `line_start` with no `line_end` covers to end of file.
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-

@@ -231,6 +231,10 @@ _SEVERITY_ORDER = (*TRIVY_SEVERITIES, "UNKNOWN")
 #: Characters ``trivy --skip-dirs`` reads as glob syntax.
 _GLOB_SPECIAL = frozenset("*?[]{}\\")
 
+#: The glob characters that need a bracket class on win32, where ``\`` separates
+#: path parts and cannot escape (``]`` is literal outside a class).
+_WIN32_GLOB_SPECIAL = frozenset("*?[{}")
+
 #: The most bytes the ``--skip-files`` and ``--skip-dirs`` tokens for the ignored
 #: paths may take together, and the whole budget where the host's own bound is not
 #: read. Linux starts a program with about 2 MiB of arguments and environment
@@ -418,8 +422,16 @@ def skip_dirs_value(path: str) -> str:
     globs. Measured on 0.69.3: an unescaped ``a,b`` or ``x[1]`` left that directory
     scanned. Glob characters are backslash-escaped, then the value is CSV-quoted
     when it holds a comma, a quote or edge whitespace.
+
+    On Windows a backslash is the path separator, so it cannot escape anything:
+    each glob character is written as a one-character bracket class (``[*]``)
+    instead. A lone ``]`` is literal outside a class and a ``\\`` cannot occur in a
+    posix-form relative path, so neither is rewritten there.
     """
-    escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
+    if sys.platform == "win32":
+        escaped = "".join(f"[{ch}]" if ch in _WIN32_GLOB_SPECIAL else ch for ch in path)
+    else:
+        escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
     return _csv_field(escaped)
 
 

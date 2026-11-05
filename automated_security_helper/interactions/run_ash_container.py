@@ -3815,11 +3815,11 @@ def _another_checkout_marks(
     CONFIG_FILE_FROM_ANOTHER_CHECKOUT_FLAG. Only the class travels: the scan
     inside reads the mounted file itself for what it restricts, so no value of
     the file is in a mark and a mark cannot carry a grant. The caller decides
-    what the answer carries: ``_assemble_run_command`` sends this flag for a
-    one-directory ``--config`` chain only, and promotes the files of
-    ``ASH_CONFIG``'s chain, and a workspace ``--config`` chain rooted here, to
-    the repository marks the pages pin (run-in-a-container.md, The config
-    file).
+    what the answer carries: ``_assemble_run_command`` sends this flag for the
+    files of a one-directory ``--config`` chain and of ``ASH_CONFIG``'s chain,
+    so they keep what only restricts inside, and promotes a workspace
+    ``--config`` chain rooted here to the repository marks the pages pin
+    (run-in-a-container.md, The config file).
 
     A file the judgment admitted only because the walk of the links in its name
     stopped before it could rule a checkout out is returned with the others: the
@@ -4950,20 +4950,18 @@ def _assemble_run_command(
             )
         if env_files:
             env_marked = _env_config_marks(env_config, marks_source, env_plan)
-            # A file of ASH_CONFIG's chain in another git checkout carries the
-            # same per-file mark as one the scanned checkout wrote
-            # (run-in-a-container.md, The config file: "A file of that chain
-            # the host counts as written by a repository is marked for the
-            # scan inside, file by file."), so the host counts any checkout's
-            # file as a repository's there, not as the weaker another-checkout
-            # class a one-directory --config chain keeps.
-            env_marked = sorted(
-                {
-                    *env_marked,
-                    *_another_checkout_marks(env_config, env_plan, env_marked),
-                }
-            )
+            # A file of ASH_CONFIG's chain in another git checkout is not the
+            # scanned tree's: it cannot grant, but it still sets what only
+            # restricts (a lowered archive limit, a no-usage-data option, a
+            # network list as a limit; config/restrictions_kept), as it does on
+            # the host and as Invoke-ASH marks it. It takes the another-checkout
+            # mark, which the scan inside reads that way. The scanned-repository
+            # mark keeps nothing, so promoting the file to it would widen those
+            # settings inside (an archive limit of 5000 where the host holds 10).
             marked_config_files = [*marked_config_files, *env_marked]
+            another_checkout_files.extend(
+                _another_checkout_marks(env_config, env_plan, env_marked)
+            )
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:
         _refuse_config_linked_out_of_the_tree(

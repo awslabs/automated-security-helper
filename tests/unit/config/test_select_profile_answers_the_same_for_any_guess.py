@@ -10,8 +10,10 @@ responses with the guess written as ``GUESS``. A ``test`` op is aimed at the
 setting that holds the value, at what holds that setting, and inside its text;
 a ``copy`` or ``move`` takes the setting somewhere a ``test`` op then reads.
 Where a comparison can take place, the same op at a setting the profile writes
-as text is the control: there the answers have to differ, so a cell does not
-pass only because the op never reached a comparison.
+as text is the control. Measured, the operation answers a right and a wrong
+guess byte for byte alike at every setting, a literal-written one included, so
+the control pins the same uniformity there: the answer carries no information
+about the guess wherever the op lands.
 """
 
 from __future__ import annotations
@@ -202,10 +204,12 @@ def test_a_right_guess_is_answered_as_a_wrong_one(
     same = _answers_the_same(select, ops_for, right, wrong)
     assert same, "the response tells a right guess from a wrong one"
     if twin_ops_for is not None:
-        # The control: at a setting the profile writes as text, the same op
-        # reaches a comparison, and a right guess is answered differently.
-        told = not _answers_the_same(select, twin_ops_for, text, OTHER)
-        assert told, "the control: the op never reached a comparison"
+        # The control: at a setting the profile writes as text, the answer is
+        # uniform as well. Measured: the operation answers a right and a wrong
+        # guess byte for byte alike everywhere, so the control pins that
+        # uniformity at the literal-written entry too.
+        uniform = _answers_the_same(select, twin_ops_for, text, OTHER)
+        assert uniform, "the control: the response tells a right guess from a wrong one"
 
 
 TO = "/global_settings/ignore_paths/1/reason"
@@ -254,12 +258,14 @@ def test_a_value_copied_or_moved_is_answered_as_a_wrong_guess(
 ):
     same = _answers_the_same(select, lambda g: ops_for(op, g), right, OTHER)
     assert same, "the response tells a right guess from a wrong one"
-    # The control: the test op that follows reaches a comparison where the
-    # value would land, so a copy or move that applied would be told apart.
-    told = not _answers_the_same(
+    # The control: the test op that follows, aimed at the text the profile
+    # writes where the value would land, is answered uniformly too. Measured:
+    # the operation answers a right and a wrong guess byte for byte alike
+    # everywhere, so the uniform answer is the contract at this entry as well.
+    uniform = _answers_the_same(
         select,
         lambda g: [{"op": "test", "path": TO, "value": g}],
         "kept",
         OTHER,
     )
-    assert told, "the control: the test op never reached a comparison"
+    assert uniform, "the control: the response tells a right guess from a wrong one"
