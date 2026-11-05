@@ -735,40 +735,47 @@ def test_the_pre_flight_of_a_scan_that_names_its_config_never_asks_the_rule(
 
 @pytest.mark.unit
 def test_a_scan_that_names_its_config_logs_nothing_about_files_discovery_would_read(
-    layout, monkeypatch, caplog
+    layout, monkeypatch
 ):
-    """Discovery reads the source directory's pyproject.toml and says so when it
-    cannot use it. A scan that names its config reads no such file, so its
-    pre-flight logs nothing about one; without a named config the same layout
-    does log it, which shows the log is captured."""
+    """Discovery reads the source directory's pyproject.toml for a [tool.ash]
+    table. A scan that names its config reads no such file, so its pre-flight
+    does not open one; without a named config the same layout does, which shows
+    the read is observed.
+
+    The read is counted at ``pyproject_has_ash_table`` and not looked for in the
+    log: behind a higher-precedence source, as in this layout, what discovery
+    cannot use in the pyproject.toml is returned as a note and never logged
+    (config_sources._pyproject_is_a_source)."""
+    from automated_security_helper.config import config_sources
+
     _discoverable_source_with_an_env_config(layout, monkeypatch)
     _unparsable_source_config(layout["source"])
     named = _write(layout["w"] / "ops" / "named.yaml", "project_name: n\n")
 
-    def pyproject_messages() -> List[str]:
-        return [
-            record.getMessage()
-            for record in caplog.records
-            if "pyproject.toml" in record.getMessage()
-        ]
+    reads_of_pyproject: List[Path] = []
+    real = config_sources.pyproject_has_ash_table
 
-    with caplog.at_level(logging.WARNING, logger="ash"):
-        rac._require_mountable_inputs(
-            layout["source"], layout["out"], None, None, None, rac.OperatorConfigReads()
-        )
-    assert pyproject_messages(), "the control run should log about pyproject.toml"
+    def counting(path, *args, **kwargs):
+        reads_of_pyproject.append(Path(path))
+        return real(path, *args, **kwargs)
 
-    caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="ash"):
-        rac._require_mountable_inputs(
-            layout["source"],
-            layout["out"],
-            str(named),
-            None,
-            None,
-            rac.OperatorConfigReads(),
-        )
-    assert pyproject_messages() == []
+    monkeypatch.setattr(config_sources, "pyproject_has_ash_table", counting)
+
+    rac._require_mountable_inputs(
+        layout["source"], layout["out"], None, None, None, rac.OperatorConfigReads()
+    )
+    assert reads_of_pyproject, "the control run should read the pyproject.toml"
+
+    reads_of_pyproject.clear()
+    rac._require_mountable_inputs(
+        layout["source"],
+        layout["out"],
+        str(named),
+        None,
+        None,
+        rac.OperatorConfigReads(),
+    )
+    assert reads_of_pyproject == []
 
 
 def _discovery_layouts():
