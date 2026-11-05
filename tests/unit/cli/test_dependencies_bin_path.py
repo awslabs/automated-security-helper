@@ -380,6 +380,20 @@ def test_a_relative_ash_bin_path_installs_into_the_default_directory(
     assert "uses ~/.ash/bin instead" in out, out
     assert (fresh_lookup / ".ash" / "bin").is_dir()
     assert not (project / "rel-bin").exists()
+    # A scan searches ~/.ash/bin for this value too, so there is nothing to export.
+    assert "export ASH_BIN_PATH" not in out, out
+
+
+@pytest.mark.unit
+def test_an_absolute_ash_bin_path_elsewhere_still_gets_the_hint(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    """Control for the one above: a scan that is not looking in the target is told."""
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "elsewhere"))
+    target = tmp_path / "chosen"
+    result = _install(tmp_path / "project", "--bin-path", str(target))
+    assert result.exit_code == 0, result.output
+    assert f"export ASH_BIN_PATH={shlex.quote(str(target))}" in _flat(result.output)
 
 
 @pytest.mark.unit
