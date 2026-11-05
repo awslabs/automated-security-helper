@@ -65,6 +65,7 @@ from automated_security_helper.utils.occurrence_context import (
 from automated_security_helper.utils.severity_ladder import MISSING_SARIF_LEVEL
 from automated_security_helper.utils.undecodable_text import (
     RecordModel,
+    path_in_record_form,
     text_of_undecodable,
     undecodable_of_text,
 )
@@ -2837,8 +2838,16 @@ class SarifReport(RecordModel):
         include_invocation: bool = True,
         include_driver: bool = True,
         include_rules: bool = True,
+        source_dir: Optional[Union[str, Path]] = None,
     ):
         """Fold every run of *sarif_report* into this report's first run.
+
+        ``source_dir`` is the scanned tree's root. When given, a location whose
+        base had to be expanded onto its uri (see
+        ``_detach_run_scoped_references``) and now names a file under that root
+        goes back to the tree-relative spelling ``sanitize_sarif_paths`` gives
+        every other location. A file under any other root keeps its expanded
+        form.
 
         Every run, not only the first. A scanner's SARIF can carry one run per
         target or per rule set, and the per-scanner counts read them all, so a
@@ -2858,7 +2867,11 @@ class SarifReport(RecordModel):
 
         for report_run in sarif_report.runs:
             self._merge_run(
-                report_run, include_invocation, include_driver, include_rules
+                report_run,
+                include_invocation,
+                include_driver,
+                include_rules,
+                source_dir,
             )
 
         # Both report-level lists are Optional: a file that writes them as null
@@ -2898,6 +2911,7 @@ class SarifReport(RecordModel):
         include_invocation: bool,
         include_driver: bool,
         include_rules: bool,
+        source_dir: Optional[Union[str, Path]] = None,
     ) -> None:
         """Fold one run into this report's first run; see ``merge_sarif_report``."""
         report_tool = report_run.tool
@@ -2964,7 +2978,9 @@ class SarifReport(RecordModel):
                 # artifacts, logicalLocations or originalUriBaseIds, so an index
                 # or a base id into those tables must not travel with the copy.
                 # An adopted first run keeps its own tables, so its indices stay.
-                _detach_run_scoped_references(clean_result, report_run, self.runs[0])
+                _detach_run_scoped_references(
+                    clean_result, report_run, self.runs[0], source_dir
+                )
             report_results.append(Result(**clean_result))
 
         needs_marker = is_composed_run(report_run) or any(
@@ -3026,7 +3042,10 @@ class SarifReport(RecordModel):
 
 
 def _detach_run_scoped_references(
-    dumped: Dict, incoming: "Run", aggregate: "Run"
+    dumped: Dict,
+    incoming: "Run",
+    aggregate: "Run",
+    source_dir: Optional[Union[str, Path]] = None,
 ) -> None:
     """Make a result copied out of *incoming* stand without that run's tables.
 
@@ -3071,6 +3090,12 @@ def _detach_run_scoped_references(
     the incoming run never defined is left as written: there is nothing to read
     it against. A chain that ends at a base the incoming run does not define
     keeps that last id on the location after the expansion, for the same reason.
+
+    With *source_dir* (the scanned tree's root), an expansion that ends with no
+    base left and lands on an absolute path under that root is made relative to
+    it again, the spelling ``sanitize_sarif_paths`` gives a location that never
+    needed a base. Only that case: an expansion under any other root keeps its
+    absolute form, so two scanners' different roots stay distinguishable.
     """
     incoming_bases = incoming.originalUriBaseIds or {}
     artifacts = incoming.artifacts or []
@@ -3148,6 +3173,27 @@ def _detach_run_scoped_references(
             base_id = base.uriBaseId
         return text, base_id
 
+    def relative_to_scanned_tree(uri: str) -> str:
+        """*uri* made relative to *source_dir* when it is an absolute path or
+        file URI under it; anything else, and every uri when no root was given,
+        comes back unchanged."""
+        if source_dir is None or not uri:
+            return uri
+        if not (uri.startswith("/") or uri.lower().startswith("file:")):
+            return uri
+        # Imported here: sarif_utils imports this module.
+        from automated_security_helper.utils.sarif_utils import _sanitize_uri
+
+        root = path_in_record_form(Path(source_dir).resolve())
+        candidate = _sanitize_uri(uri, root, root.as_posix() + "/")
+        # _sanitize_uri also strips the file: scheme from a uri outside the
+        # root; that one keeps the form the expansion gave it.
+        if candidate.startswith("/") or re.match(
+            r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate
+        ):
+            return uri
+        return candidate
+
     def detach_artifact_location(location: object) -> None:
         if not isinstance(location, dict):
             return
@@ -3182,6 +3228,8 @@ def _detach_run_scoped_references(
         if remaining == base_id:
             # The definition names no uri to expand with; left as written.
             return
+        if remaining is None:
+            expanded = relative_to_scanned_tree(expanded)
         location["uri"] = expanded
         location.pop("uriBaseId", None)
         if remaining is not None:
