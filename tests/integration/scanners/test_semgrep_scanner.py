@@ -89,6 +89,13 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
     assert scanner.use_uv_tool is True
     assert scanner.command == "semgrep"
 
+    # Semgrep publishes no Windows build, so ``unsupported_platform_reason`` makes
+    # validation report False there whatever the resolver finds (see
+    # ``test_semgrep_scanner_validate``). The "can run" answers below are the
+    # platform's own; the UV version probe and the "nothing found" answer hold
+    # everywhere.
+    can_run = sys.platform != "win32"
+
     # Test UV tool version detection
     with unittest.mock.patch(
         "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
@@ -132,7 +139,7 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         mock_runner.return_value = mock_runner_instance
         mock_runner_instance.is_uv_available.return_value = True
 
-        assert scanner.validate_plugin_dependencies() is True
+        assert scanner.validate_plugin_dependencies() is can_run
 
     # Test validation with UV tool unavailable but direct executable available
     with (
@@ -149,8 +156,11 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         mock_runner_instance.is_uv_available.return_value = False
         mock_find.return_value = "/usr/local/bin/semgrep"
 
-        assert scanner.validate_plugin_dependencies() is True
-        assert scanner.use_uv_tool is False  # Should be disabled after fallback
+        assert scanner.validate_plugin_dependencies() is can_run
+        if can_run:
+            # Should be disabled after fallback; on an unsupported platform
+            # validation answers before it consults the resolver at all.
+            assert scanner.use_uv_tool is False
 
     # Restore the flag before the next case. These four blocks share one scanner
     # instance, and the fallback above leaves use_uv_tool False --
