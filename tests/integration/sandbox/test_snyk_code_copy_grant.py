@@ -67,6 +67,55 @@ exit 0
 """
 
 
+#: The same stand-in for Windows, which has no ``sh``, ``find`` or ``paste``: the same
+#: three facts written in Python, behind a batch launcher found by PATHEXT.
+STAND_IN_PY = """\
+import json
+import os
+import sys
+
+target = ""
+out = ""
+for a in sys.argv[1:]:
+    if a.startswith("--sarif-file-output="):
+        out = a[len("--sarif-file-output="):]
+    elif a in ("code", "test") or a.startswith("--"):
+        continue
+    else:
+        target = a
+files = sorted(
+    "./" + os.path.relpath(os.path.join(root, name), target).replace(os.sep, "/")
+    for root, _dirs, names in os.walk(target)
+    for name in names
+)
+try:
+    with open(os.path.join(os.path.dirname(target), "neighbor", "file.txt")) as f:
+        f.read()
+    neighbor = True
+except OSError:
+    neighbor = False
+with open(os.path.join(os.path.dirname(out), "stand-in-saw.json"), "w") as f:
+    json.dump({"target": target, "files": files, "neighbor_readable": neighbor}, f)
+with open(out, "w") as f:
+    f.write(
+        '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"SnykCode","rules":[]}},'
+        '"results":[]}]}'
+    )
+"""
+
+
+def _install_stand_in_snyk(bin_dir: Path) -> None:
+    if os.name == "nt":
+        (bin_dir / "snyk_stand_in.py").write_text(STAND_IN_PY, encoding="utf-8")
+        (bin_dir / "snyk.cmd").write_text(
+            f'@"{sys.executable}" "%~dp0snyk_stand_in.py" %*\r\n', encoding="utf-8"
+        )
+        return
+    stand_in = bin_dir / "snyk"
+    stand_in.write_text(STAND_IN)
+    stand_in.chmod(0o755)
+
+
 def _required() -> set:
     raw = os.environ.get("ASH_REQUIRE_SANDBOX_BACKENDS", "")
     return {name.strip() for name in raw.split(",") if name.strip()}
@@ -117,9 +166,7 @@ def _scan(tmp_path: Path, mode: str) -> dict:
     # tmp_path and would include the copy.
     bin_dir = tmp_path / "stand-in"
     bin_dir.mkdir()
-    stand_in = bin_dir / "snyk"
-    stand_in.write_text(STAND_IN)
-    stand_in.chmod(0o755)
+    _install_stand_in_snyk(bin_dir)
 
     # A stand-in uv as well, which records any call: the run is online, because
     # snyk-code does not run offline, and no unselected scanner may ask uv about its
@@ -132,6 +179,10 @@ def _scan(tmp_path: Path, mode: str) -> dict:
         "TMPDIR": str(temp_root),
         "SNYK_TOKEN": "stand-in",
     }
+    if os.name == "nt":
+        # Windows' temp directory comes from TEMP/TMP and the profile from
+        # USERPROFILE, not TMPDIR/HOME.
+        env.update(TEMP=str(temp_root), TMP=str(temp_root), USERPROFILE=str(home))
     env = stand_in_env(uv_bin, uv_log, env)
     env.pop("ASH_OFFLINE", None)
     command = [
