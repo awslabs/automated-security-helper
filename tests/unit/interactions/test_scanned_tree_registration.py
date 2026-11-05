@@ -64,9 +64,12 @@ def test_a_workspace_registers_its_root(tmp_path):
     root = tmp_path / "workspace"
     root.mkdir()
 
-    wrapped = mod._in_scanned_tree_from_arguments(
-        lambda **kwargs: seen.append(subprocess_utils.scanned_trees())
-    )
+    # The wrapper binds the arguments against the wrapped function's signature,
+    # so the stand-in names the parameters the real run_ash_scan names.
+    def run(source_dir=None, workspace_plan=None):
+        seen.append(subprocess_utils.scanned_trees())
+
+    wrapped = mod._in_scanned_tree_from_arguments(run)
     wrapped(workspace_plan=SimpleNamespace(workspace_root=str(root)))
 
     assert seen == [[str(root.absolute())]]
