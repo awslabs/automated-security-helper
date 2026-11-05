@@ -47,8 +47,9 @@ def _skipped(patterns, path: str) -> bool:
 
 
 def _known_ignore_values(test_plugin_context):
+    # Construction runs ``_process_config_options`` (``model_post_init``); a second
+    # call appends every value again, so the arguments are read as built.
     scanner = CheckovScanner(context=test_plugin_context, config=CheckovScannerConfig())
-    scanner._process_config_options()
     return [
         arg.key[len("--skip-path=") :]
         for arg in scanner.args.extra_args
