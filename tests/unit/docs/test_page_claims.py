@@ -15325,15 +15325,18 @@ _A_CHILDS_SPELLING_IS_THAT_SECTION = (
 )
 #: The same paragraph, on a file that writes two spellings.
 _TWO_SPELLINGS_ARE_REFUSED = (
-    "A file that writes two such spellings, such as `detect-secrets` and "
-    "`DETECT_SECRETS`, is refused with exit 3 by a scan and by `ash config validate`, "
-    "which name both spellings and none of their values."
+    "A file that writes two such spellings, neither of them the plugin's own name, "
+    "such as `DetectSecrets` and `DETECT_SECRETS`, is refused with exit 3 by a scan "
+    "and by `ash config validate`, which name both spellings and none of their "
+    "values. When one of the two is the plugin's own name (`detect-secrets`), the "
+    "file is not refused: the plugin's own name wins key by key where both set a "
+    "value."
 )
 #: exit-codes.md's ash scan row and ash config row on that refusal.
 _TWO_SPELLINGS_ROWS = [
     (
-        "and so does one plugin's section written under two spellings, such as "
-        "`detect-secrets` and `DETECT_SECRETS`"
+        "and so does one plugin's section written under two spellings, neither of "
+        "them the plugin's own name, such as `DetectSecrets` and `DETECT_SECRETS`"
     ),
     (
         "it or an override does not validate (one plugin's section written under two "
@@ -15450,7 +15453,11 @@ def test_a_childs_spelling_of_a_section_its_base_writes_is_that_section(
 
 
 @pytest.mark.parametrize("command", ["scan", "validate"])
-@pytest.mark.parametrize("spellings", [2, 1], ids=["two-spellings", "control-one"])
+@pytest.mark.parametrize(
+    "spellings",
+    [2, 1, 3],
+    ids=["two-spellings", "control-one", "control-own-name-and-a-variant"],
+)
 @pytest.mark.integration
 def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
     tmp_path: Path, command: str, spellings: int
@@ -15458,19 +15465,22 @@ def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
     """configure.md (Share settings with `extends`), and exit-codes.md (ash scan, ash
     config).
 
-    An operator config writes detect-secrets' section as ``detect-secrets`` and as
-    ``DETECT_SECRETS``, the second with a ``baseline_file`` value. A scan and ``ash
-    config validate`` with that file must exit 3, naming both spellings and not the
-    value. The control writes ``DETECT_SECRETS`` alone, which both accept.
+    An operator config writes detect-secrets' section as ``DetectSecrets`` and as
+    ``DETECT_SECRETS``, neither of them the plugin's own name, the second with a
+    ``baseline_file`` value. A scan and ``ash config validate`` with that file must
+    exit 3, naming both spellings and not the value. The controls write
+    ``DETECT_SECRETS`` alone, and the plugin's own name ``detect-secrets`` beside
+    ``DETECT_SECRETS``, which both accept: the plugin's own name wins key by key.
     """
     assert_on_page(CONFIGURE, _TWO_SPELLINGS_ARE_REFUSED)
     for row in _TWO_SPELLINGS_ROWS:
         assert_on_page(EXIT_CODES, row)
     value = "page-claims-spelling-value-7c41.json"
     sections: Dict[str, Any] = {"DETECT_SECRETS": {"enabled": True}}
-    if spellings == 2:
+    if spellings in (2, 3):
+        first = "DetectSecrets" if spellings == 2 else "detect-secrets"
         sections = {
-            "detect-secrets": {"enabled": True},
+            first: {"enabled": True},
             "DETECT_SECRETS": {"enabled": True, "options": {"baseline_file": value}},
         }
     config = _operator_config(
@@ -15486,13 +15496,12 @@ def test_a_file_that_writes_two_spellings_of_a_section_is_refused(
     result = _ash(args, cwd=tmp_path)
     text = _squeezed(result.stdout + result.stderr)
 
-    if spellings == 1:
+    if spellings in (1, 3):
         assert result.returncode == 0, _output_tail(result)
         return
     assert result.returncode == 3, _output_tail(result)
-    assert _squeezed("'DETECT_SECRETS' and 'detect-secrets'") in text, _output_tail(
-        result
-    )
+    for named in ("scanners.DetectSecrets", "scanners.DETECT_SECRETS", "ambiguous"):
+        assert _squeezed(named) in text, _output_tail(result)
     assert value not in result.stdout + result.stderr, _output_tail(result)
 
 
