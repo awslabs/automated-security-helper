@@ -387,7 +387,13 @@ class TestReportCommand:
     def test_a_cloud_reporter_the_operator_enabled_runs(
         self, tmp_path, requests, security_hub_runs
     ):
-        """Control: the operator's override turns it on."""
+        """Control: the operator's override turns it on.
+
+        ``ash report`` runs the reporter's dependency check first, as a scan
+        does. Every request here is refused: Security Hub's DescribeHub refusal
+        is tolerated (the check goes on), and the override names the account, so
+        the check needs no STS lookup and passes without a successful call.
+        """
         output_dir = tmp_path / "out"
         _stored_results(output_dir)
 
@@ -399,6 +405,8 @@ class TestReportCommand:
             "reporters.aws-security-hub.enabled=true",
             "--config-overrides",
             "reporters.aws-security-hub.options.aws_region=us-east-1",
+            "--config-overrides",
+            "reporters.aws-security-hub.options.account_id=123456789012",
             "--config-overrides",
             "reporters.aws-security-hub.options.findings_scope=fixture-project",
         )
@@ -452,18 +460,40 @@ class TestReportCommand:
         assert requests == []
         assert sessions == []
 
-    def test_overrides_that_enable_s3_reach_put_object(self, tmp_path, requests):
+    def test_overrides_that_enable_s3_reach_put_object(
+        self, tmp_path, requests, monkeypatch
+    ):
         """Control: the operator's overrides turn it on and aim it, as far as PutObject.
 
         The config file still names the plugin module. Called directly rather
         than through CliRunner: the refused upload logs an error, and a record
         pytest's live logging writes during an invoke swaps sys.stdout under
         CliRunner, which then fails reading its own closed output stream.
+
+        ``ash report`` runs the reporter's dependency check first, as a scan
+        does, and S3's check needs an identity: STS GetCallerIdentity is
+        answered here (HeadBucket's refusal is tolerated by the check), so the
+        command gets as far as the upload, which every other request refuses.
         """
         import typer
 
         from automated_security_helper.cli.report import report_command
         from automated_security_helper.core.enums import AshLogLevel
+
+        refusing_request = botocore.client.BaseClient._make_api_call
+
+        def identity_answered(client, operation_name, api_params):
+            if (client.meta.service_model.service_name, operation_name) == (
+                "sts",
+                "GetCallerIdentity",
+            ):
+                requests.append(("sts", operation_name))
+                return {"Account": "123456789012"}
+            return refusing_request(client, operation_name, api_params)
+
+        monkeypatch.setattr(
+            botocore.client.BaseClient, "_make_api_call", identity_answered
+        )
 
         output_dir = tmp_path / "out"
         _stored_results(output_dir)

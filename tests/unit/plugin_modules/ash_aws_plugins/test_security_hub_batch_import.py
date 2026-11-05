@@ -1203,6 +1203,11 @@ def _sent_by_ash_report(
     Hub and STS are stubbed: the import must happen, and GetFindings is
     answered only when *archives*, so archiving that was not asked for, or is
     missing, fails the stubber.
+
+    ``ash report`` runs the reporter's dependency check before it reports, as a
+    scan does, so the stubs answer that first: DescribeHub and, because the
+    overrides name no ``account_id``, the account lookup; the import then asks
+    STS for the caller again.
     """
     import typer
 
@@ -1220,10 +1225,16 @@ def _sent_by_ash_report(
     securityhub, stub = _stubbed_client("securityhub")
     imports = _Capture(securityhub)
     queries = _Capture(securityhub, "GetFindings")
+    stub.add_response(
+        "describe_hub",
+        {"HubArn": f"arn:aws:securityhub:{REGION}:{ACCOUNT}:hub/default"},
+    )
     if archives:
         stub.add_response("get_findings", {"Findings": []})
     stub.add_response("batch_import_findings", _ok(1))
     sts, sts_stub = _stubbed_client("sts")
+    # The dependency check's account lookup, then the import's.
+    sts_stub.add_response("get_caller_identity", _caller(ACCOUNT))
     sts_stub.add_response("get_caller_identity", _caller(ACCOUNT))
     clients = {"securityhub": securityhub, "sts": sts}
     monkeypatch.chdir(checkout)
@@ -4317,8 +4328,13 @@ def test_ash_report_judges_the_config_against_the_results_tree(
                 ],
             )
 
-    session.assert_not_called()
-    assert "options.findings_scope" in capsys.readouterr().err
+    # The command runs the reporter's dependency check before it reports, so
+    # the one session is that check's; it is refused here (the double raises),
+    # and nothing is imported.
+    session.assert_called_once()
+    err = " ".join(capsys.readouterr().err.split())
+    assert "options.findings_scope" in err
+    assert "reporter 'aws-security-hub' cannot run: its dependency check refused" in err
 
 
 _REPOSITORY_OPTIONS = (
