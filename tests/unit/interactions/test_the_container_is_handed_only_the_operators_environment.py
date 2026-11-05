@@ -735,40 +735,47 @@ def test_the_pre_flight_of_a_scan_that_names_its_config_never_asks_the_rule(
 
 @pytest.mark.unit
 def test_a_scan_that_names_its_config_logs_nothing_about_files_discovery_would_read(
-    layout, monkeypatch, caplog
+    layout, monkeypatch
 ):
-    """Discovery reads the source directory's pyproject.toml and says so when it
-    cannot use it. A scan that names its config reads no such file, so its
-    pre-flight logs nothing about one; without a named config the same layout
-    does log it, which shows the log is captured."""
+    """Discovery reads the source directory's pyproject.toml for a [tool.ash]
+    table. A scan that names its config reads no such file, so its pre-flight
+    does not open one; without a named config the same layout does, which shows
+    the read is observed.
+
+    The read is counted at ``pyproject_has_ash_table`` and not looked for in the
+    log: behind a higher-precedence source, as in this layout, what discovery
+    cannot use in the pyproject.toml is returned as a note and never logged
+    (config_sources._pyproject_is_a_source)."""
+    from automated_security_helper.config import config_sources
+
     _discoverable_source_with_an_env_config(layout, monkeypatch)
     _unparsable_source_config(layout["source"])
     named = _write(layout["w"] / "ops" / "named.yaml", "project_name: n\n")
 
-    def pyproject_messages() -> List[str]:
-        return [
-            record.getMessage()
-            for record in caplog.records
-            if "pyproject.toml" in record.getMessage()
-        ]
+    reads_of_pyproject: List[Path] = []
+    real = config_sources.pyproject_has_ash_table
 
-    with caplog.at_level(logging.WARNING, logger="ash"):
-        rac._require_mountable_inputs(
-            layout["source"], layout["out"], None, None, None, rac.OperatorConfigReads()
-        )
-    assert pyproject_messages(), "the control run should log about pyproject.toml"
+    def counting(path, *args, **kwargs):
+        reads_of_pyproject.append(Path(path))
+        return real(path, *args, **kwargs)
 
-    caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="ash"):
-        rac._require_mountable_inputs(
-            layout["source"],
-            layout["out"],
-            str(named),
-            None,
-            None,
-            rac.OperatorConfigReads(),
-        )
-    assert pyproject_messages() == []
+    monkeypatch.setattr(config_sources, "pyproject_has_ash_table", counting)
+
+    rac._require_mountable_inputs(
+        layout["source"], layout["out"], None, None, None, rac.OperatorConfigReads()
+    )
+    assert reads_of_pyproject, "the control run should read the pyproject.toml"
+
+    reads_of_pyproject.clear()
+    rac._require_mountable_inputs(
+        layout["source"],
+        layout["out"],
+        str(named),
+        None,
+        None,
+        rac.OperatorConfigReads(),
+    )
+    assert reads_of_pyproject == []
 
 
 def _discovery_layouts():
@@ -821,9 +828,13 @@ def _discovery_layouts():
             True,
             id="pyproject-without-an-ash-table",
         ),
-        pytest.param(dangling_link, True, id="dangling-link-with-a-config-name"),
+        # A name that exists is a source whatever it is: discovery selects a
+        # dangling link or a directory at a config name and the scan refuses it
+        # when it reads it, rather than skipping it as though there were no config
+        # (config_sources, "Failure"), so ASH_CONFIG is not the scan's config.
+        pytest.param(dangling_link, False, id="dangling-link-with-a-config-name"),
         pytest.param(
-            directory_named_like_a_config, True, id="directory-with-a-config-name"
+            directory_named_like_a_config, False, id="directory-with-a-config-name"
         ),
     ]
 
@@ -1515,9 +1526,12 @@ def test_an_unmountable_env_chosen_file_path_shows_no_value(layout, monkeypatch)
         ENVIRONMENT_VALUE_SHOWN,
     )
 
-    # A single quote: distinctive, and legal in an NTFS name, where a double
-    # quote is not, so the fixture directory can exist on every platform.
-    value = "chain'dir"
+    # A comma: one of the characters --mount cannot carry
+    # (run_ash_container._UNMOUNTABLE_CHARACTERS: comma, double quote, line
+    # breaks), distinctive, and legal in an NTFS name, where a double quote is not,
+    # so the fixture directory can exist on every platform. A single quote is
+    # mountable and would give no refusal.
+    value = "chain,dir"
     monkeypatch.setenv("ASH_CHAIN_Q", value)
     _write(layout["w"] / value / "base.yaml", "project_name: b\n")
     config = _write(layout["w"] / "ash.yaml", "extends: ${ASH_CHAIN_Q}/base.yaml\n")
@@ -2868,9 +2882,22 @@ def test_a_relative_name_is_judged_from_the_physical_directory_alone_without_pwd
     layout, monkeypatch
 ):
     """The control: with ``$PWD`` unset only the physical walk runs, and that
-    walk passes no link in the checkout, so the same name is accepted."""
+    walk passes no link in the checkout, so the same name is accepted.
+
+    Windows has no physical working directory to walk: ``os.getcwd()`` returns the
+    directory as ``chdir`` was given it, link included, so the name is walked
+    through the checkout's link even with ``$PWD`` unset and is refused there, in
+    the words the ``$PWD`` case gives."""
     _standing_below_a_checkout_link(layout, monkeypatch)
     monkeypatch.delenv("PWD", raising=False)
+
+    if sys.platform == "win32":
+        with pytest.raises(rac.ContainerInputError, match="ASH_CONFIG file") as refused:
+            rac._refuse_config_linked_out_of_the_tree(
+                "../cfg.yaml", layout["source"], "ASH_CONFIG file"
+            )
+        assert "is inside the scanned tree but is a link" in str(refused.value)
+        return
 
     rac._refuse_config_linked_out_of_the_tree(
         "../cfg.yaml", layout["source"], "ASH_CONFIG file"

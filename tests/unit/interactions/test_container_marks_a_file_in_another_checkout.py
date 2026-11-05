@@ -370,7 +370,12 @@ def test_a_config_in_another_checkout_grants_nothing_inside_in_a_workspace_scan(
     assert host["bare"]["sandbox.env_scanners"] == []
     assert inside == host
     run = container.last
-    assert run[run.index(FLAG) + 1] == "/ash-config/ash.yaml"
+    # A workspace scan's --config from another checkout is marked as a whole chain
+    # (run-in-a-container.md, The config file: "A workspace scan does the same with
+    # a `--config` from another git checkout"), so the another-checkout mark, which
+    # a one-directory --config chain keeps, is not sent.
+    assert CHAIN_FLAG in run
+    assert FLAG not in run
 
 
 def test_a_base_in_another_checkout_grants_nothing_but_the_root_keeps_its_own_section(
