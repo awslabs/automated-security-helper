@@ -242,6 +242,51 @@ class TestFromSarifResultTags:
         assert vuln.tags is None
 
 
+class TestFromSarifResultFixAvailability:
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (True, True),
+            (False, False),
+            ({"name": "npm-package", "version": "2.0.0"}, True),
+            (
+                {"name": "npm-package", "version": "2.0.0", "isSemVerMajor": True},
+                True,
+            ),
+            (None, None),
+            ({}, None),
+            ({"name": "npm-package"}, None),
+            ({"version": "2.0.0"}, None),
+            ({"name": "", "version": "2.0.0"}, None),
+            ({"name": "npm-package", "version": " "}, None),
+            ({"name": 42, "version": "2.0.0"}, None),
+            ({"name": "npm-package", "version": 2}, None),
+            ({"available": True}, None),
+            ("true", None),
+            ("false", None),
+            (1, None),
+            (0, None),
+            ([], None),
+        ],
+    )
+    def test_normalizes_without_changing_source_properties(self, value, expected):
+        result = _make_result()
+        result.properties = PropertyBag(fix_available=value)
+        before = result.model_dump(mode="json")
+
+        vuln = FlatVulnerability.from_sarif_result(result, "npm-audit", "SCA")
+
+        assert vuln.fix_available is expected
+        assert result.model_dump(mode="json") == before
+        if value is not None:
+            assert json.loads(vuln.properties)["fix_available"] == value
+            assert json.loads(vuln.raw_data)["properties"]["fix_available"] == value
+
+    def test_missing_property_stays_unknown(self):
+        vuln = FlatVulnerability.from_sarif_result(_make_result(), "bandit", "SAST")
+        assert vuln.fix_available is None
+
+
 class TestFromSarifResultScannerType:
     """Scanner type is passed through."""
 

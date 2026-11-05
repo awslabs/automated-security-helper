@@ -579,6 +579,7 @@ sarif:
     originalUriBaseIds: null
     policies: []
     properties:
+      ash_occurrence_context_version: 1
       tags: []
     redactionTokens: []
     results:
@@ -649,6 +650,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: package-lock.json
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 17
+                startColumn: 1
+                startLine: 13
+          message:
+            state: resolved
+            text: 'Package: lodash
+
+              Installed Version: 4.17.20
+
+              Vulnerability CVE-2021-23337
+
+              Severity: HIGH
+
+              Fixed Version: 4.17.21
+
+              Link: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)'
+          resolved_rule:
+            id: CVE-2021-23337
+          rule_index: 0
+          version: 1
         issue_severity: HIGH
         package_name: lodash
         package_path: node_modules/lodash
@@ -744,6 +781,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: package-lock.json
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 17
+                startColumn: 1
+                startLine: 13
+          message:
+            state: resolved
+            text: 'Package: lodash
+
+              Installed Version: 4.17.20
+
+              Vulnerability CVE-2026-4800
+
+              Severity: HIGH
+
+              Fixed Version: 4.18.0
+
+              Link: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)'
+          resolved_rule:
+            id: CVE-2026-4800
+          rule_index: 1
+          version: 1
         issue_severity: HIGH
         package_name: lodash
         package_path: node_modules/lodash
@@ -839,6 +912,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: package-lock.json
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 17
+                startColumn: 1
+                startLine: 13
+          message:
+            state: resolved
+            text: 'Package: lodash
+
+              Installed Version: 4.17.20
+
+              Vulnerability CVE-2020-28500
+
+              Severity: MEDIUM
+
+              Fixed Version: 4.17.21
+
+              Link: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)'
+          resolved_rule:
+            id: CVE-2020-28500
+          rule_index: 2
+          version: 1
         issue_severity: MEDIUM
         package_name: lodash
         package_path: node_modules/lodash
@@ -934,6 +1043,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: package-lock.json
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 17
+                startColumn: 1
+                startLine: 13
+          message:
+            state: resolved
+            text: 'Package: lodash
+
+              Installed Version: 4.17.20
+
+              Vulnerability CVE-2025-13465
+
+              Severity: MEDIUM
+
+              Fixed Version: 4.17.23
+
+              Link: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)'
+          resolved_rule:
+            id: CVE-2025-13465
+          rule_index: 3
+          version: 1
         issue_severity: MEDIUM
         package_name: lodash
         package_path: node_modules/lodash
@@ -1029,6 +1174,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: package-lock.json
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 17
+                startColumn: 1
+                startLine: 13
+          message:
+            state: resolved
+            text: 'Package: lodash
+
+              Installed Version: 4.17.20
+
+              Vulnerability CVE-2026-2950
+
+              Severity: MEDIUM
+
+              Fixed Version: 4.18.0
+
+              Link: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)'
+          resolved_rule:
+            id: CVE-2026-2950
+          rule_index: 4
+          version: 1
         issue_severity: MEDIUM
         package_name: lodash
         package_path: node_modules/lodash
@@ -1124,6 +1305,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: requirements.txt
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 2
+                startColumn: 1
+                startLine: 2
+          message:
+            state: resolved
+            text: 'Package: requests
+
+              Installed Version: 2.19.1
+
+              Vulnerability CVE-2018-18074
+
+              Severity: HIGH
+
+              Fixed Version: 2.20.0
+
+              Link: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)'
+          resolved_rule:
+            id: CVE-2018-18074
+          rule_index: 5
+          version: 1
         issue_severity: HIGH
         package_name: requests
         package_version: 2.19.1
@@ -1218,6 +1435,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: requirements.txt
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 2
+                startColumn: 1
+                startLine: 2
+          message:
+            state: resolved
+            text: 'Package: requests
+
+              Installed Version: 2.19.1
+
+              Vulnerability CVE-2023-32681
+
+              Severity: MEDIUM
+
+              Fixed Version: 2.31.0
+
+              Link: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)'
+          resolved_rule:
+            id: CVE-2023-32681
+          rule_index: 6
+          version: 1
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1
@@ -1312,6 +1565,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: requirements.txt
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 2
+                startColumn: 1
+                startLine: 2
+          message:
+            state: resolved
+            text: 'Package: requests
+
+              Installed Version: 2.19.1
+
+              Vulnerability CVE-2024-35195
+
+              Severity: MEDIUM
+
+              Fixed Version: 2.32.0
+
+              Link: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)'
+          resolved_rule:
+            id: CVE-2024-35195
+          rule_index: 7
+          version: 1
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1
@@ -1406,6 +1695,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: requirements.txt
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 2
+                startColumn: 1
+                startLine: 2
+          message:
+            state: resolved
+            text: 'Package: requests
+
+              Installed Version: 2.19.1
+
+              Vulnerability CVE-2024-47081
+
+              Severity: MEDIUM
+
+              Fixed Version: 2.32.4
+
+              Link: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)'
+          resolved_rule:
+            id: CVE-2024-47081
+          rule_index: 8
+          version: 1
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1
@@ -1500,6 +1825,42 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: trivy
+          locations:
+          - bases:
+              entries:
+              - id: ROOTPATH
+                location:
+                  uri: file:///src/
+              stop: end
+            location:
+              artifact:
+                uri: requirements.txt
+                uriBaseId: ROOTPATH
+              region:
+                endColumn: 1
+                endLine: 2
+                startColumn: 1
+                startLine: 2
+          message:
+            state: resolved
+            text: 'Package: requests
+
+              Installed Version: 2.19.1
+
+              Vulnerability CVE-2026-25645
+
+              Severity: MEDIUM
+
+              Fixed Version: 2.33.0
+
+              Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)'
+          resolved_rule:
+            id: CVE-2026-25645
+          rule_index: 9
+          version: 1
         issue_severity: MEDIUM
         package_name: requests
         package_version: 2.19.1

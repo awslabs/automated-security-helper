@@ -55,6 +55,13 @@
 
 from __future__ import annotations
 
+from automated_security_helper.utils.occurrence_context import (
+    CONTEXT_PROPERTY,
+    CONTEXT_VERSION,
+    MERGE_MARKER,
+    is_composed_run,
+    occurrence_context,
+)
 from automated_security_helper.utils.severity_ladder import MISSING_SARIF_LEVEL
 from automated_security_helper.utils.undecodable_text import (
     RecordModel,
@@ -2894,6 +2901,42 @@ class SarifReport(RecordModel):
     ) -> None:
         """Fold one run into this report's first run; see ``merge_sarif_report``."""
         report_tool = report_run.tool
+
+        def curated_dump(
+            res: "Result", source_run: "Run", drop_rule_index: bool = True
+        ) -> Dict[str, Any]:
+            """One curated dump for every copy a merge makes of a result.
+
+            A full dump, not one of the set fields only: pydantic marks a field
+            set on construction or assignment, never on an append, so a dump of
+            the set fields drops what code appended in place to a default list
+            (a tag on a fresh PropertyBag, a related location). A full dump also
+            marks every field as set, so a result that stated no level came back
+            with the default level set and resolve_missing_levels could no
+            longer give it the level its rule's defaultConfiguration names. That
+            one field keeps its unset state; nothing else reads the set-fields
+            record of a result.
+            """
+            clean_result = res.model_dump(
+                exclude={"ruleIndex"} if drop_rule_index else set()
+            )
+            if "level" not in res.model_fields_set:
+                clean_result.pop("level", None)
+            properties = clean_result.get("properties")
+            if isinstance(properties, dict):
+                properties.pop(CONTEXT_PROPERTY, None)
+            context = occurrence_context(res, source_run)
+            if context is not None:
+                properties = properties if isinstance(properties, dict) else {}
+                properties[CONTEXT_PROPERTY] = context
+                clean_result["properties"] = properties
+            return clean_result
+
+        def curated_copy(
+            res: "Result", source_run: "Run", drop_rule_index: bool = True
+        ) -> "Result":
+            return Result(**curated_dump(res, source_run, drop_rule_index))
+
         # Copies, never the incoming objects: ash merge promises not to mutate
         # its inputs, and a later merge appends to the aggregate's lists, so an
         # aliased invocation or rule would change the report it came from.
@@ -2909,18 +2952,12 @@ class SarifReport(RecordModel):
         for res in report_run.results or []:
             # Remove `ruleIndex`, since we're reordering rules. RuleId should
             # correctly correlate results to associated rules in our set of scanners
-            # without it. A full dump, not one of the set fields only: pydantic marks
-            # a field set on construction or assignment, never on an append, so a
-            # dump of the set fields drops what code appended in place to a default
-            # list (a tag on a fresh PropertyBag, a related location).
-            clean_result = res.model_dump(exclude={"ruleIndex"})
-            # A full dump marks every field as set, so a result that stated no level
-            # came back with the default level set and resolve_missing_levels could
-            # no longer give it the level its rule's defaultConfiguration names. That
-            # one field keeps its unset state; nothing else reads the set-fields
-            # record of a result.
-            if "level" not in res.model_fields_set:
-                clean_result.pop("level", None)
+            # without it. The dump, the unset level and the occurrence context
+            # (curated before the run-scoped references are detached: it is read
+            # from the incoming result and run while their tables and indices
+            # still apply) come from curated_dump, the same code the aggregate's
+            # own results go through, so the two copies cannot drift.
+            clean_result = curated_dump(res, report_run)
             _keep_the_rule_by_id(clean_result, res, report_tool)
             if self.runs:
                 # Folded into a run that does not carry the incoming run's
@@ -2930,8 +2967,20 @@ class SarifReport(RecordModel):
                 _detach_run_scoped_references(clean_result, report_run, self.runs[0])
             report_results.append(Result(**clean_result))
 
+        needs_marker = is_composed_run(report_run) or any(
+            getattr(result.properties, CONTEXT_PROPERTY, None) is not None
+            for result in report_results
+        )
+
         if self.runs:
             self_run = self.runs[0]
+            if needs_marker and not is_composed_run(self_run):
+                # Capture an existing target's local references before its first
+                # transition to aggregate lifecycle disables table-based lookup.
+                self_run.results = [
+                    curated_copy(result, self_run, False)
+                    for result in self_run.results or []
+                ]
             if include_driver:
                 _fold_tool_component(self_run, report_tool.driver, include_rules)
                 # A scanner's own SARIF can define rules in its tool.extensions
@@ -2961,6 +3010,10 @@ class SarifReport(RecordModel):
         if self_run.results is None:
             self_run.results = []
         self_run.results.extend(report_results)
+        if needs_marker:
+            if self_run.properties is None:
+                self_run.properties = PropertyBag()
+            setattr(self_run.properties, MERGE_MARKER, CONTEXT_VERSION)
         if self_run.invocations is None or len(self_run.invocations) == 0:
             # Include by default if it doesn't have
             # any invocations or doesn't exist yet
@@ -3113,6 +3166,17 @@ def _detach_run_scoped_references(
         if base_definition(base_id) is None:
             return
         if same_chain(base_id):
+            return
+        uri = location.get("uri")
+        if isinstance(uri, str) and (
+            uri.startswith("/") or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", uri)
+        ):
+            # SARIF 3.4.4: an absolute URI has no base, so the differing base
+            # definition does not apply to it. Prefixing would nest the scheme
+            # or the root (file:///src/file:///abs/x.py); the uri stays as
+            # written, and the base id, which names a base this aggregate
+            # defines differently, goes with the detachment.
+            location.pop("uriBaseId", None)
             return
         expanded, remaining = expand(location.get("uri"), base_id)
         if remaining == base_id:

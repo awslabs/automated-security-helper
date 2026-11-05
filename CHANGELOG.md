@@ -5609,6 +5609,31 @@
 
 ### Fixes
 
+- **Each occurrence of a finding gets its own flat id.** Occurrences that share a rule,
+  a file and a line range, such as two secrets on one line, used to collide on one `id`
+  in `ash.flat.json`. Findings that share all of that are now told apart by their column
+  and message, so an occurrence that used to share an id is re-keyed.
+
+- **`detected_at` in the flat report is the time the finding was observed, and is
+  unset when no timezone-aware time was recorded.** It used to be the time the report
+  was generated. It now takes the last detection time, the scanner invocation's end or
+  start time, or the first detection time, in that order, normalized to UTC. A time
+  without a timezone, or one that cannot be parsed, is skipped; a finding with no
+  usable time reports `null`. A plugin report's raw timestamp stays in `raw_data`.
+
+- **The flat report has a `fix_available` field.** It is `true` or `false` when the
+  scanner says whether a fix exists, and `null` when it does not. An npm upgrade
+  object that names a package and a version counts as `true`; the original value stays
+  in `properties` and `raw_data`.
+
+- **Merged SARIF keeps what a result's run tables said about it.** A result that
+  refers to its run's artifacts, logical locations, addresses, base URIs, rules or
+  message strings now carries an `ash_occurrence_context` property with only the
+  referenced evidence, and the merged run is marked with
+  `ash_occurrence_context_version`. Flattening a merged report reads that property, so
+  the flat record keeps its location, rule and message after the merge has reordered
+  the run's tables.
+
 - **`ash dependencies install` says when a later `uv sync` removes what it
   installed.** Run from a uv project's `.venv` (the layout of a container that runs
   `RUN uv sync`), the install adds cdk-nag's packages, and any other package it

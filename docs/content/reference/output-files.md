@@ -468,6 +468,11 @@ in a workspace scan. A file a converter wrote is identified by its path under
 apart by their column and message. So a finding keeps its id from one scan to the next,
 unless it has no fingerprints and an edit above it moves it to other lines.
 
+A finding's `detected_at` is optional. It is the time the scanner recorded for the
+finding, in UTC, and is `null` when the scanner recorded none with a timezone. A plugin
+timestamp without a timezone is not guessed at; it is kept only in the finding's
+`raw_data`.
+
 ## Per-scanner results {#per-scanner-results}
 
 `scanners/<name>/` is where each scanner writes, and under the sandbox it is the only
