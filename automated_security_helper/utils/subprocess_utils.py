@@ -2111,7 +2111,15 @@ def _non_batch_substitute(program: str) -> Optional[List[str]]:
     except (ImportError, ValueError):
         importable = False
     if importable:
-        return [sys.executable, "-m", name]
+        # runpy is what ``-m`` runs, so the module starts the same way. ``-m`` itself
+        # puts the working directory (usually the scanned tree) first on sys.path;
+        # python_code_argv drops it before anything is imported (utils/python_child.py).
+        from automated_security_helper.utils.python_child import python_code_argv
+
+        return python_code_argv(
+            f"import runpy; runpy.run_module({name!r}, run_name='__main__', "
+            "alter_sys=True)"
+        )
     return None
 
 
