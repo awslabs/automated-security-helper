@@ -924,6 +924,22 @@ def _gate_client_overrides(
             base = load_config_file_for_run(Path(session_config))[1]
         except ASHConfigValidationError:
             raise
+        except OSError as exc:
+            # A file the process cannot read is refused as a config file that
+            # could not be read, as a scan refuses one (exit 3), naming the
+            # file and the OS error without repeating the path.
+            from automated_security_helper.config.config_sources import (
+                describe_config_path,
+            )
+            from automated_security_helper.utils.error_text import (
+                os_error_without_named_file,
+            )
+
+            unreadable = Path(session_config)
+            raise ASHConfigSourceError(
+                f"could not read {describe_config_path(unreadable)}: "
+                f"{os_error_without_named_file(exc, unreadable)}"
+            ) from exc
         except Exception as exc:  # noqa: BLE001 -- a file that does not parse is a config error
             # A session config that does not parse is the operator's config
             # that is broken: reported as a scan reports it (exit 3), never as

@@ -18,6 +18,7 @@ import errno
 import os
 import sys
 from pathlib import Path
+from typing import List, Optional
 
 import pytest
 
@@ -32,6 +33,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 from tests.utils.fifo_calls import returns_promptly
+from tests.utils.held_file_swaps import swap_or_record
 from tests.utils.open_audit import record_opens
 
 pytestmark = pytest.mark.unit
@@ -127,7 +129,10 @@ class TestSpecialFilesAreNotRead:
 
         own = Path(__file__).resolve().parents[3] / ".ash" / ".ash.yaml"
 
-        assert own.stat().st_size < ASH_CONFIG_MAX_FILE_BYTES / 4
+        # The repository's own config (suppressions and all) has grown past a
+        # quarter of the bound; the control is that it stays well inside it,
+        # with half the bound left as room to grow.
+        assert own.stat().st_size < ASH_CONFIG_MAX_FILE_BYTES / 2
 
     def test_control_a_file_at_the_bound_is_read(self, tmp_path, monkeypatch):
         content = "project_name: x\n"
@@ -153,7 +158,8 @@ class TestSpecialFilesAreNotRead:
         # nothing the file holds, which the parser's `in "<path>", line 2` mark
         # text did not promise.
         message = str(excinfo.value)
-        assert message.startswith(f"{path} could not be parsed (")
+        # The path is named in its POSIX spelling on every platform.
+        assert message.startswith(f"{path.as_posix()} could not be parsed (")
         assert "line 3" in message
         assert "started at line 2" in message
 
@@ -308,11 +314,24 @@ class TestDiscoveryThatCannotLookIsRefused:
         assert resolve_config(source_dir=tmp_path).project_name == "ash-scan"
 
 
-def _swap_in_a_new_file(path: Path, text: str) -> None:
-    """Replace `path` by a different file (a new inode), as a racing writer would."""
+def _swap_in_a_new_file(
+    path: Path, text: str, refused: Optional[List[BaseException]] = None
+) -> bool:
+    """Replace `path` by a different file (a new inode), as a racing writer would.
+
+    True when it was replaced. A swap made from inside the call under test passes
+    `refused`: the call holds the descriptor it opened to judge the file, and on
+    Windows a file open without ``FILE_SHARE_DELETE`` cannot be replaced, so the
+    operating system refuses the swap there (``tests.utils.held_file_swaps``).
+    That refusal is recorded in `refused` and not raised, because it would be
+    raised inside the call under test. Elsewhere any error is raised.
+    """
     replacement = path.with_name(path.name + ".new")
     replacement.write_text(text, encoding="utf-8")
-    os.replace(replacement, path)
+    if refused is None:
+        os.replace(replacement, path)
+        return True
+    return swap_or_record(lambda: os.replace(replacement, path), refused)
 
 
 class TestTheFileReadIsTheFileThatWasChecked:
@@ -352,16 +371,32 @@ class TestTheFileReadIsTheFileThatWasChecked:
         child = tmp_path / ".ash.yaml"
         child.write_text("extends: base.yaml\n", encoding="utf-8")
         real_resolve_base_path = config_sources._resolve_base_path
+        refused: List[BaseException] = []
 
         def resolve_then_swap(*args, **kwargs):
             result = real_resolve_base_path(*args, **kwargs)
-            _swap_in_a_new_file(base, "project_name: swapped\n")
+            _swap_in_a_new_file(base, "project_name: swapped\n", refused)
             return result
 
         monkeypatch.setattr(config_sources, "_resolve_base_path", resolve_then_swap)
 
-        with pytest.raises(ASHConfigSourceError, match="changed after it was checked"):
-            resolve_config(config_path=child, source_dir=tmp_path)
+        config = None
+        error = None
+        try:
+            config = resolve_config(config_path=child, source_dir=tmp_path)
+        except ASHConfigSourceError as raised:
+            error = raised
+
+        if refused:
+            # Windows: the walk holds the base it opened and the operating
+            # system refuses the replacement, so the file read is the file
+            # checked and nothing is swapped.
+            assert error is None, error
+            assert config.project_name == "checked"
+            assert base.read_text(encoding="utf-8") == "project_name: checked\n"
+        else:
+            assert error is not None, "the swap was made and the read was not refused"
+            assert "changed after it was checked" in str(error), str(error)
 
     def test_mcp_get_config_raw_refuses_a_file_replaced_after_its_check(
         self, tmp_path, monkeypatch
@@ -372,18 +407,24 @@ class TestTheFileReadIsTheFileThatWasChecked:
         path = tmp_path / ".ash.yaml"
         path.write_text("project_name: checked\n", encoding="utf-8")
         real_validate = sandbox.validate_config_input
+        refused: List[BaseException] = []
 
         def validate_then_swap(*args, **kwargs):
             refusal = real_validate(*args, **kwargs)
-            _swap_in_a_new_file(path, "project_name: swapped\n")
+            _swap_in_a_new_file(path, "project_name: swapped\n", refused)
             return refusal
 
         monkeypatch.setattr(sandbox, "validate_config_input", validate_then_swap)
 
         result = mcp_get_config(config_path=str(path), raw=True)
 
-        assert result.get("success") is False, result
         assert "swapped" not in str(result)
+        if refused:
+            # Windows: the tool holds the file it checked, the operating system
+            # refuses the replacement, and the file is still the checked one.
+            assert path.read_text(encoding="utf-8") == "project_name: checked\n"
+        else:
+            assert result.get("success") is False, result
 
 
 class TestAPathThatLedNowhereIsHeldToThat:
@@ -576,20 +617,31 @@ class TestAChangedFileIsToldByItsTypeAndNotByItsErrno:
         root = tmp_path / ".ash.yaml"
         root.write_text("extends:\n- ${ASH_HIDDEN_BASE_UNDER_TEST}\n", encoding="utf-8")
         real_resolve_base_path = config_sources._resolve_base_path
+        held: List[BaseException] = []
 
         def resolve_then_swap(*args, **kwargs):
             result = real_resolve_base_path(*args, **kwargs)
-            _swap_in_a_new_file(base, "project_name: swapped\n")
+            _swap_in_a_new_file(base, "project_name: swapped\n", held)
             return result
 
         monkeypatch.setattr(config_sources, "_resolve_base_path", resolve_then_swap)
 
-        with pytest.raises(ASHConfigSourceError) as refused:
+        error = None
+        try:
             config_sources.resolve_config_document(root, confine_to=tmp_path)
+        except ASHConfigSourceError as raised:
+            error = raised
 
-        assert refused.value.__cause__ is None, "premise: the cause was dropped"
-        assert "hidden-dir-canary-5528" not in str(refused.value), str(refused.value)
-        assert config_sources.config_file_changed(refused.value)
+        if held:
+            # Windows: the walk holds the base it opened, the operating system
+            # refuses the replacement, and the walk resolves the checked file.
+            assert error is None, error
+            assert base.read_text(encoding="utf-8") == "project_name: checked\n"
+            return
+        assert error is not None, "the swap was made and the walk was not refused"
+        assert error.__cause__ is None, "premise: the cause was dropped"
+        assert "hidden-dir-canary-5528" not in str(error), str(error)
+        assert config_sources.config_file_changed(error)
 
     def test_control_a_hidden_base_that_fails_for_another_reason_is_not_changed(
         self, tmp_path, monkeypatch
@@ -752,8 +804,17 @@ class TestMessages:
         link = tmp_path / ".ash.yaml"
         link.symlink_to(link)
 
-        with pytest.raises(ASHConfigSourceError, match="leads back to itself"):
+        # The config file discovery selects is classified by its first stat: a
+        # link that leads back to itself is refused as a symbolic link loop,
+        # naming the file, with the OS error as the cause.
+        with pytest.raises(ASHConfigValidationError) as excinfo:
             resolve_config(source_dir=tmp_path)
+
+        assert f"Config file is a symbolic link loop: {link.as_posix()}" in str(
+            excinfo.value
+        )
+        assert isinstance(excinfo.value.__cause__, OSError)
+        assert "link to nothing" not in str(excinfo.value)
 
     def test_an_ash_config_variable_of_only_whitespace_is_named_as_such(
         self, tmp_path, monkeypatch

@@ -185,10 +185,18 @@ def test_a_sandbox_grants_file_name_is_shown_once_in_ash_log(tmp_path):
 
 @pytest.mark.unit
 def test_a_plugin_module_name_is_shown_once_in_ash_log(tmp_path):
-    """The plugin-module warning names the module the repository's file asked
-    for: "m<ESC>]<BEL><newline>x", each control shown once and the newline kept
-    off a line of its own. It was a repr, whose escapes ash.log showed again."""
+    """A module named "m<ESC>]<BEL><newline>x" is outside the plugin namespace.
+
+    Confinement keeps such an entry for the scan's namespace refusal, which
+    imports nothing and refuses the scan with exit 3 (``confine_plugin_modules``),
+    so ash.log holds no "Ignoring ash_plugin_modules" line for it. The refusal
+    shows the name once: each control as an escape, the newline kept off a line of
+    its own, and no escape shown again."""
+    from automated_security_helper.config.plugin_module_trust import (
+        refuse_plugin_modules_a_scan_refuses,
+    )
     from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.plugins.loader import PluginModuleNamespaceError
 
     checkout = tmp_path / "checkout"
     (checkout / ".ash").mkdir(parents=True)
@@ -198,15 +206,19 @@ def test_a_plugin_module_name_is_shown_once_in_ash_log(tmp_path):
     log = tmp_path / "ash.log"
 
     with _ash_log(log):
-        resolve_config(source_dir=checkout)
+        config = resolve_config(source_dir=checkout)
 
     written = _written(log)
-    assert "Ignoring ash_plugin_modules entries 'm\\x1b]\\x07\\x0ax'" in written, repr(
-        written
-    )
-    assert "\\\\" not in written, repr(written)
+    assert "Ignoring ash_plugin_modules" not in written, repr(written)
     assert not _RAW_CONTROL.search(written), repr(written)
-    assert len(written.splitlines()) == 1, repr(written)
+    assert len(written.splitlines()) <= 1, repr(written)
+    with pytest.raises(PluginModuleNamespaceError) as refused:
+        refuse_plugin_modules_a_scan_refuses(config, [])
+    message = str(refused.value)
+    assert "'m\\x1b]\\x07\\nx'" in message, repr(message)
+    assert "\\\\" not in message, repr(message)
+    assert not _RAW_CONTROL.search(message), repr(message)
+    assert "m\n" not in message, repr(message)
 
 
 class _Records(logging.Handler):
@@ -267,9 +279,17 @@ def test_the_sandbox_grant_warning_is_logged_as_text_not_markup(tmp_path):
 
 @pytest.mark.unit
 def test_the_plugin_module_warning_is_logged_as_text_not_markup(tmp_path):
-    """A module named "m[/x]<ESC>", which the repository's file asks for."""
+    """A module named "m[/x]<ESC>", which the repository's file asks for.
+
+    The name is outside the plugin namespace, so confinement logs no warning for
+    it and keeps it for the scan's refusal (``confine_plugin_modules``). That
+    refusal names it as text: "[/x]" is a Rich closing tag, and the name is shown
+    with its ESC escaped and the tag left as it was written."""
+    from automated_security_helper.config.plugin_module_trust import (
+        refuse_plugin_modules_a_scan_refuses,
+    )
     from automated_security_helper.config.resolve_config import resolve_config
-    from automated_security_helper.utils.terminal_text import ShownText
+    from automated_security_helper.plugins.loader import PluginModuleNamespaceError
 
     checkout = tmp_path / "checkout"
     (checkout / ".ash").mkdir(parents=True)
@@ -278,12 +298,14 @@ def test_the_plugin_module_warning_is_logged_as_text_not_markup(tmp_path):
     )
 
     with _warnings() as records:
-        resolve_config(source_dir=checkout)
+        config = resolve_config(source_dir=checkout)
 
-    record = _the_one_warning(records, "Ignoring ash_plugin_modules entries")
-    assert getattr(record, "markup", None) is False
-    assert isinstance(record.msg, ShownText) and not record.args
-    assert "'m[/x]\\x1b'" in record.getMessage()
+    assert [r for r in records if "ash_plugin_modules" in r.getMessage()] == []
+    with pytest.raises(PluginModuleNamespaceError) as refused:
+        refuse_plugin_modules_a_scan_refuses(config, [])
+    message = str(refused.value)
+    assert "'m[/x]\\x1b'" in message, repr(message)
+    assert not _RAW_CONTROL.search(message), repr(message)
 
 
 #: A fresh process: the MCP server's get_config resolves a configuration before
