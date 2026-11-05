@@ -123,11 +123,12 @@ concurrency:
 jobs:
   drift-and-validate:
     name: Plugin output matches _base/
-    # ubuntu-24.04-arm: queue waves on the ubuntu-latest x64 pool read a median 4,310 s
-    # at peak against 21 s here, and this job runs 0.2 min. uv.lock resolves for every
-    # platform and its pydantic-core entries carry aarch64 wheels, so the install builds
+    # ubuntu-slim: queue waves on the ubuntu-latest x64 pool read a median 4,310 s
+    # at peak against 21 s on an arm pool, and this job runs 0.2 min. Measured peak
+    # memory is 1,067,556 kB (about 1.02 GB) against the slim runner's 5 GB (1 CPU,
+    # 15-minute cap). uv.lock resolves for every platform, so the install builds
     # nothing from source; the check compares text files and is arch-neutral.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-slim
     timeout-minutes: 15
     permissions:
       contents: read
