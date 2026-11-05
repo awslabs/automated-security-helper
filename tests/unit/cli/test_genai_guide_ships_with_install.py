@@ -41,7 +41,7 @@ import requests
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import main as cli_main
-from tests.utils.helpers import checkout_env
+from tests.utils.helpers import checkout_env, iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCS_GUIDE = REPO_ROOT / "docs" / "content" / "docs" / "genai-steering-guide.md"
@@ -576,8 +576,10 @@ def test_the_wheel_built_from_the_image_build_context_carries_the_guide(tmp_path
     for top in ("automated_security_helper", "docs"):
         files += [
             path
-            for path in (REPO_ROOT / top).rglob("*")
-            if path.is_file() and "__pycache__" not in path.parts
+            for path in iter_repo_files(
+                REPO_ROOT / top, skip_dirs=frozenset({"node_modules", "__pycache__"})
+            )
+            if path.is_file()
         ]
     for path in files:
         relative = path.relative_to(REPO_ROOT).as_posix()

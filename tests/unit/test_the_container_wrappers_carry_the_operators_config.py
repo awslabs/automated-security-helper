@@ -2421,9 +2421,14 @@ def _flat(text: str) -> str:
 
 @pytest.mark.unit
 def test_the_bash_wrapper_marks_another_checkout_by_the_container_path_only():
-    """One mark for the --config file and one for the ASH_CONFIG file, each the
-    option and the path inside the container, as the launcher sends it. No value
-    of the file and no host path travels in a mark."""
+    """Only the --config file keeps the another-checkout mark, as the option and
+    the path inside the container. An ASH_CONFIG file in another checkout is
+    promoted to the per-file repository mark, because the launcher does the same:
+    run_ash_container.py folds the environment config's another-checkout marks
+    into the set that drives --config-file-from-scanned-repository. So the
+    another-checkout emission appears once, and the ASH_CONFIG path travels in
+    the promoted emission. No value of the file and no host path travels in a
+    mark."""
     bash = ASH_SCRIPT.read_text(encoding="utf-8")
 
     sites = [
@@ -2432,14 +2437,24 @@ def test_the_bash_wrapper_marks_another_checkout_by_the_container_path_only():
         if "CONFIG_PROVENANCE_ARGS+=" in line
         and "--config-file-from-another-checkout" in line
     ]
-    assert (
-        sites
-        == [
-            'CONFIG_PROVENANCE_ARGS+=(--config-file-from-another-checkout "${CARRIED_INNER}")'
-        ]
-        * 2
-    )
+    assert sites == [
+        'CONFIG_PROVENANCE_ARGS+=(--config-file-from-another-checkout "${CARRIED_INNER}")'
+    ]
     assert "--config-file-from-another-checkout=" not in bash
+
+    # The ASH_CONFIG file's another-checkout case rides the per-file repository
+    # mark: the same guard that marks a scanned-repository file also admits
+    # CARRIED_ELSEWHERE, and the emission carries the container path.
+    flat = _flat(bash)
+    promoted = (
+        'if [[ "${CARRIED_MARK}" = "YES" || "${CARRIED_ELSEWHERE}" = "YES" ]]; then '
+        'CONFIG_PROVENANCE_ARGS+=(--config-file-from-scanned-repository "${CARRIED_INNER}")'
+    )
+    assert promoted in flat
+    env_arm = flat.index(
+        'carry_config_file ASH_CONFIG "ASH_CONFIG file" "${ASH_CONFIG}" /ash-env-config'
+    )
+    assert flat.index(promoted) > env_arm
 
 
 @pytest.mark.unit

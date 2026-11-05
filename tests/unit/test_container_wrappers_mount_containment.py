@@ -71,6 +71,9 @@ _SCRUBBED_ENV = (
     "DOCKER_EXTRA_ARGS",
     "ASH_CONFIG",
     "MOUNT_OUTPUT_DIR",
+    "GITHUB_ACTIONS",
+    "TF_BUILD",
+    "TEAMCITY_VERSION",
 )
 
 #: The same names test_container_mount_containment.py gives the Python launcher.

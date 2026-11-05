@@ -5730,8 +5730,20 @@ def _schema_location(model: Any, loc: Iterable[Any]) -> str:
     A field name or alias of the model reached so far, and a list index, are the
     schema's; anything else is a key from the file (a mapping's key, or a key
     ``extra="forbid"`` refuses), which a client's file may hold without the
-    client having written it.
+    client having written it. A field's ``validation_alias`` is the schema's too: a
+    plain string, or the string choices of an ``AliasChoices`` (an ``AliasPath`` is
+    not a key spelling), so an error located by the alias as written keeps it.
     """
+
+    def validation_names(info: Any) -> Tuple[str, ...]:
+        alias = getattr(info, "validation_alias", None)
+        if isinstance(alias, str):
+            return (alias,)
+        choices = getattr(alias, "choices", None)
+        if isinstance(choices, (list, tuple)):
+            return tuple(choice for choice in choices if isinstance(choice, str))
+        return ()
+
     parts: List[str] = []
     shape: Any = model
     for segment in loc:
@@ -5744,7 +5756,7 @@ def _schema_location(model: Any, loc: Iterable[Any]) -> str:
         named = None
         if isinstance(fields, dict):
             for name, info in fields.items():
-                if segment in (name, info.alias):
+                if segment in (name, info.alias, *validation_names(info)):
                     named = info
                     break
         if named is not None:

@@ -90,6 +90,7 @@ from tests.utils.ci_tiers import (
     POOLS,
     UNIT_TEST_JOB_IDS,
 )
+from tests.utils.helpers import iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
@@ -371,8 +372,9 @@ class TestTheShardFilter:
         ``owner`` assigns a module to a shard by a hash of its path, so evenness is a
         property of the names and not of the design; the synthetic names above do not
         say how the real names fall. This counts every ``test_*.py`` file under
-        tests/ with ``rglob``, so all tiers and every directory are in it, and
-        pytest's ``norecursedirs`` is not applied. That is wider than what one tier
+        tests/ (committed modules: the per-run scratch tree under
+        tests/pytest-temp is pruned), so all tiers and every directory are in it,
+        and pytest's ``norecursedirs`` is not applied. That is wider than what one tier
         run collects. The check is on module counts only. It does not measure how
         long any shard runs, so it cannot catch a split that makes one integration
         leg slower than the others; a check weighted by runtime would be a different
@@ -382,8 +384,8 @@ class TestTheShardFilter:
         patterns = _pytest_ini_patterns("python_files")
         modules = sorted(
             path.relative_to(REPO_ROOT).as_posix()
-            for path in (REPO_ROOT / "tests").rglob("*.py")
-            if sharding.matches_python_files(path, patterns)
+            for path in iter_repo_files(REPO_ROOT / "tests")
+            if path.suffix == ".py" and sharding.matches_python_files(path, patterns)
         )
         assert len(modules) > 1000, len(modules)
         sizes = [0] * count

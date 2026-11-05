@@ -6,7 +6,7 @@
 It runs ahead of the clear of the previous run's outputs, in container mode and in
 nix mode. A host with nothing to sweep must not resolve a runtime, log about one or
 start anything, and a failure anywhere in the step is one warning, not a scan that
-stops before it clears: a malformed ``OCI_RUNNER_WRAPPER``, a record that cannot be
+stops before it clears: a failing ``OCI_RUNNER_WRAPPER``, a record that cannot be
 unlinked on a read-only mount. A cancel or an interrupt is not an ``Exception`` and
 still ends the run.
 
@@ -155,11 +155,15 @@ def test_a_nix_run_with_nothing_to_sweep_resolves_no_runtime_and_logs_nothing(
     assert _lines(runtime_log) == []
 
 
-def test_a_malformed_wrapper_with_a_record_is_one_warning_and_the_clear_still_runs(
+def test_a_failing_wrapper_with_a_record_is_one_warning_and_the_clear_still_runs(
     tmp_path, monkeypatch, logged, dead_pid
 ):
+    """A wrapper that exits non-zero never runs the runtime: the record stays."""
     record = _plant(dead_pid)
-    monkeypatch.setenv("OCI_RUNNER_WRAPPER", "sudo 'x")
+    wrapper = tmp_path / "failing-wrapper"
+    wrapper.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("OCI_RUNNER_WRAPPER", str(wrapper))
     log = tmp_path / "order.log"
     runtime_log = tmp_path / "runtime.log"
     stub = _stub(tmp_path, runtime_log)
@@ -168,7 +172,7 @@ def test_a_malformed_wrapper_with_a_record_is_one_warning_and_the_clear_still_ru
 
     assert _lines(log) == ["CLEAR"], _lines(log)
     warnings = logged.messages(logging.WARNING)
-    assert len(warnings) == 1 and "Could not sweep leftover containers" in warnings[0]
+    assert len(warnings) == 1 and "was not removed (exit" in warnings[0], warnings
     assert _lines(runtime_log) == [], "the runtime was called for a wrapper that failed"
     assert record.exists()
 

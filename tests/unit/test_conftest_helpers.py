@@ -140,6 +140,9 @@ class _RecordingParser:
     def addoption(self, *names: str, **_kwargs) -> None:
         self.flags.append(names[0])
 
+    def getgroup(self, *_args, **_kwargs) -> "_RecordingParser":
+        return self
+
 
 class _RecordingConfig:
     def __init__(self) -> None:
@@ -157,10 +160,28 @@ class _ItemWithMarker:
 
     def __init__(self, marker: str) -> None:
         self.marker = marker
-        self.keywords = {marker: True}
+        self.nodeid = f"fake-item-{marker}"
+        # Exactly one tier marker per fake, as the collection hook requires of every
+        # item. Never "unit" as the filler: a unit item marked slow is refused.
+        self.markers = (
+            {marker}
+            if marker in ("unit", "integration", "e2e")
+            else {marker, "integration"}
+        )
+        self.keywords = dict.fromkeys(self.markers, True)
+        # The hook reads .kwargs on a ci_runner marker, so a marker is not a bare object.
+        self._marks = {
+            name: types.SimpleNamespace(name=name, args=(), kwargs={})
+            for name in self.markers
+        }
 
     def get_closest_marker(self, name):
-        return object() if name == self.marker else None
+        return self._marks.get(name)
+
+    def iter_markers(self, name):
+        mark = self._marks.get(name)
+        if mark is not None:
+            yield mark
 
     def add_marker(self, marker) -> None:
         pass
@@ -508,10 +529,18 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         receipt = Path(written.read_text())
         assert Path.home() in receipt.parents, receipt
         assert developer_home / ".ash" not in receipt.parents, receipt
-        assert not any(
-            os.path.commonpath([os.path.realpath(receipt), root]) == root
-            for root in guarded
-        ), receipt
+
+        def under(path: str, root: str) -> bool:
+            # ntpath.commonpath raises ValueError across drives (the receipt on
+            # D: against a guarded root on C:). Such a pair has no common path,
+            # so the receipt is not under that root.
+            try:
+                return os.path.commonpath([path, root]) == root
+            except ValueError:
+                return False
+
+        real_receipt = os.path.realpath(receipt)
+        assert not any(under(real_receipt, root) for root in guarded), receipt
 
     @pytest.mark.unit
     def test_ash_run_as_a_module_with_the_developer_home_is_refused(

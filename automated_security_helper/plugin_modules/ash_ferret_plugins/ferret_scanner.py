@@ -1276,7 +1276,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         config_file_path = self._find_config_file(options.config_file)
         if config_file_path is not None:
             self.args.extra_args.append(
-                ToolExtraArg(key="--config", value=str(config_file_path))
+                ToolExtraArg(key="--config", value=config_file_path.as_posix())
             )
 
         # Profile. The bundled config's redaction profiles turn on ferret-scan's
@@ -1579,7 +1579,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         self._process_config_options()
         if not any(arg.key == "--config" for arg in self.args.extra_args):
             self.args.extra_args.append(
-                ToolExtraArg(key="--config", value=str(self._empty_config_file()))
+                ToolExtraArg(key="--config", value=self._empty_config_file().as_posix())
             )
 
         # Build command

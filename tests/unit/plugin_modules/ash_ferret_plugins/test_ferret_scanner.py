@@ -1326,9 +1326,10 @@ class TestFerretPluginValidation:
         --exclude args, ferret in .ash.yaml, and config override conflicts.
         """
         import subprocess  # nosec B404 — test validates subprocess behavior
+        import sys
 
         result = subprocess.run(  # nosec B603 B607 — test invokes ferret-scan binary
-            ["python", "scripts/validate_ferret_plugin.py"],
+            [sys.executable, "scripts/validate_ferret_plugin.py"],
             capture_output=True,
             text=True,
             timeout=30,

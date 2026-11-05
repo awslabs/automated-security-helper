@@ -10447,13 +10447,13 @@ _ENV_PROBE_VALUE = "page-claims-environment-value-7d41"
         pytest.param(
             f"${{{_ENV_PROBE}:unset}}",
             f"<from ${{{_ENV_PROBE}:unset}}>",
-            f"${{{_ENV_PROBE}:unset}}",
+            f"!ENV ${{{_ENV_PROBE}:unset}}",
             id="a-reference-with-a-default",
         ),
         pytest.param(
             f"!ENV ${{{_ENV_PROBE}}}",
             f"<from ${{{_ENV_PROBE}}}>",
-            f"${{{_ENV_PROBE}}}",
+            f"!ENV ${{{_ENV_PROBE}}}",
             id="an-env-tag",
         ),
     ],
