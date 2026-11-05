@@ -303,7 +303,9 @@ class ScanResultProcessor:
                 aggregated_results.sarif = AshAggregatedResults.model_fields[
                     "sarif"
                 ].get_default()
-            aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
+            aggregated_results.sarif.merge_sarif_report(
+                sanitized_sarif, source_dir=self.plugin_context.source_dir
+            )
             target_report = aggregated_results.additional_reports[scanner_name][
                 target_key
             ]

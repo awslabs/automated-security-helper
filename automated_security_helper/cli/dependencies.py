@@ -94,6 +94,8 @@ from automated_security_helper.utils.python_child import (
 from automated_security_helper.utils.python_installer import environment_rebuild_note
 from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.subprocess_utils import (
+    _is_anchored,
+    _warn_relative_bin_path,
     clear_find_executable_cache,
     find_executable_for_scan,
     shown_arguments,
@@ -1084,6 +1086,12 @@ def install_dependencies(
     target_bin_path: Optional[Path]
     if is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
+    elif bin_path == bin_path_from_environment and not _is_anchored(bin_path):
+        # A relative ASH_BIN_PATH is not used, here as in a scan's lookups: it is
+        # warned about and ~/.ash/bin is the target. A relative --bin-path typed
+        # on the command line is read where it was typed (the branch below).
+        _warn_relative_bin_path(bin_path)
+        target_bin_path = home_bin_path()
     elif _is_under_tilde(bin_path):
         # A "~" a shell left unexpanded (a quoted --bin-path, or ASH_BIN_PATH set
         # to it) is expanded from the home directory only when there is a usable

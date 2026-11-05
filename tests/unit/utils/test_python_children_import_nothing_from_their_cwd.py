@@ -195,9 +195,12 @@ def test_a_relative_bin_path_is_warned_about_and_not_searched(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_BIN_PATH", "rel/bin")
     assert current_bin_path() == tmp_path / "rel" / "bin"
-    subprocess_utils._warned_relative_bin_paths.discard("rel/bin")
+    # The warning is keyed by the path as the OS spells it (Path turns "rel/bin"
+    # into "rel\\bin" on Windows).
+    spelled = str(Path("rel/bin"))
+    subprocess_utils._warned_relative_bin_paths.discard(spelled)
     assert subprocess_utils._bin_path() == Path("rel/bin")
-    assert "rel/bin" in subprocess_utils._warned_relative_bin_paths
+    assert spelled in subprocess_utils._warned_relative_bin_paths
     assert subprocess_utils.path_independent_dirs()[0] == Path("rel/bin")
 
 

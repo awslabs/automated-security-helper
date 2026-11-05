@@ -30,6 +30,8 @@ from typing import Any, Optional
 
 import pytest
 
+from automated_security_helper.core.exceptions import ASHConfigValidationError
+
 pytestmark = pytest.mark.unit
 
 #: Turns the S3 upload on, to the repository's bucket.
@@ -127,9 +129,15 @@ def test_a_workspace_config_inside_the_workspace_that_links_out_is_no_trusted_ba
     operator = workspace.parent / "ci.yaml"
     _symlink_or_skip(operator, _outside(tmp_path))
 
-    section = _s3_section(workspace, operator, tmp_path)
+    # Resolution refuses the file outright (check_operator_config: the overlay is
+    # final over every project, so a file reached through a link inside the
+    # scanned directory may not be built into it), which is stronger than
+    # confining it: no section is built, so nothing reaches the S3 reporter.
+    with pytest.raises(ASHConfigValidationError) as refused:
+        _s3_section(workspace, operator, tmp_path)
 
-    assert not _sends_to_the_repositorys_bucket(section), section
+    assert "reached through a link inside the scanned directory" in str(refused.value)
+    assert "repo-bucket" not in str(refused.value)
 
 
 def test_control_the_operators_config_outside_the_workspace_chooses_the_upload(

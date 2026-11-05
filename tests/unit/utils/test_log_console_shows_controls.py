@@ -381,7 +381,13 @@ def _ash_log(tmp_path, log) -> str:
             handler.close()
         logger.handlers = []
     # Its bytes: reading it as text would turn a bare carriage return into "\n".
-    return (tmp_path / f"{name}.log").read_bytes().decode("utf-8")
+    written = (tmp_path / f"{name}.log").read_bytes().decode("utf-8")
+    if sys.platform == "win32":
+        # The file is opened in text mode, so Windows writes every line break as
+        # CRLF: that CR is the platform's line terminator, not a control the
+        # message carried (a carried CR is shown as \x0d and is checked for).
+        written = written.replace("\r\n", "\n")
+    return written
 
 
 @pytest.mark.unit
@@ -675,7 +681,9 @@ def test_a_warning_logged_before_the_logger_is_set_up_is_shown(case):
     file name through it, with its OSC 52 sequence shown and its "::add-mask::"
     broken: the stand-in shows each control and breaks each command, as the
     console does."""
-    stderr = _fresh_process_stderr(case)
+    # The child's text-mode stderr writes the platform line ending for "\n"; that
+    # terminator is not a control the message carried.
+    stderr = _fresh_process_stderr(case).replace(os.linesep, "\n")
 
     assert "add-mask" in stderr, repr(stderr)
     assert not _RAW_CONTROL.search(stderr), repr(stderr)
@@ -699,7 +707,9 @@ def test_a_warning_no_handler_takes_is_shown_once_however_it_got_there(case):
     removes: a record no handler takes goes to it, as to logging's last resort,
     so a warning from an MCP server's get_config is still shown. A logger under
     "ash" that does not propagate, and a reload of utils/log.py, reach it too."""
-    stderr = _fresh_process_stderr(case)
+    # The child's text-mode stderr writes the platform line ending for "\n"; that
+    # terminator is not a control the message carried.
+    stderr = _fresh_process_stderr(case).replace(os.linesep, "\n")
 
     assert stderr.count("add-mask") == 1, repr(stderr)
     assert not _RAW_CONTROL.search(stderr), repr(stderr)
@@ -713,7 +723,9 @@ def test_a_warning_of_an_ash_logger_of_another_class_is_shown(case):
     "ash" made before utils/log.py set it, or after a library set its own: those
     would go to logging's last resort and write the file name raw. logging's last
     resort hands every record of "ash" and the loggers under it to the stand-in."""
-    stderr = _fresh_process_stderr(case)
+    # The child's text-mode stderr writes the platform line ending for "\n"; that
+    # terminator is not a control the message carried.
+    stderr = _fresh_process_stderr(case).replace(os.linesep, "\n")
 
     assert stderr.count("add-mask") == 1, repr(stderr)
     assert not _RAW_CONTROL.search(stderr), repr(stderr)

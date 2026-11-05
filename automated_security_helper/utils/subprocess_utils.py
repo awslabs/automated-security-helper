@@ -107,6 +107,7 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.core.constants import (
     ASH_BIN_PATH,
     ash_bin_path_from_environment,
+    home_bin_path,
     warn_if_home_unusable,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, delivers
@@ -871,19 +872,20 @@ def _bin_path() -> Optional[Path]:
     The module-level constant remains the fallback, so tests that patch
     ``subprocess_utils.ASH_BIN_PATH`` keep working.
 
-    A relative value is returned as it is, and :func:`find_executable` does not
-    search it (see there); the first time each relative value is seen, one
-    warning says so. None when there is no bin directory: ASH_BIN_PATH is unset
-    and there is no usable home for ``~/.ash/bin`` (``core.constants.home_bin_path``),
-    and one warning says that too.
+    A relative value is not used: the first time each one is seen, one warning
+    names it, and ``~/.ash/bin`` is the bin directory instead. None when there is
+    no bin directory: ASH_BIN_PATH is unset (or relative) and there is no usable
+    home for ``~/.ash/bin`` (``core.constants.home_bin_path``), and one warning
+    says that too.
     """
     from_env = ash_bin_path_from_environment()
     path = Path(from_env) if from_env else ASH_BIN_PATH
+    if path is not None and not _is_anchored(str(path)):
+        _warn_relative_bin_path(str(path))
+        path = home_bin_path()
     if path is None:
         warn_if_home_unusable()
         return None
-    if not _is_anchored(str(path)):
-        _warn_relative_bin_path(str(path))
     return path
 
 
@@ -906,14 +908,15 @@ _warned_relative_bin_paths: set = set()
 
 
 def _warn_relative_bin_path(value: str) -> None:
-    """Say, once per value, that a relative ASH_BIN_PATH is not searched."""
+    """Say, once per value, that a relative ASH_BIN_PATH is not used."""
     if value in _warned_relative_bin_paths:
         return
     _warned_relative_bin_paths.add(value)
     ASH_LOGGER.warning(
         f"ASH_BIN_PATH is the relative path {value!r}, which would be read relative "
         "to the working directory (usually the repository being scanned), so ASH "
-        "does not look for tools there. Set ASH_BIN_PATH to an absolute path.",
+        "does not use it and uses ~/.ash/bin instead. Set ASH_BIN_PATH to an "
+        "absolute path.",
         extra=NO_MARKUP,
     )
 
@@ -2111,7 +2114,15 @@ def _non_batch_substitute(program: str) -> Optional[List[str]]:
     except (ImportError, ValueError):
         importable = False
     if importable:
-        return [sys.executable, "-m", name]
+        # runpy is what ``-m`` runs, so the module starts the same way. ``-m`` itself
+        # puts the working directory (usually the scanned tree) first on sys.path;
+        # python_code_argv drops it before anything is imported (utils/python_child.py).
+        from automated_security_helper.utils.python_child import python_code_argv
+
+        return python_code_argv(
+            f"import runpy; runpy.run_module({name!r}, run_name='__main__', "
+            "alter_sys=True)"
+        )
     return None
 
 

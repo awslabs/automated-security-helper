@@ -675,18 +675,32 @@ jobs:
           echo "files=$(cat changed_files.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
       
       - name: Scan changed files
+        # Workflow commands are stopped around the scan, as the reusable scan
+        # workflow does: tool output is untrusted, and a `::`-line in it would
+        # otherwise be acted on by the runner.
         run: |
           # Create directory structure for changed files
           mkdir -p scan_target
-          while read file; do
-            if [ -f "$file" ]; then
-              mkdir -p "scan_target/$(dirname "$file")"
-              cp "$file" "scan_target/$file"
-            fi
-          done < changed_files.txt
-          
+          if [ -f changed_files.txt ]; then
+            while read -r file; do
+              if [ -f "$file" ]; then
+                mkdir -p "scan_target/$(dirname "$file")"
+                cp "$file" "scan_target/$file"
+              fi
+            done < changed_files.txt
+          fi
+
           # Run security scan
-          ash --source-dir scan_target --scanners trivy-repo --formats sarif,markdown
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          ash --source-dir scan_target --scanners trivy-repo --formats sarif,markdown 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       
       - name: Comment PR
         uses: actions/github-script@v6
@@ -1406,7 +1420,20 @@ ash --mode container --scanners trivy-repo
   run: trivy image --download-db-only
 
 - name: Run ASH with Trivy
-  run: ash --scanners trivy-repo --formats sarif
+  # Workflow commands are stopped around the scan, as the reusable scan
+  # workflow does: tool output is untrusted, and a `::`-line in it would
+  # otherwise be acted on by the runner.
+  run: |
+    token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    if [ "${#token}" -ne 32 ]; then
+      echo "::error::no random token could be read for stop-commands, so the command did not run"
+      exit 1
+    fi
+    printf '::stop-commands::%s\n' "${token}"
+    status=0
+    ash --scanners trivy-repo --formats sarif 2>&1 || status=$?
+    printf '\n::%s::\n' "${token}"
+    exit "${status}"
   timeout-minutes: 10
 ```
 
@@ -1474,8 +1501,20 @@ jobs:
         run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
       
       - name: Run Trivy Security Scan
+        # Workflow commands are stopped around the scan, as the reusable scan
+        # workflow does: tool output is untrusted, and a `::`-line in it would
+        # otherwise be acted on by the runner.
         run: |
-          ash --scanners trivy-repo --formats sarif,html
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          ash --scanners trivy-repo --formats sarif,html 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       
       - name: Upload Results
         # Also when ASH exits non-zero on findings: without a status function

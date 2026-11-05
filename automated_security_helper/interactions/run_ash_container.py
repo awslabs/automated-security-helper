@@ -666,6 +666,12 @@ def _carried_values_by_band(
     environ = snapshot_environ()
     for name in environment_names:
         value = environ.get(name, "")
+        if not value and os.name == "nt":
+            # Windows keeps environment names upper-cased and reads them without
+            # regard to case (``os.environ``), so a config that spells a name in
+            # lower case read this value while the plain dict lookup missed it, and
+            # the value rode neither band.
+            value = environ.get(name.upper(), "")
         if not value:
             continue
         all_values.append(value)

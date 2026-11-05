@@ -115,9 +115,14 @@ def test_a_cmd_shim_with_no_exe_beside_it_runs_as_the_interpreter_module(
     arguments = _skip_path_arguments()
     resolved = spu.resolve_command(["checkov", *arguments])
 
-    assert resolved[:3] == [sys.executable, "-m", "checkov"]
+    # The interpreter runs the module through runpy, as ``-m`` does, but behind
+    # python_code_argv so the working directory (the scanned tree) is not imported from.
+    launch = resolved[: len(resolved) - len(arguments)]
+    assert launch[0] == sys.executable
+    assert launch[-2] == "-c" and "runpy.run_module('checkov'" in launch[-1]
+    assert "-m" not in launch
     # The skip-path values reach the launch byte-identical, in their order.
-    assert resolved[3:] == arguments
+    assert resolved[len(launch) :] == arguments
 
 
 @patch("platform.system", new=lambda: "Windows")

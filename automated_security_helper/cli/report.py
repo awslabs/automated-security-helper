@@ -70,6 +70,7 @@ from automated_security_helper.plugins.loader import (
     load_plugins,
     plugin_module_fix,
     plugins_of,
+    refuse_plugin_name_clashes,
 )
 from automated_security_helper.utils.command_safe_stream import (
     CommandSafeStream,
@@ -993,6 +994,15 @@ def report_command(
     run_scope = plugins_of(run_modules)
     run_reporters = reporter_classes_for_run(run_modules, manager=ash_plugin_manager)
 
+    # Two reporters of this run with the same name, or names the config lookup
+    # reads as one, would each read the other's section: refused with exit 3, as a
+    # scan refuses them (exit-codes.md, ash report), before a report is rendered.
+    try:
+        refuse_plugin_name_clashes(run_scope, plugin_types=("reporter",))
+    except ASHConfigValidationError as e:
+        _print_refusal("[red]Invalid configuration: {}[/red]", e)
+        raise typer.Exit(3)
+
     # The options of a plugin loaded from ash_plugin_modules are checked only once
     # it is loaded, as the scan engine checks them (config/plugin_option_check.py).
     # Without this, a bad one reached the reporter's own model and the command
@@ -1214,6 +1224,31 @@ def report_command(
         )
         if debug:
             _print_debug_trace(e)
+        raise typer.Exit(1)
+
+    # The reporter's pre-flight check runs first, as a scan's report phase runs it
+    # (engine_phase filters on validate_plugin_dependencies). A reporter whose check
+    # refuses (a missing setting, credentials it cannot find) sends nothing: the
+    # check logs its own reason, and the command says it did not run and exits 1.
+    # Reporters whose check passes go on to the produced-no-report path below.
+    try:
+        dependencies_ok = reporter_plugin.validate_plugin_dependencies()
+    except Exception as e:
+        ASH_LOGGER.error(
+            "Reporter '%s' dependency check raised %s: %s",
+            report_format,
+            type(e).__name__,
+            e,
+        )
+        if debug:
+            _print_debug_trace(e)
+        dependencies_ok = False
+    if not dependencies_ok:
+        _print_error(
+            "[red]Error: reporter '{}' cannot run: its dependency check refused. "
+            "See the log above for the reason.[/red]",
+            report_format,
+        )
         raise typer.Exit(1)
 
     # Generate the report

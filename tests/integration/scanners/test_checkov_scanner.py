@@ -265,12 +265,19 @@ def _run_writing_results(scanner, content: str):
     the base reader (``fs_guard.read_bytes_at_most``), not ``builtins.open``,
     and scan() unlinks a stale results file before the run, so the mocked run
     itself writes the file, as checkov does.
+
+    The stand-in also returns the run's response with its exit code. The scan
+    grades the response's ``returncode`` before it reads the results file, and a
+    response with none is "its tool never ran" (``_record_target_exit_code`` and
+    ``_refuse_rejected_exit_code``), so a stand-in that returns ``None`` is
+    refused before the file it wrote is looked at.
     """
     results_file = scanner.results_dir / "source" / "results_sarif.sarif"
 
     def write_results(*args, **kwargs):
         results_file.parent.mkdir(parents=True, exist_ok=True)
         results_file.write_text(content, encoding="utf-8")
+        return {"returncode": 0, "stdout": "", "stderr": ""}
 
     return write_results
 

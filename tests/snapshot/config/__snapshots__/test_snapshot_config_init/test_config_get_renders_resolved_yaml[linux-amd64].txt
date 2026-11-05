@@ -5,7 +5,7 @@ global_settings:
   ignore_paths:
   - path: build/**
     reason: Generated output
-    expiration: null
+    expires: null
     client_supplied: false
   suppressions: []
   mcp:

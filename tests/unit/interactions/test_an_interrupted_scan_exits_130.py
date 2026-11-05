@@ -165,8 +165,20 @@ def test_a_host_starts_with_sigint_at_its_default_when_this_run_ignores_it(held)
     assert still_ignored, "the hold did not put this process's disposition back"
 
 
-def _interrupt(tmp_path: Path, env: dict, args: list, *, to_the_group: bool):
+def _interrupt(
+    tmp_path: Path,
+    env: dict,
+    args: list,
+    *,
+    to_the_group: bool,
+    cwd: Path | None = None,
+):
     """Run `ash <args>` in its own session; once the child is waiting, send SIGINT.
+
+    ``cwd`` is where ASH starts (``tmp_path`` unless named). A scan with no
+    ``--source-dir`` scans its working directory, and ASH refuses a tool it finds
+    inside the scanned tree, so a test that keeps its fake runtime in ``tmp_path``
+    starts ASH in a directory beside it.
 
     To the process group, as a terminal's Ctrl-C reaches every process in it, or to
     the host alone, as `kill -INT` or a CI job's cancel does.
@@ -194,7 +206,7 @@ def _interrupt(tmp_path: Path, env: dict, args: list, *, to_the_group: bool):
                 module_from_this_checkout("automated_security_helper.cli.main"),
                 *args,
             ],
-            cwd=tmp_path,
+            cwd=cwd or tmp_path,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -429,6 +441,8 @@ def test_build_image_says_it_was_interrupted_and_exits_130(tmp_path, isolated):
         env,
         ["build-image", "--oci-runner", str(runtime), "--no-run"],
         to_the_group=True,
+        # build-image scans its working directory; the runtime is kept outside it.
+        cwd=tmp_path / "src",
     )
 
     assert returncode == 130, stdout + stderr
@@ -481,7 +495,9 @@ def test_the_runtime_keeps_the_sigint_disposition_ash_was_started_with(
                 str(runtime),
                 "--no-run",
             ],
-            cwd=tmp_path,
+            # The working directory is the scanned tree, and the runtime is kept
+            # outside it: ASH refuses a tool found inside the scanned tree.
+            cwd=tmp_path / "src",
             env={**isolated["env"], "FAKE_LOG": str(log)},
             capture_output=True,
             text=True,
@@ -599,9 +615,11 @@ def test_on_windows_with_a_console_the_runtime_gets_its_grace(
     # The grace in slices, so a second Ctrl-C lands between them; then the kill.
     slice_seconds = subprocess_utils.INTERRUPT_WAIT_SLICE_SECONDS
     slices = round(subprocess_utils.INTERRUPT_GRACE_SECONDS / slice_seconds)
+    # The reap after the kill is bounded (subprocess_utils._wait_after_kill): a child
+    # SIGKILL did not end is not waited for without end.
     assert runtime.calls == [f"wait({slice_seconds})"] * slices + [
         "kill",
-        "wait(None)",
+        f"wait({subprocess_utils._REAP_SECONDS})",
     ], runtime.calls
 
 

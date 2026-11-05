@@ -17,7 +17,7 @@ rebase with ``--exec git commit --amend``; this hook says the same thing at comm
 time, while the message is still being written and the fix is one more line.
 
 This is the early warning, not the gate, so it covers the subset a contributor
-regenerates routinely with syrupy's ``--snapshot-update``: any STAGED path with a
+regenerates routinely when syrupy rewrites its goldens: any STAGED path with a
 ``__snapshots__`` directory component, the same test as the CI script's
 ``__snapshots__`` golden pattern. The CI script's GOLDEN set is wider (published
 schemas, MCP goldens, generated reference pages) and stays the one list; a golden

@@ -124,6 +124,27 @@ async def _appears(path: Path, timeout: float) -> bool:
     return True
 
 
+async def _read_pid(path: Path, timeout: float) -> Optional[int]:
+    """The pid the stand-in child wrote to ``path``, or None if none shows up.
+
+    ``Path.write_text`` creates the file and then writes it, so a reader that
+    stops at the file's existence can read it empty (seen on Windows, where
+    the create and the write are two steps a poll can fall between). The pid
+    counts once the file holds digits.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            text = (await asyncio.to_thread(path.read_text)).strip()
+        except OSError:
+            text = ""
+        if text.isdigit():
+            return int(text)
+        if time.monotonic() > deadline:
+            return None
+        await asyncio.sleep(0.05)
+
+
 def _alive(pid: int) -> Optional[bool]:
     """Whether ``pid`` is a running process, or None where that cannot be asked."""
     if os.name != "posix":
@@ -166,8 +187,8 @@ async def test_cancelling_during_a_scanner_stops_its_child_and_the_scan(
 
     begun = await mcp_server.run_ash_scan(ctx, source_dir=str(project))
     assert begun["success"] is True, begun
-    assert await _appears(pid_file, 30), "the stand-in scanner never started"
-    child_pid = int(pid_file.read_text())
+    child_pid = await _read_pid(pid_file, 30)
+    assert child_pid is not None, "the stand-in scanner never started"
 
     ran_on_for = await _stop_and_measure(ctx, begun["scan_id"])
 
