@@ -123,7 +123,11 @@ concurrency:
 jobs:
   drift-and-validate:
     name: Plugin output matches _base/
-    runs-on: ubuntu-latest
+    # ubuntu-24.04-arm: queue waves on the ubuntu-latest x64 pool read a median 4,310 s
+    # at peak against 21 s here, and this job runs 0.2 min. uv.lock resolves for every
+    # platform and its pydantic-core entries carry aarch64 wheels, so the install builds
+    # nothing from source; the check compares text files and is arch-neutral.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read

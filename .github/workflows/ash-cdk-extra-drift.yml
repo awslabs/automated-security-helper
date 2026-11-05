@@ -112,7 +112,10 @@ concurrency:
 jobs:
   cdk-extra-matches-pyproject:
     name: cdk extra fallback matches pyproject
-    runs-on: ubuntu-latest
+    # ubuntu-24.04-arm: queue waves on the ubuntu-latest x64 pool read a median 4,310 s
+    # at peak against 21 s here, and this job runs 0.2 min. The script is standard-library
+    # Python run under a uv-managed 3.13 with --no-project, so nothing is arch-specific.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
