@@ -483,6 +483,7 @@
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
+      'plugin_names_checked': False,
       'projects': list([
         dict({
           'config_source': None,
@@ -646,6 +647,7 @@
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
+      'plugin_names_checked': False,
       'projects': list([
         dict({
           'config_source': None,
@@ -953,6 +955,8 @@
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanner_thresholds': dict({
           }),
           'scanners': dict({
@@ -1002,6 +1006,8 @@
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanner_thresholds': dict({
           }),
           'scanners': dict({
@@ -1051,6 +1057,8 @@
           'sarif_run_index': None,
           'scan_id': None,
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanner_thresholds': dict({
           }),
           'scanners': dict({

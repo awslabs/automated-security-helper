@@ -3329,7 +3329,7 @@
             }
           ],
           "default": 256,
-          "description": "The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Honored only from --config-overrides or a config file outside the scanned tree.",
+          "description": "The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it.",
           "title": "Max Worker Output Mib"
         },
         "offline": {
