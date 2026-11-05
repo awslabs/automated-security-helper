@@ -615,9 +615,11 @@ def test_on_windows_with_a_console_the_runtime_gets_its_grace(
     # The grace in slices, so a second Ctrl-C lands between them; then the kill.
     slice_seconds = subprocess_utils.INTERRUPT_WAIT_SLICE_SECONDS
     slices = round(subprocess_utils.INTERRUPT_GRACE_SECONDS / slice_seconds)
+    # The reap after the kill is bounded (subprocess_utils._wait_after_kill): a child
+    # SIGKILL did not end is not waited for without end.
     assert runtime.calls == [f"wait({slice_seconds})"] * slices + [
         "kill",
-        "wait(None)",
+        f"wait({subprocess_utils._REAP_SECONDS})",
     ], runtime.calls
 
 
