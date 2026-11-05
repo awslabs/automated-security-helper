@@ -21382,9 +21382,18 @@ def test_a_sandbox_ash_cannot_provide_is_an_error_with_code_127(
         assert "dependencies are not satisfied" not in text, _output_tail(result)
         assert row["missing_reason"] is None, row
     if cell in ("a-backend-this-host-lacks", "the-gate-off-keeps-the-row"):
-        assert f"{unavailable} is not available" in text, _output_tail(result)
+        assert _squeezed(f"{unavailable} is not available") in _squeezed(text), (
+            _output_tail(result)
+        )
+        # The page's line, for this host's backend and system name; read without
+        # whitespace, as the console wraps a line this long at its width.
+        start_failure = (
+            f"detect-secrets could not start its tool on source: {unavailable} is "
+            f"not available: {unavailable} is not available on {platform.system()}"
+        )
         if sys.platform == "linux":
-            assert _THE_START_FAILURE_LINE in text, _output_tail(result)
+            assert start_failure == _THE_START_FAILURE_LINE
+        assert _squeezed(start_failure) in _squeezed(text), _output_tail(result)
     if cell in ("a-relative-home", "a-empty-home"):
         assert "HOME is not an absolute path" in text, _output_tail(result)
 
