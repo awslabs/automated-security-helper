@@ -979,7 +979,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.warning(
                 text_without_values(
                     f"Configured detect-secrets baseline file does not exist: "
-                    f"{Path(option_missing)}. detect-secrets will run without "
+                    f"{option_missing}. detect-secrets will run without "
                     "a baseline; no baseline file is taken from the scanned "
                     "tree in its place.",
                     values,
