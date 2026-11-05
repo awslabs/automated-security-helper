@@ -46,7 +46,11 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverter,
     JupyterConverterConfig,
 )
-from automated_security_helper.utils import subprocess_utils, uv_tool_runner
+from automated_security_helper.utils import (
+    pre_installed_tool,
+    subprocess_utils,
+    uv_tool_runner,
+)
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
@@ -259,12 +263,39 @@ def backend(monkeypatch):
     scope_module.clear_backend_cache()
 
 
+def _give_launchers_an_interpreter(monkeypatch, tools: _Tools) -> None:
+    """Let the stand-in ``.bat`` launchers of ``tools`` name the interpreter they run.
+
+    ``find_tool_interpreter`` reads the environment that provides an installed tool
+    from the tool's ``#!`` line, or on Windows from a ``python`` beside the ``.exe``
+    entry point a package manager leaves in ``Scripts``. A stand-in is a ``.bat``
+    launcher in a directory of its own, with neither, so on Windows the copy read
+    as "no Python environment could be located": the pre-installed check answered
+    unverifiable, the converter reported itself unavailable under a sandbox, and
+    without one it went on to ``uv tool install`` and a real uv ran. What the
+    launcher runs is this interpreter (``write_stand_in``), so that is the
+    environment that provides it. Any other program is looked up as before.
+    """
+    real = pre_installed_tool.find_tool_interpreter
+    stand_in_dir = os.path.normcase(os.path.realpath(tools.bin))
+
+    def find(executable):
+        found = real(executable)
+        if found is not None:
+            return found
+        parent = os.path.normcase(os.path.realpath(Path(executable).parent))
+        return sys.executable if parent == stand_in_dir else None
+
+    monkeypatch.setattr(pre_installed_tool, "find_tool_interpreter", find)
+
+
 def _isolate_tool_lookup(monkeypatch, tools: _Tools, home: Path, *, online: bool):
     monkeypatch.setenv("PATH", str(tools.bin))
     monkeypatch.setenv("ASH_BIN_PATH", str(tools.bin))
     # The uv beside this interpreter is preferred over PATH's; the stand-in is
     # the uv every check here must reach.
     monkeypatch.setattr(uv_tool_runner, "bundled_uv_executable", lambda: None)
+    _give_launchers_an_interpreter(monkeypatch, tools)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv(TOKEN_VARIABLE, "token-value")
     if online:
