@@ -185,11 +185,11 @@ def test_the_detect_secrets_worker_imports_nothing_from_the_tree_or_its_results(
 
 @pytest.mark.unit
 def test_a_relative_bin_path_is_warned_about_and_not_searched(tmp_path, monkeypatch):
-    """The documented contract (core/constants.py): tool lookup does not search
-    a relative ASH_BIN_PATH, and only ``ash dependencies install`` makes one
-    absolute. ``current_bin_path`` is the installer's reader, absolutized at
-    the caller's working directory, where the caller named it;
-    ``_bin_path`` keeps the value as written and warns once per value."""
+    """A relative ASH_BIN_PATH is not used: tool lookup warns once per value and
+    searches ``~/.ash/bin`` instead (``_bin_path``). ``current_bin_path`` is the
+    installer's reader, absolutized at the caller's working directory, where
+    the caller named it."""
+    from automated_security_helper.core.constants import home_bin_path
     from automated_security_helper.utils import subprocess_utils
 
     monkeypatch.chdir(tmp_path)
@@ -199,9 +199,9 @@ def test_a_relative_bin_path_is_warned_about_and_not_searched(tmp_path, monkeypa
     # into "rel\\bin" on Windows).
     spelled = str(Path("rel/bin"))
     subprocess_utils._warned_relative_bin_paths.discard(spelled)
-    assert subprocess_utils._bin_path() == Path("rel/bin")
+    assert subprocess_utils._bin_path() == home_bin_path()
     assert spelled in subprocess_utils._warned_relative_bin_paths
-    assert subprocess_utils.path_independent_dirs()[0] == Path("rel/bin")
+    assert subprocess_utils.path_independent_dirs()[0] == home_bin_path()
 
 
 @pytest.mark.parametrize(
