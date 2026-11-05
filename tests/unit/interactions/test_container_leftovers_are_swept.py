@@ -153,7 +153,9 @@ def test_a_run_command_names_its_container(state):
         resolved_oci_runner="docker",
         image_name="img",
         source_dir=state.parent,
-        output_dir=state.parent,
+        # An output directory that is the source (or above it) is refused: the
+        # source is mounted read-only beside it. Inside the source is the default.
+        output_dir=state.parent / ".ash" / "ash_output",
         offline=False,
         debug=False,
         color=False,
