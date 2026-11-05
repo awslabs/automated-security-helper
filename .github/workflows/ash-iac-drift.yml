@@ -280,6 +280,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
+
       # setup-node's npm cache fails with "Some specified paths were not
       # resolved" when the lockfile is missing, which reads like a CI problem
       # rather than a missing file. This names the file and the reason before
@@ -472,6 +492,15 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
+
   # ---------------------------------------------------------------------------
   # Generated buildspec drift: the construct is the source of truth, the
   # committed buildspec.yml is its output.
@@ -492,6 +521,26 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
 
       # setup-node's npm cache fails with "Some specified paths were not
       # resolved" when the lockfile is missing, which reads like a CI problem
@@ -708,6 +757,15 @@ jobs:
           echo "::endgroup::"
           exit 1
 
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
+
   # ---------------------------------------------------------------------------
   # Terraform hygiene: formatting, and every module and example initializes and
   # validates.
@@ -734,6 +792,26 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
 
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
@@ -908,6 +986,15 @@ jobs:
           fi
           echo "terraform test passed in all ${#dirs[@]} module(s)."
 
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
+
   # ---------------------------------------------------------------------------
   # cdk-nag, failing on any unsuppressed finding.
   #
@@ -1076,6 +1163,26 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
 
       # setup-node's npm cache fails with "Some specified paths were not
       # resolved" when the lockfile is missing, which reads like a CI problem
@@ -1507,6 +1614,16 @@ jobs:
             deploy/cdk/cdk.out/manifest.json
           retention-days: 7
           if-no-files-found: warn
+
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
+
   # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.
   #

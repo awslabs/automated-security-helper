@@ -128,6 +128,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
+
       # No uv cache. The check runs with --no-project, so it installs no packages: a
       # run leaves about 16 KB of interpreter metadata in ~/.cache/uv, and the 3.13
       # interpreter uv may download goes to ~/.local/share/uv/python, outside that
@@ -144,3 +164,12 @@ jobs:
       # drifted. The script prints the exact command to run locally.
       - name: Check the fallback constant against pyproject
         run: uv run --no-project --python 3.13 python scripts/sync_cdk_extra_fallback.py
+
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"

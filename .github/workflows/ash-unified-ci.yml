@@ -1451,6 +1451,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1474,6 +1493,14 @@ jobs:
           snyk-token: ${{ secrets.SNYK_TOKEN }}
           oci-runner: ${{ matrix.oci-runner }}
           offline: ${{ matrix.offline || 'false' }}
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
 
   # ---------------------------------------------------------------------------
   # The default image stage's permissions.
@@ -1581,6 +1608,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1636,6 +1682,14 @@ jobs:
           path: ${{ runner.temp }}/ash-external-target-*
           retention-days: 7
           if-no-files-found: warn
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
 
   # ---------------------------------------------------------------------------
   # Scanner sandbox: escape tests on real backends, and scanner parity under bwrap
@@ -1674,6 +1728,25 @@ jobs:
         with:
           # Nothing in this job uses git credentials after checkout.
           persist-credentials: false
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1732,6 +1805,14 @@ jobs:
           path: test-results/sandbox.junit.xml
           retention-days: 7
           if-no-files-found: warn
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
 
   sandbox-scanner-parity:
     name: "sandbox scanner parity (${{ matrix.sandbox }}, ${{ matrix.os }})"
@@ -1931,6 +2012,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1976,6 +2076,14 @@ jobs:
           path: ${{ runner.temp }}/ash-multi-project-*
           retention-days: 7
           if-no-files-found: warn
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
 
   # ---------------------------------------------------------------------------
   # Deploy-tree AWS helpers: run them against a real moto endpoint.
@@ -2366,6 +2474,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -2374,6 +2501,14 @@ jobs:
         run: uv sync
       - name: Run the converter integration tests
         run: uv run pytest tests/integration/converters --run-integration --no-cov -p no:randomly -n 0
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
 
   # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
@@ -2621,6 +2756,26 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: start memory sampler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sample_mem() {
+            peak=0
+            echo 0 > /tmp/mem-peak.kb
+            while true; do
+              used=$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a}' /proc/meminfo)
+              if [ "$used" -gt "$peak" ]; then
+                peak="$used"
+                echo "$peak" > /tmp/mem-peak.kb
+              fi
+              sleep 2
+            done
+          }
+          export -f sample_mem
+          nohup bash -c sample_mem > /dev/null 2>&1 &
+          echo "$!" > /tmp/mem-sampler.pid
+
       # Every method still on the axis needs an interpreter, so this is no longer
       # conditional. The `matrix.method != 'uvx'` it used to carry existed solely
       # for the uvx leg, and uvx is not a leg any more. It does mean uv now resolves
@@ -2740,6 +2895,15 @@ jobs:
         if: matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl'
         with:
           runtime: ${{ matrix.method }}
+
+      - name: report peak memory
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          MEM_JOB_NAME: ${{ github.job }}
+        run: |
+          kill "$(cat /tmp/mem-sampler.pid 2>/dev/null)" 2>/dev/null || true
+          echo "MEM_PEAK_USED_KB=$(cat /tmp/mem-peak.kb 2>/dev/null || echo unknown) job=${MEM_JOB_NAME} runner=${RUNNER_OS}/${RUNNER_ARCH}"
 
   # ---------------------------------------------------------------------------
   # Homebrew on macOS, a supported install method, in a job of its own
