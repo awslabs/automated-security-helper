@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     ValidationError,
+    ValidationInfo,
     field_serializer,
     field_validator,
     model_validator,
@@ -70,6 +71,7 @@ from automated_security_helper.config.plugin_section_names import (
     # before `extends` merges.
     folded_section_name as _folded_section_name,
 )
+from automated_security_helper.utils.unknown_keys import TOLERATE_STORED_CONFIG
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -754,6 +756,31 @@ def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
     }
 
 
+def _recorded_variant_clashes(
+    info: ValidationInfo, variant_value: Any, read_value: Any
+) -> bool:
+    """Whether a recorded config's second spelling sets what the read one does not.
+
+    Only a read of a config a results file recorded (``TOLERATE_STORED_CONFIG``
+    in the validation context) asks. A variant whose values all agree with the
+    read spelling's, or that adds nothing, is not a clash. Compared as written,
+    so the warning never needs to name a value.
+    """
+    context = info.context
+    if not isinstance(context, dict) or TOLERATE_STORED_CONFIG not in context:
+        return False
+    if isinstance(variant_value, BaseModel):
+        variant_value = variant_value.model_dump(by_alias=True)
+    if isinstance(read_value, BaseModel):
+        read_value = read_value.model_dump(by_alias=True)
+    if isinstance(variant_value, dict) and isinstance(read_value, dict):
+        return any(
+            key not in read_value or read_value[key] != value
+            for key, value in variant_value.items()
+        )
+    return variant_value != read_value
+
+
 class _PluginConfigSegment(RedactedSection):
     """Base for the scanner, reporter and converter config segments.
 
@@ -780,7 +807,9 @@ class _PluginConfigSegment(RedactedSection):
 
     @model_validator(mode="before")
     @classmethod
-    def _read_field_name_spellings_as_aliases(cls, data: Any) -> Any:
+    def _read_field_name_spellings_as_aliases(
+        cls, data: Any, info: ValidationInfo
+    ) -> Any:
         if not isinstance(data, dict):
             return data
         # The spelling other than the declared one already read for each
@@ -828,6 +857,14 @@ class _PluginConfigSegment(RedactedSection):
             data = dict(data)
             variant_value = data.pop(key)
             if target in data:
+                if _recorded_variant_clashes(info, variant_value, data[target]):
+                    ASH_LOGGER.warning(
+                        "The recorded configuration's "
+                        f"{cls.__name__[: -len('ConfigSegment')].lower()}s "
+                        f"section holds '{target}' and '{key}' for one plugin; "
+                        f"the scan that recorded it read '{target}', so that is "
+                        f"read here, not '{key}'."
+                    )
                 data[target] = _merge_config_values(variant_value, data[target])
             else:
                 data[target] = variant_value
