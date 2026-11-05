@@ -1414,7 +1414,10 @@ jobs:
     # still fails, through required-checks, and the legs read what the cache holds.
     needs: [ensure-cache, warm-image-layers]
     if: ${{ !cancelled() }}
-    runs-on: ${{ matrix.os }}
+    # Finch ships apt packages for the noble suite only (artifact.runfinch.com/deb has no
+    # resolute suite) and ubuntu-latest has moved to resolute, so the finch legs run on the
+    # noble image label. The matrix axis keeps saying ubuntu-latest.
+    runs-on: ${{ (matrix.oci-runner == 'finch' && matrix.os == 'ubuntu-latest') && 'ubuntu-24.04' || matrix.os }}
     # Container-runtime cells are far slower than docker/python-local and were
     # being cancelled at exactly 20.3 min by the previous flat 20. Measured:
     # docker/python-local peak ~5 min, podman/finch on ubuntu-latest reach 20+.
@@ -2509,7 +2512,10 @@ jobs:
   #    turns one of them into a duplicate of the other while staying green.
   install-validation:
     name: "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})"
-    runs-on: ${{ matrix.os }}
+    # Finch ships apt packages for the noble suite only (artifact.runfinch.com/deb has no
+    # resolute suite) and ubuntu-latest has moved to resolute, so the finch legs run on the
+    # noble image label. The matrix axis keeps saying ubuntu-latest.
+    runs-on: ${{ (matrix.method == 'finch' && matrix.os == 'ubuntu-latest') && 'ubuntu-24.04' || matrix.os }}
     # finch has been observed succeeding at 23 min and hanging past 280; podman is
     # similarly slow, so the container runtimes get enough room to pass
     # legitimately. homebrew installs the formula from source (bottles for its
