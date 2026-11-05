@@ -22,6 +22,7 @@ bucket; the reporter must not get that section.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -112,8 +113,16 @@ def test_a_config_named_through_the_repositorys_link_is_the_repositorys(tmp_path
     """``repo/lnk/../other.yaml``: the kernel follows ``repo/lnk`` before ``..``."""
     ops, repo = _operator_dir_holding_the_checkout(tmp_path)
     (ops / "sub").mkdir()
-    _symlink_or_skip(repo / "lnk", ops / "sub")
-    named = repo / "lnk" / ".." / "other.yaml"
+    if os.name == "nt":
+        # Windows collapses ``..`` in the name before it follows any link, so
+        # ``lnk/../other.yaml`` is ``repo/other.yaml`` there. The same scene
+        # without ``..``: the repository's link points at the operator's
+        # directory and the name passes through it.
+        _symlink_or_skip(repo / "lnk", ops)
+        named = repo / "lnk" / "other.yaml"
+    else:
+        _symlink_or_skip(repo / "lnk", ops / "sub")
+        named = repo / "lnk" / ".." / "other.yaml"
     assert named.resolve() == (ops / "other.yaml").resolve()
 
     section = _s3_section(named, repo)

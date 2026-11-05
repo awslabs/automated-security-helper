@@ -652,6 +652,19 @@ def link_walk_cannot_examine(monkeypatch, component: Path) -> ExaminationRefused
     refused = ExaminationRefused(component)
     real = os.lstat
 
+    def same_component(path) -> bool:
+        # Windows reads a link's target back in its extended-length spelling
+        # (a ``\\?\`` prefix) and compares names without case, so the walk reaches
+        # the component by a spelling that differs from the one this shim was
+        # given. Both are compared as the same name.
+        def plain(value) -> str:
+            text = os.fspath(value)
+            if text.startswith("\\\\?\\"):
+                text = text[4:]
+            return os.path.normcase(text)
+
+        return plain(path) == plain(refused.component)
+
     def asked_by_the_link_walk() -> bool:
         frame = sys._getframe(2)
         for _ in range(4):
@@ -663,7 +676,7 @@ def link_walk_cannot_examine(monkeypatch, component: Path) -> ExaminationRefused
         return False
 
     def guarded(path, *args, **kwargs):
-        if os.fspath(path) == refused.component and asked_by_the_link_walk():
+        if same_component(path) and asked_by_the_link_walk():
             refused.asked += 1
             raise PermissionError(13, "Permission denied", refused.component)
         return real(path, *args, **kwargs)
