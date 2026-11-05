@@ -5187,7 +5187,9 @@ def test_workspace_mode_checks_rules_that_could_not_be_evaluated(
         "content database under a `fail` policy each fail the project whatever "
         "`fail_on_incomplete_scanners` says.",
     )
-    path = _plugin_path(tmp_path, "page_claim_scanners_ash_plugins", _UNEVALUATING_PLUGIN)
+    path = _plugin_path(
+        tmp_path, "page_claim_scanners_ash_plugins", _UNEVALUATING_PLUGIN
+    )
     project = tmp_path / "workspace" / "api"
     project.mkdir(parents=True)
     (project / "main.py").write_text(
@@ -20060,7 +20062,7 @@ _DRY_RUN_IMPORTS_THE_MODULES = (
         ),
         pytest.param(
             "no-import",
-            "which could not be imported",
+            "which failed to import",
             id="a-module-that-does-not-import",
         ),
         pytest.param(
