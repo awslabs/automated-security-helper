@@ -1259,7 +1259,11 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
             "success": False,
             "operation": operation,
             "error": raw_controls_on_one_line(error_text(error)),
-            "error_type": CONFIG_INPUT_NOT_PERMITTED,
+            "error_type": (
+                CONFIG_CHECK_FAILED
+                if isinstance(error, ConfigCheckFailedError)
+                else CONFIG_INPUT_NOT_PERMITTED
+            ),
             "error_category": error.context["error_category"],
         },
         REFUSED_CONFIG_EXIT_CODE,
