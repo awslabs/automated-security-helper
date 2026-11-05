@@ -2171,7 +2171,7 @@ async def mcp_scan_directory(
     counted: Optional[Any] = None
     try:
         limit = per_session_scan_limit(session_id)
-    except BaseException:
+    except BaseException as limit_error:
         # The claim above is held and no task exists to give it back: give it
         # back here, or a clear_source is refused as "a scan is running" forever.
         if claimed_session is not None:
@@ -2182,7 +2182,34 @@ async def mcp_scan_directory(
                 scan_id=None,
                 environment_values=environment_values,
             )
-        raise
+        if not isinstance(limit_error, Exception):
+            # A cancellation or an exit is not a failure to answer: it leaves
+            # the tool as it came, with the claim given back above.
+            raise
+        # A failure of the limit lookup is answered as the unexpected-error arm
+        # below answers one, as a refusal, never as an exception out of the tool.
+        log_unexpected_error(
+            _logger,
+            limit_error,
+            "Unexpected error starting scan",
+            values=environment_values,
+        )
+        return with_exit_code(
+            create_error_response(
+                error=MCPResourceError(
+                    "Unexpected error starting scan: "
+                    f"{error_text(limit_error, environment_values)}",
+                    context={
+                        "directory_path": directory_path,
+                        "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
+                        "error_type": type(limit_error).__name__,
+                        "error_message": error_text(limit_error, environment_values),
+                    },
+                ),
+                operation="scan_directory",
+            ),
+            REFUSED_INTERNAL_EXIT_CODE,
+        )
     if claimed_session is not None:
         if limit is None:
             # No limit applies, and with none try_start_scan always counts. The
