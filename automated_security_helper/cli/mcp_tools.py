@@ -1098,7 +1098,9 @@ def _config_pre_check(
     client_named = config_path is not None
     if config_path is None:
         try:
-            config_path = find_config_file(source_dir)
+            config_path = find_config_file(
+                source_dir, permit=config_base_gate(session_id)
+            )
         except (ASHConfigValidationError, OSError):
             # Discovery's own refusals are the scan's to report.
             return _ConfigPreCheck(None, None, ())
@@ -5335,7 +5337,9 @@ def _answer_get_config(
                 refusal = validate_discovered_config(search, session_id)
             if refusal is None:
                 try:
-                    path = find_config_file(search_dir=search)
+                    path = find_config_file(
+                        search_dir=search, permit=config_base_gate(session_id)
+                    )
                 except ASHConfigSourceError as exc:
                     # Discovery's own read failure: a pyproject.toml that
                     # declares [tool.ash] but cannot be read. Refused as a

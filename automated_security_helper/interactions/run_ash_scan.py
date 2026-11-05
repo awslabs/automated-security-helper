@@ -5163,7 +5163,9 @@ def _container_config_to_parse(opts: ScanOptions) -> Optional[Path]:
             # as for a missing path, so the parse check stands aside here too.
             is_file = False
         return path if is_file else None
-    return find_config_file(search_dir=Path(opts.source_dir))
+    # permit=None: the operator's own scan options, run on the operator's tree;
+    # there is no MCP session or client whose gate could be passed.
+    return find_config_file(search_dir=Path(opts.source_dir), permit=None)
 
 
 def _refuse_a_container_config_that_does_not_parse(opts: ScanOptions) -> None:
