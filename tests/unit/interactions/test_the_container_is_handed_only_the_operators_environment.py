@@ -1526,9 +1526,12 @@ def test_an_unmountable_env_chosen_file_path_shows_no_value(layout, monkeypatch)
         ENVIRONMENT_VALUE_SHOWN,
     )
 
-    # A single quote: distinctive, and legal in an NTFS name, where a double
-    # quote is not, so the fixture directory can exist on every platform.
-    value = "chain'dir"
+    # A comma: one of the characters --mount cannot carry
+    # (run_ash_container._UNMOUNTABLE_CHARACTERS: comma, double quote, line
+    # breaks), distinctive, and legal in an NTFS name, where a double quote is not,
+    # so the fixture directory can exist on every platform. A single quote is
+    # mountable and would give no refusal.
+    value = "chain,dir"
     monkeypatch.setenv("ASH_CHAIN_Q", value)
     _write(layout["w"] / value / "base.yaml", "project_name: b\n")
     config = _write(layout["w"] / "ash.yaml", "extends: ${ASH_CHAIN_Q}/base.yaml\n")
