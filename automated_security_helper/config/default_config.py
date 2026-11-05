@@ -194,9 +194,9 @@ def _load_as_the_ash_config_files(
         # that would go on to use the defaults.
         raise AssertionError("the load neither returned nor raised")
     # Outside the handler, so the parser's error is not its context.
-    refused = ASHConfigValidationError(unparsed)
-    refused.ash_config_file = named
-    raise refused
+    not_parsed = ASHConfigValidationError(unparsed)
+    not_parsed.ash_config_file = named
+    raise not_parsed
 
 
 def get_default_config(

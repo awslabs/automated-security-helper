@@ -207,8 +207,7 @@ def test_a_runner_failure_shows_no_value_the_config_read(tmp_path, monkeypatch):
 _PROFILE_SECRET = "a-profile-value-read-from-the-environment"
 _BASE_SECRET = "a-base-value-read-from-the-environment"
 _SESSION_PROFILE_TEXT = (
-    f"extends: {BASE_PROFILE_FILENAME}\n"
-    "project_name: ${ASH_PROFILE_ARM_HELD:unset}\n"
+    f"extends: {BASE_PROFILE_FILENAME}\nproject_name: ${{ASH_PROFILE_ARM_HELD:unset}}\n"
 )
 _SESSION_BASE_TEXT = (
     "global_settings:\n"
