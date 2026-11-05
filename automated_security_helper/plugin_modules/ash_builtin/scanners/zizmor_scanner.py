@@ -853,6 +853,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             # satisfies, so the constrained probe is owed again, and its answer
             # below is never that stale version.
             self._deferred_tool_version_probe = ("zizmor", self._uv_from_spec())
+        # The uv route is the one being asked about. An earlier check's PATH
+        # success left use_uv_tool False, and resolve_deferred_tool_version drops
+        # the owed probe unasked for a scanner that is off uv, which read the
+        # earlier check's stale version as the probe's answer.
+        self.use_uv_tool = True
         self.resolve_deferred_tool_version()
         # The constrained probe (uv tool run --from <requirement> zizmor
         # --version) answered, and the release it resolved satisfies: the uv
