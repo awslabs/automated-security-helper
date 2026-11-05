@@ -87,7 +87,10 @@ def test_the_prewarm_resolves_every_plugin_kind_inside_the_scope(tmp_path, monke
     finally:
         sys.modules.pop(package, None)
 
-    assert seen == [MASK, MASK, MASK], seen
+    # The prewarm resolves each plugin kind (three reads) and then reads each kind
+    # again for the name-clash refusal (refuse_plugin_name_clashes), all inside the
+    # run's scope. What is pinned is that no read happens outside it.
+    assert len(seen) >= 3 and set(seen) == {MASK}, seen
 
 
 def test_the_reporter_step_resolves_and_filters_inside_the_scope(tmp_path, monkeypatch):

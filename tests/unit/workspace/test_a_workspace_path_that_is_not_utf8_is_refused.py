@@ -85,10 +85,15 @@ def _workspace(
     only way UTF-8 JSON can hold one, and json.loads reads it back as the same str.
     """
     root.mkdir(parents=True, exist_ok=True)
-    for folder in folders:
-        (root / folder).mkdir(exist_ok=True)
-        (root / folder / "x.py").write_text('password = "hunter2hunter2hunter2"\n')
     try:
+        # APFS refuses a name that is not UTF-8 (EILSEQ, "Illegal byte sequence"),
+        # which is an OSError here, so the folder is made inside the same skip as
+        # the definition (see the module docstring).
+        for folder in folders:
+            (root / folder).mkdir(exist_ok=True)
+            (root / folder / "x.py").write_text(
+                'password = "hunter2hunter2hunter2"\n'
+            )
         definition = root / name
         definition.write_text(
             json.dumps({"folders": [{"path": folder} for folder in folders]}),
@@ -592,7 +597,9 @@ def test_a_utf8_policy_and_default_config_resolve(tmp_path):
     """The check reads the paths, and leaves a name with non-ASCII letters alone."""
     root = tmp_path / "ws"
     definition = _workspace(root, ["api"])
-    folder = root / "café"
+    # Outside the workspace root: an operator config inside the scanned
+    # directory is refused (check_operator_config), whatever its name.
+    folder = tmp_path / "café"
     folder.mkdir()
     policy = folder / "ash-workspace.yaml"
     policy.write_text("workspace:\n  max_severity_threshold: HIGH\n", encoding="utf-8")

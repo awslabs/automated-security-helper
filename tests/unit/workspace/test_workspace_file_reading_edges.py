@@ -49,11 +49,38 @@ class TestParsing:
 
         assert [folder.path for folder in definition.folders] == ["api"]
 
-    def test_a_document_nested_past_the_recursion_limit_is_refused(self, tmp_path):
+    def test_a_document_nested_past_the_recursion_limit_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "dev.code-workspace"
+        path.write_text("[" * 50000 + "]" * 50000, encoding="utf-8")
+        real_loads = json.loads
+
+        def past_the_limit(text, *args, **kwargs):
+            # Python 3.14's C scanner parses this depth without raising, so the
+            # interpreter's own limit is not what the test relies on: the parse
+            # raises what 3.10-3.13 raise for it.
+            if isinstance(text, str) and text.startswith("[[["):
+                raise RecursionError("maximum recursion depth exceeded")
+            return real_loads(text, *args, **kwargs)
+
+        monkeypatch.setattr(json, "loads", past_the_limit)
+
+        with pytest.raises(WorkspaceDefinitionError, match="not valid JSON"):
+            load_workspace_file(path)
+
+    def test_a_deeply_nested_list_is_refused_whichever_way_the_parser_ends(
+        self, tmp_path
+    ):
+        """With the real parser: it raises RecursionError (3.10-3.13) or parses the
+        list (3.14), and either way the file is refused, not read as a workspace."""
         path = tmp_path / "dev.code-workspace"
         path.write_text("[" * 50000 + "]" * 50000, encoding="utf-8")
 
-        with pytest.raises(WorkspaceDefinitionError, match="not valid JSON"):
+        with pytest.raises(
+            WorkspaceDefinitionError,
+            match="not valid JSON|must contain a JSON object",
+        ):
             load_workspace_file(path)
 
     def test_a_trailing_comma_gets_the_jsonc_hint(self, tmp_path):

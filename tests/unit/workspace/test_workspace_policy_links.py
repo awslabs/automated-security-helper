@@ -164,7 +164,8 @@ def test_a_policy_linking_out_of_the_roots_is_refused_unread(
     (result,) = out
     assert result.get("success") is False, result
     assert result.get("error_type") == "config_input_not_permitted", result
-    assert result.get("exit_code") == 4, result
+    # config_input_not_permitted carries exit 3 in every MCP tool (_error_response).
+    assert result.get("exit_code") == 3, result
     assert (_server["host"] / "ash-workspace.yaml").resolve() not in read
     assert "ash-workspace.yaml" in result["error"], result
     assert CANARY not in repr(result)
