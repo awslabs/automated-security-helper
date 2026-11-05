@@ -47,6 +47,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
     ArchiveConverter,
     ArchiveConverterConfig,
 )
+from automated_security_helper.utils.sandbox import fs_guard
 
 pytestmark = pytest.mark.unit
 
@@ -894,13 +895,16 @@ def test_the_case_probe_is_written_beside_an_existing_extraction_directory_never
     extraction = results / "a.zip"
     extraction.mkdir(parents=True)
     probed: List[Path] = []
-    real_open = open
+    # The probe is written through the write guard (fs_guard.open_for_write, which
+    # _filesystem_folds_case imports when it runs), not through the builtin open,
+    # so the guard's entry point is where the probe's path is seen.
+    real_open_for_write = fs_guard.open_for_write
 
     def recording_open(path, *args, **kwargs):
         probed.append(Path(path))
-        return real_open(path, *args, **kwargs)
+        return real_open_for_write(path, *args, **kwargs)
 
-    monkeypatch.setattr(archive_converter, "open", recording_open, raising=False)
+    monkeypatch.setattr(fs_guard, "open_for_write", recording_open)
 
     archive_converter._filesystem_folds_case(extraction)
     archive_converter._filesystem_folds_case(results / "b.zip")
