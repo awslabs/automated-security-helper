@@ -427,6 +427,55 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
     return {**environment, **env}
 
 
+from automated_security_helper.utils import (  # noqa: E402
+    content_db_staleness as _staleness_module,
+    pre_installed_tool as _pre_installed_module,
+    uv_tool_runner as _uv_runner_module,
+)
+
+#: The tool probes as the code defines them, taken when this module is imported at
+#: collection, before any test's tool guard replaces them (``stub_tool_probes`` in
+#: tests/utils/tool_guard.py answers each as a host without the tool would). A test
+#: whose subject is the probe itself puts these back with
+#: :func:`_use_the_real_tool_probes`; every other test in this module keeps the guard's
+#: answers, since building a plugin would otherwise start uv.
+_REAL_UV_AVAILABILITY = _uv_runner_module.UVToolRunner.uv_availability
+_REAL_FIND_UV_OR_NONE = _uv_runner_module.find_uv_or_none
+_REAL_PRE_INSTALLED_RUN = _pre_installed_module._run
+_REAL_TRIVY_DATABASE_MEASURER = _staleness_module.MEASURERS["trivy-db"]
+_REAL_BUILT_FROM_TRIVY = _staleness_module._built_from_trivy
+
+
+def _use_the_real_tool_probes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    uv: bool = False,
+    pre_installed: bool = False,
+    trivy_database: bool = False,
+) -> None:
+    """Put back the probes the unit tests' tool guard answers without a process.
+
+    Applied inside the test, after the guard's fixture, so it wins (the contract
+    ``_unit_tool_guard`` states). The guard still audits every start: a probe that
+    runs a stand-in under the test's own directory is not a start of the tool, which
+    is how these tests use it.
+    """
+    if uv:
+        monkeypatch.setattr(
+            _uv_runner_module.UVToolRunner, "uv_availability", _REAL_UV_AVAILABILITY
+        )
+        monkeypatch.setattr(_uv_runner_module, "find_uv_or_none", _REAL_FIND_UV_OR_NONE)
+    if pre_installed:
+        monkeypatch.setattr(_pre_installed_module, "_run", _REAL_PRE_INSTALLED_RUN)
+    if trivy_database:
+        monkeypatch.setitem(
+            _staleness_module.MEASURERS, "trivy-db", _REAL_TRIVY_DATABASE_MEASURER
+        )
+        monkeypatch.setattr(
+            _staleness_module, "_built_from_trivy", _REAL_BUILT_FROM_TRIVY
+        )
+
+
 def _ash(args: List[str], cwd: Path, **env: str) -> subprocess.CompletedProcess:
     """Run this interpreter's ``ash`` with a private home directory and no network installs.
 
@@ -7359,6 +7408,9 @@ def test_each_content_database_is_held_to_the_age_bound_the_pages_state(
         )
 
     monkeypatch.setattr(content_db_staleness, "spawn_run", answer)
+    # The unit tests' tool guard answers trivy's database probe as a host without a
+    # database; this test is about that probe, whose process boundary it doubles.
+    _use_the_real_tool_probes(monkeypatch, trivy_database=True)
     monkeypatch.setenv("GRYPE_DB_MAX_ALLOWED_BUILT_AGE", "480h")
     for name, bound in sorted(stated.items()):
         for offset, stale in ((-timedelta(hours=1), False), (timedelta(hours=1), True)):
@@ -9387,7 +9439,9 @@ def test_a_leftover_server_is_ended_only_when_it_runs_under_the_root(
         [sys.executable, "-I", "-c", ready, "mcp"], cwd=cwd, stdout=subprocess.PIPE
     )
     try:
-        assert child.stdout is not None and child.stdout.readline() == b"ready\n"
+        # print() ends the line with the platform's newline, so on Windows the pipe
+        # carries b"ready\r\n".
+        assert child.stdout is not None and child.stdout.readline().rstrip() == b"ready"
         _end_leftover_server(child.pid, root)
         if where == "under-the-root":
             assert child.wait(timeout=60) == -signal.SIGKILL, child.returncode
@@ -12865,10 +12919,15 @@ def _uv_package(spec: str) -> str:
 
 
 def _uv_installed_package(argv: List[str]) -> str:
-    """The package a ``uv tool install`` command installs, past its options."""
+    """The package a ``uv tool install`` command installs, past its options.
+
+    ``--python`` and ``--with`` each take a value that is not the package: the jupyter
+    converter's command is ``uv tool install --with jupyter nbconvert``, and read
+    without skipping ``--with``'s value its package was ``jupyter``.
+    """
     words = iter(argv[3:])
     for word in words:
-        if word in ("--python", "-p"):
+        if word in ("--python", "-p", "--with", "-w"):
             next(words, None)
         elif not word.startswith("-"):
             return _uv_package(word)
@@ -13231,6 +13290,11 @@ def test_a_uv_run_tool_keeps_the_file_it_found_first(
     # read would otherwise leave the real lookup in play, which is what it exists
     # to prevent.
     from automated_security_helper.utils import subprocess_utils
+
+    # The subject is the lookup and the probe of the uv and the program it finds, so
+    # the guard's answers (no uv, a pre-installed tool that is not executable) are
+    # put back; the programs probed are this test's own stand-ins under tmp_path.
+    _use_the_real_tool_probes(monkeypatch, uv=True, pre_installed=True)
 
     pins_consulted: Set[str] = set()
 
@@ -16655,8 +16719,10 @@ def _warns_naming(text: str, variable: str, value: str) -> bool:
 
 def _warns_about_home(text: str) -> bool:
     """Whether ``text`` holds a warning about ``HOME``, which is as much as the pages
-    say of it."""
-    return "HOMEis" in _squeezed(text)
+    say of it. On Windows the variable the warning names is ``USERPROFILE``, the one
+    that platform's home directory is read from."""
+    squeezed = _squeezed(text)
+    return "HOMEis" in squeezed or (os.name == "nt" and "USERPROFILEis" in squeezed)
 
 
 def _home_setting(kind: str, home: Path) -> Optional[str]:
@@ -16805,8 +16871,12 @@ def test_a_relative_ash_bin_path_is_not_used_and_the_default_bin_directory_is(
         "default-under-a-relative-home": cwd / "relhome" / ".ash" / "bin",
     }
     tools = {where: _unique_tool() for where in directories}
-    for where, directory in directories.items():
-        _place_tool(directory, tools[where], "exec")
+    # The file each tool was placed as: on Windows it carries the ``.exe`` suffix that
+    # makes it a candidate, so the lookup answers ``name.exe``, not the bare name.
+    placed = {
+        where: _place_tool(directory, tools[where], "exec")
+        for where, directory in directories.items()
+    }
     if value == "ABSOLUTE":
         value = str(directories["absolute"])
 
@@ -16821,7 +16891,7 @@ def test_a_relative_ash_bin_path_is_not_used_and_the_default_bin_directory_is(
     answered = {where for where, name in tools.items() if found[name] is not None}
     assert answered == ({holder} if holder else set()), found
     if holder:
-        assert _same_file(found[tools[holder]], directories[holder] / tools[holder])
+        assert _same_file(found[tools[holder]], placed[holder])
     if home_kind == "absolute":
         relative = value == "rel-bin"
         assert _warns_naming(stderr, "ASH_BIN_PATH", value) is relative, stderr
@@ -16861,8 +16931,18 @@ def test_ash_dependencies_install_reads_a_relative_bin_path_where_it_was_typed(
     # Without the side bars of the panel the target is printed in.
     text = _squeezed(result.stdout + result.stderr).replace("│", "")
 
-    target = cwd / "rel-bin" if given == "option" else home / ".ash" / "bin"
-    assert _squeezed(f"Target bin path: {target}") in text, _output_tail(result)
+    # The panel prints the target as given (dependencies.py: "The panel shows the
+    # value as given"), so a relative --bin-path reads ``rel-bin`` and the fallback
+    # for a relative ASH_BIN_PATH reads ``~/.ash/bin`` under the test's home. The
+    # option's target is the working directory's ``rel-bin``, not the home default.
+    if given == "option":
+        assert _squeezed("Target bin path: rel-bin\nPlugin types:") in text, (
+            _output_tail(result)
+        )
+        assert _squeezed(str(home / ".ash" / "bin")) not in text, _output_tail(result)
+    else:
+        target = home / ".ash" / "bin"
+        assert _squeezed(f"Target bin path: {target}") in text, _output_tail(result)
     if given == "environment":
         assert _warns_naming(text, "ASH_BIN_PATH", "rel-bin"), _output_tail(result)
         assert not (cwd / "rel-bin").exists(), "a relative ASH_BIN_PATH was created"
@@ -17159,9 +17239,9 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
             "~/bin/sudo -n",
             "unset",
             {
-                "environment": "USERHOME/bin/docker",
-                "typed": "USERHOME/bin/docker",
-                "wrapper": ["USERHOME/bin/sudo", "-n"],
+                "environment": "PASSWDHOME/bin/docker",
+                "typed": "PASSWDHOME/bin/docker",
+                "wrapper": ["PASSWDHOME/bin/sudo", "-n"],
             },
             id="a-leading-tilde-home-unset-uses-the-passwd-home",
         ),
@@ -17232,6 +17312,15 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
         if os.name == "nt"
         else importlib.import_module("pwd").getpwnam(user).pw_dir
     )
+    # What a bare ``~`` names with ``HOME`` unset: expanduser asks the passwd database
+    # for the *process's uid*, which is not the entry ``getpass.getuser()`` names when
+    # the login variables (LOGNAME, USER) differ from the uid's entry, as on a runner
+    # image that sets them for another account.
+    passwd_home = (
+        str(home)
+        if os.name == "nt"
+        else importlib.import_module("pwd").getpwuid(os.getuid()).pw_dir
+    )
     runner = runner.replace("ABSOLUTE", absolute).replace("USER", user)
     wrapper = wrapper.replace("ABSOLUTE", absolute).replace("USER", user)
 
@@ -17249,6 +17338,7 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
                 )
                 .replace("CWD", str(cwd))
                 .replace("ABSOLUTE", absolute)
+                .replace("PASSWDHOME", passwd_home)
                 .replace("USERHOME", user_home)
                 .replace("HOME", str(home))
             )
@@ -18266,6 +18356,10 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
         # the `assert any(...)` above the stubs, so a step that stops using it
         # fails there, not here.
         script = script.replace('"$(uv tool dir --bin)/ash"', f'"{bin_dir}/ash"')
+        # A GitHub runner expands ``${{ runner.temp }}`` before it hands the step to
+        # bash; bash itself reads the text as a bad substitution. The context value is
+        # the directory RUNNER_TEMP names.
+        script = re.sub(r"\$\{\{\s*runner\.temp\s*\}\}", str(runner_temp), script)
         result = subprocess.run(
             _bash_argv("-e", _step_script(tmp_path, script)),
             cwd=tmp_path,
@@ -21161,6 +21255,9 @@ def test_a_uv_tool_scanners_tool_ended_by_a_signal_is_the_same_error(
     # a probed-uv constructor takes the stand-in through it; this one builds the
     # runner from the executable itself, which probes it on first use and keeps
     # the answer for the stand-in it was probed from.
+    # The runner probes the stand-in on first use; the guard's stub answers that
+    # probe as a host without uv, so the real probe is put back.
+    _use_the_real_tool_probes(monkeypatch, uv=True)
     make_runner = getattr(UVToolRunner, "for_probed_uv", UVToolRunner)
     runner = make_runner(str(stand_in))
     monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", lambda: runner)
