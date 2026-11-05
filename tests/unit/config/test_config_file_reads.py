@@ -129,10 +129,7 @@ class TestSpecialFilesAreNotRead:
 
         own = Path(__file__).resolve().parents[3] / ".ash" / ".ash.yaml"
 
-        # The repository's own config (suppressions and all) has grown past a
-        # quarter of the bound; the control is that it stays well inside it,
-        # with half the bound left as room to grow.
-        assert own.stat().st_size < ASH_CONFIG_MAX_FILE_BYTES / 2
+        assert own.stat().st_size < ASH_CONFIG_MAX_FILE_BYTES / 4
 
     def test_control_a_file_at_the_bound_is_read(self, tmp_path, monkeypatch):
         content = "project_name: x\n"
