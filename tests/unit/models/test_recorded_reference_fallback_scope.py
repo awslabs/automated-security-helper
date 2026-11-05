@@ -58,14 +58,21 @@ def test_a_reference_in_a_fixed_choice_field_falls_back():
     assert _unreadable(config) == ["global_settings.severity_threshold"]
 
 
-@pytest.mark.parametrize(
-    "path",
-    ["fail_on_findings", "mcp-resource-management__max_concurrent_scans"],
-    ids=["true-or-false", "number"],
-)
-def test_a_reference_in_another_field_refuses_the_record(path):
+def test_a_reference_in_a_true_or_false_field_refuses_the_record():
+    """A true/false field is not one the fallback admits: it has no parse error
+    of its own kind and its default is one of its two values."""
     with pytest.raises(ValidationError):
-        _load(_record(**{path: "${ASH_PROBE_VALUE}"}))
+        _load(_record(fail_on_findings="${ASH_PROBE_VALUE}"))
+
+
+def test_a_reference_in_a_number_field_falls_back():
+    """A number field cannot hold a reference either, and the record writes the
+    reference in its place (recorded_config._a_choice_refused), so it reads as
+    its default and is listed as unreadable, as a fixed-choice field is."""
+    field = "mcp-resource-management.max_concurrent_scans"
+    config = _load(_record(**{field.replace(".", "__"): "${ASH_PROBE_VALUE}"}))
+    assert config.mcp_resource_management.max_concurrent_scans == 3
+    assert _unreadable(config) == [field]
 
 
 def test_a_reference_beside_another_refusal_refuses_the_record():

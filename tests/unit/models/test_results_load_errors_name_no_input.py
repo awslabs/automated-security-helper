@@ -65,10 +65,31 @@ def _assert_no_value(text: str) -> None:
 
 
 def test_the_record_s_own_error_quotes_the_value():
-    """Control: loaded as it is, pydantic's text for this record quotes it."""
+    """Control: pydantic's own text for a refused input quotes it.
+
+    Whether the text for THIS record quotes the value depends on the pydantic
+    release and on which model's ``hide_input_in_errors`` it honors (the
+    record's sections set it; the newer releases apply a nested model's
+    setting, the older ones only the outer model's), so the record alone is not
+    a stable control. A default-configured model is: it shows the quoting the
+    reporting layers below exist to keep out of their output. The record's own
+    error still names the field and is a ValueError, which is what those
+    layers read.
+    """
+    from typing import Literal
+
+    from pydantic import BaseModel
+
+    class Plain(BaseModel):
+        severity_threshold: Literal["LOW", "HIGH"]
+
+    with pytest.raises(ValueError) as quoting:
+        Plain.model_validate({FIELD: CANARY})
+    assert CANARY in str(quoting.value)
+
     with pytest.raises(ValueError) as refused:
         AshAggregatedResults.model_validate(_record())
-    assert CANARY in str(refused.value)
+    assert FIELD in str(refused.value)
 
 
 @pytest.fixture
