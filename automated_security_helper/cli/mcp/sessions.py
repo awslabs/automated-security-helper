@@ -83,6 +83,7 @@ from automated_security_helper.cli.mcp.session_paths import (
     validated_path_component,
 )
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+from automated_security_helper.utils.threads import ash_thread
 
 
 class ScanCount:
@@ -2533,7 +2534,7 @@ def _complete_a_pending_end_off_the_sweep(session_id: str) -> None:
             return
         _completing_off_the_sweep.add(session_id)
     try:
-        threading.Thread(
+        ash_thread(
             target=_finish_ended_session_off_the_sweep,
             args=(session_id,),
             name=f"ash-mcp-finish-ended-session-{session_id}",
