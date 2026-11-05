@@ -115,7 +115,17 @@ def project_dir(
     # displayed_cwd, so the run ends without the ASH_BIN_PATH hint: it quotes a
     # Windows path differently from a POSIX one, and
     # tests/unit/cli/test_dependencies_bin_path.py checks it.
-    monkeypatch.setenv("ASH_BIN_PATH", str(Path(DISPLAYED_CWD, "bin")))
+    #
+    # On Windows the command computes that absolute form with ``ntpath.abspath``,
+    # which asks the OS for the real cwd rather than ``os.getcwd``, so
+    # displayed_cwd does not reach it; and a drive-less ``\workspace\...`` is not
+    # anchored there, so the command would read it as unset (core.constants
+    # ``is_anchored``). The anchored real path is what the command compares with.
+    if os.name == "nt":
+        bin_path = os.path.abspath(project / "bin")
+    else:
+        bin_path = str(Path(DISPLAYED_CWD, "bin"))
+    monkeypatch.setenv("ASH_BIN_PATH", bin_path)
     # cfn-nag's Windows check reads it; pinned unset so the warning is the same on
     # a developer machine with a Ruby DevKit as on CI.
     monkeypatch.delenv("RI_DEVKIT", raising=False)

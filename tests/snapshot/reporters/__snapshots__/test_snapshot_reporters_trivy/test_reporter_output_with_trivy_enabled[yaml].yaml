@@ -530,6 +530,7 @@ metadata:
   plugin_load_errors: {}
   project_name: ASH
   report_id: ASH-20260115120000-000000000001
+  requested_scanners_not_run: null
   shard: null
   summary_stats:
     actionable: 10

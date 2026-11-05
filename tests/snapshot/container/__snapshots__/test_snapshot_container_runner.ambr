@@ -50,9 +50,8 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The container exited with code 0.
   
     ''',
   })

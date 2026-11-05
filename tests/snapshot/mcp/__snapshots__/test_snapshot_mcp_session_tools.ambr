@@ -483,6 +483,7 @@
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
+      'plugin_names_checked': False,
       'projects': list([
         dict({
           'config_source': None,
@@ -646,6 +647,7 @@
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
+      'plugin_names_checked': False,
       'projects': list([
         dict({
           'config_source': None,
