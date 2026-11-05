@@ -19,12 +19,12 @@ defaults and the operator control.
 """
 
 import json
+from types import SimpleNamespace
 
 import boto3
 import botocore.client
 import botocore.exceptions
 import pytest
-from typer.testing import CliRunner
 
 from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
     SecurityHubReporter,
@@ -334,22 +334,53 @@ class TestTheEnvironmentIsReadWhenAConfigIsBuilt:
 
 @pytest.mark.unit
 class TestReportCommand:
+    @pytest.fixture(autouse=True)
+    def _capture(self, capsys):
+        self.capsys = capsys
+
     def _report(self, output_dir, *extra, report_format="aws-security-hub"):
+        """``ash report``, run as ``CliRunner.invoke`` runs it, read with ``capsys``.
+
+        Not through ``CliRunner``: a record logged during ``invoke`` while pytest's
+        live logging is on reassigns ``sys.stdout``, which finalizes the runner's own
+        stream wrapper and closes the buffer it reads back
+        (``_keep_live_logging_off_the_ash_logger`` in tests/conftest.py explains the
+        mechanism; tests/unit/docs/test_page_claims.py does this for ``ash mcp``).
+        Which test hit ``ValueError: I/O operation on closed file`` depended on what
+        ran before it in the worker.
+        """
+        from typer.main import get_command
+
         from automated_security_helper.cli.main import app
 
-        return CliRunner().invoke(
-            app,
-            [
-                "report",
-                "--format",
-                report_format,
-                "--output-dir",
-                str(output_dir),
-                "--log-level",
-                "ERROR",
-                "--no-color",
-                *extra,
-            ],
+        self.capsys.readouterr()
+        try:
+            get_command(app).main(
+                args=[
+                    "report",
+                    "--format",
+                    report_format,
+                    "--output-dir",
+                    str(output_dir),
+                    "--log-level",
+                    "ERROR",
+                    "--no-color",
+                    *extra,
+                ],
+                prog_name="ash",
+                standalone_mode=True,
+            )
+            code = 0
+        except SystemExit as stopped:
+            # As CliRunner reads it: None is success, a message is failure.
+            code = stopped.code
+            if code is None:
+                code = 0
+            elif not isinstance(code, int):
+                code = 1
+        printed = self.capsys.readouterr()
+        return SimpleNamespace(
+            exit_code=code, output=printed.out + printed.err, stdout=printed.out
         )
 
     @staticmethod
@@ -415,7 +446,7 @@ class TestReportCommand:
         assert security_hub_runs == ["SecurityHubReporter"]
         # The import receipt: the stored results hold no finding, so nothing
         # was sent and no AWS call was needed.
-        assert json.loads(result.output)["imported"] == 0
+        assert json.loads(result.stdout)["imported"] == 0
 
     def _s3_operator_config(self, root, enabled_line=""):
         """An operator config with every option S3 needs to upload, and ``enabled_line``."""
