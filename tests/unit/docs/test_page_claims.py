@@ -16568,7 +16568,7 @@ def test_a_container_scan_passes_only_the_aws_settings_the_operators_config_read
 #: advanced-usage.md's step 2 of where ASH looks for a tool, and its sentence on a
 #: relative ``--bin-path`` (Install tools with `ash dependencies install`).
 _A_RELATIVE_ASH_BIN_PATH_IS_NOT_USED = (
-    "The directory in `ASH_BIN_PATH`, or `~/.ash/bin` if it is not set or is empty. "
+    "the directory in `ASH_BIN_PATH`, or `~/.ash/bin` if it is not set or is empty. "
     "This is where `ash dependencies install` puts tools, so you do not need to add it "
     "to `PATH`. A `~` at the start of the value is expanded. A relative `ASH_BIN_PATH` "
     "is not used: ASH logs a warning that names it and uses `~/.ash/bin`, for lookups "
