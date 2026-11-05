@@ -709,7 +709,19 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             os.environ.get("TRIVY_IGNOREFILE"),
             os.environ.get("TRIVY_SECRET_CONFIG"),
         )
-        return (*super()._environment_values(), *(value for value in read if value))
+        # The command line names these two files in forward slashes
+        # (``Path.as_posix``), so on Windows, where the variable holds
+        # backslashes, the value must also be matched in that spelling or the
+        # logged command and the SARIF invocation would carry it unredacted.
+        spellings = []
+        for value in read:
+            if not value:
+                continue
+            spellings.append(value)
+            slashed = value.replace("\\", "/")
+            if slashed != value:
+                spellings.append(slashed)
+        return (*super()._environment_values(), *spellings)
 
     def validate_plugin_dependencies(self) -> bool:
         """The binary, and offline, a vulnerability database for it to read.
