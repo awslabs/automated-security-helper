@@ -2882,9 +2882,22 @@ def test_a_relative_name_is_judged_from_the_physical_directory_alone_without_pwd
     layout, monkeypatch
 ):
     """The control: with ``$PWD`` unset only the physical walk runs, and that
-    walk passes no link in the checkout, so the same name is accepted."""
+    walk passes no link in the checkout, so the same name is accepted.
+
+    Windows has no physical working directory to walk: ``os.getcwd()`` returns the
+    directory as ``chdir`` was given it, link included, so the name is walked
+    through the checkout's link even with ``$PWD`` unset and is refused there, in
+    the words the ``$PWD`` case gives."""
     _standing_below_a_checkout_link(layout, monkeypatch)
     monkeypatch.delenv("PWD", raising=False)
+
+    if sys.platform == "win32":
+        with pytest.raises(rac.ContainerInputError, match="ASH_CONFIG file") as refused:
+            rac._refuse_config_linked_out_of_the_tree(
+                "../cfg.yaml", layout["source"], "ASH_CONFIG file"
+            )
+        assert "is inside the scanned tree but is a link" in str(refused.value)
+        return
 
     rac._refuse_config_linked_out_of_the_tree(
         "../cfg.yaml", layout["source"], "ASH_CONFIG file"
