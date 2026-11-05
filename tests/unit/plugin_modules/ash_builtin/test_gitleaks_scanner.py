@@ -1534,8 +1534,19 @@ def test_a_directory_named_gitleaksignore_is_not_a_reason_to_stop(tmp_path):
 
 #: Characters Python's str.splitlines() or str.strip() treat as line breaks or
 #: whitespace and gitleaks does not: it splits lines on "\n" alone
-#: (bufio.ScanLines) and trims with Go's strings.TrimSpace.
-NOT_A_BREAK_TO_GITLEAKS = ["\v", "\f", "\r", "\x1c", "\x1d", "\x1e", "\x85", " ", " "]
+#: (bufio.ScanLines) and trims with Go's strings.TrimSpace. The last two are
+#: spelled as escapes so the source holds no invisible characters.
+NOT_A_BREAK_TO_GITLEAKS = [
+    "\v",
+    "\f",
+    "\r",
+    "\x1c",
+    "\x1d",
+    "\x1e",
+    "\x85",
+    "\N{LINE SEPARATOR}",
+    "\N{PARAGRAPH SEPARATOR}",
+]
 
 
 def _copied_for(tmp_path, monkeypatch, entries: bytes, *files: bytes) -> list:
