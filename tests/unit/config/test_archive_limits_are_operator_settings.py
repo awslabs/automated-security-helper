@@ -273,10 +273,17 @@ class TestRepositoryConfig:
         archive = tree / "a.zip"
         archive.write_bytes(zip_bytes({"large.py": incompressible(2000)}))
 
-        config = resolve_config(source_dir=tree)
-        converter, results = convert_with(config, tree, archive, monkeypatch)
+        # A key the converter does not model is refused by name (strict option
+        # keys), so a hyphenated spelling can no more raise the limit than a
+        # correct one: the config file does not load and no archive is converted.
+        with pytest.raises(ASHConfigValidationError) as refused:
+            resolve_config(source_dir=tree)
 
-        assert_refused(converter, results, archive, "max_member_bytes")
+        message = str(refused.value)
+        assert "Unknown key 'max-member-bytes'" in message, message
+        assert "max_member_bytes" in message, message
+        assert ".ash.yaml" in message, message
+        assert [p.name for p in tree.iterdir() if p.is_dir() and p.name != ".ash"] == []
 
     def test_config_overrides_set_a_limit_over_a_repository_config(
         self, layout, monkeypatch
