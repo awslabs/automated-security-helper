@@ -370,7 +370,10 @@ def test_run_command_s_lines_take_a_bare_value_as_one(monkeypatch, records):
         )
 
     monkeypatch.setattr(subprocess_utils, "_runner", lambda sandboxed: _fails)
-    monkeypatch.setattr(subprocess_utils, "find_executable", lambda name: None)
+    # The stand-in is found as itself: Windows refuses a bare name nothing
+    # resolves before any start, so a lookup that found nothing would never reach
+    # the runner whose stderr line this cell reads.
+    monkeypatch.setattr(subprocess_utils, "find_executable", lambda name: name)
 
     def logged(values):
         records.clear()
