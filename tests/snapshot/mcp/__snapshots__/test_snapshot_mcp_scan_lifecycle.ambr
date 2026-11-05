@@ -2964,7 +2964,7 @@
         'aggregated_results': dict({
           'exists': True,
           'path': '<TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
-          'size_bytes': 7207,
+          'size_bytes': 7247,
         }),
         'csv': dict({
           'exists': False,

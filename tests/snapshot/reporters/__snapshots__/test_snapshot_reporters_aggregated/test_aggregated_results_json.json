@@ -31,6 +31,7 @@
     "execution_discrepancy_report": {},
     "shard": null,
     "expected_scanners": [],
+    "requested_scanners_not_run": null,
     "plugin_load_errors": {},
     "ignore_file_exclusions": null,
     "inputs_not_scanned": null
