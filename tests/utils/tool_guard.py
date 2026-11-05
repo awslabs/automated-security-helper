@@ -931,6 +931,25 @@ def reset_tool_lookup_caches() -> None:
     reset_pre_installed_tool_cache()
 
 
+def use_the_real_candidate_names(monkeypatch) -> None:
+    """Put back the lookup's own candidate list for a test whose subject is it.
+
+    On Windows the guard makes every guarded name resolve to its ``.bat`` stand-in
+    alone (``_guard_first``), so a test of how ``find_executable`` orders ``.exe``,
+    ``.bat`` and ``.cmd``, or of which install locations it searches, reads the
+    guard's one-name list and finds only a ``.bat``. Such a test points PATH or
+    ASH_BIN_PATH at directories of its own, so the stand-ins are not in its way.
+    Call it from the test or a fixture that runs after the guard's; without a
+    Windows guard in force it does nothing.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    guard = _ACTIVE
+    real = getattr(guard, "real_candidate_names", None)
+    if real is not None:
+        monkeypatch.setattr(subprocess_utils, "_executable_candidate_names", real)
+
+
 def stub_tool_probes(monkeypatch) -> None:
     """Answer the probes ASH runs while building and validating scanners, without a process.
 
@@ -1668,6 +1687,9 @@ def install_tool_guard(
         monkeypatch.setattr(
             subprocess_utils, "_executable_candidate_names", _guard_first
         )
+        #: For a test whose subject is the candidate list itself
+        #: (``use_the_real_candidate_names``).
+        guard.real_candidate_names = real_candidates
     if "uv" in names:
         # find_uv_or_none asks for the uv installed with ASH before it searches
         # PATH, so that copy would answer ahead of the stand-in.

@@ -53,6 +53,7 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 WINDOWS = sys.platform == "win32"
 posix_only = pytest.mark.skipif(WINDOWS, reason="starts a POSIX shell script")
@@ -78,6 +79,9 @@ def hermetic(monkeypatch, tmp_path):
     monkeypatch.setattr(
         subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
     )
+    # The lookup's own candidate list, not the Windows tool guard's one-name
+    # list: these cells read how ``.exe``, ``.cmd`` and ``.bat`` names resolve.
+    use_the_real_candidate_names(monkeypatch)
     subprocess_utils.clear_find_executable_cache()
     yield
     subprocess_utils.clear_find_executable_cache()

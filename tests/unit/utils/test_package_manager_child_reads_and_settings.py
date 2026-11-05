@@ -69,13 +69,33 @@ def _copy(binary: str, package: Path, tmp_path: Path, **options) -> dict:
         }
 
 
+def _nesting_json_refuses() -> int:
+    """A nesting depth this interpreter's ``json.loads`` refuses with RecursionError.
+
+    Python 3.14 measures the C stack instead of counting frames, so the 50,000
+    levels that were past every earlier interpreter's limit parse there, and a
+    manifest of that depth stopped being one this parser cannot read. The depth is
+    found by trying, so the cells below keep their premise (a manifest the parser
+    refuses and V8's does not) on every interpreter, and fail here, naming it,
+    if none is found.
+    """
+    depth = 50_000
+    while depth <= 50_000_000:
+        try:
+            json.loads("[" * depth + "]" * depth)
+        except RecursionError:
+            return depth
+        depth *= 4
+    raise AssertionError("json.loads read every nesting depth tried")
+
+
 class TestADeeplyNestedManifest:
     """json.loads refuses it with RecursionError; V8's parser does not."""
 
     def _nested(
         self, tmp_path: Path, lockfile: str = "package-lock.json", **keys
     ) -> Path:
-        depth = 50_000
+        depth = _nesting_json_refuses()
         body = json.dumps({"name": "deep", **keys})[1:-1].encode()
         nested = b"{" + body + b', "a": ' + b"[" * depth + b"]" * depth + b"}"
         return _package(tmp_path / "repo" / "deep", lockfile, nested)
@@ -117,7 +137,7 @@ class TestADeeplyNestedManifest:
         """The refusal does not look for the key's bytes: an unparsable pnpm
         manifest is refused whatever it holds, so the escaped spelling
         (``auditCon\\u0066ig``, the same key to Node) is no way past it."""
-        depth = 50_000
+        depth = _nesting_json_refuses()
         nested = (
             b'{"name": "deep", "pnpm": {"auditCon\\u0066ig": {}}, "a": '
             + b"[" * depth

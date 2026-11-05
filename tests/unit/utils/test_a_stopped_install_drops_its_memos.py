@@ -56,6 +56,10 @@ _POSIX_FAKE_UV = pytest.mark.skipif(
 @pytest.fixture(autouse=True)
 def _isolated_caches(monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    # On Windows ASH refuses a bare name its lookup cannot resolve before it
+    # spawns anything (subprocess_utils._refuse_unresolved_on_windows); the
+    # cells here replace the spawn and pin what happens after it.
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
     _reset_uv_tool_runner_caches()
     subprocess_utils.clear_find_executable_cache()
     yield

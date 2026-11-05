@@ -43,17 +43,24 @@ from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
 )
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _isolate_lookup_cache():
+def _isolate_lookup_cache(monkeypatch):
     """find_executable memoizes into a module-global dict.
 
     Cleared on both sides so a name resolved under a mocked Windows does not leak into
     a POSIX test, or into anything else sharing this xdist worker.
+
+    The candidate list is the subject here, so it is the lookup's own: on Windows
+    the unit tests' tool guard narrows a guarded name (cfn_nag_scan, npm) to its
+    ``.bat`` stand-in, which these cells' ``.exe``, ``.cmd`` and bare-name
+    expectations cannot be read through.
     """
+    use_the_real_candidate_names(monkeypatch)
     clear_find_executable_cache()
     yield
     clear_find_executable_cache()

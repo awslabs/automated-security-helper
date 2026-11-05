@@ -62,6 +62,7 @@ from automated_security_helper.utils.cdk_nag_wrapper import (
     run_cdk_nag_against_cfn_template,
 )
 from tests.utils.env_assertions import environ_names
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 pytestmark = pytest.mark.unit
 
@@ -2487,6 +2488,9 @@ def hermetic_lookup(monkeypatch, tmp_path):
     monkeypatch.setattr(
         subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
     )
+    # The lookup's own candidate list: on Windows the unit tests' tool guard
+    # narrows "node" to its .bat stand-in, and these cells' fake node is node.exe.
+    use_the_real_candidate_names(monkeypatch)
     subprocess_utils.clear_find_executable_cache()
     yield
     subprocess_utils.clear_find_executable_cache()
