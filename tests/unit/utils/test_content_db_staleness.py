@@ -113,17 +113,21 @@ def _executable(bin_dir: Path, name: str, source: str) -> Path:
     would leave on PATH. On POSIX that is an executable file named ``name``. On Windows a
     shebang script cannot be started at all -- ``CreateProcess`` rejects it with
     ``[WinError 193] %1 is not a valid Win32 application`` -- so the launcher is a
-    ``name.cmd`` shim, the same form npm installs. ``find_executable`` tries ``.exe``,
-    ``.bat`` and ``.cmd`` before the bare name on Windows, and ``subprocess.run`` with a
-    list starts a ``.cmd`` directly, so the scanner's own lookup and invocation are the
-    ones under test rather than a patched-out subprocess call.
+    ``name.bat`` shim, the form RubyGems installs. ``find_executable`` tries ``.exe``,
+    ``.bat`` and ``.cmd`` before the bare name on Windows, each across the whole PATH
+    before the next, and ``subprocess.run`` with a list starts a ``.bat`` directly, so
+    the scanner's own lookup and invocation are the ones under test rather than a
+    patched-out subprocess call. It is ``.bat``, not ``.cmd``, because the tool guard
+    (tests/utils/tool_guard.py) puts a ``name.bat`` stand-in on PATH for each guarded
+    tool: a ``.cmd`` shim ranks after it whatever the PATH order, so the lookup
+    answered the stand-in and the test started a guarded tool.
 
     Returns the launcher's path, which is what a scanner's ``find_executable`` would return.
     """
     script = bin_dir / f"_fake_{name}.py"
     script.write_text(source, encoding="utf-8")
     if platform.system().lower() == "windows":
-        launcher = bin_dir / f"{name}.cmd"
+        launcher = bin_dir / f"{name}.bat"
         launcher.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
         return launcher
     launcher = bin_dir / name
