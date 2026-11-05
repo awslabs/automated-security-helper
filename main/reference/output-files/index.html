@@ -3932,6 +3932,10 @@ in a workspace scan. A file a converter wrote is identified by its path under
 <code>converted/</code>. Findings that share all of that, such as two secrets on one line, are told
 apart by their column and message. So a finding keeps its id from one scan to the next,
 unless it has no fingerprints and an edit above it moves it to other lines.</p>
+<p>A finding's <code>detected_at</code> is optional. It is the time the scanner recorded for the
+finding, in UTC, and is <code>null</code> when the scanner recorded none with a timezone. A plugin
+timestamp without a timezone is not guessed at; it is kept only in the finding's
+<code>raw_data</code>.</p>
 <h2 id="per-scanner-results">Per-scanner results<a class="headerlink" href="#per-scanner-results" title="Permanent link">&para;</a></h2>
 <p><code>scanners/&lt;name&gt;/</code> is where each scanner writes, and under the sandbox it is the only
 directory a scanner can write to. Each target's directory below it holds the tool's raw
