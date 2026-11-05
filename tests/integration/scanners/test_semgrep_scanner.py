@@ -212,16 +212,34 @@ SEMGREP_CLEAN_RUN_SARIF = (
 )
 
 
+def _run_writing_results(scanner, content: str):
+    """A ``_run_subprocess`` stand-in that writes ``content`` where semgrep would.
+
+    The scan reads the real ``results_sarif.sarif`` path through the base reader
+    (``fs_guard.read_bytes_at_most``), which does not go through
+    ``builtins.open``, so patching ``open`` never reached it. It also grades the
+    response's ``returncode`` before it reads the file, and a response with none
+    is "its tool never ran", so the stand-in returns an exit code of 0.
+    """
+    results_file = scanner.results_dir / "source" / "results_sarif.sarif"
+
+    def write_results(*args, **kwargs):
+        results_file.parent.mkdir(parents=True, exist_ok=True)
+        results_file.write_text(content, encoding="utf-8")
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    return write_results
+
+
 def test_semgrep_scanner_scan(test_semgrep_scanner, test_data_dir):
     """Test SemgrepScanner scan method: a mocked clean run returns its report."""
     # Mock the scan to avoid actual execution
     import unittest.mock
 
-    with (
-        unittest.mock.patch.object(test_semgrep_scanner, "_run_subprocess"),
-        unittest.mock.patch(
-            "builtins.open", unittest.mock.mock_open(read_data=SEMGREP_CLEAN_RUN_SARIF)
-        ),
+    with unittest.mock.patch.object(
+        test_semgrep_scanner,
+        "_run_subprocess",
+        side_effect=_run_writing_results(test_semgrep_scanner, SEMGREP_CLEAN_RUN_SARIF),
     ):
         # Run the scan
         results = test_semgrep_scanner.scan(test_data_dir, target_type="source")
@@ -241,8 +259,11 @@ def test_semgrep_scanner_scan_refuses_a_result_with_no_run(
     from automated_security_helper.core.exceptions import ScannerError
 
     with (
-        unittest.mock.patch.object(test_semgrep_scanner, "_run_subprocess"),
-        unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
+        unittest.mock.patch.object(
+            test_semgrep_scanner,
+            "_run_subprocess",
+            side_effect=_run_writing_results(test_semgrep_scanner, "{}"),
+        ),
         pytest.raises(ScannerError, match="holds no SARIF run"),
     ):
         test_semgrep_scanner.scan(test_data_dir, target_type="source")
