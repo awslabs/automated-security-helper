@@ -171,7 +171,10 @@ def test_a_community_config_entry_is_judged_by_its_line_numbers(
         "      reason: example\n",
         encoding="utf-8",
     )
-    validator.COMMUNITY_SUPPRESSIONS = validator.load_community_suppressions()
+    # The loader reads the config files it is given. Its default is the list of this
+    # repository's own configs, fixed when the module is loaded, so the file the
+    # test wrote under tmp_path is named outright.
+    validator.COMMUNITY_SUPPRESSIONS = validator.load_community_suppressions([config])
 
     validator.check_suppression_coverage()
 
