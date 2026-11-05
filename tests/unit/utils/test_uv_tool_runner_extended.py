@@ -445,8 +445,16 @@ class TestGetToolVersionOffline:
         monkeypatch.delenv("UV_OFFLINE", raising=False)
         version, call = self._probe(runner)
         command = call.args[0]
-        # uv by the absolute path ASH resolved for it, never by name.
-        assert Path(command[0]).stem == "uv" and Path(command[0]).is_absolute()
+        # uv by the absolute path ASH resolved for it, never by name. On Windows
+        # the unit tests' guard resolves "uv" to a .bat stand-in, which ASH starts
+        # through the running interpreter and not through cmd.exe, so the program
+        # is the interpreter's absolute path and what follows it is the stand-in's
+        # replacement launch; the arguments after uv's own are read the same way.
+        if os.name == "nt":
+            assert Path(command[0]).is_absolute()
+            command = [command[0], *command[command.index("tool") :]]
+        else:
+            assert Path(command[0]).stem == "uv" and Path(command[0]).is_absolute()
         assert command[1:4] == ["tool", "run", "--offline"]
         assert command[-2:] == ["semgrep", "--version"]
         assert call.kwargs["env"]["UV_OFFLINE"] == "1"

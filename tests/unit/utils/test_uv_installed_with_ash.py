@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import pytest
 
 from automated_security_helper.utils import subprocess_utils, uv_tool_runner
+from tests.utils.tool_guard import use_the_real_candidate_names
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     _reset_uv_tool_runner_caches,
@@ -253,6 +254,9 @@ def test_the_uv_package_layouts(package, windows, expected):
 
 
 def test_path_is_searched_when_no_uv_came_with_ash(tmp_path, monkeypatch):
+    # The lookup's own candidate list: on Windows the unit tests' tool guard
+    # narrows "uv" to its .bat stand-in, which a uv.exe on PATH is not.
+    use_the_real_candidate_names(monkeypatch)
     _reset_uv_tool_runner_caches()
     subprocess_utils.clear_find_executable_cache()
     monkeypatch.setattr(sys, "executable", str(tmp_path / "bin" / f"python{EXE}"))
