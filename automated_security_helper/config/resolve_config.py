@@ -4776,7 +4776,7 @@ def _load_operator_config(
     only path they hold, the client's delivered file, and blamed that file
     for the operator's copy of a profile that would not parse. A base of the
     chain is already reworded by the walk, and a file the process cannot
-    read is raised as it is, for the caller to name in its own words.
+    read is refused as ``ASHConfigSourceError`` ("could not read ...").
     """
     if trusted_config_path is None:
         return None
@@ -4803,6 +4803,15 @@ def _load_operator_config(
             raise
         # The parser's own words can quote the file (unparsed_config_reason).
         unparsed = unparsed_config_reason(Path(trusted_config_path), exc)
+    except OSError as exc:
+        # A file the process cannot read is refused as a config error, as a
+        # named or ASH_CONFIG file is, not raised bare: a workspace scan exits
+        # 3 for it and not 1.
+        operator_file = Path(trusted_config_path)
+        raise ASHConfigSourceError(
+            f"could not read {describe_config_path(operator_file)}: "
+            f"{os_error_without_named_file(exc, operator_file)}"
+        ) from exc
     if unparsed is not None:
         # Outside the handler (unparsed_config_reason).
         raise ASHConfigUnparsedError(unparsed)
