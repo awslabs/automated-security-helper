@@ -69,9 +69,13 @@ def test_the_directory_variables_alone_are_every_write_location(tmp_path):
 
 @pytest.mark.unit
 def test_an_operator_uv_cache_is_reused(tmp_path, monkeypatch):
-    monkeypatch.setenv("UV_CACHE_DIR", "/operator/uv-cache")
+    # An absolute path on every platform: "/operator/uv-cache" has no drive on
+    # Windows, where it is made absolute against the current drive and no longer
+    # reads as written.
+    operator_cache = str(tmp_path / "operator" / "uv-cache")
+    monkeypatch.setenv("UV_CACHE_DIR", operator_cache)
 
-    assert isolated_tool_env(tmp_path)["UV_CACHE_DIR"] == "/operator/uv-cache"
+    assert isolated_tool_env(tmp_path)["UV_CACHE_DIR"] == operator_cache
 
 
 @pytest.mark.unit
