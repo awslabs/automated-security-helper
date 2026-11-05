@@ -277,15 +277,28 @@ def test_a_timed_out_run_with_complete_output_is_not_successful(
     """
     bin_dir = tmp_path / "stub-bin"
     bin_dir.mkdir()
-    stub = bin_dir / "cfn_nag_scan"
     # The document is written whole and unbuffered (cat writes straight to
     # the stdout fd), then the process becomes a sleep the runner's stop can
     # kill cleanly, so the response is a plain timed_out with the full
     # output captured.
-    stub.write_text(
-        "#!/bin/sh\ncat <<'SARIF'\n" + _complete_cfn_nag_sarif() + "\nSARIF\n"
-        "exec sleep 60\n"
-    )
+    if os.name == "nt":
+        # Windows runs no "#!/bin/sh" file (WinError 193). The lookup prefers a
+        # .bat to the bare name, and the batch file prints the document with
+        # ``type`` and then waits, which gives the same two steps.
+        (bin_dir / "cfn_nag_scan.sarif").write_text(
+            _complete_cfn_nag_sarif() + "\n", encoding="utf-8"
+        )
+        stub = bin_dir / "cfn_nag_scan.bat"
+        stub.write_text(
+            '@echo off\r\ntype "%~dp0cfn_nag_scan.sarif"\r\nping -n 60 127.0.0.1 >nul\r\n',
+            encoding="utf-8",
+        )
+    else:
+        stub = bin_dir / "cfn_nag_scan"
+        stub.write_text(
+            "#!/bin/sh\ncat <<'SARIF'\n" + _complete_cfn_nag_sarif() + "\nSARIF\n"
+            "exec sleep 60\n"
+        )
     stub.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
 
