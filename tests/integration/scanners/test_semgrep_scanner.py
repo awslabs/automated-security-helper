@@ -246,10 +246,19 @@ def test_semgrep_scanner_scan(test_semgrep_scanner, test_data_dir):
     # Mock the scan to avoid actual execution
     import unittest.mock
 
-    with unittest.mock.patch.object(
-        test_semgrep_scanner,
-        "_run_subprocess",
-        side_effect=_run_writing_results(test_semgrep_scanner, SEMGREP_CLEAN_RUN_SARIF),
+    # Semgrep publishes no Windows build, so on Windows the scanner is skipped
+    # before it runs; this test is about reading a run's report, on any platform.
+    with (
+        unittest.mock.patch.object(
+            test_semgrep_scanner, "unsupported_platform_reason", return_value=None
+        ),
+        unittest.mock.patch.object(
+            test_semgrep_scanner,
+            "_run_subprocess",
+            side_effect=_run_writing_results(
+                test_semgrep_scanner, SEMGREP_CLEAN_RUN_SARIF
+            ),
+        ),
     ):
         # Run the scan
         results = test_semgrep_scanner.scan(test_data_dir, target_type="source")
@@ -269,6 +278,9 @@ def test_semgrep_scanner_scan_refuses_a_result_with_no_run(
     from automated_security_helper.core.exceptions import ScannerError
 
     with (
+        unittest.mock.patch.object(
+            test_semgrep_scanner, "unsupported_platform_reason", return_value=None
+        ),
         unittest.mock.patch.object(
             test_semgrep_scanner,
             "_run_subprocess",

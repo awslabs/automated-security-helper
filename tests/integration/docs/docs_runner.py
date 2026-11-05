@@ -611,6 +611,15 @@ class PageRunner:
             state = session.root / "state.env"
             cwd_file = session.root / "state.cwd"
             interpreter = "sh" if block.lang == "sh" else "bash"
+            if os.name == "nt":
+                # A bare "bash" given to CreateProcess is the WSL launcher in the
+                # system directory ("Windows Subsystem for Linux has no installed
+                # distributions"). Use the bash that ships with Git for Windows.
+                from tests.utils.github_actions import git_for_windows_bash
+
+                git_bash = git_for_windows_bash()
+                if git_bash:
+                    interpreter = git_bash
             code, output, timed_out = self._run_process(
                 [interpreter, str(script), str(state), str(cwd_file)],
                 session.cwd,

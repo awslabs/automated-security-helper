@@ -296,6 +296,14 @@ def _assert_only_frames(server: _Server) -> None:
 
 
 def _gone(pid: int) -> bool:
+    if os.name == "nt":
+        # os.kill(pid, 0) is not a probe on Windows: it terminates a live process
+        # and raises WinError 87 for one that is gone. Ask the way the product does.
+        from automated_security_helper.core.resource_management.scan_registry import (
+            _windows_process_is_running,
+        )
+
+        return not _windows_process_is_running(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
