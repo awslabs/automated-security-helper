@@ -332,10 +332,15 @@ class TestThePullRequestCover:
         }
 
     def test_the_pull_request_tiers_add_up(self):
-        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == 3 * 3
+        # One image per pool and the 3 cover Pythons. The Linux and macOS unit jobs run
+        # each combination whole; the Windows unit job runs it in 4 shards.
+        unit_linux_and_macos = 1 * 3 + 1 * 3
+        unit_windows = 1 * 3 * 4
+        unit = unit_linux_and_macos + unit_windows
+        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == unit == 18
         assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == 3 * 3 * 4
         assert [PR_LEGS[n] for n in E2E_TEST_JOB_IDS] == [1, 1, 1]
-        assert PR_PYTEST_CHECK_RUNS == 9 + 36 + 3
+        assert PR_PYTEST_CHECK_RUNS == unit + 36 + 3
 
     def test_ensure_cache_runs_on_the_two_labels_with_headroom_on_a_pull_request(self):
         """The fan-out waits for this job, so on a pull request it must not touch a saturated label."""

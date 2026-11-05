@@ -148,9 +148,10 @@ def _assert_only_the_pull_request_cover(job_id: str, matrix: dict[str, Any]) -> 
 #: The shard axis of the integration tier. Four is a reading from the real
 #: classification and the per-file medians of one run of the earlier layout (eight was
 #: the figure before the tests were classified). The list is written out here so that
-#: moving it is a change to this file in the same diff. The unit tier carries no shard
-#: axis: it runs whole, one leg per OS and Python version, under a timeout sized from
-#: the measured shard walls (the note above unit-test-linux in the workflow).
+#: moving it is a change to this file in the same diff. The Linux and macOS unit jobs
+#: carry no shard axis: they run the tier whole, one leg per OS and Python version, under
+#: a timeout sized from the measured shard walls (the note above unit-test-linux in the
+#: workflow). The Windows unit job takes this same axis (SHARDED_UNIT_JOB_IDS below).
 INTEGRATION_SHARDS = ["1of4", "2of4", "3of4", "4of4"]
 #: The unit job that is sharded on a measurement: Windows, where the unsharded py3.10 leg
 #: of pull-request run 41949551817 was cancelled at 212.6 minutes against its 210-minute
@@ -216,7 +217,7 @@ def _shard_axes() -> dict[str, list[str]]:
 
 
 def _shard_axis() -> list[str]:
-    """The one shard axis the six sharded tier jobs share; they must not differ."""
+    """The one shard axis the four sharded tier jobs share; they must not differ."""
     axes = _shard_axes()
     first = axes[SHARDED_TIER_JOB_IDS[0]]
     assert all(axis == first for axis in axes.values()), (
@@ -2400,7 +2401,8 @@ class TestTheActionRunsATier:
 
 @pytest.mark.unit
 class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
-    #: A set that was sharded, for the controls: the unit tier itself uploads one artifact.
+    #: A set that was sharded, for the controls: the Linux and macOS unit jobs upload one
+    #: artifact each (the Windows unit job uploads four).
     SHARDED = ["1of3", "2of3", "3of3"]
 
     @staticmethod
