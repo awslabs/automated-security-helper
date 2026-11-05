@@ -658,9 +658,7 @@ def link_walk_cannot_examine(monkeypatch, component: Path) -> ExaminationRefused
         # the component by a spelling that differs from the one this shim was
         # given. Both are compared as the same name.
         def plain(value) -> str:
-            text = os.fspath(value)
-            if text.startswith("\\\\?\\"):
-                text = text[4:]
+            text = os.fspath(value).removeprefix("\\\\?\\")
             return os.path.normcase(text)
 
         return plain(path) == plain(refused.component)

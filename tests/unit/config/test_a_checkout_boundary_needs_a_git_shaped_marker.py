@@ -213,8 +213,7 @@ def test_a_chain_cut_at_an_unreadable_link_is_judged_in_a_checkout(
         # Windows reads a link's target back with a ``\\?\`` prefix, and
         # compares names without case: the walk reaches this link by that
         # spelling, so both are compared as the one name.
-        text = str(value)
-        return os.path.normcase(text[4:] if text.startswith("\\\\?\\") else text)
+        return os.path.normcase(str(value).removeprefix("\\\\?\\"))
 
     def readlink(path, *args, **kwargs):
         if plain(path) == plain(unreadable):
