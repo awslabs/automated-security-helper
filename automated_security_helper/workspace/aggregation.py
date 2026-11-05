@@ -1884,30 +1884,35 @@ def rewrite_workspace_block(results_path: Path, payload: WorkspaceResults) -> bo
     replacement = f"{key}: {json.dumps(payload.model_dump(mode='json'))},\n"
     try:
         path = Path(results_path)
-        with (
-            open(path, "r", encoding="utf-8") as source,
-            open_for_atomic_write(path) as target,
-        ):
-            at_line_start = True
-            while True:
-                piece = source.readline(_STAMP_READ_LIMIT)
-                if not piece:
-                    raise _NotWritten
-                if at_line_start:
-                    if piece.startswith(f"{key}: "):
-                        # The old block is dropped unread beyond its first piece:
-                        # its line can be as long as the project list.
-                        while not piece.endswith("\n"):
-                            piece = source.readline(_STAMP_READ_LIMIT)
-                            if not piece:
-                                raise _NotWritten
-                        target.write(replacement)
-                        break
-                    if piece.startswith('"sarif": '):
+        # The staging file replaces ``path`` when the outer block ends, and Windows
+        # will not replace a file that this process still holds open (the same
+        # order stamp_run_record uses). So ``source`` is opened inside the block
+        # and closed before it ends. A file that is not there is given up on
+        # first, so the guard creates nothing for it.
+        if not path.exists() and not path.is_symlink():
+            return False
+        with open_for_atomic_write(path) as target:
+            with open(path, "r", encoding="utf-8") as source:
+                at_line_start = True
+                while True:
+                    piece = source.readline(_STAMP_READ_LIMIT)
+                    if not piece:
                         raise _NotWritten
-                target.write(piece)
-                at_line_start = piece.endswith("\n")
-            shutil.copyfileobj(source, target)
+                    if at_line_start:
+                        if piece.startswith(f"{key}: "):
+                            # The old block is dropped unread beyond its first
+                            # piece: its line can be as long as the project list.
+                            while not piece.endswith("\n"):
+                                piece = source.readline(_STAMP_READ_LIMIT)
+                                if not piece:
+                                    raise _NotWritten
+                            target.write(replacement)
+                            break
+                        if piece.startswith('"sarif": '):
+                            raise _NotWritten
+                    target.write(piece)
+                    at_line_start = piece.endswith("\n")
+                shutil.copyfileobj(source, target)
         return True
     except (_NotWritten, OSError, TypeError, ValueError):
         return False
