@@ -45,7 +45,7 @@
         {
           "path": "app/app.py",
           "reason": "Fixture placeholder credential, not a real secret",
-          "expiration": null,
+          "expires": null,
           "client_supplied": false,
           "rule_id": "SECRET-SECRET-KEYWORD",
           "line_start": 5,
@@ -60,7 +60,7 @@
         {
           "path": "infra/main.tf",
           "reason": "Stale suppression for a check that no longer exists",
-          "expiration": "2099-12-31",
+          "expires": "2099-12-31",
           "client_supplied": false,
           "rule_id": "CKV_AWS_999",
           "line_start": null,
