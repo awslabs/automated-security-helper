@@ -18,12 +18,21 @@ gitlab-ci-local's defaults. GitLab has no pull request event.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
-from collections.abc import Callable, Mapping
+import time
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
-from .env import launch, launch_env, run_in_new_session
+from .env import (
+    DOCKER_TIMEOUT,
+    SYSTEM_PATH,
+    launch,
+    launch_argv,
+    launch_env,
+    run_in_new_session,
+)
 
 GITLAB_CI_LOCAL_TOOL = "tools.gitlab-ci-local"
 JOB_IMAGE = "images.python-3-12"
@@ -73,6 +82,86 @@ def gitlab_ci_local_argv(
             f"CI_MERGE_REQUEST_DIFF_BASE_SHA={base_sha}",
         ]
     return argv
+
+
+#: What the identity recording keeps: the start of every container, and the pull, tag
+#: and untag of every image. Separate from the workflow's pull recording, which the
+#: image allowlist reads and this does not touch.
+IDENTITY_EVENT_FILTERS = (
+    "type=container",
+    "type=image",
+    "event=start",
+    "event=pull",
+    "event=tag",
+    "event=untag",
+)
+
+
+def _docker_argv(home: Path, args: list[str]) -> list[str]:
+    return launch_argv({"HOME": str(home), "PATH": SYSTEM_PATH}, ["docker", *args])
+
+
+@contextlib.contextmanager
+def record_identity_events(record: Path, *, home: Path) -> Iterator[int]:
+    """Record container starts and image pulls, tags and untags into ``record``.
+
+    ``docker events --since`` replays from the second ``since`` falls in, so a start
+    that happens before the stream attaches is still recorded. Yields ``since`` in
+    nanoseconds; the detector counts only events at or after it, so an event of the
+    image build itself in that second is not read as a change made during the run.
+    The stream ends when the block does.
+    """
+    since_ns = time.time_ns()
+    argv = [
+        "events",
+        "--since",
+        str(since_ns // 1_000_000_000),
+        "--format",
+        "{{json .}}",
+    ]
+    for name in IDENTITY_EVENT_FILTERS:
+        argv += ["--filter", name]
+    Path(record).parent.mkdir(parents=True, exist_ok=True)
+    with Path(record).open("wb") as out:
+        try:
+            process = subprocess.Popen(
+                _docker_argv(home, argv),
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.DEVNULL,
+                env={"PATH": SYSTEM_PATH},
+                start_new_session=True,
+            )
+        except OSError:
+            process = None
+        try:
+            yield since_ns
+        finally:
+            if process is not None:
+                process.terminate()
+                try:
+                    process.wait(timeout=DOCKER_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+
+
+def inspect_image_id(tag: str, *, home: Path) -> str | None:
+    """The id ``docker image inspect`` gives ``tag`` now, None when it cannot say."""
+    try:
+        done = subprocess.run(
+            _docker_argv(home, ["image", "inspect", tag, "--format", "{{.Id}}"]),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={"PATH": SYSTEM_PATH},
+            timeout=DOCKER_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    text = done.stdout.decode(errors="replace").strip()
+    return text if done.returncode == 0 and text else None
 
 
 def helper_image_build_argv(dockerfile: Path = HELPER_DOCKERFILE) -> list[str]:

@@ -50,6 +50,7 @@ only the build record is copied out; every kept ``.ash/ash_output`` is copied as
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import json
@@ -658,6 +659,12 @@ class Launched:
     timed_out: str | None = None
     #: The id of the image the run built for the block, when it built one.
     image_id: str | None = None
+    #: The container starts and image pulls and tags the run recorded (a docker events
+    #: JSON-lines file), and the nanosecond from which they count.
+    image_events: Path | None = None
+    image_events_since_ns: int = 0
+    #: The id ``docker image inspect`` gave the built image's tag right after the run.
+    image_inspected: str | None = None
 
     def text(self) -> str:
         try:
@@ -803,20 +810,38 @@ def _launch_gitlab(prepared: Prepared, session: Session) -> Launched:
     )
     _record(out, "gitlab-ci-local", argv)
     log = out / "gitlab-ci-local.log"
-    code, timed_out = _timed(
-        lambda: run_gitlab_ci_local.run_gitlab_ci_local(
-            argv,
-            runner_bin=program.parent,
-            cwd=project,
-            home=Path(fixture.home),
-            tool_cache=session.tool_cache,
-            outer=os.environ,
-            log=log,
-            timeout=session.options.launch_timeout,
+    events = out / "docker-identity-events.jsonl"
+    since_ns = 0
+    inspected = None
+    with contextlib.ExitStack() as stack:
+        if image_id:
+            since_ns = stack.enter_context(
+                run_gitlab_ci_local.record_identity_events(events, home=out)
+            )
+        code, timed_out = _timed(
+            lambda: run_gitlab_ci_local.run_gitlab_ci_local(
+                argv,
+                runner_bin=program.parent,
+                cwd=project,
+                home=Path(fixture.home),
+                tool_cache=session.tool_cache,
+                outer=os.environ,
+                log=log,
+                timeout=session.options.launch_timeout,
+            )
         )
-    )
+        if image_id:
+            inspected = run_gitlab_ci_local.inspect_image_id(BUILT_IMAGE, home=out)
     reports.keep_tree(project / ".gitlab-ci-local" / "artifacts", out / "artifacts")
-    return Launched(log=log, code=code, timed_out=timed_out, image_id=image_id)
+    return Launched(
+        log=log,
+        code=code,
+        timed_out=timed_out,
+        image_id=image_id,
+        image_events=events if image_id else None,
+        image_events_since_ns=since_ns,
+        image_inspected=inspected,
+    )
 
 
 def keep_jenkins_build(jenkins_home: Path, out: Path) -> None:
@@ -1626,16 +1651,88 @@ def built_image_problems(prepared: Prepared, launched: Launched) -> list[str]:
                 "image the job ran is unknown"
             )
         ]
-    log = launched.text()
-    short = image_id.removeprefix("sha256:")[:12]
-    if image_id not in log and not (len(short) == 12 and short in log):
-        return [
-            (
-                f"the log does not show the job running {image_id}, the image this "
-                "run built"
-            )
-        ]
-    return []
+    return image_identity_problems(
+        image_id=image_id,
+        tag=BUILT_IMAGE,
+        inspected=launched.image_inspected,
+        events=_read_text(launched.image_events),
+        since_ns=launched.image_events_since_ns,
+    )
+
+
+def _read_text(path: Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _event_ns(event: Mapping[str, Any]) -> int:
+    nano = event.get("timeNano")
+    if isinstance(nano, int):
+        return nano
+    seconds = event.get("time")
+    return seconds * 1_000_000_000 if isinstance(seconds, int) else 0
+
+
+def image_identity_problems(
+    *, image_id: str, tag: str, inspected: str | None, events: str, since_ns: int
+) -> list[str]:
+    """Whether the job ran ``image_id``, the id ``docker build --iidfile`` gave the
+    image the run built and tagged ``tag``.
+
+    gitlab-ci-local prints only the tag of the image a job runs ("starting <tag>"),
+    and removes its job containers when the job ends (cleanupResources, ``docker rm
+    -vf``, src/job.ts of 4.76.1), so neither the log nor a container left behind can
+    show the id. The proof is a chain that ends in the id, from three records:
+
+    (a) a container started with image ``tag``: the docker events recording, made from
+        before gitlab-ci-local starts until after it ends, holds a container ``start``
+        whose ``image`` attribute is ``tag``;
+    (b) ``tag`` is ``image_id``: ``docker image inspect tag`` read right after the
+        run gave exactly ``image_id``;
+    (c) ``tag`` did not move meanwhile: the recording holds no ``pull``, ``tag`` or
+        ``untag`` of ``tag``. The harness owns the only build, and it ran before the
+        recording started, so a different image under ``tag`` needs one of those.
+
+    A job on an older image under the same tag fails (b); one that pulled or re-tagged
+    fails (c); no start from ``tag`` fails (a).
+    """
+    starts = 0
+    moved: list[str] = []
+    for line in events.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or _event_ns(event) < since_ns:
+            continue
+        actor = event.get("Actor") or {}
+        attributes = actor.get("Attributes") or {}
+        kind, action = event.get("Type"), event.get("Action")
+        if kind == "container" and action == "start":
+            starts += attributes.get("image") == tag
+        elif kind == "image" and action in ("pull", "tag", "untag"):
+            if tag in (actor.get("ID"), attributes.get("name")):
+                moved.append(str(action))
+    problems = []
+    if not starts:
+        problems.append(f"no container started from {tag} while the job ran")
+    if inspected != image_id:
+        problems.append(
+            f"{tag} is {inspected or 'not readable'} after the run, not {image_id}"
+        )
+    if moved:
+        problems.append(f"{tag} was moved during the run ({', '.join(moved)})")
+    if not problems:
+        return []
+    return [
+        f"the job was not shown to run {image_id}, the image this run built: "
+        + "; ".join(problems)
+        + " (docker events and docker image inspect)"
+    ]
 
 
 def _gitlab_problems(prepared, launched, log, expected) -> list[str]:
