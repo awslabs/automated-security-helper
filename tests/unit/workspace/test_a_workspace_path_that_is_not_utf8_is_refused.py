@@ -91,9 +91,7 @@ def _workspace(
         # the definition (see the module docstring).
         for folder in folders:
             (root / folder).mkdir(exist_ok=True)
-            (root / folder / "x.py").write_text(
-                'password = "hunter2hunter2hunter2"\n'
-            )
+            (root / folder / "x.py").write_text('password = "hunter2hunter2hunter2"\n')
         definition = root / name
         definition.write_text(
             json.dumps({"folders": [{"path": folder} for folder in folders]}),

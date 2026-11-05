@@ -1898,12 +1898,57 @@ def test_the_built_image_job_must_run_the_image_the_run_built(tmp_path):
         composed="image: registry.example.com/security/automated-security-helper:ci",
     )
     image = "sha256:" + "c" * 64
-    assert check(
-        prepared, _launched(tmp_path, "ash-scan pulled nothing", image_id=image)
+    older = "sha256:" + "d" * 64
+    tag = "registry.example.com/security/automated-security-helper:ci"
+    since = 1_000_000_000_000_000_000
+
+    def event(kind, action, at=since + 5, **attributes):
+        return json.dumps(
+            {
+                "Type": kind,
+                "Action": action,
+                "Actor": {"ID": attributes.pop("id", "x"), "Attributes": attributes},
+                "timeNano": at,
+            }
+        )
+
+    started = event("container", "start", image=tag, name="job")
+
+    def run(events, inspected=image, image_id=image):
+        record = tmp_path / "events.jsonl"
+        record.write_text("\n".join(events), encoding="utf-8")
+        # The log says only what gitlab-ci-local 4.76.1 prints: the tag, never an id.
+        return check(
+            prepared,
+            _launched(
+                tmp_path,
+                f"ash-scan starting {tag} (test)",
+                image_id=image_id,
+                image_events=record,
+                image_events_since_ns=since,
+                image_inspected=inspected,
+            ),
+        )
+
+    # Must not flag: a start from the tag, the tag is the built id, nothing moved it
+    # (a start of another image, and an event from before the recording, do not count).
+    assert run([started, event("container", "start", image="helper:local")]) == []
+    assert run([started, event("image", "tag", at=since - 1, name=tag)]) == []
+    # Must flag: the tag was re-pointed at an older image (the inspect read an older id).
+    assert run([started], inspected=older)
+    assert run([started], inspected=None)
+    # ... the job never started from the tag ...
+    assert run([event("container", "start", image="other:ci")])
+    assert run([])
+    # ... the tag was pulled or re-tagged while the job ran ...
+    assert run([started, event("image", "pull", id=tag, name=tag)])
+    assert run([started, event("image", "tag", id=older, name=tag)])
+    assert run([started, event("image", "untag", id=image, name=tag)])
+    # ... no id was recorded for the build, or no recording was made at all.
+    assert run([started], image_id=None)
+    assert check(prepared, _launched(tmp_path, f"starting {tag}", image_id=image)), (
+        "no recording"
     )
-    named = f"ash-scan > Using docker image {image}"
-    assert check(prepared, _launched(tmp_path, named, image_id=image)) == []
-    assert check(prepared, _launched(tmp_path, named, image_id=None)), "no id recorded"
 
 
 BUILT_JOB = "image: registry.example.com/security/automated-security-helper:ci"
