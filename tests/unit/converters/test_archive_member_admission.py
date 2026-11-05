@@ -537,8 +537,17 @@ def test_log_lines_naming_members_and_archives_are_not_read_as_markup(
 
 
 def _lines_naming(records, fragment):
-    """The records whose text holds ``fragment`` and a ``[/`` from a path."""
-    return [r for r in records if fragment in r.getMessage() and "[/" in r.getMessage()]
+    """The records whose text holds ``fragment`` and a ``[`` ending a path component.
+
+    The path spells that as ``[/`` where the separator is ``/`` and as ``[\\`` where
+    it is a backslash (Windows): the directory ``d[`` is displayed as ``d[<sep>x]``,
+    so the hazard the test names (a bracket then the separator) is spelled with the
+    separator of the host that made the path.
+    """
+    hazard = "[" + os.sep
+    return [
+        r for r in records if fragment in r.getMessage() and hazard in r.getMessage()
+    ]
 
 
 def test_debug_lines_naming_a_scan_set_path_are_not_read_as_markup(
