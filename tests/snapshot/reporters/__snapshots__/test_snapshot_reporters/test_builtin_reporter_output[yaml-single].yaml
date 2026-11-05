@@ -268,7 +268,7 @@ ash_config:
     severity_threshold: MEDIUM
     suppressions:
     - client_supplied: false
-      expiration: null
+      expires: null
       line_end: 5
       line_start: 5
       package_name: null
@@ -281,7 +281,7 @@ ash_config:
       scope: null
       symbol: null
     - client_supplied: false
-      expiration: '2099-12-31'
+      expires: '2099-12-31'
       line_end: null
       line_start: null
       package_name: null
@@ -828,6 +828,7 @@ metadata:
   plugin_load_errors: {}
   project_name: ASH
   report_id: ASH-20260115120000-000000000001
+  requested_scanners_not_run: null
   shard: null
   summary_stats:
     actionable: 6

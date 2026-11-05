@@ -32,6 +32,7 @@ metadata:
   plugin_load_errors: {}
   project_name: workspace
   report_id: ASH-WORKSPACE-snapshot-20260115120042-000000000003
+  requested_scanners_not_run: null
   shard: null
   summary_stats:
     actionable: 0
