@@ -23,6 +23,7 @@ OSError at the plain runner (``_run_plain``), before it started any child, or at
 
 import errno
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -227,7 +228,11 @@ def test_semgrep_through_uv_is_not_accepted(semgrep):
         scanner.scan(target=source, target_type="source")
 
     assert run.call_count == 1, "a spawn failure is reported, not retried"
-    assert run.call_args.args[0][1:3] == ["tool", "run"]
+    # On Windows a uv.cmd shim is replaced by the running interpreter's launch
+    # (python -P -c <runpy uv>), so "tool run" follows the launcher's words
+    # rather than sitting at index 1; it is still the uv command, once.
+    argv = list(run.call_args.args[0])
+    assert any(argv[i : i + 2] == ["tool", "run"] for i in range(len(argv) - 1)), argv
     assert scanner.exit_code == 127
     assert not scanner._exit_code_accepted()
     assert scanner.scan_spawn_failure and "Bad address" in scanner.scan_spawn_failure
@@ -972,6 +977,14 @@ def _waiting_fails_once_the_stderr_was_read():
             except subprocess.TimeoutExpired as partial:
                 to_send = None
                 if b"diag before the failure" in (partial.stderr or b""):
+                    break
+                if os.name == "nt":
+                    # On Windows a TimeoutExpired carries nothing (the reader
+                    # threads deliver at EOF; see _output_after_stop), so the
+                    # diagnostic is never visible here. Give the child the time
+                    # to write it to its pipe, then fail the wait; the later
+                    # real communicate collects what the pipe holds.
+                    time.sleep(2)
                     break
             else:
                 break

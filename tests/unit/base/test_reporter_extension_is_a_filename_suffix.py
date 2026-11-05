@@ -325,6 +325,12 @@ class _ReportingOrchestrator:
         self.output_dir = output_dir
         self.reporter = reporter
 
+    def add_metadata(self, **values):
+        # The local scan records worked-out metadata (changed_files_only,
+        # scan_source) on the orchestrator before it runs; the stand-in's
+        # results file carries none, and the report phase here reads none.
+        self.recorded_metadata = values
+
     def execute_scan(self, phases=None):
         model = AshAggregatedResults()
         model.save_model(self.output_dir)

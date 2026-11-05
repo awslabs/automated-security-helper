@@ -487,10 +487,19 @@ def test_the_reason_names_the_link_inside_the_checkout(tmp_path):
     source = _repository_links_its_config_to(tmp_path, other)
     _symlink(tmp_path / "cur.yaml", source / ".ash" / ".ash.yaml")
     reason = sandbox_grants.untrusted_reason(tmp_path / "cur.yaml", tmp_path / "t")
-    link = Path(os.path.realpath(source / ".ash")) / ".ash.yaml"
+
+    def resolved(path):
+        # os.path.realpath answers with the extended-length prefix on some
+        # Windows Pythons (\\?\D:\...); the reason names the plain drive path.
+        text = os.path.realpath(path)
+        if os.name == "nt" and text.startswith("\\\\?\\") and text[5:6] == ":":
+            text = text[4:]
+        return Path(text)
+
+    link = resolved(source / ".ash") / ".ash.yaml"
     assert reason == (
         f"it is reached through {link.as_posix()}, a link inside the git checkout "
-        f"at {Path(os.path.realpath(source)).as_posix()}"
+        f"at {resolved(source).as_posix()}"
     )
     # A link outside every checkout to a file outside every checkout is fine.
     _symlink(tmp_path / "plain.yaml", other)
