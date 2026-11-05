@@ -37,7 +37,10 @@ from automated_security_helper.core.resource_management.scan_registry import (
 )
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils.log import ASHLogger
-from tests.utils.mcp_sessions import a_session_with_a_bound_profile
+from tests.utils.mcp_sessions import (
+    BASE_PROFILE_FILENAME,
+    a_session_with_a_bound_profile,
+)
 from tests.utils.tasks import drain
 
 pytestmark = pytest.mark.unit
@@ -204,7 +207,8 @@ def test_a_runner_failure_shows_no_value_the_config_read(tmp_path, monkeypatch):
 _PROFILE_SECRET = "a-profile-value-read-from-the-environment"
 _BASE_SECRET = "a-base-value-read-from-the-environment"
 _SESSION_PROFILE_TEXT = (
-    "extends: base.ash.yaml\nproject_name: ${ASH_PROFILE_ARM_HELD:unset}\n"
+    f"extends: {BASE_PROFILE_FILENAME}\n"
+    "project_name: ${ASH_PROFILE_ARM_HELD:unset}\n"
 )
 _SESSION_BASE_TEXT = (
     "global_settings:\n"

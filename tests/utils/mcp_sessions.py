@@ -20,6 +20,14 @@ from automated_security_helper.cli.mcp.scan_target import ASH_MCP_ALLOWED_ROOTS_
 from automated_security_helper.config.ash_config import AshConfig
 
 
+#: The name a profile's base is written under in a session's ``config/`` directory.
+#: Only the names the server writes there count as the operator's
+#: (``sandbox.config_is_client_supplied``): a per-profile call profile's name is
+#: one (``profile_registry.is_call_profile_filename``), and any other file there,
+#: a ``base.ash.yaml`` included, is a client's and may not read the environment.
+BASE_PROFILE_FILENAME = "call-profile-0123456789abcdef.yaml"
+
+
 def a_session_with_a_bound_profile(
     ws: Path,
     monkeypatch,
@@ -40,8 +48,8 @@ def a_session_with_a_bound_profile(
 
     *allowed_roots* names the source directory in the allowed-roots variable;
     *clear_config_env* removes ``ASH_CONFIG``; *env* sets further variables
-    through *monkeypatch*; *base_text* writes a ``base.ash.yaml`` beside the
-    profile.
+    through *monkeypatch*; *base_text* writes ``BASE_PROFILE_FILENAME`` beside
+    the profile (a name the server writes, so the operator's own).
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
@@ -61,7 +69,7 @@ def a_session_with_a_bound_profile(
     profile = config_dir / "ash.yaml"
     profile.write_text(profile_text, encoding="utf-8")
     if base_text is not None:
-        (config_dir / "base.ash.yaml").write_text(base_text, encoding="utf-8")
+        (config_dir / BASE_PROFILE_FILENAME).write_text(base_text, encoding="utf-8")
     assert config_is_client_supplied(delivered)
     assert not config_is_client_supplied(profile)
     profile_registry.bind_session_config(
