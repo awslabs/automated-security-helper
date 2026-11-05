@@ -122,9 +122,7 @@ ASH looks up each program it starts, scanners and `uv` included, in this order:
    `.exe`, `.bat`, and `.cmd` before the bare name.
 2. ASH's bin directory: the directory in `ASH_BIN_PATH`, or `~/.ash/bin` if it is not
    set or is empty. This is where `ash dependencies install` puts tools, so you do not
-   need to add it to `PATH`. A `~` at the start of the value is expanded. A relative
-   `ASH_BIN_PATH` is not used: ASH logs a warning that names it and uses `~/.ash/bin`,
-   for lookups and for `ash dependencies install` alike.
+   need to add it to `PATH`. A `~` at the start of the value is expanded.
    `~/.ash/bin`, and a `~` in `ASH_BIN_PATH`, need a usable home directory: `HOME`
    when it is set to an absolute path, or, when `HOME` is not set, the home in your
    passwd entry if that is absolute (on Windows, the profile directory). With `HOME`
