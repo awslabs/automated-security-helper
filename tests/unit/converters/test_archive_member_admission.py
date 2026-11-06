@@ -537,15 +537,17 @@ def test_log_lines_naming_members_and_archives_are_not_read_as_markup(
         assert all(getattr(r, "markup", True) is False for r in lines), fragment
 
 
-def _lines_naming(records, fragment):
+def _lines_naming(records, fragment, sep=os.sep):
     """The records whose text holds ``fragment`` and a ``[`` ending a path component.
 
     The path spells that as ``[/`` where the separator is ``/`` and as ``[\\`` where
     it is a backslash (Windows): the directory ``d[`` is displayed as ``d[<sep>x]``,
     so the hazard the test names (a bracket then the separator) is spelled with the
-    separator of the host that made the path.
+    separator of the host that made the path. A line that shows an archive by its
+    scan-set display name (``d[/x].zip``) always spells it with ``/``, whatever the
+    host, so it passes ``sep="/"``.
     """
-    hazard = "[" + os.sep
+    hazard = "[" + sep
     return [
         r for r in records if fragment in r.getMessage() and hazard in r.getMessage()
     ]
@@ -594,7 +596,7 @@ def test_the_debug_line_for_an_archive_not_extracted_whole_is_not_read_as_markup
 
     _convert(test_plugin_context, monkeypatch, archive)
 
-    lines = _lines_naming(ash_records_at_every_level, "not extracted whole")
+    lines = _lines_naming(ash_records_at_every_level, "not extracted whole", "/")
     assert lines
     assert all(getattr(r, "markup", True) is False for r in lines)
 

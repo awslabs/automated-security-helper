@@ -24,6 +24,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -237,7 +238,16 @@ def test_a_member_whose_name_is_not_utf_8_is_refused_when_ignore_paths_are_set(
     messages[0].encode("utf-8")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="a POSIX file name of latin-1 bytes")
+#: macOS file systems (APFS, HFS+) refuse a name that is not valid UTF-8 with EILSEQ
+#: ("Illegal byte sequence"), so there neither an archive nor a directory named from
+#: latin-1 bytes can be made: the case needs a file system that keeps the bytes.
+_KEEPS_NON_UTF_8_NAMES = os.name != "nt" and sys.platform != "darwin"
+_NON_UTF_8_NAMES_REASON = (
+    "a POSIX file name of latin-1 bytes, which Windows cannot hold and macOS refuses"
+)
+
+
+@pytest.mark.skipif(not _KEEPS_NON_UTF_8_NAMES, reason=_NON_UTF_8_NAMES_REASON)
 def test_an_archive_whose_own_name_is_not_utf_8_is_refused_member_by_member(
     test_plugin_context, monkeypatch, ash_records
 ):
@@ -260,7 +270,22 @@ def test_an_archive_whose_own_name_is_not_utf_8_is_refused_member_by_member(
         record.getMessage().encode("utf-8")
 
 
-@pytest.mark.parametrize("kind", ["zip", "tar"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "zip",
+        # The tar member's name is latin-1 bytes, extracted as a directory of that
+        # name; macOS refuses it (see _KEEPS_NON_UTF_8_NAMES). The zip's name is
+        # decoded as cp437 and is valid UTF-8 on every host.
+        pytest.param(
+            "tar",
+            marks=pytest.mark.skipif(
+                sys.platform == "darwin",
+                reason=_NON_UTF_8_NAMES_REASON,
+            ),
+        ),
+    ],
+)
 def test_with_no_ignore_path_a_member_whose_name_is_not_utf_8_is_extracted(
     test_plugin_context, monkeypatch, ash_records, kind
 ):
