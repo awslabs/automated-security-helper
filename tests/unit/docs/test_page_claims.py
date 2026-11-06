@@ -10986,8 +10986,10 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
     takes the session and starts the removal, and a ``set_source_zip_chunk`` for
     that session sent while the removal runs is refused with that ``error_type``
     (``sessions.writing_session_state``, the hold ``set_source_zip_chunk`` and
-    ``select_profile`` take). The remover is held open on an event, so the window
-    the server tests above cannot time is open when the write comes. The control
+    ``select_profile`` take). The remover is held open on an event, first at the
+    rename aside and then at the delete of the renamed tree, so the window the
+    server tests above cannot time is open when each write comes: the refusal
+    holds from the start of the sweep until the delete is done. The control
     is the same chunk once the sweep has returned: accepted, the upload starting
     again from chunk 0 in a new workspace, as the page says.
     """
@@ -11011,25 +11013,32 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
 
         removing = threading.Event()
         release = threading.Event()
-        # The rename of the stale tree aside, which the sweep makes under the
-        # presence guard. The sweep holds the session (try_begin_sweep) from its
-        # last look at the age, and the hold stands on the registry's entry until
-        # the sweep forgets the session (_set_session_state_aside), which it does
-        # right after the rename: from then on the session's path is free and a
-        # write is admitted into a fresh workspace, not refused
-        # (test_a_binding_made_during_the_sweeps_delete_is_kept). So the window
-        # in which a write meets the hold is this one, and the remover is held
-        # open here, before the rename. The stale session has a workspace, so
-        # the sweep does not take the removal that has no guard
+        # The sweep holds the session (try_begin_sweep) from its last look at the
+        # age until the delete of the set-aside tree is done; the hold stands on
+        # the registry's entry, which the sweep forgets only after the delete
+        # (test_a_write_during_the_sweeps_delete_is_refused_as_busy). So a write
+        # meets the hold in two windows, and the remover is held open in both:
+        # before the rename aside, which the sweep makes under the presence
+        # guard, and at the delete of the renamed tree. The stale session has a
+        # workspace, so the sweep does not take the removal that has no guard
         # (_remove_session_state).
         real_set_aside = source_delivery._set_aside_for_removal
+        deleting = threading.Event()
+        release_delete = threading.Event()
+        real_remove_tree = source_delivery._remove_tree
 
         def held_set_aside(*args: Any, **kwargs: Any) -> Optional[Path]:
             removing.set()
             assert release.wait(timeout=30), "the test never released the remover"
             return real_set_aside(*args, **kwargs)
 
+        def held_delete(path: Path) -> bool:
+            deleting.set()
+            assert release_delete.wait(timeout=30), "the test never released the delete"
+            return real_remove_tree(path)
+
         monkeypatch.setattr(source_delivery, "_set_aside_for_removal", held_set_aside)
+        monkeypatch.setattr(source_delivery, "_remove_tree", held_delete)
         removed: List[str] = []
         sweep = threading.Thread(
             target=lambda: removed.extend(
@@ -11050,11 +11059,28 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
                     workspace_root=root,
                     session_id=_STALE_SESSION,
                 )
+            # The refusal holds through the whole removal: the rename is done,
+            # the sweep is deleting the renamed tree, and the same chunk is
+            # still refused, with no fresh workspace built at the freed path.
+            release.set()
+            assert deleting.wait(timeout=30), "the sweep never reached the delete"
+            with pytest.raises(sessions.SessionWorkspaceBusyError) as refused_deleting:
+                source_delivery.set_source_zip_chunk(
+                    "page-claims-upload",
+                    0,
+                    chunk,
+                    True,
+                    workspace_root=root,
+                    session_id=_STALE_SESSION,
+                )
+            assert not sandbox.exists(), "a refused write built a fresh workspace"
         finally:
             release.set()
+            release_delete.set()
             sweep.join(timeout=30)
         assert not sweep.is_alive(), "the sweep did not return once released"
         assert refused.value.error_type == "session_workspace_busy"
+        assert refused_deleting.value.error_type == "session_workspace_busy"
         assert removed == [_STALE_SESSION], removed
         assert not sandbox.exists(), f"the sweep left {sandbox}"
 
