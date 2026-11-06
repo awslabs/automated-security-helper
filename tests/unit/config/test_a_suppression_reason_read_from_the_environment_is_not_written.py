@@ -270,7 +270,13 @@ def run(work):
                 *more,
             ],
             capture_output=True,
+            # The console is read as the UTF-8 the scan writes, as the output files
+            # are below: text=True alone decodes with the parent's locale (cp1252 on
+            # Windows), where one undefined byte ends the reader thread and leaves
+            # stdout None.
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=900,
             cwd=work,
             env=env,
