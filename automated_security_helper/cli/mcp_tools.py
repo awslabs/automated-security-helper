@@ -3656,7 +3656,8 @@ async def _run_scan(
                     # for a scan that has its results.
                     _logger.error(
                         f"Scan {scan_id}: could not complete the end of its "
-                        f"session: {error_text(end_error, environment_values)}"
+                        "session: "
+                        f"{error_text(end_error, environment_values)}"
                     )
 
     try:

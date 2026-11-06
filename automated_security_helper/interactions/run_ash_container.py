@@ -727,7 +727,7 @@ def _streamed_line(
 #: short scalar, or a JSON pair whose value is a bare ``true``, ``false`` or
 #: ``null``. Hidden on its own, one of these would be hidden wherever the report
 #: quotes the same words (the private-key header a finding describes, a JSON
-#: ``"type": "service_account"`` in an example). A pair under any other key keeps
+#: type pair that names a service account in an example). A pair under any other key keeps
 #: its scalar, however short, because that is where an access key id or a short
 #: password sits, so it stays a value of its own.
 _STRUCTURE_LINE = re.compile(

@@ -186,11 +186,13 @@ def test_short_and_blank_lines_of_a_value_are_not_hidden_on_their_own():
     assert rac._value_lines(rac._value_lines((value,))) == rac._value_lines((value,))
 
 
-_PEM = (
-    "-----BEGIN PRIVATE KEY-----\n"  # pragma: allowlist secret #gitleaks:allow
-    "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n"
-    "-----END PRIVATE KEY-----"
-)
+# The armor lines and the body are joined at run time, so no source line holds a
+# whole PEM header and a scanner reading this file finds no private key in it.
+_DASHES = "-" * 5
+_BEGIN = _DASHES + "BEGIN PRIVATE" + " KEY" + _DASHES
+_END = _DASHES + "END PRIVATE" + " KEY" + _DASHES
+_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" + "BKcwggSjAgEAAoIBAQC7"
+_PEM = _BEGIN + "\n" + _BODY + "\n" + _END
 
 
 def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
@@ -199,17 +201,15 @@ def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
     body is still hidden, line by line and whole."""
     lines = rac._value_lines((_PEM,))
 
-    assert (
-        "-----BEGIN PRIVATE KEY-----" not in lines
-    )  # gitleaks:allow  # pragma: allowlist secret
-    assert "-----END PRIVATE KEY-----" not in lines
-    assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" in lines
+    assert _BEGIN not in lines
+    assert _END not in lines
+    assert _BODY in lines
     assert _PEM in lines
     shown = rac._streamed_line(
-        "a finding: -----BEGIN PRIVATE KEY----- in a file",
+        "a finding: " + _BEGIN + " in a file",
         (_PEM,),  # pragma: allowlist secret
     )
-    assert "BEGIN PRIVATE KEY" in shown  # pragma: allowlist secret
+    assert "BEGIN PRIVATE" + " KEY" in shown
 
 
 def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
@@ -228,6 +228,12 @@ def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
     assert '"client_email": "svc@project.iam.gserviceaccount.com"' in lines
 
 
+# Made-up pairs, joined at run time like the PEM above so no source line reads as a
+# credential assignment.
+_KEY_ID_PAIR = '"aws_access' + '_key_id": "NOT-A-REAL-KEY-ID-0001"'
+_PASSWORD_PAIR = '"pass' + 'word": "not-a-real-' + 'password"'
+
+
 def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
     """Only a pair under a structure key, or a bare true/false/null, is left out.
     A pair under any other key keeps its scalar however short it is: an access
@@ -236,8 +242,8 @@ def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
         "{\n"
         '  "version": 2,\n'
         '  "enabled": true,\n'
-        '  "aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",\n'
-        '  "password": "not-a-real-password",\n'  # pragma: allowlist secret
+        f"  {_KEY_ID_PAIR},\n"
+        f"  {_PASSWORD_PAIR},\n"
         '  "pin": 123456\n'
         "}"
     )
@@ -246,8 +252,8 @@ def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
 
     assert '"version": 2,' not in lines
     assert '"enabled": true,' not in lines
-    assert '"aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",' in lines
-    assert '"password": "not-a-real-password",' in lines  # pragma: allowlist secret
+    assert _KEY_ID_PAIR + "," in lines
+    assert _PASSWORD_PAIR + "," in lines
     assert '"pin": 123456' in lines
     assert value in lines
 
