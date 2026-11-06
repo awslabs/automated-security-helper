@@ -153,11 +153,40 @@ def test_a_notebook_over_the_read_bound_is_an_input_error(
     assert started == []
 
 
-def test_deeply_nested_json_is_an_input_error():
+def test_json_nested_past_the_parsers_recursion_limit_is_an_input_error(
+    monkeypatch,
+):
+    """The arm for a parser that gives up on depth, driven by the parser's own error.
+
+    How deep a document must be before ``json.loads`` raises ``RecursionError``
+    depends on the interpreter: CPython 3.14 on macOS reads 100,000 nested arrays
+    to the end, where Linux and Windows raise. The arm is therefore pinned with
+    the error itself, raised where the parser would raise it.
+    """
+
+    def too_deep(text, *args, **kwargs):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(json, "loads", too_deep)
+
     parsed, problem = _parse_notebook(b"[" * 100_000 + b"]" * 100_000)
 
     assert parsed is None
     assert problem == "its JSON is nested too deeply to read"
+
+
+def test_deeply_nested_json_is_an_input_error():
+    """Whatever the interpreter's recursion limit does with 100,000 nested arrays,
+    the file is no notebook and is recorded as an input error with ASH's own words:
+    either the parse gave up on depth, or it read an array where a notebook is an
+    object."""
+    parsed, problem = _parse_notebook(b"[" * 100_000 + b"]" * 100_000)
+
+    assert parsed is None
+    assert problem in (
+        "its JSON is nested too deeply to read",
+        "its JSON is not an object",
+    )
 
 
 # ---------------------------------------------------------------- uv readiness
