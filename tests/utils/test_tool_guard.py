@@ -2189,3 +2189,28 @@ def test_a_windows_probe_by_a_child_is_a_probe_and_not_a_start(
     assert guard.started == ["grype"], guard.started
     assert guard.tool_starts == ["grype"], guard.tool_starts
     assert guard.log.read_text(encoding="utf-8").count("--probe") == 2
+
+
+@pytest.mark.unit
+def test_a_windows_stand_in_exits_zero_for_a_lone_version_call_only(
+    monkeypatch, tmp_path_factory
+):
+    """The scanner inventory accepts a version probe only on exit 0 and otherwise
+    asks again with ``version``, which the stand-in logs as a start; the POSIX
+    stand-in exits 0 for a lone --version, so the Windows one does too. Any other
+    call still exits 1."""
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    lines = (
+        (guard.directory / "grype.bat")
+        .read_text(encoding="utf-8")
+        .replace("\r\n", "\n")
+        .splitlines()
+    )
+    start_section = lines[: lines.index(":probe")]
+    probe_section = lines[lines.index(":probe") + 1 :]
+    assert start_section[-1] == "@exit /b 1", start_section
+    assert "@exit /b 0" not in start_section, start_section
+    assert '@if /i "%~1"=="--version" exit /b 0' in probe_section, probe_section
+    assert probe_section[-1] == "@exit /b 1", probe_section

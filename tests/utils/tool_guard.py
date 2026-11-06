@@ -1681,13 +1681,20 @@ def install_tool_guard(
             # Only the name is recorded: "%*" in a .bat line is parsed by cmd, so an
             # argument holding & | or > would run as a command. A "%" in the log
             # path is doubled for the same parser.
-            # It prints the version for every call (the locator ignores the exit
-            # code). The one argument it reads is %~1, and only inside quotes, and
-            # only when %~2 is empty: a call that is exactly --version, -v or
-            # --help is a dependency probe and is logged as "<name> --probe", so
-            # ToolGuard counts it as a probe and not as a start. Every call is
-            # still logged. A quote inside an argument is the limit of the
-            # quoting: no argument ASH or the tests pass holds one.
+            # It prints the version for every call. The one argument it reads is
+            # %~1, and only inside quotes, and only when %~2 is empty: a call that
+            # is exactly --version, -v or --help is a dependency probe and is
+            # logged as "<name> --probe", so ToolGuard counts it as a probe and
+            # not as a start. Every call is still logged. A quote inside an
+            # argument is the limit of the quoting: no argument ASH or the tests
+            # pass holds one.
+            # A lone --version exits 0, as the POSIX stand-in does: the scanner
+            # inventory takes a zero exit as the whole test of a version probe and
+            # asks again with the ``version`` subcommand after any other exit, and
+            # that second call is a start (the child scans of
+            # test_session_plugins_stay_in_their_session listed grype, syft,
+            # cfn_nag_scan, checkov and ferret-scan as started tools). Every other
+            # call exits 1.
             stand_in = directory / f"{name}.bat"
             log = str(guard.log).replace("%", "%%")
             stand_in.write_text(
@@ -1695,11 +1702,12 @@ def install_tool_guard(
                 '@if "%~2"=="" if /i "%~1"=="-v" goto probe\r\n'
                 '@if "%~2"=="" if /i "%~1"=="--help" goto probe\r\n'
                 f'@echo {name}>> "{log}"\r\n'
-                "@goto answer\r\n"
+                f"@echo {name} {stand_in_version(name)}\r\n"
+                "@exit /b 1\r\n"
                 ":probe\r\n"
                 f'@echo {name} {PROBE_MARK}>> "{log}"\r\n'
-                ":answer\r\n"
                 f"@echo {name} {stand_in_version(name)}\r\n"
+                '@if /i "%~1"=="--version" exit /b 0\r\n'
                 "@exit /b 1\r\n",
                 encoding="utf-8",
             )
