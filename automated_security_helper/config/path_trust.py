@@ -1181,7 +1181,10 @@ def honored_path(
         # hidden before it is escaped (_shown_escaped), since an escaped value
         # no longer matches the value it was made from. The whole message is
         # shown once more for the key.
-        shown_path = _shown_escaped(_named(value, named, config, env_named), config)
+        # The path shown is the resolved one (``_named``: "the resolved path
+        # otherwise"), as in the derived-product warning; *named* is only the
+        # spelling the tree judgment above was made on.
+        shown_path = _shown_escaped(_named(value, path, config, env_named), config)
         ASH_LOGGER.warning(
             _shown(
                 f"Ignoring {key} ({shown_path}): "
