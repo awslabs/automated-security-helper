@@ -8556,6 +8556,7 @@ def _mcp_package_missing(
 ) -> Tuple[int, str]:
     # A child interpreter in which the MCP SDK cannot be imported.
     driver = importing_this_checkout(
+        "import sys\n"
         "sys.modules['mcp'] = None\n"
         "from automated_security_helper.cli.main import app\n"
         "sys.argv = ['ash', 'mcp', '--quiet']\n"
