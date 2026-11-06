@@ -4833,10 +4833,16 @@ def _resolve(
                     if stat.S_ISDIR(mode)
                     else OSError(errno.EINVAL, "Not a regular file")
                 )
+            # An extends value read from the environment is named by reference
+            # (``ref`` is then ENVIRONMENT_VALUE_SHOWN, ``_shown_chain_path``'s
+            # word), whatever spelling ``resolve`` gave the path: where a link
+            # loop fails early (Windows, 3.14) ``real`` is not the path the
+            # environment chose and the membership test above misses it.
+            by_reference = hidden or ref == ENVIRONMENT_VALUE_SHOWN
             raise ASHConfigSourceError(
                 f"'{EXTENDS_KEY}: {ref}' in {state.shown(extending)} names "
-                f"{state.shown(real) if hidden else real.as_posix()}, which does "
-                "not exist or is not a file"
+                f"{ENVIRONMENT_VALUE_SHOWN if by_reference else real.as_posix()}, "
+                "which does not exist or is not a file"
             ) from cause
         # Judged by the name the entry spells as well as the file it reaches, as
         # the root is: a base reached through a client's link is the client's.
