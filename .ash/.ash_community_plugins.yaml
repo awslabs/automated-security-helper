@@ -17,12 +17,12 @@ global_settings:
     # GuardDog's heuristics read source text, so test code that writes a fake
     # credentials file matches them. Pinned to the one line GuardDog reports, so a
     # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 731 and 947; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 731 only.
+    # twice, at lines 732 and 948; GuardDog 3.2.0 drops a match whose code snippet
+    # is the same as one it already reported, so it reports 732 only.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 731
-      line_end: 731
+      line_start: 732
+      line_end: 732
       reason: >-
         False positive. The line writes a creds.env holding a fake AWS key id and
         secret, generated per run with secrets.choice, into the test's temporary
