@@ -760,10 +760,14 @@ def _behaviour_from_declaration(declared: Any) -> Optional[ReporterWorkspaceBeha
     return None
 
 
-def _unreadable_declaration(reporter_class: type) -> Optional[str]:
-    """The text of a ``workspace_behaviour`` ASH cannot read, or ``None`` if it can."""
+def _unreadable_declaration(reporter: object) -> Optional[str]:
+    """The text of a ``workspace_behaviour`` ASH cannot read, or ``None`` if it can.
+
+    Read from the reporter itself, which answers with its class's declaration, so
+    no class is taken from a value and handed on.
+    """
     declared = getattr(
-        reporter_class, "workspace_behaviour", ReporterWorkspaceBehaviour.PER_PROJECT
+        reporter, "workspace_behaviour", ReporterWorkspaceBehaviour.PER_PROJECT
     )
     if _behaviour_from_declaration(declared) is not None:
         return None
@@ -1120,7 +1124,7 @@ def unsupported_reporter_names(
             continue
         name = _reporter_name(instance)
         names.append(name)
-        declaration = _unreadable_declaration(instance.__class__)
+        declaration = _unreadable_declaration(instance)
         if declarations is not None:
             declarations.append((name, declaration))
     return tuple(names)
@@ -1427,7 +1431,7 @@ def emit_workspace_reports(
 
         if behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED:
             unsupported.append(key)
-            unreadable = _unreadable_declaration(instance.__class__)
+            unreadable = _unreadable_declaration(instance)
             if unreadable is not None:
                 # Not a claim the reporter made: its declaration is a typo or a
                 # wrong type, and the way out is to fix it, not to disable it.
