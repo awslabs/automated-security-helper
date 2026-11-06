@@ -395,6 +395,14 @@ class TestTheDroppedSandboxIsReported:
         assert WARNING in _one_line(output), output
         assert "(landlock," in _one_line(output)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "the section is passed as JSON, whose double quotes a batch-file "
+            "runner stand-in refuses as an argument (cmd.exe would read it "
+            "differently); ASH refuses to start it, as it should"
+        ),
+    )
     def test_a_sandbox_section_override(self, tmp_path, stand_in, project):
         output, _ = _scan(
             tmp_path,
