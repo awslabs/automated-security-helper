@@ -1846,7 +1846,11 @@ function Invoke-ASH {
                 # that is there decides, as it does for ./ash and `ash scan`.
                 $nearest = $outputDirAbsolute
                 while ($nearest -and -not (Test-Path -LiteralPath $nearest)) {
-                    $nearest = Split-Path -LiteralPath $nearest -Parent
+                    # Split-Path -LiteralPath ... -Parent is a parameter-set error on
+                    # PowerShell 7 ("Parameter set cannot be resolved"), which ended the
+                    # call with 1 where the refusal is 5; the directory name is the
+                    # same parent, and is null at a root.
+                    $nearest = [System.IO.Path]::GetDirectoryName($nearest)
                 }
                 if ($nearest -and (Test-Path -LiteralPath $nearest -PathType Leaf)) {
                     $createReason = 'Not a directory'

@@ -21,9 +21,11 @@ repository file inside the tree, which writes a case-variant twin of the
 base's reporter section; the config's own patch names that section in a
 third spelling. The merge joins every spelling of a plugin section into one
 key, so the twins do not stay apart and the pointer fits nothing: the scan's
-own load refuses the chain. The pre-check must agree with the scan on that
-refusal -- the same error class naming the same pointer -- and not load the
-chain where the scan would refuse it.
+own load refuses the chain. The scan reports that refusal (the error class
+naming the pointer). The pre-check, read with the scan's own settings, hits the
+same refusal and swallows it by design -- the scan reports the error -- so it
+returns no refusal and no environment values: a chain the scan refuses
+contributes nothing to the pre-check.
 """
 
 import pytest
@@ -33,7 +35,7 @@ pytestmark = pytest.mark.unit
 _VALUE = "a-chain-value-the-pre-check-must-keep"
 
 
-def test_a_chain_the_scan_loads_keeps_its_values_in_the_pre_check(
+def test_a_chain_the_scan_refuses_contributes_nothing_to_the_pre_check(
     tmp_path, monkeypatch
 ):
     from automated_security_helper.cli.mcp_tools import _config_pre_check
@@ -100,12 +102,14 @@ def test_a_chain_the_scan_loads_keeps_its_values_in_the_pre_check(
         )
     assert "/reporters/Acme" in str(scan_refusal.value)
 
-    # The pre-check answers as the scan does: the same refusal, of the same
-    # class, naming the same pointer. It does not load the chain where the scan
-    # refuses it, and it raises no environment refusal of its own.
+    # The pre-check swallows the load error because the scan reports it
+    # (_config_pre_check returns (None, None, ()) for an
+    # ASHConfigValidationError, which ASHConfigSourceError subclasses). It
+    # reports no refusal of its own, and the chain the scan refuses contributes
+    # nothing to it: no environment value reaches the redaction set from a chain
+    # no scan will run with.
     pre_check = _config_pre_check(config, source, None)
     assert pre_check.env_refusal is None
-    assert pre_check.load_refusal is not None
-    _refused_path, refusal = pre_check.load_refusal
-    assert type(refusal) is type(scan_refusal.value)
-    assert "/reporters/Acme" in str(refusal)
+    assert pre_check.load_refusal is None
+    assert pre_check.environment_values == ()
+    assert _VALUE not in pre_check.environment_values

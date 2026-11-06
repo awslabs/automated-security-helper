@@ -1755,6 +1755,25 @@ def _keep_stand_ins_as_batch_files(monkeypatch, directory: Path) -> None:
 
     monkeypatch.setattr(subprocess_utils, "_non_batch_substitute", substitute)
 
+    # With no substitute the spawn layer falls back to its cmd.exe argument check,
+    # which refuses a ``--from tool>=1.0,<2.0`` spec: cmd.exe would read ``>`` and
+    # ``<`` as redirections. That check protects a real batch shim. The guard's
+    # ``uv.bat`` plays the ``uv.exe`` the product starts, never reads ``%*``, and a
+    # test that hands it a version range expects the start to be made (or its
+    # mocked runner called), so the check is not applied to a program in the
+    # guard's own directory. Any other batch file is checked as before.
+    real_refusal = subprocess_utils._refusal_for_cmd_exe
+
+    def refusal(args):
+        if args:
+            program = os.fspath(args[0])
+            parent = os.path.normcase(os.path.realpath(os.path.dirname(program)))
+            if parent == stand_ins:
+                return None
+        return real_refusal(args)
+
+    monkeypatch.setattr(subprocess_utils, "_refusal_for_cmd_exe", refusal)
+
 
 def install_tool_guard(
     monkeypatch,
