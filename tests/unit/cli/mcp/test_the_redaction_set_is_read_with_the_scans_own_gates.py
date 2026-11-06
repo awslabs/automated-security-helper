@@ -12,8 +12,9 @@ trusted base, with the scan's source directory and the session's base gate,
 so a chain is in the set exactly when the scan runs with it.
 
 Two arms pin the agreement from both sides. A base beside the profile is
-accepted by both reads: its values are in the set and every failure surface
-hides them. A base inside the scan target is refused by both reads -- config
+accepted by both reads: the profile's value is in the set and every failure
+surface hides it (the base carries no environment value, because a file in
+the session's config directory is client-supplied and may not read one). A base inside the scan target is refused by both reads -- config
 bases must stay inside the profile's own directory when the profile sits
 outside the scanned tree -- so the scan itself fails before any value is
 read, and the refusal's text shows none.
@@ -107,7 +108,15 @@ def test_the_set_and_the_scan_judge_the_profiles_chain_together(
     else:
         base = target / "base.ash.yaml"
         extends_ref = base.as_posix()
-    base.write_text("project_name: ${ASH_GATES_BASE:unset}\n", encoding="utf-8")
+    if chain == "accepted":
+        # A file in the session's config directory is client-supplied
+        # (config_is_client_supplied), and the scan refuses a client-supplied
+        # file that reads a value from the environment. The accepted base
+        # therefore carries no environment value; the profile's own value is
+        # the accepted content the set must hold.
+        base.write_text("project_name: a-literal-base\n", encoding="utf-8")
+    else:
+        base.write_text("project_name: ${ASH_GATES_BASE:unset}\n", encoding="utf-8")
     profile = config_dir / "ash.yaml"
     profile.write_text(
         f"extends:\n  - {extends_ref}\n"
@@ -196,14 +205,14 @@ def test_the_set_and_the_scan_judge_the_profiles_chain_together(
 
     if chain == "accepted":
         # Controls on the premise: the scan's own resolution accepted the
-        # chain and read both values, so both are in use at the failure.
+        # chain and read the profile's value, so it is in use at the failure.
         assert "values" in loaded, (
             "control: the scan never resolved its config",
             loaded.get("resolve_trouble"),
             entry.error_message,
         )
-        assert _BASE_VALUE in loaded["values"], loaded
         assert _PROFILE_VALUE in loaded["values"], loaded
+        assert _BASE_VALUE not in loaded["values"], loaded
     else:
         # Control on the premise: the scan's own resolution refused the chain
         # before any value was read, so nothing resolved and nothing ran.
