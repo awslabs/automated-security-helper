@@ -332,10 +332,12 @@ class CommandSafeStream:
             # state the check would have left. Read alone: the checked text
             # itself is not written here.
             self._at_line_start = self._line_state_after(text, self._at_line_start)
+            self._carry = self._carry_after(text, self._carry)
             return written
-        safe, at_line_start = self._safe(text, self._at_line_start)
+        safe, at_line_start, carry = self._safe(text, self._at_line_start)
         target.write(safe)
         self._at_line_start = at_line_start
+        self._carry = carry
         return len(text)
 
     def _drain_pending(self) -> None:
@@ -398,10 +400,12 @@ class CommandSafeStream:
         finally:
             self._mid_write = False
 
-    def _safe(self, text: str, at_line_start: bool) -> tuple[str, bool]:
+    def _safe(self, text: str, at_line_start: bool) -> tuple[str, bool, str]:
         """*text* with its command forms broken when *at_line_start* starts it,
-        and whether the next text starts a line. State goes in and comes out so
-        the caller commits it only once the text has reached the stream.
+        whether the next text starts a line, and the carry the next text
+        starts from. State goes in and comes out so the caller commits it
+        (``_at_line_start`` and ``_carry`` together) only once the text has
+        reached the stream.
 
         The "#" or "##name" a line's last write ended with is kept (``_carry``):
         Rich's Windows console render writes each styled run of a message on its
@@ -436,8 +440,23 @@ class CommandSafeStream:
                 if lead < len(piece):
                     at_line_start = False
             pieces[index] = piece
-        self._carry = carry
-        return "".join(pieces), at_line_start
+        return "".join(pieces), at_line_start, carry
+
+    @staticmethod
+    def _carry_after(text: str, carry: str) -> str:
+        """The carry once *text* has been written as is: what :meth:`_safe`
+        would have left, read without building the checked text. A write that
+        passes as is keeps the carry current, so a checked write after it
+        (the as-is-to-checked transition) still breaks a form that began in
+        the as-is text."""
+        pieces = _LINE_BREAK.split(text)
+        if len(pieces) > 1:
+            carry = ""
+        last = pieces[-1]
+        if last:
+            tail = _TRAILING_HASHES.search(carry + last)
+            carry = tail.group(0) if tail is not None else ""
+        return carry
 
     @staticmethod
     def _line_state_after(text: str, at_line_start: bool) -> bool:
@@ -633,6 +652,7 @@ class CommandSafeBuffer(io.BufferedIOBase):
             written = target.write(given)
             text = tail + codecs.decode(given, "utf-8", "surrogateescape")
             owner._at_line_start = owner._line_state_after(text, owner._at_line_start)
+            owner._carry = owner._carry_after(text, owner._carry)
             return written
         if deferred:
             # A deferred byte write, drained after the write it interrupted:
@@ -644,9 +664,10 @@ class CommandSafeBuffer(io.BufferedIOBase):
             text = codecs.decode(given, "utf-8", "surrogateescape")
         else:
             text = self._decoder.decode(given)
-        safe, at_line_start = owner._safe(text, owner._at_line_start)
+        safe, at_line_start, carry = owner._safe(text, owner._at_line_start)
         target.write(_encoded(safe))
         owner._at_line_start = at_line_start
+        owner._carry = carry
         return len(given)
 
     def _emit_held(self) -> None:
@@ -682,9 +703,10 @@ class CommandSafeBuffer(io.BufferedIOBase):
         tail = self._decoder.decode(b"", True)
         self._decoder.reset()
         if tail:
-            safe, at_line_start = owner._safe(tail, owner._at_line_start)
+            safe, at_line_start, carry = owner._safe(tail, owner._at_line_start)
             self._target_buffer().write(_encoded(safe))
             owner._at_line_start = at_line_start
+            owner._carry = carry
 
     def flush(self) -> None:
         # Quiet on a target that is closed or detached, not on a closed view:
