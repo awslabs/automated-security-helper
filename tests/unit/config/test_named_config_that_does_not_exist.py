@@ -69,9 +69,15 @@ def test_a_name_with_a_newline_is_shown_on_one_line(tmp_path):
     # every message goes through writes the newline as an escape.
     from automated_security_helper.utils.terminal_text import shown_on_one_line
 
-    message = str(shown_on_one_line(str(refusal.value)))
-    assert "\n" not in message, message
-    assert "missing.yaml" in message, message
+    # The exception holds the name once and unescaped: a newline escaped here
+    # would be shown twice by the sink.
+    raw = str(refusal.value)
+    assert "a\nmissing.yaml" in raw, raw
+    assert "\\x0a" not in raw, raw
+
+    shown = str(shown_on_one_line(raw))
+    assert "\n" not in shown, shown
+    assert "a\\x0amissing.yaml" in shown, shown
 
 
 @pytest.mark.parametrize("config", [None, "", "   ", "\t\n"])
