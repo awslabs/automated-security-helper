@@ -1472,7 +1472,10 @@ def test_metadata_changes_through_a_descriptor_are_checked(char, outside, tmp_pa
             with pytest.raises(LaunchViolation, match="outside the test's directory"):
                 change(out_fd)
             change(in_fd)
-        os.fchmod(read_end, 0o600)  # a pipe names no file
+        if sys.platform != "darwin":
+            # A pipe names no file. macOS refuses fchmod on a pipe with EINVAL in the
+            # kernel, whatever the harness does, so there is no call to observe there.
+            os.fchmod(read_end, 0o600)
     finally:
         for fd in (out_fd, in_fd, read_end, write_end):
             os.close(fd)
@@ -1742,8 +1745,11 @@ def test_an_argv_path_through_a_symlinked_directory_leading_outside_is_not_captu
 ):
     (char.work / "dir-link").symlink_to(outside / "victim-dir")
     assert _argv_files(char, char.work / "dir-link" / "f") == {}
+    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
     assert _argv_files(char, char.work / "dir-link") == {
-        str(char.work / "dir-link"): {"symlink": str(outside / "victim-dir")}
+        os.path.realpath(char.work / "dir-link"): {
+            "symlink": str(outside / "victim-dir")
+        }
     }
 
 
@@ -1754,7 +1760,8 @@ def test_a_symlink_in_argv_is_recorded_as_a_symlink_and_not_read_through(
     link = char.work / "link"
     target = outside / "victim.txt" if kind == "host-file" else char.work / "missing"
     link.symlink_to(target)
-    assert _argv_files(char, link) == {str(link): {"symlink": str(target)}}
+    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
+    assert _argv_files(char, link) == {os.path.realpath(link): {"symlink": str(target)}}
 
 
 def test_a_directory_in_argv_records_its_symlinks_as_symlinks(char, outside):
@@ -1764,17 +1771,19 @@ def test_a_directory_in_argv_records_its_symlinks_as_symlinks(char, outside):
     (handed / "link").symlink_to(outside / "victim.txt")
     (handed / "dangling").symlink_to(char.work / "missing")
     (handed / "dir-link").symlink_to(outside / "victim-dir")
-    listing = _argv_files(char, handed)[str(handed)]["dir"]
+    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
+    real = Path(os.path.realpath(handed))
+    listing = _argv_files(char, handed)[str(real)]["dir"]
     assert sorted(listing) == [
-        str(handed / "dangling"),
-        str(handed / "dir-link"),
-        str(handed / "link"),
-        str(handed / "own.txt"),
+        str(real / "dangling"),
+        str(real / "dir-link"),
+        str(real / "link"),
+        str(real / "own.txt"),
     ]
-    assert listing[str(handed / "link")] == {"symlink": str(outside / "victim.txt")}
-    assert listing[str(handed / "dangling")] == {"symlink": str(char.work / "missing")}
-    assert listing[str(handed / "dir-link")] == {"symlink": str(outside / "victim-dir")}
-    assert listing[str(handed / "own.txt")].value == {"text": ["own\n"]}
+    assert listing[str(real / "link")] == {"symlink": str(outside / "victim.txt")}
+    assert listing[str(real / "dangling")] == {"symlink": str(char.work / "missing")}
+    assert listing[str(real / "dir-link")] == {"symlink": str(outside / "victim-dir")}
+    assert listing[str(real / "own.txt")].value == {"text": ["own\n"]}
 
 
 def test_an_argv_path_through_a_link_into_a_host_directory_probes_no_host_path(char):
@@ -1787,7 +1796,8 @@ def test_an_argv_path_through_a_link_into_a_host_directory_probes_no_host_path(c
     link = char.work / "bin-link"
     link.symlink_to(host)
     assert _argv_files(char, link / "git") == {}
-    assert _argv_files(char, link) == {str(link): {"symlink": host}}
+    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
+    assert _argv_files(char, link) == {os.path.realpath(link): {"symlink": host}}
     assert char.take_violations() == []
 
 
@@ -1817,8 +1827,10 @@ def test_a_file_the_test_made_inside_its_tree_is_captured_as_before(char):
     made = char.work / "made.txt"
     made.write_text("made\n", encoding="utf-8")
     files = _argv_files(char, made, f"--out={made}")
-    assert list(files) == [str(made)]
-    assert files[str(made)].value == {"text": ["made\n"]}
+    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
+    key = os.path.realpath(made)
+    assert list(files) == [key]
+    assert files[key].value == {"text": ["made\n"]}
 
 
 def test_dots_after_a_link_in_argv_name_the_parent_of_the_links_target(char):
