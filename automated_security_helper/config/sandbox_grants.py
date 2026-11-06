@@ -110,6 +110,7 @@ from automated_security_helper.utils.log import (
     NO_MARKUP,
     current_run_log_scope,
 )
+from automated_security_helper.utils.link_locations import without_extended_prefix
 from automated_security_helper.utils.scanned_tree import _is_link_stat
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
@@ -794,7 +795,11 @@ def _walk_links(path: Path) -> Tuple[List[Path], bool]:
             return links, False
         links.append(candidate)
         try:
-            target = Path(os.readlink(candidate))
+            text = os.readlink(candidate)
+            # A link made with an absolute target reads back on Windows with the
+            # extended-length prefix; the places the walk goes on to and names
+            # are spelled as the rest of the family spells them, without it.
+            target = Path(without_extended_prefix(text) if os.name == "nt" else text)
         except (OSError, ValueError) as error:
             # ValueError: a reparse point readlink cannot read as a link.
             reason = (

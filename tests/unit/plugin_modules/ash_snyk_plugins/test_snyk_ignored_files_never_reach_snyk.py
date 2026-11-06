@@ -58,6 +58,7 @@ from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner
 from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
 from automated_security_helper.utils.output_dir_links import ignore_output_dir_in_git
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 CANARY = "snyk-canary-4b1f0e9d7c"
 
@@ -112,6 +113,10 @@ def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         binary.write_text(stand_in, encoding="utf-8")
         binary.chmod(0o755)
     monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
+    # On Windows the unit tool guard makes "snyk" resolve to its own snyk.bat
+    # alone, so this directory's snyk.cmd was never found and the guard's
+    # stand-in ran in its place. The program here is this test's own.
+    use_the_real_candidate_names(monkeypatch)
     monkeypatch.setenv("SNYK_TOKEN", "placeholder-token")
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     return record

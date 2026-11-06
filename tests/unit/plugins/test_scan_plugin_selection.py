@@ -51,7 +51,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
-from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS, path_without_the_guard
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 FERRET_MODULE = "automated_security_helper.plugin_modules.ash_ferret_plugins"
@@ -405,7 +405,12 @@ class _Process:
                 [str(self.stubs), str(Path(sys.executable).parent), "/usr/bin", "/bin"]
             )
         else:
-            env["PATH"] = os.pathsep.join([str(self.stubs), env.get("PATH", "")])
+            # Not the unit tool guard's directory, which this process's PATH
+            # starts with: a child that inherited it ran the guard's stand-ins
+            # (a snyk on its PATH, and every scanner tool started in the log).
+            env["PATH"] = os.pathsep.join(
+                [str(self.stubs), path_without_the_guard(env.get("PATH", ""))]
+            )
         env.update(
             {
                 "PYTHONPATH": os.pathsep.join(python_path),

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -4399,7 +4400,8 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     them. A scan of that checkout ignores both, so they are shown marked. The
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
-    environment is marked by the reference it wrote, never by the value. The
+    environment is shown neither by the value nor by a marker made of it:
+    the option is absent from the answer. The
     rest of the section (aws_region) is the operator's too and is confined
     for a file in another checkout, so it is absent rather than shown as
     applied (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options
@@ -4442,10 +4444,12 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
             '<operator only; ignored from this file: "victim">'
         )
     else:
+        # The confinement settles the place and drops the reference the file
+        # wrote there, so get_config (``_without_environment_read_markers``)
+        # withdraws a marker that would print the server's environment value:
+        # the option is absent, never the value and never a marker made of it.
         assert "victim-from-the-environment" not in json.dumps(result), result
-        assert options["findings_scope"] == (
-            "<operator only; ignored from this file: <from ${ASH_TEST_SH_SCOPE}>>"
-        )
+        assert "findings_scope" not in options, options
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"
     )
@@ -4498,7 +4502,11 @@ def test_in_a_checkout_reads_the_name_and_the_target(tmp_path, layout, inside):
         # to a directory is refused at traversal, which would break the
         # resolve below and the walk under test; POSIX ignores the argument.
         (checkout / "lnk").symlink_to(outside / "sub", target_is_directory=True)
-        assert path.resolve() == (outside / "file.yaml").resolve()
+        # POSIX steps up from where the link leads (outside/file.yaml); Windows
+        # removes the ".." before it looks at any link (ntpath.realpath), so the
+        # name opens checkout/file.yaml, which is in the checkout by where it is.
+        reached = checkout if os.name == "nt" else outside
+        assert path.resolve() == (reached / "file.yaml").resolve()
 
     assert in_a_checkout(path) is inside
 
