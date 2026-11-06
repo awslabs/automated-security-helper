@@ -195,6 +195,41 @@ def self_test() -> list[str]:
     return failures
 
 
+#: The name a flat download is read as. actions/download-artifact extracts straight into
+#: its path, with no per-artifact directory, whenever exactly one artifact matched the
+#: pattern (its source: ``isSingleArtifactDownload || mergeMultiple || artifacts.length
+#: === 1``), and an unsharded run uploads exactly one artifact, shard1of1. The data file
+#: carries no shard name, so a flat download is read as that complete set of one. The
+#: limit: one shard of a multi-shard set that was the only artifact found would pass as
+#: whole; the unit-coverage job needs every unit job, so that set is not reached.
+FLAT_SHARD_SUFFIX = "-shard1of1"
+
+
+def find_shard_dirs(results: Path, prefix: str) -> list[tuple[str, Path]]:
+    """(artifact name, directory holding its files) per shard, in both layouts.
+
+    One artifact per directory named after it, or, when only one artifact matched, its
+    files directly under ``results``.
+    """
+    dirs = sorted(p for p in results.glob(f"{prefix}-shard*") if p.is_dir())
+    if dirs:
+        return [(p.name, p) for p in dirs]
+    if (results / DATA_FILE).is_file():
+        return [(prefix + FLAT_SHARD_SUFFIX, results)]
+    return []
+
+
+def describe_root(results: Path) -> str:
+    """One level of what the download root holds, for the 'no shard artifacts' error."""
+    try:
+        entries = sorted(
+            f"{e.name}/" if e.is_dir() else e.name for e in results.iterdir()
+        )
+    except OSError as error:
+        return f"{results} cannot be listed: {error}"
+    return f"{results} holds {entries or 'nothing'}"
+
+
 def data_problem(path: Path) -> str | None:
     """Why a shard's data file cannot stand in for its slice of the suite, or None.
 
@@ -222,7 +257,9 @@ def _coverage(*args: str) -> subprocess.CompletedProcess:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--results-dir", help="directory holding one subdirectory per artifact"
+        "--results-dir",
+        help="directory holding one subdirectory per artifact, or the one artifact's "
+        "files directly when download-artifact matched exactly one",
     )
     parser.add_argument(
         "--os", help="the runs-on value of the shards, e.g. macos-latest"
@@ -278,13 +315,15 @@ def main(argv: list[str] | None = None) -> int:
         return 64
 
     results = Path(args.results_dir)
-    shard_dirs = sorted(p for p in results.glob(f"{prefix}-shard*") if p.is_dir())
-    problems = check_shards([p.name for p in shard_dirs], prefix)
+    shard_dirs = find_shard_dirs(results, prefix)
+    problems = check_shards([name for name, _ in shard_dirs], prefix)
+    if problems == [f"no shard artifacts found for {prefix!r}"]:
+        problems = [f"{problems[0]}; {describe_root(results)}"]
     data_files = []
-    for shard_dir in shard_dirs:
+    for name, shard_dir in shard_dirs:
         data = shard_dir / DATA_FILE
         if not data.is_file():
-            problems.append(f"{shard_dir.name} has no {DATA_FILE}")
+            problems.append(f"{name} has no {DATA_FILE}")
             continue
         problem = data_problem(data)
         if problem:
