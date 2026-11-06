@@ -488,7 +488,9 @@ def test_an_unusable_home_is_the_passwd_home_or_the_root(layout, monkeypatch):
     for module in (policy_module, backends_module):
         monkeypatch.setattr(module, "_passwd_home", lambda: None, raising=False)
     monkeypatch.setenv("HOME", "")
-    assert policy_module._policy_home() == Path("/")
+    # No passwd home: POSIX reads the empty HOME as unset and falls to "/". Windows
+    # ignores HOME and reads USERPROFILE, which still names the drive root set above.
+    assert policy_module._policy_home() == (root if os.name == "nt" else Path("/"))
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows reads USERPROFILE, not HOME")
