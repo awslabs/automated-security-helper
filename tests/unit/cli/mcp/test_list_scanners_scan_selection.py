@@ -56,7 +56,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
-from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS, path_without_the_guard
 
 pytestmark = pytest.mark.integration
 
@@ -275,7 +275,12 @@ class _Sequence:
             }
         )
         if platform.system().lower() == "windows":
-            path = os.pathsep.join([str(self.bin_dir), env.get("PATH", "")])
+            # The inherited PATH holds the unit tool guard's directory. Its snyk.bat
+            # is tried before the recorder's snyk.cmd, so the child ran the stand-in,
+            # which recorded the call in the guard's log and not in this one.
+            path = os.pathsep.join(
+                [str(self.bin_dir), path_without_the_guard(env.get("PATH", ""))]
+            )
         else:
             path = os.pathsep.join(
                 [
