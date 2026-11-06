@@ -222,7 +222,9 @@ def test_the_local_scan_and_the_nix_gate_word_a_non_file_config_alike(
         assert "could not be parsed" in refused.message, refused.message
         assert named.name in refused.message, refused.message
     else:
-        assert str(named) in refused.message
+        # The refusal names the file in forward slashes on every platform, so a
+        # Windows path is not spelled with backslashes in it.
+        assert named.as_posix() in refused.message
 
 
 def test_a_symlink_loop_is_worded_alike_when_resolve_raises_as_it_did_before_3_13(

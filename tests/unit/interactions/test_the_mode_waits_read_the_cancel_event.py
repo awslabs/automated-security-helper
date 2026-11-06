@@ -35,7 +35,21 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.interactions.run_ash_container import run_cmd_direct
 from automated_security_helper.interactions.run_ash_nix import _enter_shell
 from automated_security_helper.utils import subprocess_utils
-from tests.utils.processes import process_running
+from tests.utils.processes import process_running as _posix_process_running
+
+
+def process_running(process: "subprocess.Popen") -> bool:
+    """Whether *process* still runs, read from the OS where the cell can.
+
+    POSIX reads the OS first (/proc, signal 0, ps), because poll() answers from
+    Popen's bookkeeping, which a stop path under test could have written without
+    stopping anything. Windows has no signal 0 and no zombies: poll() there asks
+    the process handle (GetExitCodeProcess), which is the OS's own answer.
+    """
+    if sys.platform == "win32":
+        return process.poll() is None
+    return _posix_process_running(process.pid)
+
 
 #: Long enough that "the wait returned early" is unambiguous, short enough
 #: that the pre-fix red -- the wait sitting the child out -- stays bounded.
@@ -157,7 +171,7 @@ class TestContainerRuntimeWait:
         # written without stopping anything, while /proc cannot be told a
         # running process is gone. A child the arm killed but has not yet
         # reaped is a zombie, which process_running counts as stopped.
-        still_running_after_the_raise = process_running(child.pid)
+        still_running_after_the_raise = process_running(child)
         code_after_the_raise = child.poll()
         if still_running_after_the_raise or code_after_the_raise is None:
             child.kill()
@@ -229,7 +243,7 @@ class TestNixShellWait:
         # bookkeeping read is writable by the very path under test and a
         # killed-but-unreaped shell is a zombie process_running counts as
         # stopped.
-        still_running_after_the_raise = process_running(shell.pid)
+        still_running_after_the_raise = process_running(shell)
         code_after_the_raise = shell.poll()
         if still_running_after_the_raise or code_after_the_raise is None:
             shell.kill()

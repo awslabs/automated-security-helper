@@ -164,9 +164,12 @@ def _scan(
     )
     started = starts.read_text(encoding="utf-8").splitlines() if starts.exists() else []
     # On Windows, Python's platform module probes the OS version by running
-    # ``cmd /c ver`` inside the child. That start is the interpreter's own,
+    # ``cmd /c ver`` (``cmd /c "ver"`` on some interpreters, and wrapped as
+    # ``... /c "cmd /c ver"`` or ``... /c "command /c ver"`` on others) inside the child. That start is the interpreter's own,
     # not a program ASH started for the scan, so it is not part of the answer.
-    started = [line for line in started if '/c "ver"' not in line]
+    started = [
+        line for line in started if '/c "ver"' not in line and "/c ver" not in line
+    ]
     return child.returncode, said, output, started
 
 
@@ -189,9 +192,11 @@ def _root_lookups(started: List[str], source: Path) -> List[str]:
     Popen hands the audit hook the joined command line, so the same lookup is a
     string. The run's directory is a Path, whose repr spells a Windows path
     with forward slashes, which is why ``as_posix`` is matched alongside
-    ``str``.
+    ``str``. A directory handed to Popen as a string appears inside the line's
+    repr, which writes each backslash of a Windows path twice, so that
+    spelling is matched too.
     """
-    spellings = {str(source), source.as_posix()}
+    spellings = {str(source), source.as_posix(), str(source).replace("\\", "\\\\")}
     return [
         line
         for line in started
