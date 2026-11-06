@@ -37,6 +37,7 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.helpers import mark_git_checkout
 
 pytestmark = pytest.mark.unit
 
@@ -203,7 +204,7 @@ def test_a_single_directory_scan_still_forwards_what_the_host_read(tmp_path):
 def _checkout_workspace(tmp_path: Path) -> Path:
     """A workspace inside a git checkout, with an operator config beside it."""
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     root = checkout / "work"
     (root / "api").mkdir(parents=True)
     (root / "dev.code-workspace").write_text('{"folders": [{"path": "api"}]}')
