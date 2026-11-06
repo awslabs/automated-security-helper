@@ -41,7 +41,6 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
     get_args,
     get_origin,
     get_type_hints,
@@ -2685,7 +2684,8 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
         value_class = type(node)
         if isinstance(node, tuple):
             if hasattr(value_class, "_fields"):  # a NamedTuple class
-                return cast(Any, value_class)._make(entries)
+                # The class is only the receiver of the call, never an argument.
+                return value_class._make(entries)  # type: ignore[attr-defined]
             if value_class is tuple:
                 return tuple(entries)
             try:

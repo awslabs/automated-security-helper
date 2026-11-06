@@ -18,7 +18,7 @@ import sys
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Union, cast
+from typing import Dict, List, Optional, Any, Tuple, Union
 
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
@@ -1089,7 +1089,8 @@ def _strings_shown(value: Any, _on_path: Optional[set[int]] = None) -> Any:
             except TypeError:
                 return items
         if hasattr(type(value), "_make"):
-            return cast(Any, type(value))._make(items)
+            # The class is only the receiver of the call, never an argument.
+            return type(value)._make(items)  # type: ignore[attr-defined]
         try:
             return type(value)(items)
         except TypeError:
