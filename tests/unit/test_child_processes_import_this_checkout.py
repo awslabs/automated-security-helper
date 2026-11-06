@@ -171,6 +171,35 @@ _FRESH_INTERPRETER = (
     "parent's sys.path, so it imports ASH from where this test process does, this "
     "checkout"
 )
+_STAND_IN_GIT = "a stand-in git script that imports only the stdlib; no ASH import"
+_STAND_IN_CONTAINER_RUNTIME = (
+    "the script is a stand-in container runtime (stdlib only); the ash child "
+    "itself is routed by _ash_environment"
+)
+_PRINTS_VARIABLES = (
+    "-c code from _print_variables, which imports only json and os and prints "
+    "environment variables; it imports nothing from ASH"
+)
+_READS_AN_ARGV = "runs_module_or_code only reads an argv; nothing is started"
+_PLAN_RAISES = (
+    "the backend's plan raises and subprocess.run and Popen are replaced by a "
+    "recorder, so nothing is started (the test asserts started == [])"
+)
+_RECORD_EMITTED = (
+    "Popen is replaced by a stub that raises _Reached after the record is "
+    "emitted; nothing is started"
+)
+_ISOLATED_STDLIB_SCRIPT = (
+    "install-pinned-tool.py is standard-library only by design (nothing is "
+    "installed when it runs); it imports no ASH module"
+)
+_RUN_IS_STUBBED = (
+    "pre_installed_tool._run is replaced by a stub answering a canned "
+    "CompletedProcess; nothing is started"
+)
+_DRY_RUN_IS_STUBBED = (
+    "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
+)
 
 #: "<path below the repository>::<function>::<kind>#<place>@<call>" (Launch.key) ->
 #: why that one launch needs no routing. Each entry allows one launch site; a launch
@@ -310,32 +339,18 @@ ALLOWED: Dict[str, str] = {
         f"{_FRESH_INTERPRETER}; its target is os.getpid"
     ),
     "tests/unit/cli/mcp/test_a_value_error_from_running_git_is_not_a_bad_session_id.py"
-    "::delivery::unread-script#1@setattr": (
-        "a stand-in git script that imports only the stdlib; no ASH import"
-    ),
+    "::delivery::unread-script#1@setattr": _STAND_IN_GIT,
     "tests/unit/cli/mcp/test_git_output_that_is_not_utf8_is_a_git_failure.py"
-    "::stand_in_git.install::unread-script#1@setattr": (
-        "a stand-in git script that imports only the stdlib; no ASH import"
-    ),
+    "::stand_in_git.install::unread-script#1@setattr": _STAND_IN_GIT,
     "tests/unit/cli/mcp/"
     "test_set_source_git_refuses_unprintable_url_and_ref_up_front.py"
-    "::delivery::unread-script#1@setattr": (
-        "a stand-in git script that imports only the stdlib; no ASH import"
-    ),
+    "::delivery::unread-script#1@setattr": _STAND_IN_GIT,
     "tests/unit/cli/mcp/test_set_source_git_times_out.py"
-    "::fake_git.install::unread-script#1@setattr": (
-        "a stand-in git script that imports only the stdlib; no ASH import"
-    ),
-    "tests/unit/docs/test_page_claims.py::_container_scan::unread-script#1@_ash+cwd": (
-        "the script is a stand-in container runtime (stdlib only); the ash child "
-        "itself is routed by _ash_environment"
-    ),
+    "::fake_git.install::unread-script#1@setattr": _STAND_IN_GIT,
+    "tests/unit/docs/test_page_claims.py::_container_scan::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
     "tests/unit/docs/test_page_claims.py"
     "::test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is"
-    ".scan::unread-script#1@_ash+cwd": (
-        "the script is a stand-in container runtime (stdlib only); the ash child "
-        "itself is routed by _ash_environment"
-    ),
+    ".scan::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
     "tests/unit/docs/test_page_claims.py"
     "::test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is"
     "::stdin#1@scan": (
@@ -350,16 +365,10 @@ ALLOWED: Dict[str, str] = {
     ),
     "tests/unit/docs/test_page_claims.py"
     "::test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is"
-    "::unread-script#1@_ash+cwd": (
-        "the script is a stand-in container runtime (stdlib only); the ash child "
-        "itself is routed by _ash_environment"
-    ),
+    "::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
     "tests/unit/docs/test_page_claims.py"
     "::test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own"
-    "::unread-script#1@_ash+cwd": (
-        "the script is a stand-in container runtime (stdlib only); the ash child "
-        "itself is routed by _ash_environment"
-    ),
+    "::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
     "tests/unit/docs/test_page_claims.py"
     "::test_ctrl_c_ends_ash_build_image_with_exit_code_130"
     "::stdin#1@_run_interrupted": (
@@ -378,49 +387,27 @@ ALLOWED: Dict[str, str] = {
     ),
     "tests/unit/utils/test_offline_tool_env.py"
     "::test_every_spawn_gets_them_offline::unread-code#1@"
-    "run_command_with_output_handling+cwd": (
-        "-c code from _print_variables, which imports only json and os and prints "
-        "environment variables; it imports nothing from ASH"
-    ),
+    "run_command_with_output_handling+cwd": _PRINTS_VARIABLES,
     "tests/unit/utils/test_offline_tool_env.py"
-    "::test_spawn_run_gets_them_offline::unread-code#1@spawn_run+cwd": (
-        "-c code from _print_variables, which imports only json and os and prints "
-        "environment variables; it imports nothing from ASH"
-    ),
+    "::test_spawn_run_gets_them_offline::unread-code#1@spawn_run+cwd": _PRINTS_VARIABLES,
     "tests/unit/utils/test_python_child_reads_interpreter_and_uv_arguments.py"
     "::test_a_path_in_argv_is_a_script_and_never_an_error"
-    "::unread-script#1@runs_module_or_code": (
-        "runs_module_or_code only reads an argv; nothing is started"
-    ),
+    "::unread-script#1@runs_module_or_code": _READS_AN_ARGV,
     "tests/unit/utils/test_python_child_reads_interpreter_and_uv_arguments.py"
     "::test_a_path_in_argv_is_a_script_and_never_an_error"
-    "::unread-script#2@runs_module_or_code": (
-        "runs_module_or_code only reads an argv; nothing is started"
-    ),
+    "::unread-script#2@runs_module_or_code": _READS_AN_ARGV,
     "tests/unit/utils/test_sandbox_policy.py"
     "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
-    "::stdin#1@run_command": (
-        "the backend's plan raises and subprocess.run and Popen are replaced by a "
-        "recorder, so nothing is started (the test asserts started == [])"
-    ),
+    "::stdin#1@run_command": _PLAN_RAISES,
     "tests/unit/utils/test_sandbox_policy.py"
     "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
-    "::stdin#1@run_command_stream_output": (
-        "the backend's plan raises and subprocess.run and Popen are replaced by a "
-        "recorder, so nothing is started (the test asserts started == [])"
-    ),
+    "::stdin#1@run_command_stream_output": _PLAN_RAISES,
     "tests/unit/utils/test_sandbox_policy.py"
     "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
-    "::stdin#1@spawn_run": (
-        "the backend's plan raises and subprocess.run and Popen are replaced by a "
-        "recorder, so nothing is started (the test asserts started == [])"
-    ),
+    "::stdin#1@spawn_run": _PLAN_RAISES,
     "tests/unit/utils/test_sandbox_policy.py"
     "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
-    "::stdin#1@create_process_with_pipes": (
-        "the backend's plan raises and subprocess.run and Popen are replaced by a "
-        "recorder, so nothing is started (the test asserts started == [])"
-    ),
+    "::stdin#1@create_process_with_pipes": _PLAN_RAISES,
     "tests/unit/utils/test_stand_ins.py"
     "::test_on_windows_the_stand_in_is_a_script_and_a_bat_launcher_for_it"
     "::unread-script#1@launcher_text": (
@@ -434,81 +421,49 @@ ALLOWED: Dict[str, str] = {
     ),
     "tests/unit/utils/test_the_pipes_record_hides_carried_values.py"
     "::test_a_carried_value_in_a_mount_path_never_reaches_the_record"
-    "::unread-script#1@create_process_with_pipes": (
-        "Popen is replaced by a stub that raises _Reached after the record is "
-        "emitted; nothing is started"
-    ),
+    "::unread-script#1@create_process_with_pipes": _RECORD_EMITTED,
     "tests/unit/utils/test_the_pipes_record_hides_carried_values.py"
     "::test_the_same_text_uncarried_prints_as_it_is"
-    "::unread-script#1@create_process_with_pipes": (
-        "Popen is replaced by a stub that raises _Reached after the record is "
-        "emitted; nothing is started"
-    ),
+    "::unread-script#1@create_process_with_pipes": _RECORD_EMITTED,
     "tests/unit/utils/test_uv_overrides_read_uvs_own_arguments.py"
     "::test_a_path_like_program_is_uv::unread-script#1@uv_child_overrides": (
         "uv_child_overrides only reads an argv; nothing is started"
     ),
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestAnExtraTheInstalledVersionDoesNotDeclare"
-    ".test_it_is_unsatisfied_not_satisfied::unread-script#1@_dry_run": (
-        "pre_installed_tool._run is replaced by a stub answering a canned "
-        "CompletedProcess; nothing is started"
-    ),
+    ".test_it_is_unsatisfied_not_satisfied::unread-script#1@_dry_run": _RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestAnExtraTheInstalledVersionDoesNotDeclare"
-    ".test_no_changes_without_the_warning_is_satisfied::unread-script#1@_dry_run": (
-        "pre_installed_tool._run is replaced by a stub answering a canned "
-        "CompletedProcess; nothing is started"
-    ),
+    ".test_no_changes_without_the_warning_is_satisfied::unread-script#1@_dry_run": _RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestAnExtraTheInstalledVersionDoesNotDeclare"
-    ".test_another_packages_missing_extra_is_not_this_copys::unread-script#1@_dry_run": (
-        "pre_installed_tool._run is replaced by a stub answering a canned "
-        "CompletedProcess; nothing is started"
-    ),
+    ".test_another_packages_missing_extra_is_not_this_copys::unread-script#1@_dry_run": _RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestAnExtraTheInstalledVersionDoesNotDeclare"
     ".test_the_requested_package_is_matched_by_its_canonical_name"
-    "::unread-script#1@_dry_run": (
-        "pre_installed_tool._run is replaced by a stub answering a canned "
-        "CompletedProcess; nothing is started"
-    ),
+    "::unread-script#1@_dry_run": _RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestAnExtraTheInstalledVersionDoesNotDeclare"
     ".test_the_requested_package_is_matched_whatever_its_version_spelling"
-    "::unread-script#1@_dry_run": (
-        "pre_installed_tool._run is replaced by a stub answering a canned "
-        "CompletedProcess; nothing is started"
-    ),
+    "::unread-script#1@_dry_run": _RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestAnExtraTheInstalledVersionDoesNotDeclare"
     ".test_a_drifted_warning_with_no_readable_package_is_unsatisfied"
-    "::unread-script#1@_dry_run": (
-        "pre_installed_tool._run is replaced by a stub answering a canned "
-        "CompletedProcess; nothing is started"
-    ),
+    "::unread-script#1@_dry_run": _RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestTheCauseOfAnUnsatisfiedVerdict"
-    ".test_a_dependency_gap_blames_no_extra::unread-script#1@_judge": (
-        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
-    ),
+    ".test_a_dependency_gap_blames_no_extra::unread-script#1@_judge": _DRY_RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestTheCauseOfAnUnsatisfiedVerdict"
-    ".test_an_extra_the_environment_lacks_is_still_named::unread-script#1@_judge": (
-        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
-    ),
+    ".test_an_extra_the_environment_lacks_is_still_named::unread-script#1@_judge": _DRY_RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestTheCauseOfAnUnsatisfiedVerdict"
     ".test_a_missing_extra_spelled_by_a_hidden_value_is_hidden_in_the_summary"
-    "::unread-script#1@_judge": (
-        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
-    ),
+    "::unread-script#1@_judge": _DRY_RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestTheCauseOfAnUnsatisfiedVerdict"
     ".test_a_missing_extra_no_value_spells_is_named_in_the_summary"
-    "::unread-script#1@_judge": (
-        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
-    ),
+    "::unread-script#1@_judge": _DRY_RUN_IS_STUBBED,
     "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
     "::TestAProbeThatCouldNotRunNamesItsCause"
     ".test_the_dry_runs_timeout_is_in_the_reason::unread-script#1@_dry_run": (
@@ -580,15 +535,9 @@ ALLOWED: Dict[str, str] = {
         "reads the ASH the interpreter installs, as the generators do, which is the "
         "code the docs are checked against; the cwd is an empty directory on purpose"
     ),
-    "tests/unit/test_nix_cfn_guard_rules_reseed.py::_script_check::script#1@run": (
-        "install-pinned-tool.py is standard-library only by design (nothing is "
-        "installed when it runs); it imports no ASH module"
-    ),
+    "tests/unit/test_nix_cfn_guard_rules_reseed.py::_script_check::script#1@run": _ISOLATED_STDLIB_SCRIPT,
     "tests/unit/test_nix_cfn_guard_rules_reseed.py"
-    "::test_check_needs_rules_bundle::script#1@run": (
-        "install-pinned-tool.py is standard-library only by design (nothing is "
-        "installed when it runs); it imports no ASH module"
-    ),
+    "::test_check_needs_rules_bundle::script#1@run": _ISOLATED_STDLIB_SCRIPT,
     "tests/unit/test_docs_ci_runner_tools.py"
     "::_run_isolated::isolated-unread-script#1@run+cwd": (
         "the CI-runner scripts run standalone under -I on the standard library "
