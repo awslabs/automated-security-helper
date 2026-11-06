@@ -25,6 +25,7 @@ from typer import core as typer_core
 
 from automated_security_helper.cli import entrypoint
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from tests.utils.env_assertions import environ_names
 
 pytestmark = pytest.mark.unit
 
@@ -682,7 +683,7 @@ def test_the_hook_runs_with_color_turned_off_and_the_environment_put_back(
     assert seen == {"FORCE_COLOR": None, "PYTHON_COLORS": "0", "NO_COLOR": "1"}
     assert os.environ["FORCE_COLOR"] == "1"
     assert os.environ["PYTHON_COLORS"] == "1"
-    assert "NO_COLOR" not in os.environ
+    assert "NO_COLOR" not in environ_names()
 
 
 # --- interrupts and the emit ---

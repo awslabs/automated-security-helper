@@ -175,7 +175,8 @@ class TestRegisterProfiles:
             "project_name: !ENV ${ASH_PROFILE_NAME_PROBE:unset}\n",
         )
         registry = register_profiles([f"env={cfg}"])
-        assert registry["env"].config.project_name == "from-env"
+        project_name = registry["env"].config.project_name
+        assert project_name == "from-env"
 
     def test_a_toml_profile_registers_and_is_still_checked(
         self, tmp_path: Path

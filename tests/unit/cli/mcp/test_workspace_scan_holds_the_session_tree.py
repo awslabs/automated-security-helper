@@ -44,6 +44,7 @@ from automated_security_helper.cli.mcp.sessions import (
     end_session,
     reset_default_registry_for_tests,
 )
+from tests.utils.env_assertions import environ_value
 
 pytestmark = pytest.mark.unit
 
@@ -423,7 +424,7 @@ def test_an_offline_setting_lasts_as_long_as_the_worker(
 
     assert blocking_execution["offline_during"] == "YES"
     assert observed["after_cancel"] == "YES", "the scan went back online mid-run"
-    assert os.environ.get("ASH_OFFLINE") is None
+    assert environ_value("ASH_OFFLINE") is None
 
 
 def test_a_session_that_delivered_nothing_takes_no_claim(
