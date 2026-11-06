@@ -3747,6 +3747,19 @@ def _granting_config(directory: Path, checkout: bool = False) -> Path:
     return config
 
 
+#: The sentences a sandbox warning gives for why a config file is not the operator's
+#: (``sandbox_grants.confinement_membership``): the one for a file in a git checkout
+#: other than the scanned tree, and the one for a file inside the scanned tree, which
+#: is the membership the host's mark carries.
+_MEMBERSHIP_CLAUSES = (
+    (
+        "the file is inside the scanned tree or a git checkout, or an MCP client "
+        "delivered it, so someone other than the operator may have written it"
+    ),
+    "the file is inside the scanned tree, so the repository being scanned wrote it",
+)
+
+
 def _workspace_in_a_checkout(tmp_path: Path, checkout: bool = True) -> Path:
     """The workspace file of ``repo/ws``, inside the git checkout ``repo``, or in no
     checkout unless ``checkout``. It lists ``api``, which has no config of its own, and
@@ -4012,6 +4025,15 @@ def test_the_workspace_scan_inside_limits_a_marked_config_as_a_local_one_in_a_ch
         output = _normalize(result.stdout + result.stderr)
         for spelling in (str(config.parent), config.parent.as_posix()):
             output = output.replace(spelling, "<config directory>")
+        # Each warning says why the file is not the operator's in the words of the
+        # membership that put it under the limits (membership_clause): a file in
+        # another checkout is "inside the scanned tree or a git checkout, or ...
+        # delivered", and a file the host marked is the scanned tree's. Which one is
+        # said follows from where the file is judged to sit; the claim is that the
+        # same settings are dropped for the same files, so the clause is compared
+        # as one value and every other word of the warning and the plan as written.
+        for clause in _MEMBERSHIP_CLAUSES:
+            output = output.replace(clause, "<why the file is not the operator's>")
         return output
 
     in_a_checkout = dry_run(_granting_config(tmp_path / "ops", checkout=True))
@@ -10989,19 +11011,25 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
 
         removing = threading.Event()
         release = threading.Event()
-        # The delete of the tree the sweep renamed aside. The sweep holds the
-        # session (try_begin_sweep) from its last look at the age until that
-        # delete is done, so a write meets the hold while this is open; the
-        # stale session has a workspace, so the sweep does not take the
-        # removal that has no guard (_remove_session_state).
-        real_remove = sessions._remove_set_aside_tree
+        # The rename of the stale tree aside, which the sweep makes under the
+        # presence guard. The sweep holds the session (try_begin_sweep) from its
+        # last look at the age, and the hold stands on the registry's entry until
+        # the sweep forgets the session (_set_session_state_aside), which it does
+        # right after the rename: from then on the session's path is free and a
+        # write is admitted into a fresh workspace, not refused
+        # (test_a_binding_made_during_the_sweeps_delete_is_kept). So the window
+        # in which a write meets the hold is this one, and the remover is held
+        # open here, before the rename. The stale session has a workspace, so
+        # the sweep does not take the removal that has no guard
+        # (_remove_session_state).
+        real_set_aside = source_delivery._set_aside_for_removal
 
-        def held_remove(doomed: Optional[Path]) -> None:
+        def held_set_aside(*args: Any, **kwargs: Any) -> Optional[Path]:
             removing.set()
             assert release.wait(timeout=30), "the test never released the remover"
-            real_remove(doomed)
+            return real_set_aside(*args, **kwargs)
 
-        monkeypatch.setattr(sessions, "_remove_set_aside_tree", held_remove)
+        monkeypatch.setattr(source_delivery, "_set_aside_for_removal", held_set_aside)
         removed: List[str] = []
         sweep = threading.Thread(
             target=lambda: removed.extend(
@@ -13355,6 +13383,16 @@ def test_a_uv_run_tool_keeps_the_file_it_found_first(
     # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
     # "uv" to its .bat stand-in, and this cell's stand-ins are .cmd files.
     use_the_real_candidate_names(monkeypatch)
+    # A batch program is started through its non-batch substitute when one exists
+    # (subprocess_utils._non_batch_substitute), and the ``uv`` package is importable
+    # in the test environment, so the ``uv.cmd`` stand-in would be replaced by the
+    # real uv run as a module: it probes the made-up tool name, exits non-zero, and
+    # the stand-in the lookup found is never the one that answers. The subject here
+    # is which file the lookup found, so the stand-in is started as the file it is.
+    if os.name == "nt":
+        monkeypatch.setattr(
+            subprocess_utils, "_non_batch_substitute", lambda program: None
+        )
 
     pins_consulted: Set[str] = set()
 
