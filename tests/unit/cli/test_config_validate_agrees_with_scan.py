@@ -1741,7 +1741,14 @@ def test_mcp_validate_config_judges_a_client_supplied_path_as_untrusted(
 
     server_dir = workspace / "sess1" / "config"
     server_dir.mkdir()
-    materialized = server_dir / "cfg.yaml"
+    # Only the files the server itself writes there are set aside as the
+    # operator's (client_named_config_is_untrusted): the bound profile's name,
+    # not an arbitrary file a client could have placed in that directory.
+    from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
+    )
+
+    materialized = server_dir / SESSION_CONFIG_FILENAME
     materialized.write_text(text, encoding="utf-8")
 
     control = mcp_validate_config(config_path=str(materialized), session_id="sess1")

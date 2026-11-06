@@ -344,7 +344,9 @@ def test_the_scan_console_holds_no_value(run, step):
     _the_scan_ran(run)
     scan = run["steps"][step]
     assert scan.returncode == 0, (scan.returncode, _held(run, scan.stderr))
-    printed = scan.stdout + scan.stderr
+    # On Windows a child that wrote nothing to its stdout was seen to leave None
+    # there, not "": nothing printed is nothing held.
+    printed = (scan.stdout or "") + scan.stderr
     if step == "scan --debug":
         # The control, a boolean so a failure shows no console text: the
         # console holds the scan's DEBUG lines.
