@@ -1605,7 +1605,16 @@ class RuntimeOverridesConfig(RedactedSection):
         is the shipped list unchanged and keeps its serialized shape. The list as
         written is kept first (``_written_denied_paths``).
         """
-        if "denied_paths" in self.model_fields_set:
+        # A written list equal to the shipped default is recorded as no list:
+        # that is what an unset one is, and it is what a rebuild from a dump of
+        # an unset one writes (the serializer below dumps the default as the
+        # field holds it), so a section equals its rebuilt copy. Every reader of
+        # the record treats the two alike (client_config_policy._written_denied_paths
+        # falls back to the field, policy_is_default and exempt_paths read a
+        # default the same either way).
+        if "denied_paths" in self.model_fields_set and list(self.denied_paths) != list(
+            type(self).model_fields["denied_paths"].default
+        ):
             self._written_denied_paths = tuple(self.denied_paths)
         missing = [
             entry for entry in ALWAYS_DENIED_PATHS if entry not in self.denied_paths
