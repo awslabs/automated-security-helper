@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -398,9 +397,9 @@ class TestADiscoveryFailureOutsideTheSourceErrorIsAnswered:
     cannot load, exit 3: never a raise the generic handler turns into exit 1.
 
     The input that reaches it: a ``.ash`` directory the server may not search.
-    Discovery asks ``Path.is_file`` about each name in it, and on Python 3.10 to
-    3.13 that re-raises the PermissionError from stat; 3.14's answers False, so
-    there the names are skipped as absent (measured on each interpreter).
+    Discovery looks each name in it up with ``os.lstat``
+    (``config_sources._name_exists``), which raises the PermissionError on every
+    interpreter, so the answer is a refusal on each.
     """
 
     @pytest.mark.parametrize(
@@ -441,14 +440,12 @@ class TestADiscoveryFailureOutsideTheSourceErrorIsAnswered:
             ash_dir.chmod(0o755)
 
         assert response.get("exit_code") != 1, response
-        if sys.version_info < (3, 14):
-            # Below 3.14 the walk raises PermissionError on the unsearchable
-            # directory, and the category mapping answers it as the operating
-            # system's refusal, never as a format problem.
-            _refused(response, "permission_denied")
-        else:
-            assert response.get("success") is not False, response
-            assert "project_name" in response, response
+        # Discovery looks each name up with lstat (config_sources._name_exists),
+        # which raises PermissionError on the unsearchable directory on every
+        # interpreter, 3.14 included, and refuses because ASH cannot tell
+        # whether a config is there. The category mapping answers it as the
+        # operating system's refusal, never as a format problem.
+        _refused(response, "permission_denied")
 
 
 @_NEEDS_PERMISSION_BITS
