@@ -1003,7 +1003,7 @@ class ScanExecutionEngine:
         stats = self._results.metadata.summary_stats
         if (
             getattr(self, "_run_stamped_timing", False)
-            and stats.end is not None
+            and isinstance(stats.end, datetime)
             and stats.end > scan_end_time
         ):
             # The pre-report end is the start plus the monotonic elapsed time,
