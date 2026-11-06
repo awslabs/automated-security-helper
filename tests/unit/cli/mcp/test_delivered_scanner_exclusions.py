@@ -988,13 +988,19 @@ def test_a_value_the_move_does_not_take_is_still_refused(
 #: The fold drops ASCII case and the ``-``/``_`` separators, and then one
 #: trailing plugin-type word (config/plugin_section_names.declared_target:
 #: ``DetectSecretsScanner`` names ``detect-secrets``), so ``opengrep-scanner``
-#: is a spelling of the declared name. A spelling with any other extra word is
-#: not: it stays an extra section the scanner never reads.
+#: is a spelling of the declared name. A spelling the fold leaves alone but the
+#: scanner's lookup still reduces to its name (``get_plugin_config`` drops every
+#: character outside ``[a-z0-9+]``, ``open.grep`` included; ``reduced_plugin_name``)
+#: stays an extra section the scanner never reads while the declared section
+#: exists, and is moved out and warned about. A spelling with an extra WORD
+#: (``opengrep-extra``) reduces to no scanner's name at all: nothing matches it,
+#: so the move has no section to take it from and it is not a spelling of
+#: opengrep.
 OTHER_SPELLINGS = [
     pytest.param("OpenGrep", True, id="case"),
     pytest.param("open-grep", True, id="separator"),
     pytest.param("opengrep-scanner", True, id="type-word"),
-    pytest.param("opengrep-extra", False, id="extra-word"),
+    pytest.param("open.grep", False, id="extra-word"),
 ]
 
 
