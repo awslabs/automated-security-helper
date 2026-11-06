@@ -3550,8 +3550,9 @@ def _normalize_pointer(
     two patch walks reach one canonical path and a spelling whose type word
     a separator splits -- which folds by name alone but names no plugin the
     lookup reads -- stays as typed on both. Only when EXACTLY ONE existing
-    key matches: a merged document can hold two case-variant keys of an
-    undeclared section (deep_merge joins only "-"/"_" twins), and picking
+    key matches: a document can hold two case-variant keys of a section
+    (deep_merge joins every spelling of a plugin section the plugin lookup
+    reads, and only "-"/"_" twins elsewhere), and picking
     one by insertion order would land the op on a key the plugin does not
     read while the override resolver refuses the same spelling as ambiguous
     -- so an ambiguous segment stays as typed. A deeper key that happens to
