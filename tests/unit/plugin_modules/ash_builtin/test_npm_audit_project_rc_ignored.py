@@ -432,7 +432,8 @@ def test_unsandboxed_yarn_copy_is_made_under_the_scan_s_output_directory(
         assert not cwd.is_relative_to(scanner.context.source_dir), cwd
     (audit,) = _audits(spawns)
     assert audit["command"] == ["yarn", "audit", "--json"]
-    assert "YARN_RC_FILENAME" not in audit["env"]
+    audit_env_names = set(audit["env"])
+    assert "YARN_RC_FILENAME" not in audit_env_names
     _assert_operator_settings_untouched(audit["env"])
 
 
@@ -463,7 +464,8 @@ def test_unsandboxed_yarn_copy_uses_the_operator_s_cache_when_the_output_is_insi
         assert not cwd.is_relative_to(repo), cwd
     (audit,) = _audits(spawns)
     assert audit["command"] == ["yarn", "audit", "--json"]
-    assert "YARN_RC_FILENAME" not in audit["env"]
+    audit_env_names = set(audit["env"])
+    assert "YARN_RC_FILENAME" not in audit_env_names
     assert sorted(audit["files"]) == ["package.json", "yarn.lock"]
     # The copy is removed when the child's block ends: the directories the
     # tool ran in no longer exist. A glob on the copy's name prefix passed

@@ -38,6 +38,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
     SemgrepScannerConfig,
 )
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+from tests.utils.env_assertions import environ_names
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
@@ -109,7 +110,7 @@ def test_version_probe_puts_the_environment_back(probes, online, test_plugin_con
     scanner = SemgrepScanner(context=test_plugin_context, config=SemgrepScannerConfig())
     scanner.resolve_deferred_tool_version()
 
-    assert VERSION_CHECK not in os.environ
+    assert VERSION_CHECK not in environ_names()
 
 
 def test_version_probe_puts_back_a_value_the_host_exported(
@@ -135,7 +136,7 @@ def test_failed_version_probe_puts_the_environment_back(online, test_plugin_cont
     scanner.resolve_deferred_tool_version()
 
     assert scanner.tool_version is None
-    assert VERSION_CHECK not in os.environ
+    assert VERSION_CHECK not in environ_names()
 
 
 def test_control_sandbox_requirements_grant_no_cache_directory_read():
