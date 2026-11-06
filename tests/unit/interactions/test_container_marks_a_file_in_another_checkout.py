@@ -1170,8 +1170,8 @@ def test_a_base_whose_walk_stopped_is_marked_beside_a_root_found_in_another_chec
 def test_an_ash_config_file_whose_walk_stopped_is_marked_file_by_file(
     launch, monkeypatch, tmp_path
 ):
-    """The fail-closed answer takes the per-file repository mark, as any
-    checkout's file of ASH_CONFIG's chain does."""
+    """The fail-closed answer takes the per-file another-checkout mark, as a file of
+    ASH_CONFIG's chain in any other checkout does."""
     env = _write(tmp_path / "envdir" / "env.yaml", "project_name: env\n")
     config = _write(launch["operator"] / "ash.yaml")
     monkeypatch.setenv("ASH_CONFIG", str(env))
@@ -1180,9 +1180,9 @@ def test_an_ash_config_file_whose_walk_stopped_is_marked_file_by_file(
     inner = _inner_args(_assemble(launch["source"], launch["out"], config=str(config)))
 
     assert inner[inner.index(ENV_FLAG) + 1] == "/ash-env-config/env.yaml"
-    assert _flags(inner, TREE_FILE_FLAG) == ["/ash-env-config/env.yaml"]
+    assert _flags(inner, FLAG) == ["/ash-env-config/env.yaml"]
     assert RETIRED_FLAG not in inner
-    assert _flags(inner, FLAG) == []
+    assert _flags(inner, TREE_FILE_FLAG) == []
 
 
 def test_the_launcher_has_no_option_for_a_stopped_walk():
