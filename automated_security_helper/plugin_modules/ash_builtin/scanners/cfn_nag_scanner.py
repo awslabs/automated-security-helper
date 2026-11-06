@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import re
+import time
 from pathlib import Path
 from typing import Annotated, ClassVar, Dict, List, Literal
 
@@ -101,6 +102,37 @@ def _stage_cfn_nag_input(results_file_dir: Path, cfn_file: str, text: str) -> Pa
     with open_for_write(staged) as handle:
         handle.write(text)
     return staged
+
+
+#: How long the staged copy's removal waits for a handle the finished child (or a
+#: virus scanner) still holds. Windows refuses to delete an open file with
+#: ``[WinError 32]``; the handle is released within moments of the child exiting.
+_STAGED_REMOVAL_ATTEMPTS = 10
+_STAGED_REMOVAL_PAUSE_SECONDS = 0.2
+
+
+def _remove_staged_cfn_nag_input(staged: Path) -> None:
+    """Remove the staged copy and its directory, retrying a sharing violation.
+
+    Only the removal is retried, and only on ``PermissionError`` (which is what
+    ``[WinError 32]`` raises as). A copy that stays locked is left behind with a
+    warning: it is a leftover under the results directory, not a failed scan, and
+    raising from here would replace the scan's own outcome with an error.
+    """
+    for attempt in range(_STAGED_REMOVAL_ATTEMPTS):
+        try:
+            staged.unlink(missing_ok=True)
+            break
+        except PermissionError as e:
+            if attempt == _STAGED_REMOVAL_ATTEMPTS - 1:
+                ASH_LOGGER.warning(
+                    f"CFN Nag staged copy {staged.name} could not be removed "
+                    f"and was left in place: {e}"
+                )
+                return
+            time.sleep(_STAGED_REMOVAL_PAUSE_SECONDS)
+    with contextlib.suppress(OSError):
+        staged.parent.rmdir()
 
 
 def _as_cfn_nag_renders(path: str | Path, run_dir: str | Path) -> str:
@@ -1066,9 +1098,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         timeout=self._effective_scan_timeout(),
                     )
                 finally:
-                    staged_input.unlink(missing_ok=True)
-                    with contextlib.suppress(OSError):
-                        staged_input.parent.rmdir()
+                    _remove_staged_cfn_nag_input(staged_input)
                 try:
                     stdout = proc_resp.get("stdout", "")
                     if not stdout or not stdout.strip():
