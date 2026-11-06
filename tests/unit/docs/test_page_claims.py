@@ -13355,6 +13355,16 @@ def test_a_uv_run_tool_keeps_the_file_it_found_first(
     # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
     # "uv" to its .bat stand-in, and this cell's stand-ins are .cmd files.
     use_the_real_candidate_names(monkeypatch)
+    # A batch program is started through its non-batch substitute when one exists
+    # (subprocess_utils._non_batch_substitute), and the ``uv`` package is importable
+    # in the test environment, so the ``uv.cmd`` stand-in would be replaced by the
+    # real uv run as a module: it probes the made-up tool name, exits non-zero, and
+    # the stand-in the lookup found is never the one that answers. The subject here
+    # is which file the lookup found, so the stand-in is started as the file it is.
+    if os.name == "nt":
+        monkeypatch.setattr(
+            subprocess_utils, "_non_batch_substitute", lambda program: None
+        )
 
     pins_consulted: Set[str] = set()
 
