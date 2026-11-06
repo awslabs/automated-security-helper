@@ -3747,6 +3747,19 @@ def _granting_config(directory: Path, checkout: bool = False) -> Path:
     return config
 
 
+#: The sentences a sandbox warning gives for why a config file is not the operator's
+#: (``sandbox_grants.confinement_membership``): the one for a file in a git checkout
+#: other than the scanned tree, and the one for a file inside the scanned tree, which
+#: is the membership the host's mark carries.
+_MEMBERSHIP_CLAUSES = (
+    (
+        "the file is inside the scanned tree or a git checkout, or an MCP client "
+        "delivered it, so someone other than the operator may have written it"
+    ),
+    "the file is inside the scanned tree, so the repository being scanned wrote it",
+)
+
+
 def _workspace_in_a_checkout(tmp_path: Path, checkout: bool = True) -> Path:
     """The workspace file of ``repo/ws``, inside the git checkout ``repo``, or in no
     checkout unless ``checkout``. It lists ``api``, which has no config of its own, and
@@ -4012,6 +4025,15 @@ def test_the_workspace_scan_inside_limits_a_marked_config_as_a_local_one_in_a_ch
         output = _normalize(result.stdout + result.stderr)
         for spelling in (str(config.parent), config.parent.as_posix()):
             output = output.replace(spelling, "<config directory>")
+        # Each warning says why the file is not the operator's in the words of the
+        # membership that put it under the limits (membership_clause): a file in
+        # another checkout is "inside the scanned tree or a git checkout, or ...
+        # delivered", and a file the host marked is the scanned tree's. Which one is
+        # said follows from where the file is judged to sit; the claim is that the
+        # same settings are dropped for the same files, so the clause is compared
+        # as one value and every other word of the warning and the plan as written.
+        for clause in _MEMBERSHIP_CLAUSES:
+            output = output.replace(clause, "<why the file is not the operator's>")
         return output
 
     in_a_checkout = dry_run(_granting_config(tmp_path / "ops", checkout=True))
