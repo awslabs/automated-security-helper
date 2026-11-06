@@ -1197,6 +1197,15 @@ def _slow_to_stop(marker: Path) -> str:
     )
 
 
+#: These cells stop a child that ignores SIGTERM and then read whether it is still
+#: running. The stop goes by process group (subprocess_utils.kill_running_groups,
+#: POSIX only), and tests/utils/processes.py's process_running raises on Windows.
+_POSIX_PROCESS_STOP = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the child is stopped by process group, which is POSIX only",
+)
+
+
 def _alive(pid: int) -> bool:
     # Running, not a zombie waiting to be reaped, which signal 0 still reaches.
     return process_running(pid)
@@ -1205,6 +1214,7 @@ def _alive(pid: int) -> bool:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("held_by", ["slot", "directory"])
 @pytest.mark.integration
+@_POSIX_PROCESS_STOP
 async def test_a_project_past_its_project_timeout_is_stopped_before_the_call_returns(
     tmp_path, monkeypatch, held, held_by
 ):
@@ -1278,6 +1288,7 @@ async def test_a_project_past_its_project_timeout_is_stopped_before_the_call_ret
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@_POSIX_PROCESS_STOP
 async def test_stopping_the_server_stops_a_running_workspace_scan(
     tmp_path, monkeypatch
 ):
@@ -1367,6 +1378,7 @@ async def test_a_timeout_after_every_project_ended_is_not_reported(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@_POSIX_PROCESS_STOP
 async def test_a_worker_freed_by_a_stopped_project_runs_the_rest_of_the_queue(
     tmp_path, monkeypatch
 ):
