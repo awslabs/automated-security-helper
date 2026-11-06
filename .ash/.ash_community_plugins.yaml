@@ -1547,6 +1547,28 @@ global_settings:
         CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: minimatch CVE-2026-118764 / GHSA-g3hv-75wg-m249, bundled in aws-cdk-lib (expires 2027-02-06) ===
+    # The flagged copy is node_modules/aws-cdk-lib/node_modules/minimatch 10.2.5
+    # (inBundle: true) in deploy/cdk/package-lock.json. The repository's own override
+    # already pins the top-level minimatch to 11.x, but a bundled copy ships inside the
+    # aws-cdk-lib tarball and no override reaches it. The advisory lists 11.0.1 as the
+    # only patched release (affected >= 7.0.0, < 11.0.1). Measured 2026-11-06: the latest
+    # aws-cdk-lib, 2.275.0, declares minimatch ^10.2.6 and bundles it, and main declares
+    # the same range, so no released aws-cdk-lib carries a fixed bundle yet. The version
+    # is pinned in the entry, so a different bundled version reports again. trivy and
+    # trivy-repo both report the CVE id as is, so one entry covers both.
+    # Revisit when an aws-cdk-lib release declares minimatch >=11.0.1.
+    - rule_id: "CVE-2026-118764"
+      path: "deploy/cdk/package-lock.json"
+      package_name: "minimatch"
+      package_version: "10.2.5"
+      expires: "2027-02-06"
+      reason: >-
+        CVE-2026-118764 (GHSA-g3hv-75wg-m249): minimatch 10.2.5 bundled inside aws-cdk-lib
+        (inBundle), so the repository's override, which pins the top-level minimatch to 11.x,
+        cannot reach it. Fix = aws-cdk-lib >= none released yet (2.275.0 declares minimatch
+        ^10.2.6; the fix is minimatch 11.0.1). Revisit when a release bundles minimatch
+        >=11.0.1.
     # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===
     #
     # The same unquoted-assignment and name-matching dispositions as the ferret-scan
