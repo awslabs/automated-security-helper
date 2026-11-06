@@ -883,7 +883,14 @@ def test_the_cut_pieces_of_a_one_letter_value_are_found_in_bounded_time():
     """_cut_pieces over a 100000-character one-letter value printed before
     "...": the match lengths come from one linear scan per form, not a search
     at every occurrence. The one piece bounded on its far side is the whole
-    value."""
+    value.
+
+    Timed by how the time grows, as the redact_values cell below is: a value of
+    25000 letters and one of 100000, four times as long. Time linear in the
+    length takes four times as long for the second, time in its square sixteen
+    times; the second must be under eight times the first plus a tenth of a
+    second. A second on the clock read 1.6 s to 4.4 s for the same code on
+    hosted runners."""
     import time
 
     from automated_security_helper.config.config_validator import (
@@ -891,14 +898,27 @@ def test_the_cut_pieces_of_a_one_letter_value_are_found_in_bounded_time():
         _folded,
     )
 
-    value = "a" * 100000
-    text = value + "..."
-    folded = _folded(text)
-    started = time.monotonic()
-    pieces = _cut_pieces(text, folded, value, [100000], [100003])
-    elapsed = time.monotonic() - started
-    assert [(start, end) for start, end, far_ok, _ in pieces if far_ok] == [(0, 100000)]
-    assert elapsed < 1.0, elapsed
+    def best_time(length):
+        value = "a" * length
+        text = value + "..."
+        folded = _folded(text)
+        best = None
+        for _ in range(3):
+            started = time.monotonic()
+            pieces = _cut_pieces(text, folded, value, [length], [length + 3])
+            elapsed = time.monotonic() - started
+            far = [(start, end) for start, end, far_ok, _ in pieces if far_ok]
+            assert far == [(0, length)]
+            best = elapsed if best is None else min(best, elapsed)
+        return best
+
+    first = best_time(25000)
+    second = best_time(100000)
+    limit = 8 * first + 0.1
+    assert second < limit, (
+        f"100000 letters took {second:.3f} s against {limit:.3f} s, "
+        f"8 times the {first:.3f} s of 25000 letters plus 0.1 s"
+    )
 
 
 def test_a_long_value_is_hidden_in_bounded_time():
@@ -971,33 +991,33 @@ def test_long_values_a_message_never_prints_cost_no_cut_piece_work():
 
 
 @pytest.mark.parametrize(
-    ("text", "values", "options", "expected"),
+    ("text_at", "values_at", "options", "expected_at"),
     [
         pytest.param(
-            "a" * 100000 + "...",
-            ["a" * 100000],
+            lambda k: "a" * k + "...",
+            lambda k: ["a" * k],
             {},
-            f"{REDACTED}...",
+            lambda k: f"{REDACTED}...",
             id="a-cut-value-of-one-letter",
         ),
         pytest.param(
-            "a" * 100000,
-            ["a" * 100001],
+            lambda k: "a" * k,
+            lambda k: ["a" * (k + 1)],
             {},
-            "a" * 100000,
+            lambda k: "a" * k,
             id="a-run-one-letter-short-of-the-value",
         ),
         pytest.param(
-            "a" * 100000,
-            ["a" * 100001],
+            lambda k: "a" * k,
+            lambda k: ["a" * (k + 1)],
             {"whole_words": True, "ignore_case": True},
-            "a" * 100000,
+            lambda k: "a" * k,
             id="the-same-run-matched-as-whole-words-in-any-case",
         ),
     ],
 )
 def test_a_long_value_beside_a_long_run_of_its_letter_is_matched_in_bounded_time(
-    text, values, options, expected
+    text_at, values_at, options, expected_at
 ):
     """A long value matched in any case, over a text that is a long run of the
     value's own letter: each position's attempt at the value runs to the end of
@@ -1005,14 +1025,35 @@ def test_a_long_value_beside_a_long_run_of_its_letter_is_matched_in_bounded_time
     in the square of the run. A long value is found in time linear in the
     text instead. The whole-word case is a guard rather than a regression
     cell: there the pattern's lookbehind fails at every position but the
-    first, so it was linear before too, and it is kept so."""
-    import time
+    first, so it was linear before too, and it is kept so.
 
-    started = time.monotonic()
-    result = redact_values(text, values, **options)
-    elapsed = time.monotonic() - started
-    assert result == expected
-    assert elapsed < 2.0, elapsed
+    Timed by how the time grows, not by a second on the clock (a bound of 2.0 s
+    read 1.6 s to 4.4 s for the same code on hosted runners): a run of 25000
+    letters and one of 100000, four times as long. Time linear in the length
+    takes four times as long for the second, time in its square sixteen times;
+    the second must be under eight times the first plus a tenth of a second.
+    The shortest of three runs of each is timed (``_best_time``)."""
+    first_length, second_length = 25000, 100000
+    first = _best_time(
+        text_at(first_length),
+        values_at(first_length),
+        expected_at(first_length),
+        CEILING,
+        **options,
+    )
+    limit = 8 * first + 0.1
+    second = _best_time(
+        text_at(second_length),
+        values_at(second_length),
+        expected_at(second_length),
+        CEILING,
+        limit,
+        **options,
+    )
+    assert second < limit, (
+        f"{second_length} letters took {second:.3f} s against {limit:.3f} s, "
+        f"8 times the {first:.3f} s of {first_length} letters plus 0.1 s"
+    )
 
 
 def test_a_long_form_is_found_where_the_pattern_finds_it():
@@ -1311,11 +1352,16 @@ def test_many_windows_beside_long_values_are_checked_in_bounded_time():
     part of one: this measures REJECTED windows. Their 200000 characters are
     under _PREFILTER_LISTED_CHARACTERS (262144), so each part costs one lookup
     in the set of the values' eight-character runs, not a search of every
-    value. Each run is stopped at its bound (_timed_run), and the best of
-    three counts: one run on a loaded host can come close to the bound (0.975 s
-    was measured, in 180 runs of this input), while a regression is slow on
-    every run, so it still fails, within three bounds rather than running to
-    its end."""
+    value.
+
+    Timed by how the time grows, not by a second on the clock (a bound of 1.0 s
+    was decided by the host: 0.975 s was measured in 180 runs of this input, and
+    hosted runners read more): 10000 parts and 40000, four times as many. Time
+    linear in the parts takes four times as long for the second, a search of
+    every value for each part far more; the second must be under eight times the
+    first plus a tenth of a second. The shortest of three runs of each is timed
+    (``_best_time``), and a run is stopped at its limit, so a regression fails
+    within three limits rather than running to its end."""
     import random
 
     from automated_security_helper.config.config_validator import (
@@ -1326,14 +1372,21 @@ def test_many_windows_beside_long_values_are_checked_in_bounded_time():
     alphabet = "abcdefghijklmnopqrstuvwxy0123456789"
     values = ["".join(rng.choice(alphabet) for _ in range(2000)) for _ in range(100)]
     assert sum(map(len, values)) <= _PREFILTER_LISTED_CHARACTERS
-    text = "..." + "".join(f"z{i:07d}zzzzzzzzzzzzzz..." for i in range(40000))
-    assert len(text) >= 1_000_000
-    runs = []
-    for _ in range(3):
-        runs.append(_timed_run(text, values, text, 1.0))
-        if runs[-1] is not None:
-            break
-    assert runs[-1] is not None, f"all three runs reached the 1.0 s bound: {runs}"
+
+    def text_of(parts):
+        return "..." + "".join(f"z{i:07d}zzzzzzzzzzzzzz..." for i in range(parts))
+
+    first_parts, second_parts = 10000, 40000
+    assert len(text_of(second_parts)) >= 1_000_000
+    first_text = text_of(first_parts)
+    first = _best_time(first_text, values, first_text, CEILING)
+    limit = 8 * first + 0.1
+    second_text = text_of(second_parts)
+    second = _best_time(second_text, values, second_text, CEILING, limit)
+    assert second < limit, (
+        f"{second_parts} parts took {second:.3f} s against {limit:.3f} s, "
+        f"8 times the {first:.3f} s of {first_parts} parts plus 0.1 s"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1439,8 +1492,9 @@ class _RunPastLimit(BaseException):
     A BaseException, so no ``except Exception`` on the way can swallow it."""
 
 
-def _timed_run(text, values, expected, limit):
-    """The time one run of redact_values takes, checked against *expected*, or
+def _timed_run(text, values, expected, limit, **options):
+    """The time one run of redact_values (given *options*) takes, checked against
+    *expected*, or
     None when it reaches *limit* seconds. Where signal.setitimer can be used (on
     the main thread), a timer stops the run at *limit* rather than waiting for
     it to end; elsewhere the run ends and is measured. The cell file is the only
@@ -1480,7 +1534,7 @@ def _timed_run(text, values, expected, limit):
             if timer:
                 signal.setitimer(signal.ITIMER_REAL, max(limit, 0.01))
             started = time.monotonic()
-            result = redact_values(text, values)
+            result = redact_values(text, values, **options)
         finally:
             if timer:
                 signal.setitimer(signal.ITIMER_REAL, 0)
@@ -1502,7 +1556,7 @@ _STOPPABLE_FILES = frozenset(
 )
 
 
-def _best_time(text, values, expected, bound, limit=None):
+def _best_time(text, values, expected, bound, limit=None, **options):
     """The shortest of three timed runs of redact_values, each checked against
     *expected* and under *bound* seconds. A run that reaches *bound* fails the
     cell at once, stopped there by the timer (_timed_run). A lower *limit*
@@ -1514,13 +1568,20 @@ def _best_time(text, values, expected, bound, limit=None):
     best = None
     cap = bound if limit is None else min(limit, bound)
     for _ in range(3):
-        elapsed = _timed_run(text, values, expected, cap)
+        elapsed = _timed_run(text, values, expected, cap, **options)
         if elapsed is None:
             assert cap < bound, f"a run reached the {bound} s bound"
             continue
         best = elapsed if best is None else min(best, elapsed)
     assert best is not None, f"every run reached its {cap:.3f} s limit"
     return best
+
+
+#: The absolute ceiling of a timed run, in seconds. The cells below are decided by
+#: how the time grows with the size (see test_cut_pieces_take_time_linear_in_the_text),
+#: as the one-letter cell above is; a ceiling of 2.0 or 3.0 s was decided by the
+#: host instead, and read 1.6 to 4.4 s for the same code on hosted runners.
+CEILING = 30.0
 
 
 @pytest.mark.parametrize(
@@ -1533,7 +1594,7 @@ def _best_time(text, values, expected, bound, limit=None):
             lambda k: ["default", "us-east-1"],
             lambda k: f" {REDACTED}..." * k,
             1250,
-            3.0,
+            CEILING,
             id="value-then-cut-piece-pairs",
         ),
         pytest.param(
@@ -1541,7 +1602,7 @@ def _best_time(text, values, expected, bound, limit=None):
             lambda k: ["A" * (k + 8)],
             lambda k: "..." + "A" * k + "x",
             1500,
-            2.0,
+            CEILING,
             id="tail-pieces-from-one-marker-that-all-fall",
         ),
         pytest.param(
@@ -1549,7 +1610,7 @@ def _best_time(text, values, expected, bound, limit=None):
             lambda k: ["AAAA", "A" * (k + 8)],
             lambda k: "x" + "A" * k + "...",
             1500,
-            2.0,
+            CEILING,
             id="head-pieces-to-one-marker-that-all-fall",
         ),
         # Many cut pieces, each held up by a standing full match beside it:
@@ -1560,7 +1621,7 @@ def _best_time(text, values, expected, bound, limit=None):
             lambda k: ["a" * 20, "aaaa"],
             lambda k: f"x{REDACTED}..." * k,
             250,
-            2.0,
+            CEILING,
             id="cut-pieces-inside-full-matches",
         ),
     ],
