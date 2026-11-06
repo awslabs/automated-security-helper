@@ -102,6 +102,58 @@ def _answers_the_same(select, ops_for, right: str, wrong: str) -> bool:
     )
 
 
+def _is_a_patch_answer(result: Dict[str, Any]) -> bool:
+    """Whether *result* is select_profile's own answer to a patch: a structured,
+    non-empty response whose success flag is a boolean, that is either the bound
+    profile (``mode`` inherit_and_patch and a ``config_path``) or the patch's
+    refusal (``patch denied: ...`` with no ``error_type``). A registry that does
+    not hold the profile, a busy session workspace or a failed write answers in
+    other shapes, so a pipeline that never reached the patch is not one. Read
+    from mcp_tools._select_profile; a boolean, so a failure prints no value."""
+    if not isinstance(result, dict) or not result:
+        return False
+    success = result.get("success")
+    if success is True:
+        path = result.get("config_path")
+        return (
+            result.get("mode") == "inherit_and_patch"
+            and isinstance(path, str)
+            and bool(path)
+        )
+    if success is False:
+        error = result.get("error")
+        return (
+            isinstance(error, str)
+            and error.startswith("patch denied: ")
+            and "error_type" not in result
+        )
+    return False
+
+
+def test_select_profile_answers_a_patch_both_ways(select):
+    """The uniform answers below mean something only if the pipeline can answer
+    both ways: a patch that applies binds the profile, a test op at a place the
+    profile does not hold is refused with the patch's own error."""
+    bound = select(
+        [
+            {
+                "op": "replace",
+                "path": "/global_settings/ignore_paths/1/reason",
+                "value": "x",
+            }
+        ]
+    )
+    assert _is_a_patch_answer(bound), "a patch that applies is not bound"
+    assert bound["success"] is True
+
+    refused = select(
+        [{"op": "test", "path": "/global_settings/ignore_paths/9/path", "value": "x"}]
+    )
+    assert _is_a_patch_answer(refused), "a refused patch is not answered as one"
+    assert refused["success"] is False
+    assert "patch apply failed" in refused["error"]
+
+
 def _entry(path: str, reason: str) -> Dict[str, Any]:
     """An ignore_paths entry as the configuration's dump holds it, every field.
 
@@ -210,6 +262,15 @@ def test_a_right_guess_is_answered_as_a_wrong_one(
         # uniformity at the literal-written entry too.
         uniform = _answers_the_same(select, twin_ops_for, text, OTHER)
         assert uniform, "the control: the response tells a right guess from a wrong one"
+        # And the uniform answer is the pipeline's own: both responses are
+        # structured patch answers, so a blanket refusal or a load failure that
+        # answers alike does not pass for it.
+        assert _is_a_patch_answer(select(twin_ops_for(text))), (
+            "the control: the right guess got no patch answer"
+        )
+        assert _is_a_patch_answer(select(twin_ops_for(OTHER))), (
+            "the control: the wrong guess got no patch answer"
+        )
 
 
 TO = "/global_settings/ignore_paths/1/reason"
@@ -262,10 +323,14 @@ def test_a_value_copied_or_moved_is_answered_as_a_wrong_guess(
     # writes where the value would land, is answered uniformly too. Measured:
     # the operation answers a right and a wrong guess byte for byte alike
     # everywhere, so the uniform answer is the contract at this entry as well.
-    uniform = _answers_the_same(
-        select,
-        lambda g: [{"op": "test", "path": TO, "value": g}],
-        "kept",
-        OTHER,
-    )
+    literal_ops = lambda g: [{"op": "test", "path": TO, "value": g}]  # noqa: E731
+    uniform = _answers_the_same(select, literal_ops, "kept", OTHER)
     assert uniform, "the control: the response tells a right guess from a wrong one"
+    # The uniform answer is the pipeline's own patch answer, not a blanket
+    # refusal or a load failure that answers alike.
+    assert _is_a_patch_answer(select(literal_ops("kept"))), (
+        "the control: the right guess got no patch answer"
+    )
+    assert _is_a_patch_answer(select(literal_ops(OTHER))), (
+        "the control: the wrong guess got no patch answer"
+    )
