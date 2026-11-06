@@ -24,6 +24,7 @@ from types import SimpleNamespace
 import pytest
 
 from automated_security_helper.config.path_trust import in_scanned_tree
+from tests.utils.helpers import importing_this_checkout
 from automated_security_helper.utils.tool_config_dir import (
     active_tool_config_dir,
     make_tool_config_directory,
@@ -181,7 +182,13 @@ def test_outside_a_scope_the_directory_is_removed_when_the_process_exits(
         ),
     }
     done = subprocess.run(  # nosec B603 - this interpreter, a fixed script
-        [sys.executable, "-c", script, source.as_posix(), output.as_posix()],
+        [
+            sys.executable,
+            "-c",
+            importing_this_checkout(script),
+            source.as_posix(),
+            output.as_posix(),
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,
