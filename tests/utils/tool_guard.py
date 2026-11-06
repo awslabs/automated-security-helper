@@ -1710,6 +1710,10 @@ def install_tool_guard(
                 '@if /i "%~1"=="--version" exit /b 0\r\n'
                 "@exit /b 1\r\n",
                 encoding="utf-8",
+                # The text carries its own CRLF endings. Without newline="" the
+                # default translation on Windows turns each into CR CR LF, a
+                # blank line after every command.
+                newline="",
             )
         else:
             stand_in = directory / name

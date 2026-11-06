@@ -3,6 +3,7 @@
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from datetime import datetime as _DatetimeType
 from pathlib import Path
 import platform
 import time
@@ -1003,7 +1004,10 @@ class ScanExecutionEngine:
         stats = self._results.metadata.summary_stats
         if (
             getattr(self, "_run_stamped_timing", False)
-            and isinstance(stats.end, datetime)
+            # The class under its own name: the module's ``datetime`` is the
+            # clock the duration tests replace with a mock, and isinstance
+            # against a mock raises before the final stamp is written.
+            and isinstance(stats.end, _DatetimeType)
             and stats.end > scan_end_time
         ):
             # The pre-report end is the start plus the monotonic elapsed time,
