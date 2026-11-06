@@ -223,7 +223,9 @@ def test_a_report_to_a_regular_file_is_the_report_phases_bytes(
     assert path.read_bytes() == re.sub(
         rb"(?<!\r)\n", os.linesep.encode(), expected.read_bytes()
     )
-    raw = path.read_text(encoding="utf-8", newline="")
+    # Decoded from the bytes: Path.read_text takes no newline argument before
+    # Python 3.13, and the bytes keep every line ending untranslated.
+    raw = path.read_bytes().decode("utf-8")
     assert "::add-mask::" in raw
     if report_format in SHOWN or report_format in BROKEN_BY_THE_REPORTER:
         # A human report shows each name, and the CSV and YAML reporters write it
