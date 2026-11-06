@@ -100,7 +100,8 @@ class TestTimedChild:
         env = calls[0]["env"]
         assert env["PYTHONIOENCODING"] == "utf-8"
         assert env["PYTHONUTF8"] == "1"
-        assert "PYTHONSAFEPATH" not in env
+        names = set(env)
+        assert "PYTHONSAFEPATH" not in names
 
     def test_a_timed_out_child_abandons_the_measurement(
         self, measure, monkeypatch, tmp_path

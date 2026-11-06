@@ -246,7 +246,8 @@ def test_a_system_python_switch_read_as_true_is_the_callers_choice(
         env={"PATH": "/usr/bin", "UV_SYSTEM_PYTHON": "1"},
     )
 
-    assert "UV_PYTHON" not in seen["env"]
+    names = set(seen["env"])
+    assert "UV_PYTHON" not in names
 
 
 # -- the timeout limit token -----------------------------------------------------
