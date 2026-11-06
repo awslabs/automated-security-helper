@@ -1729,6 +1729,16 @@ def _argv_files(char, *argv, cwd=None) -> dict:
     return char.launches[-1].files
 
 
+def _link_key(link) -> str:
+    """The capture key the harness gives a link named in argv.
+
+    The harness resolves the tmp prefix (macOS's /var -> /private/var) and leaves the
+    last part as written, so the link stays a link; ``os.path.realpath`` on the link
+    itself would follow it to its target."""
+    parent, name = os.path.split(str(link))
+    return os.path.join(os.path.realpath(parent), name)
+
+
 def test_an_argv_path_with_dots_that_lands_outside_the_test_is_not_captured(
     char, outside
 ):
@@ -1745,11 +1755,9 @@ def test_an_argv_path_through_a_symlinked_directory_leading_outside_is_not_captu
 ):
     (char.work / "dir-link").symlink_to(outside / "victim-dir")
     assert _argv_files(char, char.work / "dir-link" / "f") == {}
-    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
+    # Captures key a link on its own path with only the tmp prefix resolved.
     assert _argv_files(char, char.work / "dir-link") == {
-        os.path.realpath(char.work / "dir-link"): {
-            "symlink": str(outside / "victim-dir")
-        }
+        _link_key(char.work / "dir-link"): {"symlink": str(outside / "victim-dir")}
     }
 
 
@@ -1760,8 +1768,8 @@ def test_a_symlink_in_argv_is_recorded_as_a_symlink_and_not_read_through(
     link = char.work / "link"
     target = outside / "victim.txt" if kind == "host-file" else char.work / "missing"
     link.symlink_to(target)
-    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
-    assert _argv_files(char, link) == {os.path.realpath(link): {"symlink": str(target)}}
+    # Captures key a link on its own path with only the tmp prefix resolved.
+    assert _argv_files(char, link) == {_link_key(link): {"symlink": str(target)}}
 
 
 def test_a_directory_in_argv_records_its_symlinks_as_symlinks(char, outside):
@@ -1771,7 +1779,7 @@ def test_a_directory_in_argv_records_its_symlinks_as_symlinks(char, outside):
     (handed / "link").symlink_to(outside / "victim.txt")
     (handed / "dangling").symlink_to(char.work / "missing")
     (handed / "dir-link").symlink_to(outside / "victim-dir")
-    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
+    # Neither is a link: only the tmp prefix (macOS /var -> /private/var) differs.
     real = Path(os.path.realpath(handed))
     listing = _argv_files(char, handed)[str(real)]["dir"]
     assert sorted(listing) == [
@@ -1796,8 +1804,8 @@ def test_an_argv_path_through_a_link_into_a_host_directory_probes_no_host_path(c
     link = char.work / "bin-link"
     link.symlink_to(host)
     assert _argv_files(char, link / "git") == {}
-    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
-    assert _argv_files(char, link) == {os.path.realpath(link): {"symlink": host}}
+    # Captures key a link on its own path with only the tmp prefix resolved.
+    assert _argv_files(char, link) == {_link_key(link): {"symlink": host}}
     assert char.take_violations() == []
 
 
@@ -1827,7 +1835,7 @@ def test_a_file_the_test_made_inside_its_tree_is_captured_as_before(char):
     made = char.work / "made.txt"
     made.write_text("made\n", encoding="utf-8")
     files = _argv_files(char, made, f"--out={made}")
-    # Captures are keyed on os.path.realpath (macOS's /var -> /private/var).
+    # Neither is a link: only the tmp prefix (macOS /var -> /private/var) differs.
     key = os.path.realpath(made)
     assert list(files) == [key]
     assert files[key].value == {"text": ["made\n"]}
