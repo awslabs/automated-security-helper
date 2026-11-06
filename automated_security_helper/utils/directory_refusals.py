@@ -65,6 +65,10 @@ REFUSED_CANNOT_BE_CREATED = "cannot_be_created"
 REFUSED_CANNOT_BE_WRITTEN = "cannot_be_written"
 REFUSED_NOT_A_VALID_PATH = "not_a_valid_path"
 
+#: The Windows error codes (``OSError.winerror``) stat gives a name that cannot
+#: exist: ERROR_INVALID_PARAMETER, ERROR_INVALID_NAME and ERROR_BAD_PATHNAME.
+_WINDOWS_INVALID_NAME_ERRORS = frozenset({87, 123, 161})
+
 
 class DirectoryRefusal(str):
     """The text of an output directory's refusal, which also says why.
@@ -112,6 +116,13 @@ def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
     except OSError as error:
         # A link that leads back to itself names nothing, as a link to nothing does.
         if error.errno == errno.ELOOP:
+            return f"Source directory does not exist: {path}"
+        # Windows answers a name it cannot hold (a control character such as a
+        # newline, or characters a name may not carry) with a WinError instead
+        # of ENOENT: 87 (invalid parameter), 123 (invalid name) or 161 (bad
+        # path). POSIX answers ENOENT for the same name, which is "does not
+        # exist"; a name that cannot exist is not one that cannot be entered.
+        if getattr(error, "winerror", None) in _WINDOWS_INVALID_NAME_ERRORS:
             return f"Source directory does not exist: {path}"
         return f"Source directory cannot be entered: {path}"
     if not stat.S_ISDIR(mode):
