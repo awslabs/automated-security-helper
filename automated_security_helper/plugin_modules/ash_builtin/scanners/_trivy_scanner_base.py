@@ -914,6 +914,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 # The environment is the operator's own write, as for the input
                 # files (_trivy_input_file).
                 operator_written=True,
+                # A refusal names the path as the variable gives it, joined to
+                # the working directory (path_trust.honored_path).
+                env_read=True,
             )
             if path is not None:
                 return "TRIVY_CONFIG", variable, path
