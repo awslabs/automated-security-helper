@@ -19598,7 +19598,12 @@ def test_ash_report_writes_the_reporters_output_unless_a_color_terminal_renders_
     document = documents[0]
     if expected == "as-written":
         wanted = document.encode("utf-8")
-        if sink == "terminal":
+        if sink == "terminal" and sys.platform == "darwin":
+            # Platform contract of the pty line discipline: macOS gives a line feed
+            # that already follows a carriage return no second one (the HTML's CSS
+            # carries CRLF), where Linux's ONLCR turns it into CR CR LF.
+            wanted = re.sub(rb"(?<!\r)\n", b"\r\n", wanted)
+        elif sink == "terminal":
             wanted = wanted.replace(b"\n", b"\r\n")
         assert out == wanted, (
             "standard output is not the reporter's document:\n"
