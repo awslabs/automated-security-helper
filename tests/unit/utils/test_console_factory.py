@@ -772,7 +772,11 @@ def _run_on_a_fake_terminal(body: str) -> str:
                 importing_this_checkout(_TERMINAL_CHILD_PRELUDE + body),
             ],
             capture_output=True,
+            # The child writes UTF-8 (PYTHONIOENCODING above); text=True alone reads
+            # it with the parent's locale, cp1252 on Windows, which cannot decode
+            # the panel's box-drawing bytes and leaves stdout None.
             text=True,
+            encoding="utf-8",
             timeout=60,
             env=env,
         )

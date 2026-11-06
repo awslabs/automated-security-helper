@@ -295,6 +295,12 @@ def _isolate_tool_lookup(monkeypatch, tools: _Tools, home: Path, *, online: bool
     # The uv beside this interpreter is preferred over PATH's; the stand-in is
     # the uv every check here must reach.
     monkeypatch.setattr(uv_tool_runner, "bundled_uv_executable", lambda: None)
+    # find_executable also searches ASH's own environment after PATH, once per
+    # candidate suffix: on Windows it tries ``uv.exe`` in every directory (the
+    # environment's Scripts directory included) before it tries the stand-in's
+    # ``uv.bat``, so the real uv.exe beside this interpreter answered, ran in the
+    # test's HOME and left its cache there. Only the stand-ins' directory is searched.
+    monkeypatch.setattr(subprocess_utils, "own_environment_dirs", list)
     _give_launchers_an_interpreter(monkeypatch, tools)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv(TOKEN_VARIABLE, "token-value")
