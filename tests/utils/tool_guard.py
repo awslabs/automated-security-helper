@@ -132,6 +132,11 @@ STAND_IN_VERSIONS: dict[str, str] = {
 #: The version a guarded tool with no entry above prints.
 UNRANGED_VERSION = "1.0.0"
 
+#: What a Windows stand-in appends to its name in ``started.log`` for a call that
+#: is exactly ``--version``, ``-v`` or ``--help``: a dependency probe, logged but
+#: not a start. A POSIX stand-in tells the probe apart by its own probe log.
+PROBE_MARK = "--probe"
+
 
 def stand_in_version(name: str) -> str:
     """The version the stand-in for *name* prints when probed."""
@@ -1324,9 +1329,10 @@ class ToolGuard:
                     stand_in
                 ):
                     if _on_windows():
-                        if unmatched_logged[name] > 0:
-                            unmatched_logged[name] -= 1
-                            probes_in_log[name] += 1
+                        marked = f"{name} {PROBE_MARK}"
+                        if unmatched_logged[marked] > 0:
+                            unmatched_logged[marked] -= 1
+                            probes_in_log[marked] += 1
                             answered = True
                     elif unmatched_probes[str(stand_in)] > 0:
                         unmatched_probes[str(stand_in)] -= 1
@@ -1367,6 +1373,13 @@ class ToolGuard:
         for line in logged:
             if probes_in_log[line] > 0:
                 probes_in_log[line] -= 1
+                continue
+            if line.endswith(f" {PROBE_MARK}"):
+                # A Windows stand-in's probe by a child process (no audited
+                # start accounts for it): a probe, not a start.
+                probe = f"{line.removesuffix(PROBE_MARK).strip()} --version"
+                if probe not in probes:
+                    probes.append(probe)
                 continue
             starts.append(line)
         return probes, starts + extra, starts + tool_extra
@@ -1668,13 +1681,24 @@ def install_tool_guard(
             # Only the name is recorded: "%*" in a .bat line is parsed by cmd, so an
             # argument holding & | or > would run as a command. A "%" in the log
             # path is doubled for the same parser.
-            # For the same reason it cannot tell a version probe from any other
-            # call: it prints the version every time (the locator ignores the exit
-            # code), and ToolGuard sorts the probe out from the audited argv.
+            # It prints the version for every call (the locator ignores the exit
+            # code). The one argument it reads is %~1, and only inside quotes, and
+            # only when %~2 is empty: a call that is exactly --version, -v or
+            # --help is a dependency probe and is logged as "<name> --probe", so
+            # ToolGuard counts it as a probe and not as a start. Every call is
+            # still logged. A quote inside an argument is the limit of the
+            # quoting: no argument ASH or the tests pass holds one.
             stand_in = directory / f"{name}.bat"
             log = str(guard.log).replace("%", "%%")
             stand_in.write_text(
+                '@if "%~2"=="" if /i "%~1"=="--version" goto probe\r\n'
+                '@if "%~2"=="" if /i "%~1"=="-v" goto probe\r\n'
+                '@if "%~2"=="" if /i "%~1"=="--help" goto probe\r\n'
                 f'@echo {name}>> "{log}"\r\n'
+                "@goto answer\r\n"
+                ":probe\r\n"
+                f'@echo {name} {PROBE_MARK}>> "{log}"\r\n'
+                ":answer\r\n"
                 f"@echo {name} {stand_in_version(name)}\r\n"
                 "@exit /b 1\r\n",
                 encoding="utf-8",
