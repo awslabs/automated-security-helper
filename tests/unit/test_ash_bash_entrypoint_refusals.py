@@ -24,6 +24,7 @@ reach a real container runner, and each asserts that no runner was called.
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shutil
@@ -1029,7 +1030,15 @@ def test_a_utf8_path_is_mounted_with_no_tool_beyond_bash(
     """./ash judges UTF-8 in bash, so a UTF-8 path outside ASCII mounts on a PATH
     with no iconv."""
     assert not (bare_path / "iconv").exists()
-    (tmp_path / name).mkdir(exist_ok=True)
+    try:
+        (tmp_path / name).mkdir(exist_ok=True)
+    except OSError as error:
+        # APFS refuses the noncharacter U+10FFFF in a name (EILSEQ, "Illegal byte
+        # sequence"), so the directory this case needs cannot be made there. Any
+        # other name, or any other error, is still a failure.
+        if error.errno != errno.EILSEQ:
+            raise
+        pytest.skip(f"this filesystem refuses the name {name!r}: {error}")
 
     result, calls = run_ash(
         "--no-build",

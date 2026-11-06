@@ -400,11 +400,21 @@ def page_sessions(page) -> list[tuple[int, str, object]]:
     return sessions
 
 
-def _refusing_port() -> socket.socket:
-    """A bound, never-listening socket: connections to its port are refused at once."""
+def _refusing_port() -> tuple[socket.socket, int]:
+    """A socket and a loopback port on which connections are refused at once.
+
+    On Linux a bound, never-listening socket answers a connection with a reset, and
+    holding it keeps the port from being handed to another process. On macOS a
+    connection to such a socket is not answered and the client waits out its timeout
+    (a 30 s urlopen timed out instead of being refused), so there the socket is
+    closed once the port is read: a port nothing holds is refused by every OS.
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
-    return sock
+    port = sock.getsockname()[1]
+    if sys.platform != "linux":
+        sock.close()
+    return sock, port
 
 
 @dataclass
@@ -475,8 +485,8 @@ class PageRunner:
             target.parent.mkdir(parents=True, exist_ok=True)
             if path.name != ".keep":
                 shutil.copy2(path, target)
-        port = _refusing_port()
-        env = self._base_env(root, port.getsockname()[1])
+        port, port_number = _refusing_port()
+        env = self._base_env(root, port_number)
         for args in (
             ["init", "-q", "-b", "main"],
             ["add", "-A"],

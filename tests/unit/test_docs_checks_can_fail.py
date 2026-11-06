@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -3447,7 +3448,11 @@ def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
         line for line in lines if line.startswith("        - the check did not run: ")
     ]
     assert not_run, result.stdout
-    assert all("docs/content/reference/" in line for line in not_run), not_run
+    # The error text quotes the path as the OS spells it: on Windows with
+    # backslashes, doubled by the repr of the message, so a run of them is a separator.
+    assert all(
+        "docs/content/reference/" in re.sub(r"\\+", "/", line) for line in not_run
+    ), not_run
     assert result.returncode == 2
 
 

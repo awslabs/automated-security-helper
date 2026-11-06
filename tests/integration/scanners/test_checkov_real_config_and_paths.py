@@ -152,7 +152,13 @@ def test_paths_for_a_target_outside_the_source_match_too(tmp_path):
     before = _uris(_run_from(source, converted, tmp_path / "old"))
     after = _uris(_ash_raw(source, output, converted, "converted"))
     assert before
-    assert after == before
+    # checkov removes every ``/..`` from the path it writes, so a run from the
+    # source directory names this file ``out/converted/nb/c.tf``, a path that
+    # reads as inside the source and names nothing there. ASH keeps the ``..``
+    # (checkov_scanner._source_relative_path), so the same findings are reported
+    # at ``../out/converted/nb/c.tf``, relative to the source directory.
+    assert before == ["out/converted/nb/c.tf"] * len(before)
+    assert after == ["../out/converted/nb/c.tf"] * len(before)
 
 
 @pytest.mark.parametrize(

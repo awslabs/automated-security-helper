@@ -1134,7 +1134,15 @@ _INVOKE_ASH_SITES = {
         {"files": ["blocker"]},
         {},
         USAGE_ERROR_EXIT,
-        "Outputdirectorycannotbecreated:blocker/out(Notadirectory)",
+        # The reason is the system's text for the error where the runtime gives an
+        # errno (Linux, macOS: ENOTDIR); a file on the way is an IOException with
+        # none on Windows, where the helper's own words stand
+        # (utils/ash_helpers.ps1, "elsewhere there is none to give").
+        (
+            "Outputdirectorycannotbecreated:blocker/out(itcouldnotbemade)"
+            if os.name == "nt"
+            else "Outputdirectorycannotbecreated:blocker/out(Notadirectory)"
+        ),
     ),
     "source-dir-missing": (
         _INVOKE.replace("-SourceDir src", "-SourceDir no-such-dir"),
@@ -2993,7 +3001,10 @@ def _github_pwsh_arguments(shell: str, script: Path) -> list[str]:
     assert command == "pwsh", shell
     if not argument_format.strip():
         return ["-command", f". '{script}'"]
-    return shlex.split(argument_format.replace("{0}", str(script)))
+    # Split the format, then put the path in: shlex reads a backslash as an escape,
+    # so a Windows path split with the format lost every separator
+    # ("D:\a\_temp\step.ps1" became "D:a_tempstep.ps1").
+    return [token.replace("{0}", str(script)) for token in shlex.split(argument_format)]
 
 
 def _github_pwsh_contents(run: str) -> str:
