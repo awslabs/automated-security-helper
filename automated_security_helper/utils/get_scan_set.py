@@ -2584,6 +2584,20 @@ def git_repository_root_problem(path: Path, *, values: Iterable[str] = ()) -> st
     return f"the git repository root of {path.as_posix()} could not be read"
 
 
+def _missing_directory_clause(cwd: Optional[Path]) -> Optional[str]:
+    """``<cwd> does not exist`` when *cwd* names nothing, else None.
+
+    Windows raises NotADirectoryError ([WinError 267], "The directory name is
+    invalid") for a missing working directory, where POSIX raises
+    FileNotFoundError, so the OSError arms tell a missing directory from a
+    directory git could not be started in the same way
+    :func:`_why_git_did_not_start` does for FileNotFoundError.
+    """
+    if cwd is None or os.path.lexists(cwd):
+        return None
+    return f"{Path(cwd).as_posix()} does not exist"
+
+
 def _why_git_did_not_start(error: OSError, cwd: Optional[Path]) -> str:
     """The cause of a FileNotFoundError from starting git in *cwd*, as a clause.
 
@@ -2695,7 +2709,9 @@ def _rev_parse_toplevel(
     except subprocess.TimeoutExpired:
         return None, "git rev-parse --show-toplevel timed out after 30 seconds"
     except (NotADirectoryError, OSError) as error:
-        return None, f"git could not be started in {Path(path).as_posix()}: {error}"
+        return None, _missing_directory_clause(path) or (
+            f"git could not be started in {Path(path).as_posix()}: {error}"
+        )
 
     if result.returncode != 0:
         stderr = _git_message_text(result.stderr or b"")
@@ -3238,10 +3254,10 @@ def get_changed_files(
         # the rest of what starting git can raise: the same answer as a git that is not
         # there, as the repository-root lookup gives for the same errors.
         shown = Path(cwd).as_posix() if cwd is not None else "the working directory"
-        ASH_LOGGER.warning(
-            f"git could not be started in {shown}: {error}; reporting every finding",
-            extra=NO_MARKUP,
+        why = _missing_directory_clause(cwd) or (
+            f"git could not be started in {shown}: {error}"
         )
+        ASH_LOGGER.warning(f"{why}; reporting every finding", extra=NO_MARKUP)
         return None
 
     if result.returncode != 0:
