@@ -54,6 +54,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     resolve_session_config_path,
     set_profile_registry,
 )
+from tests.utils.helpers import checkout_env
 from tests.utils.mcp_transport_harness import (
     AsgiSseConnection,
     LOOPBACK_BASE_URL,
@@ -239,7 +240,7 @@ def _stdio_server(workspace_root: Path, stderr) -> subprocess.Popen:
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=stderr,
-        env=env,
+        env=checkout_env(env),
         text=True,
     )
 

@@ -24,7 +24,7 @@ from typing import List
 import httpx
 import pytest
 
-from tests.utils.helpers import KillAfter
+from tests.utils.helpers import KillAfter, checkout_env
 
 _RUNNING = re.compile(
     r"^INFO: +Uvicorn running on http://127\.0\.0\.1:(\d+) \(Press CTRL\+C to quit\)$"
@@ -71,7 +71,7 @@ def _serve(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-        env=env,
+        env=checkout_env(env),
         cwd=tmp_path,
         text=True,
     )

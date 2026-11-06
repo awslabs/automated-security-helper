@@ -414,7 +414,7 @@ def two_sessions(request, tmp_path_factory):
                 sys.executable,
                 "-I",
                 "-c",
-                DRIVER,
+                importing_this_checkout(DRIVER),
                 str(work),
                 str(packages),
                 str(REPO_ROOT),

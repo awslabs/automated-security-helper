@@ -41,7 +41,7 @@ from rich.console import Console
 
 from automated_security_helper.cli.mcp import mcp_command
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
-from tests.utils.helpers import KillAfter
+from tests.utils.helpers import KillAfter, checkout_env
 
 POSIX = pytest.mark.skipif(os.name == "nt", reason="POSIX file modes and fifos")
 PROC = pytest.mark.skipif(
@@ -344,7 +344,7 @@ def _serve(argv_tail: List[str], tmp_path: Path, pass_fds=()) -> subprocess.Pope
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-        env=env,
+        env=checkout_env(env),
         cwd=tmp_path,
         pass_fds=pass_fds,
         text=True,
