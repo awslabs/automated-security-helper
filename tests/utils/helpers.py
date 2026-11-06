@@ -143,7 +143,7 @@ def bound_run_command(monkeypatch, seconds: float = CHILD_TIMEOUT_SECONDS) -> No
     monkeypatch.setattr(subprocess_utils, "run_command", run_command)
 
 
-def importing_this_checkout(driver: str) -> str:
+def importing_this_checkout(driver: str, root: Optional[Path] = None) -> str:
     """``driver``, preceded by code that has it import ASH from this checkout.
 
     For a child started with ``python -I``. ``-I`` leaves the current directory and
@@ -152,8 +152,12 @@ def importing_this_checkout(driver: str) -> str:
     test: an editable install points at the tree it was installed from. This puts the
     checkout first on ``sys.path``, and the child exits 86 before running ``driver``
     if ``automated_security_helper`` still comes from somewhere else.
+
+    ``root`` names another tree to import from, for a test written to run against
+    the package its parent process imported (a cross-tree run) rather than the
+    checkout the test file sits in.
     """
-    root = str(REPO_ROOT)
+    root = str(REPO_ROOT if root is None else root)
     return (
         "import sys\n"
         f"sys.path.insert(0, {root!r})\n"
@@ -402,7 +406,7 @@ def get_ash_temp_path():
     return temp_dir
 
 
-def module_from_this_checkout(module: str) -> str:
+def module_from_this_checkout(module: str, root: Optional[Path] = None) -> str:
     """Code that runs ``module`` as ``python -m`` would, importing ASH from this
     checkout (``importing_this_checkout``).
 
@@ -414,11 +418,12 @@ def module_from_this_checkout(module: str) -> str:
     """
     return importing_this_checkout(
         "import runpy\n"
-        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)\n"
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)\n",
+        root,
     )
 
 
-def checkout_env(env: Optional[dict] = None) -> dict:
+def checkout_env(env: Optional[dict] = None, root: Optional[Path] = None) -> dict:
     """``env`` (os.environ when None), with this checkout first on ``PYTHONPATH``.
 
     For a child Python that is not started with ``-I`` or ``-E``: a
@@ -427,14 +432,20 @@ def checkout_env(env: Optional[dict] = None) -> dict:
     installed copy points unless ``PYTHONPATH`` names the checkout: an editable
     install points at the tree it was installed from, which need not be this one.
 
+    ``root`` names another tree, for a test written to run against the package its
+    parent imported (a cross-tree run). Applying it again to its own result adds
+    nothing: a ``PYTHONPATH`` that already starts with the root is left as it is.
+
     A ``NamesOnlyEnvironment``, so a failure whose traceback passes through a frame
     given it shows its names, not their values.
     """
     given = NamesOnlyEnvironment(os.environ if env is None else env)
-    parts = [str(REPO_ROOT)]
-    if given.get("PYTHONPATH"):
-        parts.append(given["PYTHONPATH"])
-    given["PYTHONPATH"] = os.pathsep.join(parts)
+    first = str(REPO_ROOT if root is None else root)
+    existing = given.get("PYTHONPATH") or ""
+    if existing.split(os.pathsep, 1)[0] != first:
+        given["PYTHONPATH"] = os.pathsep.join(
+            [first, existing] if existing else [first]
+        )
     return given
 
 

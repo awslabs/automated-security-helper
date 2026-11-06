@@ -430,7 +430,7 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
     }
     for name in ("ASH_CONFIG", "XDG_BIN_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
         environment.pop(name, None)
-    return checkout_env({**environment, **env})
+    return checkout_env({**environment, **env}, root=_IMPORTED_ROOT)
 
 
 from automated_security_helper.utils import (  # noqa: E402
@@ -439,6 +439,14 @@ from automated_security_helper.utils import (  # noqa: E402
     uv_tool_runner as _uv_runner_module,
 )
 from tests.utils.tool_guard import use_the_real_candidate_names  # noqa: E402
+
+import automated_security_helper as _ash_package  # noqa: E402
+
+#: The tree this process imports ASH from, where ``_code_root`` looks. Every child
+#: ASH is routed to it, not to the checkout this file sits in, so a cross-tree run
+#: (pages from this tree, code from another) tests one tree, and a same-tree run
+#: gets the checkout, as before.
+_IMPORTED_ROOT = Path(_ash_package.__file__).resolve().parents[1]
 
 #: The tool probes as the code defines them, taken when this module is imported at
 #: collection, before any test's tool guard replaces them (``stub_tool_probes`` in
@@ -1573,7 +1581,9 @@ def _ash_with_no_aws_credentials(
     return subprocess.run(
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         cwd=cwd,
-        env=checkout_env(_no_aws_credentials_environment(cwd, **env)),
+        env=checkout_env(
+            _no_aws_credentials_environment(cwd, **env), root=_IMPORTED_ROOT
+        ),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1742,7 +1752,9 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
             result = subprocess.run(
                 [sys.executable, "-m", "automated_security_helper.cli.main", *args],
                 cwd=work,
-                env=checkout_env(_moto_child_environment(work, endpoint)),
+                env=checkout_env(
+                    _moto_child_environment(work, endpoint), root=_IMPORTED_ROOT
+                ),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2105,7 +2117,9 @@ def test_each_run_in_one_process_gives_the_error_for_a_missing_setting(
             *_S3_WITHOUT_A_REGION,
         ],
         cwd=tmp_path,
-        env=checkout_env(_no_aws_credentials_environment(tmp_path)),
+        env=checkout_env(
+            _no_aws_credentials_environment(tmp_path), root=_IMPORTED_ROOT
+        ),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -7869,7 +7883,9 @@ def _interrupter(
     return [
         sys.executable,
         "-c",
-        importing_this_checkout(_INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT)),
+        importing_this_checkout(
+            _INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT), root=_IMPORTED_ROOT
+        ),
         json.dumps(control),
     ]
 
@@ -8308,7 +8324,7 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         cwd=cwd,
-        env=checkout_env(_mcp_child_env(cwd)),
+        env=checkout_env(_mcp_child_env(cwd), root=_IMPORTED_ROOT),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -8322,7 +8338,9 @@ _ASH_MODULE = [
     sys.executable,
     "-I",
     "-c",
-    module_from_this_checkout("automated_security_helper.cli.main"),
+    module_from_this_checkout(
+        "automated_security_helper.cli.main", root=_IMPORTED_ROOT
+    ),
 ]
 
 
@@ -8542,7 +8560,8 @@ def _mcp_package_missing(
         "sys.modules['mcp'] = None\n"
         "from automated_security_helper.cli.main import app\n"
         "sys.argv = ['ash', 'mcp', '--quiet']\n"
-        "app()\n"
+        "app()\n",
+        root=_IMPORTED_ROOT,
     )
     result = _mcp_run([sys.executable, "-c", driver], cwd)
     return result.returncode, result.stderr
@@ -8955,7 +8974,7 @@ def _mcp_serving_stdio(
     process = _server_popen(
         command or [*_ASH_MODULE, "mcp", "--quiet"],
         cwd=cwd,
-        env=checkout_env(_mcp_child_env(cwd)),
+        env=checkout_env(_mcp_child_env(cwd), root=_IMPORTED_ROOT),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -9163,7 +9182,9 @@ def _mcp_http_server(
             *options,
         ],
         cwd=cwd,
-        env=checkout_env(env if env is not None else _mcp_child_env(cwd)),
+        env=checkout_env(
+            env if env is not None else _mcp_child_env(cwd), root=_IMPORTED_ROOT
+        ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -15225,7 +15246,7 @@ def test_the_s3_reporter_sends_a_value_read_from_the_environment_as_its_referenc
         result = subprocess.run(
             [sys.executable, "-m", "automated_security_helper.cli.main", *args],
             cwd=tmp_path,
-            env=checkout_env(env),
+            env=checkout_env(env, root=_IMPORTED_ROOT),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -16855,7 +16876,7 @@ def _child_answer(
     result = subprocess.run(
         [sys.executable, "-c", script, *args],
         cwd=cwd,
-        env=checkout_env(environment),
+        env=checkout_env(environment, root=_IMPORTED_ROOT),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -19436,7 +19457,7 @@ def _report_through(
     argv = [
         sys.executable,
         "-c",
-        importing_this_checkout(_RECORDING_REPORT),
+        importing_this_checkout(_RECORDING_REPORT, root=_IMPORTED_ROOT),
         str(record),
         "report",
         *args,
@@ -20741,7 +20762,8 @@ def _backend_unavailable(class_name: str) -> Optional[str]:
     scratch = Path(tempfile.mkdtemp(prefix="ash-backend-probe-"))
     probe = importing_this_checkout(
         "from automated_security_helper.utils.sandbox import backends\n"
-        f"print(repr(backends.{class_name}()._probe()))\n"
+        f"print(repr(backends.{class_name}()._probe()))\n",
+        root=_IMPORTED_ROOT,
     )
     # A spawn failure or a hang (TimeoutExpired) propagates and errors the
     # cell: this interpreter failing to start its own executable is never a
