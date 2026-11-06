@@ -8336,7 +8336,6 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
 
 _ASH_MODULE = [
     sys.executable,
-    "-I",
     "-c",
     module_from_this_checkout(
         "automated_security_helper.cli.main", root=_IMPORTED_ROOT
