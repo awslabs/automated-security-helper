@@ -689,22 +689,26 @@ def _mode_chain_with_a_twin(tmp_path, with_twin=True):
 def test_the_uncarried_mode_read_folds_with_the_scans_ownership(tmp_path, monkeypatch):
     """The sandbox-mode floor read with nothing carried (no operator config,
     the trusted base already the defaults) loads the ASH_CONFIG chain with
-    the ownership the scan's own load applies: the operator root's
-    case-variant patch folds onto the operator's own section beside the twin
-    a base in the scanned checkout wrote, and the mode read answers the
-    chain's mode. A read without the ownership finds the fold ambiguous and
-    refuses a chain the local scan takes, so the floor it feeds reported no
-    sandbox where the local scan applies one."""
+    the ownership the scan's own load applies, so it refuses what the scan
+    refuses. A base in the scanned checkout wrote a case-variant twin of the
+    operator's reporter section, so the operator root's case-variant patch
+    does not fit the document it patches: the decision on case-variant twins
+    made that refusal the contract (a local scan refuses the chain, pinned by
+    test_readers_of_the_scan_chain_take_what_the_scan_takes.py), and the read
+    that feeds the floor takes the same ownership and raises the same
+    refusal. The control below, with no twin, answers the chain's mode."""
     from automated_security_helper.config.resolve_config import trusted_base_config
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
 
     source, root = _mode_chain_with_a_twin(tmp_path)
     monkeypatch.setenv("ASH_CONFIG", str(root))
 
-    base = trusted_base_config(
-        None, scanned_trees(source), default_in_tree=True, merged_fallback=False
-    )
-
-    assert base.sandbox.mode == "firejail"
+    with pytest.raises(
+        ASHConfigSourceError, match="the path does not fit the document it patches"
+    ):
+        trusted_base_config(
+            None, scanned_trees(source), default_in_tree=True, merged_fallback=False
+        )
 
 
 def test_control_the_uncarried_mode_read_without_the_twin(tmp_path, monkeypatch):
