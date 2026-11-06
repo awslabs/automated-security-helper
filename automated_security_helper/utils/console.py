@@ -202,6 +202,9 @@ def typer_console(*, stderr: bool = True) -> Console:
         force_terminal = True
     if os.environ.get("_TYPER_FORCE_DISABLE_TERMINAL"):
         force_terminal = False
+    # A Windows pipe child reads legacy_windows true and the legacy renderer writes
+    # no ANSI, defeating the force; a forced terminal gets the ANSI renderer.
+    legacy_windows: Optional[bool] = False if force_terminal else None
     width = _typer_terminal_width(os.environ.get("TERMINAL_WIDTH", ""))
     return ash_console(
         stderr=stderr,
@@ -219,6 +222,7 @@ def typer_console(*, stderr: bool = True) -> Console:
         highlighter=rich_utils.highlighter,
         color_system=rich_utils.COLOR_SYSTEM,
         force_terminal=force_terminal,
+        legacy_windows=legacy_windows,
         width=width,
     )
 
