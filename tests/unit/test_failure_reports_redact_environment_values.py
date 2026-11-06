@@ -835,9 +835,7 @@ def test_a_value_set_only_in_a_worker_is_hidden_in_the_writes_report(
     )
     # The refused path is printed as the OS spells it: backslashes on Windows.
     lines = [
-        line
-        for line in output.replace("\\", "/").splitlines()
-        if "/vis-a/" in line
+        line for line in output.replace("\\", "/").splitlines() if "/vis-a/" in line
     ]
     if (
         "outside any test" not in output
@@ -946,9 +944,7 @@ def test_a_path_holding_the_other_workers_value_hides_it(tmp_path: Path) -> None
     )
     # The refused path is printed as the OS spells it: backslashes on Windows.
     lines = [
-        line
-        for line in output.replace("\\", "/").splitlines()
-        if "/vis-a/" in line
+        line for line in output.replace("\\", "/").splitlines() if "/vis-a/" in line
     ]
     workers = {line.split(":", 1)[0].strip() for line in lines}
     if returncode == 0 or len(lines) != 2 or workers != {"gw0", "gw1"}:
