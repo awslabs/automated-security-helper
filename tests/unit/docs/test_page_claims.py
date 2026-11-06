@@ -4291,18 +4291,16 @@ def test_a_nix_scan_resolves_its_config_on_the_host_before_the_shell_starts(
 @pytest.mark.parametrize("command", [["scan"], []], ids=["ash-scan", "ash"])
 @pytest.mark.parametrize("scan", ["one-directory", "workspace"])
 @pytest.mark.parametrize(
-    "place, marked",
+    "place",
     [
-        pytest.param("another-checkout", True, id="in-another-checkout-marked"),
-        pytest.param("the-scanned-checkout", True, id="in-the-scanned-checkout-marked"),
-        pytest.param(
-            "outside-every-checkout", False, id="control-outside-every-checkout"
-        ),
+        pytest.param("another-checkout", id="in-another-checkout-marked"),
+        pytest.param("the-scanned-checkout", id="in-the-scanned-checkout-marked"),
+        pytest.param("outside-every-checkout", id="control-outside-every-checkout"),
     ],
 )
 @pytest.mark.integration
 def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is(
-    tmp_path: Path, command: List[str], scan: str, place: str, marked: bool
+    tmp_path: Path, command: List[str], scan: str, place: str
 ) -> None:
     """run-in-a-container.md (The config file).
 
@@ -4325,8 +4323,11 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     )
     assert_on_page(
         RUN_IN_A_CONTAINER,
-        "A file of that chain the host counts as written by a repository is marked for "
-        "the scan inside, file by file.",
+        "Each file of that chain is marked for the scan inside on its own, by where it "
+        "sits. A file in the scanned checkout is marked as the scanned repository's and "
+        "is limited like any repository config. A file in another git checkout is "
+        "marked as another checkout's, which keeps the settings that only restrict. A "
+        "file outside every checkout is not marked.",
     )
     workspace = _workspace_in_a_checkout(tmp_path)
     checkout = workspace.parent.parent
@@ -4404,7 +4405,6 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     # checkout's carry the another-checkout mark, which keeps what only restricts.
     assert file_marks == (both_files if place == "the-scanned-checkout" else []), inner
     assert elsewhere_marks == (both_files if place == "another-checkout" else []), inner
-    assert marked == (place != "outside-every-checkout")
     assert "--config-from-scanned-repository" not in inner, inner
 
 

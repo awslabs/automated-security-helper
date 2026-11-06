@@ -202,8 +202,11 @@ settings a repository may not choose
 ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)).
 `ash scan --mode container` and `ash --mode container` mount that file, and each file it
 `extends`, read-only under `/ash-env-config`, and the scan inside reads it as its
-`ASH_CONFIG`. A file of that chain the host counts as written by a repository is marked
-for the scan inside, file by file. An `ASH_CONFIG` file that is missing, cannot be read,
+`ASH_CONFIG`. Each file of that chain is marked for the scan inside on its own, by where
+it sits. A file in the scanned checkout is marked as the scanned repository's and is
+limited like any repository config. A file in another git checkout is marked as another
+checkout's, which keeps the settings that only restrict. A file outside every checkout is
+not marked. An `ASH_CONFIG` file that is missing, cannot be read,
 does not parse, or is not a valid config stops the scan with exit code 3 on the host,
 before anything is built, run, mounted, or cleared, even when `--config` names a valid
 file.
