@@ -126,8 +126,15 @@ def test_a_streamed_tool_output_is_shown(capsys):
         run_command_stream_output,
     )
 
+    # Bytes, not sys.stdout.write: on Windows the child's stdout is a pipe in the
+    # ANSI code page, which cannot encode the override character, and the child
+    # died with a UnicodeEncodeError before writing. ASH reads the pipe as UTF-8.
     code = run_command_stream_output(
-        [sys.executable, "-c", f"import sys; sys.stdout.write({HOSTILE!r} + '\\n')"]
+        [
+            sys.executable,
+            "-c",
+            f"import sys; sys.stdout.buffer.write(({HOSTILE!r} + '\\n').encode('utf-8'))",
+        ]
     )
 
     out = capsys.readouterr().out
@@ -172,7 +179,9 @@ def test_container_mode_relays_text_the_inner_scan_already_showed_as_is(capsys):
         "see \\x1b]52;c;ZXZpbA==\\x07 in C:\\\\x1b\\out\n"
         "\\x3a:add-mask::hidden and \\x23#vso[task.complete]x\n"
     )
-    script = f"import sys; sys.stdout.write({shown!r})"
+    # Bytes, so the child's "\n" stays one on Windows, where a text-mode stdout
+    # writes "\r\n" and the relay passes the "\r" on as the child's own.
+    script = f"import sys; sys.stdout.buffer.write({shown!r}.encode('utf-8'))"
 
     result = run_cmd_direct([sys.executable, "-c", script], check=False)
 
