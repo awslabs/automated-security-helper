@@ -247,6 +247,12 @@ def test_without_a_sandbox_the_neighbor_is_readable(tmp_path):
     saw = _scan(tmp_path, "off")
     _assert_tested_the_copy(saw)
     assert saw["neighbor_readable"] is True
+    if sys.platform == "win32":
+        # The platform contract the other stand-in uv tests state: the stand-in uv
+        # is a POSIX shell script. On Windows the witness call never reaches its
+        # batch launcher (measured: the log is empty), so "no call named a tool"
+        # would prove nothing; the copy and neighbor checks above still ran.
+        pytest.skip("the stand-in uv is a POSIX shell script")
     # Online, and still no tool resolved for a scanner this run did not select, by
     # a run that did reach the stand-in uv.
     assert_reached_the_stand_in(saw["uv_calls"])
