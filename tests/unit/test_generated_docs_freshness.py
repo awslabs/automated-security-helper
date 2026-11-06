@@ -217,6 +217,10 @@ def _planted_tools(directory: Path) -> Path:
 def _planted_environment(root: Path, seed: str, home: str | None) -> tuple[dict, Path]:
     """The environment of one planted run, and the home it uses."""
     home_dir = Path(home) if home else root / "home"
+    if os.name == "nt" and home is not None:
+        # "/d" names no drive on Windows, so ASH reads it as a relative home, has no
+        # bin directory, and the scanner page lists "custom command" installs.
+        home_dir = Path(root.drive + home)
     if home is None:
         home_dir.mkdir(parents=True)
     tmp = root / "planted-tmp"
