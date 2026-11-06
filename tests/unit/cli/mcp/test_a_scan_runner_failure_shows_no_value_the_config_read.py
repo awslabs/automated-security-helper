@@ -437,6 +437,12 @@ def test_a_timed_out_scan_hides_a_limit_the_profile_also_read(tmp_path, monkeypa
         with (
             patch.object(ras, "run_ash_scan", a_run_that_outlives_the_limit),
             patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
+            # The sandbox judges the profile's per-scan copy by asking the scan
+            # management registry whether this session holds the scan. Left on
+            # the default registry it holds none, the copy reads as a file the
+            # client delivered, its environment read is refused, and the
+            # profile's value never joins the redaction set.
+            patch(f"{_MGMT}.get_scan_registry", return_value=registry),
             patch(f"{_TOOLS}._logger", logger),
         ):
             asyncio.run(
