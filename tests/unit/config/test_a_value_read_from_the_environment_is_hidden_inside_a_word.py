@@ -1998,18 +1998,27 @@ def test_the_linear_time_check_fails_a_square_time_shape_quickly(monkeypatch, n)
     # overshoots by far more than a spin does on any host.
     spin_overshoots = []
     for _, limit, _ in stopped[:1]:
+        spin_finished = []
 
-        def spin(text, values, _limit=limit):
+        def spin(text, values, _limit=limit, _finished=spin_finished):
             end = time.monotonic() + 3 * _limit
             while time.monotonic() < end:
                 pass
+            _finished.append(True)
             return "spun"
 
         monkeypatch.setattr(module, "redact_values", spin)
+        raise_counts.append(0)
         spin_started = time.monotonic()
         spin_result = real_run("", [], "spun", limit)
         spin_took = time.monotonic() - spin_started
         assert spin_result is None, (spin_result, limit)
+        # None alone cannot tell a landed stop from one that never landed:
+        # _timed_run also returns None after a run that ends past its limit.
+        # The spin runs three times the limit, so it returns only if the stop
+        # never cut it short; the handler must also have raised exactly once.
+        assert not spin_finished, ("the spin ran to its end; no stop landed", limit)
+        assert raise_counts[-1] == 1, (raise_counts[-1], limit)
         spin_overshoots.append(max(spin_took - limit, 0.0))
     control = max(spin_overshoots, default=0.0)
     for _, limit, took in stopped:
