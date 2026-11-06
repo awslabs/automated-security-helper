@@ -111,7 +111,16 @@ def declared_target(declared_by_fold: Dict[str, str], key: str) -> Optional[str]
     if target is not None:
         return target
     stripped = _without_type_word(folded)
-    return declared_by_fold.get(stripped) if stripped is not None else None
+    if stripped is None:
+        return None
+    # The fold drops the separators, so a word a separator splits
+    # ("sarif-re_porter") reads as whole on the folded form. It must stand
+    # whole in the key as written: a split word names no plugin the config
+    # lookup reads (reduced_plugin_name keeps it), and folding it here would
+    # rewrite the operator's own section onto a built-in's.
+    if not ascii_lower(key).endswith(folded[len(stripped) :]):
+        return None
+    return declared_by_fold.get(stripped)
 
 
 def declared_section_names(segment_key: str) -> Dict[str, str]:
