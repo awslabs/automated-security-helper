@@ -256,6 +256,10 @@ def test_a_usage_error_keeps_typers_color_and_highlighting_under_github_actions(
     The child gets the variables GitHub documents for every job, GITHUB_ACTIONS
     and CI, both "true", and no TERM, which that list does not hold. The caller's
     TERM is not passed on: under TERM=dumb Rich writes no color even when forced.
+    Nor is _TYPER_FORCE_DISABLE_TERMINAL: tests/conftest.py sets it for the whole
+    run so a runner's forced color does not reach the other tests, and children
+    inherit it; "A test of the forcing builds its own" environment (see
+    _clear_the_callers_display_variables), which is what this one does.
     """
     body = (
         "import sys\n"
@@ -265,7 +269,10 @@ def test_a_usage_error_keeps_typers_color_and_highlighting_under_github_actions(
     )
 
     done = _run_child(
-        body, tmp_path, {"GITHUB_ACTIONS": "true", "CI": "true"}, unset=("TERM",)
+        body,
+        tmp_path,
+        {"GITHUB_ACTIONS": "true", "CI": "true"},
+        unset=("TERM", "_TYPER_FORCE_DISABLE_TERMINAL"),
     )
 
     assert done.returncode == 5, done.stderr
