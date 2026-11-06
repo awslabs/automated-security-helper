@@ -4695,6 +4695,12 @@ def trusted_base_config(
             trusted.sandbox.mode = operator.config.sandbox.mode
             if not operator_delivered:
                 keep_restrictions(trusted, operator.config)
+            # ASH_CONFIG's file, when it is outside the scanned tree too,
+            # keeps what it only restricts beside the operator's: a base
+            # that dropped it would be looser than one built without
+            # --config. The mode stays the operator's.
+            if default_outside and not default_delivered:
+                keep_restrictions(trusted, ash_config_base())
         elif default_outside:
             kept_from = ash_config_base()
             trusted.sandbox.mode = kept_from.sandbox.mode
