@@ -2211,6 +2211,8 @@ def _refuse_descriptor_change(event: str, fd: int) -> None:
     if target is None:
         # macOS has no /proc, and F_GETPATH names only a descriptor of a file or a
         # directory: a pipe or a socket names no file, so there is nothing to confine.
+        import stat as _stat
+
         try:
             mode = os.fstat(fd).st_mode
         except OSError:
