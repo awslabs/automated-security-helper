@@ -132,23 +132,16 @@ def _is_a_patch_answer(result: Dict[str, Any]) -> bool:
 
 def test_select_profile_answers_a_patch_both_ways(select):
     """The uniform answers below mean something only if the pipeline can answer
-    both ways: a patch that applies binds the profile, a test op at a place the
-    profile does not hold is refused with the patch's own error."""
-    bound = select(
-        [
-            {
-                "op": "replace",
-                "path": "/global_settings/ignore_paths/1/reason",
-                "value": "x",
-            }
-        ]
-    )
+    both ways: a patch that applies binds the profile, a test op whose value the
+    profile does not hold is refused with the patch's own error. Both aim at
+    /project_name, which the profile allows and the always-denied paths do not
+    cover (ignore_paths is always denied, so a write there is refused whatever
+    the profile allows)."""
+    bound = select([{"op": "replace", "path": "/project_name", "value": "x"}])
     assert _is_a_patch_answer(bound), "a patch that applies is not bound"
     assert bound["success"] is True
 
-    refused = select(
-        [{"op": "test", "path": "/global_settings/ignore_paths/9/path", "value": "x"}]
-    )
+    refused = select([{"op": "test", "path": "/project_name", "value": "x"}])
     assert _is_a_patch_answer(refused), "a refused patch is not answered as one"
     assert refused["success"] is False
     assert "patch apply failed" in refused["error"]
