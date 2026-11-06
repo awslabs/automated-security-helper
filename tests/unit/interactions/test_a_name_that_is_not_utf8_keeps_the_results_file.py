@@ -193,6 +193,13 @@ def _scan(
         "utf-8", "backslashreplace"
     )
     started = starts.read_text(encoding="utf-8").splitlines() if starts.exists() else []
+    # On Windows, Python's platform module probes the OS version by running
+    # ``cmd /c ver`` inside the child (logged as '... /c "ver"', '... /c "cmd /c
+    # ver"' or '... /c "command /c ver"'). That start is the interpreter's own,
+    # not a program ASH started for the scan.
+    started = [
+        line for line in started if "/c ver" not in line and '/c "ver"' not in line
+    ]
     return child.returncode, said, output, started
 
 

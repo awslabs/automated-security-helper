@@ -346,7 +346,9 @@ class TestTheScanInsideAppliesTheSameLimits:
         (honor,) = [
             message
             for message in messages
-            if "Ignoring honor_ignore_files from" in message and str(mounted) in message
+            # The warning names the file in forward slashes on every platform.
+            if "Ignoring honor_ignore_files from" in message
+            and mounted.as_posix() in message
         ]
         assert "someone other than the operator may have written it" in honor
         assert "MCP client" not in honor
