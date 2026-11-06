@@ -1432,7 +1432,8 @@ def _argv_text(argv: Sequence[Any]) -> str:
     after the plan had made its temporary directories and the writable-root
     registrations above, which nothing then released. A bytes argument is decoded
     like a path (``os.fsdecode``), not shown by its ``str``: that prints the
-    escaped bytes (``b'--token=s\\xc3\\xa9cret'``), which a redaction of the value
+    escaped bytes (a ``b'...'`` literal with ``\\xc3\\xa9`` escapes for a
+    non-ASCII letter in an option value), which a redaction of the value
     by its text never matches and anyone can decode. Quoted (``shlex.join``) so
     an argument holding a blank stays one argument in the record.
     """
