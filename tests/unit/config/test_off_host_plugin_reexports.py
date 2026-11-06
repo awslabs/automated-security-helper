@@ -50,23 +50,49 @@ ASH_REPORTERS = [S3Reporter]
 
 SUBCLASS_PACKAGE = "subclass_ash_plugins"
 
+# Each subclass has a config class of its own with its own name, as the
+# plugins page says a subclass beside its base needs: a subclass that kept its
+# base's config would have the very same name as the base, and a scan that
+# selects both (this package binds the base in its namespace) refuses the pair
+# (PluginNameClashError) before the off-host check drops or keeps either.
 _SUBCLASS_SOURCE = f"""
+from typing import Literal
+
 from automated_security_helper.plugins.decorators import (
     ash_reporter_plugin,
     ash_scanner_plugin,
 )
-from {SNYK}.snyk_code_scanner import SnykCodeScanner
-from {AWS}.s3_reporter import S3Reporter
+from {SNYK}.snyk_code_scanner import SnykCodeScanner, SnykCodeScannerConfig
+from {AWS}.s3_reporter import S3Reporter, S3ReporterConfig
+
+
+class DerivedSnykConfig(SnykCodeScannerConfig):
+    name: Literal["derived-snyk"] = "derived-snyk"
 
 
 @ash_scanner_plugin
 class DerivedSnykScanner(SnykCodeScanner):
-    pass
+    config: DerivedSnykConfig | None = None
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = DerivedSnykConfig()
+        super().model_post_init(context)
+
+
+class DerivedS3Config(S3ReporterConfig):
+    name: Literal["derived-s3"] = "derived-s3"
+    extension: str = "derived-s3.json"
 
 
 @ash_reporter_plugin
 class DerivedS3Reporter(S3Reporter):
-    pass
+    config: DerivedS3Config | None = None
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = DerivedS3Config()
+        super().model_post_init(context)
 
 
 ASH_SCANNERS = [DerivedSnykScanner]
