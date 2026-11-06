@@ -194,7 +194,11 @@ def test_a_sandbox_stat_that_fails_warns_and_the_scan_runs_unregistered(
     warned = _stat_warnings(ash_log)
     assert len(warned) == 1, warned
     assert "session 'stat-refused'" in warned[0], warned[0]
-    assert f"errno {errno.ESTALE} ESTALE" in warned[0], warned[0]
+    # The name errno gives the code on this platform: Windows numbers ESTALE 10070
+    # and names it WSAESTALE.
+    assert f"errno {errno.ESTALE} {errno.errorcode[errno.ESTALE]}" in warned[0], warned[
+        0
+    ]
     assert "FAKE-sandbox" in warned[0], warned[0]
     assert "the scan runs unregistered" in warned[0], warned[0]
     assert _scan_warnings(ash_log) == [], "the stat failure used the lock text"
