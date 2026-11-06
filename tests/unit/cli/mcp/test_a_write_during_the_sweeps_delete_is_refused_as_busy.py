@@ -1,19 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A profile bound while the sweep deletes a stale session's tree is admitted and kept.
+"""A profile bound while the sweep deletes a stale session's tree is refused as busy.
 
-The TTL sweep renames a stale workspace aside and forgets the session under the
-presence guard (``_set_session_state_aside``), then releases the guard and
-deletes the renamed tree (``_remove_set_aside_tree``). From the rename on, the
-session's path is free and its registry entry is gone, so a request for the
-same id that lands during the delete is not refused as busy: it builds a fresh
-workspace at the session's path, which the delete of the hidden-named tree does
-not touch, and keeps it. Held through the whole delete, as the guard was before
-the two steps were split, the delete ran with the lock held and every other
-server's registration waited on it; this pins the window the split opened: the
-lock is free during the delete, the binding is admitted, and its file survives
-the sweep.
+The TTL sweep renames a stale workspace aside under the presence guard
+(``_set_session_state_aside``), then releases the guard and deletes the renamed
+tree (``_remove_set_aside_tree``). The session reads busy through the whole
+removal: from the start of the sweep's hold until the delete of the set-aside
+tree is done, a write for the session is refused ``session_workspace_busy``.
+The registry entry that carries the hold is forgotten only when the delete is
+done, so a request that lands during the delete does not build a fresh
+workspace at the freed path.
+
+The presence lock stays free during the delete (the other servers' registrations
+do not wait out an rmtree); only this session's writes are held. A write after
+the sweep has returned is admitted into a fresh workspace.
 """
 
 from __future__ import annotations
@@ -72,13 +73,17 @@ def _stale_workspace(root: Path) -> Path:
     return sandbox
 
 
-def test_a_profile_bound_during_the_delete_is_admitted_and_kept(
-    root: Path, monkeypatch, tmp_path
-) -> None:
-    sandbox = _stale_workspace(root)
+def _register_strict(tmp_path: Path) -> None:
     profile = tmp_path / "strict.yaml"
     profile.write_text(yaml.safe_dump({"project_name": "strict"}), encoding="utf-8")
     set_profile_registry(register_profiles([f"strict={profile}"]))
+
+
+def test_a_profile_bound_during_the_delete_is_refused_as_busy(
+    root: Path, monkeypatch, tmp_path
+) -> None:
+    sandbox = _stale_workspace(root)
+    _register_strict(tmp_path)
 
     entered, release = threading.Event(), threading.Event()
     seen: Dict[str, Any] = {"deleted": [], "lock_free": []}
@@ -103,23 +108,61 @@ def test_a_profile_bound_during_the_delete_is_admitted_and_kept(
     sweeper.start()
     try:
         assert entered.wait(30), "control: the sweep never reached the delete"
-        bound = mcp_select_profile("strict", session_id=STALE)
+        refused = mcp_select_profile("strict", session_id=STALE)
+        # No fresh workspace was built at the freed path by the refused write.
+        built_during_delete = sandbox.exists()
     finally:
         release.set()
         sweeper.join(30)
     assert not sweeper.is_alive(), "the sweep did not finish"
 
     # The sweep removed the stale session, deleting the renamed tree with the
-    # presence lock free (the window the split opened).
+    # presence lock free (the other servers do not wait out the delete).
     assert removed["ids"] == [STALE], removed
     assert seen["lock_free"] == [True], seen
     (deleted,) = seen["deleted"]
     assert deleted != sandbox and deleted.name.startswith("."), deleted
-    # The binding that landed during the delete was admitted, not refused as
-    # busy: the old session was forgotten under the guard, so the request is a
-    # fresh session at the freed path.
+    # The write that landed during the delete was refused as busy, and it
+    # created nothing at the session's freed path.
+    assert refused["success"] is False, refused
+    assert refused["error_type"] == sessions.SESSION_WORKSPACE_BUSY, refused
+    assert built_during_delete is False, "a refused write built a workspace"
+    assert not sandbox.exists(), "the sweep left a workspace at the session's path"
+
+
+def test_a_profile_bound_after_the_sweep_returns_is_admitted_fresh(
+    root: Path, tmp_path
+) -> None:
+    """The control: the hold ends with the delete, not before and not after."""
+    sandbox = _stale_workspace(root)
+    _register_strict(tmp_path)
+
+    assert sessions.sweep_stale_workspaces(1.0) == [STALE]
+    assert not sandbox.exists()
+
+    bound = mcp_select_profile("strict", session_id=STALE)
+
     assert bound["success"] is True, bound
     config_path = Path(bound["config_path"])
-    assert config_path.is_file(), "the binding's file was removed with the stale tree"
+    assert config_path.is_file()
     assert sandbox in config_path.parents, (config_path, sandbox)
+
+
+def test_a_delete_that_fails_does_not_leave_the_session_busy(
+    root: Path, monkeypatch, tmp_path
+) -> None:
+    """The hold is released in a finally: a delete that raises frees the session."""
+    sandbox = _stale_workspace(root)
+    _register_strict(tmp_path)
+
+    def a_delete_that_raises(path: Path) -> bool:
+        raise OSError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(sd, "_remove_tree", a_delete_that_raises)
+    sessions.sweep_stale_workspaces(1.0)
+    monkeypatch.undo()
+
+    bound = mcp_select_profile("strict", session_id=STALE)
+
+    assert bound["success"] is True, bound
     assert sandbox.is_dir()
