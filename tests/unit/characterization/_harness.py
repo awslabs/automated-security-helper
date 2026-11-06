@@ -2209,6 +2209,14 @@ def _refuse_descriptor_change(event: str, fd: int) -> None:
     may have been opened read-only, so the file it names is checked now."""
     target = _fd_path(fd)
     if target is None:
+        # macOS has no /proc, and F_GETPATH names only a descriptor of a file or a
+        # directory: a pipe or a socket names no file, so there is nothing to confine.
+        try:
+            mode = os.fstat(fd).st_mode
+        except OSError:
+            mode = 0
+        if _stat.S_ISFIFO(mode) or _stat.S_ISSOCK(mode):
+            return
         raise _GUARDS.violation(
             f"{event} on descriptor {fd}, whose file the harness cannot resolve"
         )
@@ -4724,11 +4732,11 @@ class Harness:
         never by where it points (a link is recorded as a link, see ``_entry``). The
         links are followed with the real ``lstat`` (``_real_path``), so a link into a
         host directory takes no probe."""
-        text = _argv_landing(os.fspath(path))
+        text = self._real_spelling(_argv_landing(os.fspath(path)))
         if not os.path.isabs(text):
             return False
         path = Path(text)
-        if not path.is_relative_to(self.tmp):
+        if not path.is_relative_to(os.path.realpath(self.tmp)):
             return False
         if _real_islink(text):
             parent = _real_path(os.path.dirname(text))
@@ -4736,9 +4744,27 @@ class Harness:
                 return False
         elif not self._confined(text):
             return False
-        if path.is_relative_to(self.src):
-            return self._source_changed(path)
-        return text not in self._fixture_paths and text not in self.stand_ins
+        # The harness's own records (fixture files, stand-ins, the source state) are
+        # keyed on the tmp path as written, which a symlinked tmp root (macOS's
+        # /var -> /private/var) spells differently from the resolved name above.
+        written = self._written_spelling(text)
+        if Path(written).is_relative_to(self.src):
+            return self._source_changed(Path(written))
+        return written not in self._fixture_paths and written not in self.stand_ins
+
+    def _real_spelling(self, text: str) -> str:
+        """``text`` with the tmp path as written replaced by its resolved name."""
+        written, real = str(self.tmp), os.path.realpath(self.tmp)
+        if text == written or text.startswith(written + os.sep):
+            return real + text[len(written) :]
+        return text
+
+    def _written_spelling(self, text: str) -> str:
+        """``text`` with the resolved tmp name replaced by the path as written."""
+        written, real = str(self.tmp), os.path.realpath(self.tmp)
+        if text == real or text.startswith(real + os.sep):
+            return written + text[len(real) :]
+        return text
 
     def _capture_argv_files(
         self, argv: List[str], cwd: Optional[str]
@@ -4756,7 +4782,7 @@ class Harness:
                     if cwd is None:
                         continue
                     path = Path(cwd) / path
-                path = Path(_argv_landing(str(path)))
+                path = Path(self._real_spelling(_argv_landing(str(path))))
                 try:
                     # _captured first: it reads no file and probes nothing the guards
                     # watch (it follows a link with the real lstat), so a host path in
