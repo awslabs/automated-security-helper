@@ -7691,12 +7691,19 @@ if control["terminal"]:
 
 
 def interrupt():
-    for watched, ready in control["waits"]:
+    for number, (watched, ready) in enumerate(control["waits"]):
         watched = Path(watched)
         while ready not in (
             watched.read_text("utf-8", "replace") if watched.is_file() else ""
         ):
             time.sleep(0.05)
+        if number and control.get("console_file"):
+            # The stand-in logs a console Ctrl-C as soon as it reads the console
+            # file, which is before ASH's main thread has handled the first one
+            # (a slow Windows runner). A second Ctrl-C raised then lands in the
+            # unwinding, before the wait that kills the child, so it never ran.
+            # An operator's second press is never within that window.
+            time.sleep(0.5)
         print({sent!r}, time.monotonic(), file=sys.stderr, flush=True)
         if control.get("console_file"):
             with open(control["console_file"], "a", encoding="utf-8") as console_file:
