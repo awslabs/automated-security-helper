@@ -112,7 +112,9 @@ class BlockResult:
             return True
         if self.expected == "nonzero":
             # 126 and 127: the command could not run at all, which is a broken
-            # example, not the failure the block is meant to show.
+            # example, not the failure the block is meant to show. macOS
+            # /bin/bash 3.2 exits 1 for a non-executable file, so there the
+            # guard is weaker by the shell, not by this runner.
             return self.exit_code not in (0, *COULD_NOT_RUN)
         return self.exit_code == int(self.expected)
 
