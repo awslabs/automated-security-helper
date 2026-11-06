@@ -338,7 +338,9 @@ def test_the_recorder_records_a_path_like_start(tmp_path):
 
     assert "REFUSED" in done.stdout, (done.stdout, done.stderr)
     assert log.is_file(), done.stderr
-    assert "/bin/true" in log.read_text(encoding="utf-8")
+    # The path-like as the platform spells it: a POSIX path on POSIX, backslashes
+    # on Windows, where Path('/bin/true') is '\\bin\\true'.
+    assert str(Path("/bin/true")) in log.read_text(encoding="utf-8")
 
 
 @pytest.mark.integration
