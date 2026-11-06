@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -4498,7 +4499,11 @@ def test_in_a_checkout_reads_the_name_and_the_target(tmp_path, layout, inside):
         # to a directory is refused at traversal, which would break the
         # resolve below and the walk under test; POSIX ignores the argument.
         (checkout / "lnk").symlink_to(outside / "sub", target_is_directory=True)
-        assert path.resolve() == (outside / "file.yaml").resolve()
+        # POSIX steps up from where the link leads (outside/file.yaml); Windows
+        # removes the ".." before it looks at any link (ntpath.realpath), so the
+        # name opens checkout/file.yaml, which is in the checkout by where it is.
+        reached = checkout if os.name == "nt" else outside
+        assert path.resolve() == (reached / "file.yaml").resolve()
 
     assert in_a_checkout(path) is inside
 
