@@ -301,6 +301,23 @@ def _isolate_tool_lookup(monkeypatch, tools: _Tools, home: Path, *, online: bool
     # ``uv.bat``, so the real uv.exe beside this interpreter answered, ran in the
     # test's HOME and left its cache there. Only the stand-ins' directory is searched.
     monkeypatch.setattr(subprocess_utils, "own_environment_dirs", list)
+
+    # On Windows the project venv's Scripts directory outranks the stand-ins on
+    # PATH, and a probe there read ``find_uv_or_none()`` and
+    # ``UVToolRunner().uv_executable`` both as ``.venv\Scripts\uv.exe``: the real
+    # uv verified and installed during these tests and left its cache in HOME. So
+    # the resolver itself answers with the stand-in's launcher, the one file the
+    # directory holds for uv, or None once a test has taken the stand-in away.
+    # ``UVToolRunner.uv_executable`` and the pre-installed check both ask this
+    # function, so no other uv can be reached.
+    def stand_in_uv() -> str | None:
+        for candidate in ("uv.bat", "uv"):
+            path = tools.bin / candidate
+            if path.is_file():
+                return str(path)
+        return None
+
+    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", stand_in_uv)
     _give_launchers_an_interpreter(monkeypatch, tools)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv(TOKEN_VARIABLE, "token-value")
