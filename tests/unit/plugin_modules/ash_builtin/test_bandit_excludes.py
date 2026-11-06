@@ -61,6 +61,22 @@ def _popen_argument(name, rest, kwargs, default=None):
     return rest[position] if len(rest) > position else default
 
 
+def _git_ash_starts():
+    """The git file ASH's own lookup resolves ``git`` to, normalized as ``real_git``
+    is, or ``real_git()`` where the lookup finds none.
+
+    ASH starts git by the path ``find_executable`` returns, which is not always the
+    file ``shutil.which`` finds first: on the Windows runners ASH started
+    ``...\\Git\\<dir>\\bin\\git.exe`` while ``real_git`` named another file of the same
+    install, so ASH's own git was refused. Every other git, a link named git
+    included, is still refused (``test_nothing_else_runs_under_gits_name``).
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    found = find_executable("git")
+    return os.path.normcase(os.path.realpath(found)) if found else real_git()
+
+
 @pytest.fixture(autouse=True)
 def _no_tool_runs(monkeypatch, request):
     """Building a scanner here must not start a tool.
@@ -101,7 +117,7 @@ def _no_tool_runs(monkeypatch, request):
             monkeypatch.setattr(module, "tracked_files_in", lambda directory: None)
     started = []
     real_init = subprocess.Popen.__init__
-    git = real_git()
+    git = _git_ash_starts()
 
     def refuse(popen, args, *rest, **kwargs):
         if in_a_checkout and popen_runs_only_git(

@@ -2006,9 +2006,15 @@ def test_stdlib_network_clients_are_refused(char):
     assert char.take_violations()
 
 
-def test_third_party_http_clients_are_refused(char):
+def test_third_party_http_clients_are_refused(char, monkeypatch):
     # Imported at collection, so urllib3's IPv6 probe ran there: what is refused
     # here is the request.
+    # botocore asks urllib whether to bypass a proxy for the endpoint when the client
+    # is made. With no proxy variable set, Python 3.10 on macOS reads the system
+    # proxy settings and resolves the endpoint's name, a lookup this test would
+    # refuse before it reaches the request. An exemption list for the endpoint keeps
+    # that question in the environment, where it makes no lookup.
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
     with pytest.raises(LaunchViolation):
         urllib3.PoolManager(retries=False).request(
             "GET", "http://127.0.0.1:9/", timeout=2
