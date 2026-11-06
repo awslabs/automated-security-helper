@@ -26,6 +26,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.operator_only_options import reporter_section
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.config.sandbox_grants import scanned_trees
+from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
 from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
     SecurityHubReporter,
 )
@@ -812,16 +813,21 @@ def test_a_vanished_client_path_leaves_the_operator_chain_the_operator_s(
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     _delete_cwd(tmp_path, monkeypatch)
 
-    config = resolve_config(
-        config_path=str(tmp_path / "nope" / "missing.yaml"),
-        untrusted_config=True,
-        fallback_to_default=True,
-    )
+    # A named path that is not there is refused by name, whatever the fallback
+    # flag says (resolve_config: every stat problem is refused as the problem
+    # it is, a missing file included): the fallback never answers it, so no
+    # chain is loaded for it and the ASH_CONFIG checkout file's module entry is
+    # never reached.
+    missing = tmp_path / "nope" / "missing.yaml"
+    with pytest.raises(ASHConfigFileNotFoundError) as refused:
+        resolve_config(
+            config_path=str(missing),
+            untrusted_config=True,
+            fallback_to_default=True,
+        )
 
-    assert config.project_name == "env"
-    assert "zz_vanish_mod_ash_plugins" not in (config.ash_plugin_modules or []), (
-        config.ash_plugin_modules
-    )
+    assert str(refused.value).startswith("Configuration file not found: "), refused
+    assert missing.as_posix() in str(refused.value), refused
 
 
 def test_the_any_checkout_arm_judges_a_location_by_its_checkout(tmp_path, monkeypatch):
@@ -1053,16 +1059,18 @@ def test_an_installed_module_outside_every_checkout_is_kept_on_the_fallback(
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     _delete_cwd(tmp_path, monkeypatch)
 
-    config = resolve_config(
-        config_path=str(tmp_path / "nope" / "missing.yaml"),
-        untrusted_config=True,
-        fallback_to_default=True,
-    )
+    # The same current contract as the cell above: a named path that is not
+    # there is refused by name and the fallback does not answer it.
+    missing = tmp_path / "nope" / "missing.yaml"
+    with pytest.raises(ASHConfigFileNotFoundError) as refused:
+        resolve_config(
+            config_path=str(missing),
+            untrusted_config=True,
+            fallback_to_default=True,
+        )
 
-    kept = config.ash_plugin_modules or []
-    assert config.project_name == "env"
-    assert "zz9_outside_mod_ash_plugins" in kept, kept
-    assert "zz9_inside_mod_ash_plugins" not in kept, kept
+    assert str(refused.value).startswith("Configuration file not found: "), refused
+    assert missing.as_posix() in str(refused.value), refused
 
 
 def test_a_given_root_judges_client_modules_as_a_scan_of_it_would(

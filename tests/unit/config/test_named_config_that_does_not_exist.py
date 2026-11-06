@@ -64,7 +64,12 @@ def test_a_name_with_a_newline_is_shown_on_one_line(tmp_path):
     with pytest.raises(ASHConfigFileNotFoundError) as refusal:
         refuse_a_named_config_that_does_not_exist(str(tmp_path / "a\nmissing.yaml"))
 
-    message = str(refusal.value)
+    # The refusal carries the name as written (describe_config_path leaves
+    # escaping to the sink, so a path is not shown escaped twice); the sink
+    # every message goes through writes the newline as an escape.
+    from automated_security_helper.utils.terminal_text import shown_on_one_line
+
+    message = str(shown_on_one_line(str(refusal.value)))
     assert "\n" not in message, message
     assert "missing.yaml" in message, message
 
