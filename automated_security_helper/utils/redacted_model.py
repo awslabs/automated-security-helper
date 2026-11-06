@@ -2685,7 +2685,7 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
         if isinstance(node, tuple):
             if hasattr(value_class, "_fields"):  # a NamedTuple class
                 # The class is only the receiver of the call, never an argument.
-                return value_class._make(entries)  # type: ignore[attr-defined, union-attr]
+                return value_class._make(entries)  # type: ignore[union-attr]
             if value_class is tuple:
                 return tuple(entries)
             try:

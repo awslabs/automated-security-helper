@@ -1097,7 +1097,7 @@ def _strings_shown(value: Any, _on_path: Optional[set[int]] = None) -> Any:
                 return items
         if hasattr(type(value), "_make"):
             # The class is only the receiver of the call, never an argument.
-            return type(value)._make(items)  # type: ignore[attr-defined, union-attr]
+            return type(value)._make(items)  # type: ignore[union-attr]
         try:
             return type(value)(items)
         except TypeError:

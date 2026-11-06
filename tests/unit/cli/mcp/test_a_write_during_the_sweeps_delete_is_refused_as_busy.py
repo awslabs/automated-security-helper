@@ -151,7 +151,11 @@ def test_a_profile_bound_after_the_sweep_returns_is_admitted_fresh(
 def test_a_delete_that_fails_does_not_leave_the_session_busy(
     root: Path, monkeypatch, tmp_path
 ) -> None:
-    """The hold is released in a finally: a delete that raises frees the session."""
+    """The hold is released in a finally: a delete that raises frees the session.
+
+    The sweep renames the workspace aside before it deletes, so a failed delete
+    leaves the aside tree for the next pass, never the session busy.
+    """
     sandbox = _stale_workspace(root)
     _register_strict(tmp_path)
 
@@ -165,4 +169,5 @@ def test_a_delete_that_fails_does_not_leave_the_session_busy(
     bound = mcp_select_profile("strict", session_id=STALE)
 
     assert bound["success"] is True, bound
-    assert sandbox.is_dir()
+    assert not sandbox.exists()
+    assert len(list(sandbox.parent.glob(f".{STALE}.deleting-*"))) == 1
