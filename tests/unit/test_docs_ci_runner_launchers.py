@@ -53,6 +53,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import pytest
 import yaml
 
+from tests.utils.helpers import checkout_env
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
 PACKAGE = "_ash_ci_runners"
@@ -1864,7 +1866,7 @@ def _collect(path: Path, *flags: str) -> subprocess.CompletedProcess:
         text=True,
         timeout=300,
         check=False,
-        env=_not_a_hosted_runner(),
+        env=checkout_env(_not_a_hosted_runner()),
     )
 
 

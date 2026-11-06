@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 pytestmark = [
@@ -139,7 +140,7 @@ def scan(tree: Path, tools: dict, *extra: str, env_extra=None) -> str:
             sys.executable,
             "-I",
             "-c",
-            DRIVER,
+            importing_this_checkout(DRIVER),
             "--source-dir",
             str(tree),
             "--output-dir",

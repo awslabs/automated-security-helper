@@ -40,6 +40,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import checkout_env
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
 PACKAGE = "_ash_ci_runners"
@@ -448,8 +450,10 @@ def _collect(*flags: str) -> subprocess.CompletedProcess:
         timeout=300,
         check=False,
         # As a host the runs refuse, so a host check at collection fails this test.
-        env={k: v for k, v in os.environ.items() if k not in HOSTED and k != "ACT"}
-        | {"DOCTEST_CI_RUNNERS_ANYWHERE": "0"},
+        env=checkout_env(
+            {k: v for k, v in os.environ.items() if k not in HOSTED and k != "ACT"}
+            | {"DOCTEST_CI_RUNNERS_ANYWHERE": "0"}
+        ),
     )
 
 
