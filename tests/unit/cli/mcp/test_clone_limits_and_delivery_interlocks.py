@@ -571,6 +571,26 @@ def test_a_subtree_the_live_poll_cannot_read_stops_the_command(
     )
     pid = int(pidfile.read_text())
     for _ in range(200):
+        if os.name == "nt":
+            # os.kill(pid, 0) is no liveness probe on Windows: it terminates a
+            # live process with exit code 0, and raises OSError (WinError 87)
+            # for one that is already gone. Ask for the exit code instead; 259
+            # is STILL_ACTIVE.
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                break
+            try:
+                status = ctypes.c_ulong()
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(status))
+            finally:
+                kernel32.CloseHandle(handle)
+            if status.value != 259:
+                break
+            time.sleep(0.05)
+            continue
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
