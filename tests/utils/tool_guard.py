@@ -1517,6 +1517,73 @@ def _hold_to_the_home_rule(
 _THIS_INTERPRETER = [sys.executable]
 
 
+def _split_windows_command_line(text: str) -> list[str]:
+    """The arguments of a Windows command line, split as the C runtime splits it.
+
+    ``subprocess.Popen`` on Windows turns an argument list into a line with
+    ``list2cmdline`` before it raises its audit event, so a start arrives here as a
+    string, not as the list it was made from. The first word is the program: quoted
+    or up to the first blank, with no escapes. After it, a run of backslashes before
+    a double quote is halved and the quote is an argument character when the run is
+    odd, else it opens or closes a quoted stretch; a doubled quote inside one is a
+    quote character; backslashes before anything else are literal.
+    """
+    words: list[str] = []
+    i, n = 0, len(text)
+    while i < n and text[i] in " \t":
+        i += 1
+    if i >= n:
+        return words
+    if text[i] == '"':
+        end = text.find('"', i + 1)
+        end = n if end == -1 else end
+        words.append(text[i + 1 : end])
+        i = end + 1
+    else:
+        end = i
+        while end < n and text[end] not in " \t":
+            end += 1
+        words.append(text[i:end])
+        i = end
+    while True:
+        while i < n and text[i] in " \t":
+            i += 1
+        if i >= n:
+            return words
+        word: list[str] = []
+        quoted = False
+        while i < n:
+            char = text[i]
+            if char == "\\":
+                end = i
+                while end < n and text[end] == "\\":
+                    end += 1
+                run = end - i
+                if end < n and text[end] == '"':
+                    word.append("\\" * (run // 2))
+                    if run % 2:
+                        word.append('"')
+                        i = end + 1
+                    else:
+                        i = end
+                else:
+                    word.append("\\" * run)
+                    i = end
+            elif char == '"':
+                if quoted and i + 1 < n and text[i + 1] == '"':
+                    word.append('"')
+                    i += 2
+                else:
+                    quoted = not quoted
+                    i += 1
+            elif char in " \t" and not quoted:
+                break
+            else:
+                word.append(char)
+                i += 1
+        words.append("".join(word))
+
+
 def _audit(event: str, args: tuple) -> None:
     if event not in _RECORDED_EVENTS:
         return
@@ -1554,6 +1621,10 @@ def _audit(event: str, args: tuple) -> None:
         cwd: object = None
         if event == "subprocess.Popen":
             executable, argv, cwd, env = args[0], args[1], args[2], args[3]
+            if _on_windows() and isinstance(argv, str):
+                # Popen's Windows route joins the list with list2cmdline before it
+                # raises this event, so the guard reads the line as CreateProcess does.
+                argv = _split_windows_command_line(argv) or argv
             if executable is not None:
                 program = executable
             elif isinstance(argv, (list, tuple)) and argv:
