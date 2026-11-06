@@ -102,11 +102,14 @@ def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     stand_in = _STAND_IN.format(python=sys.executable, record=str(record))
     if sys.platform == "win32":
         # CreateProcess starts no shebang script. ASH looks for snyk.exe, snyk.bat
-        # and snyk.cmd before the bare name, so the program is a .cmd that runs the
-        # same script (its shebang line is only a comment to Python).
+        # and snyk.cmd before the bare name, so the program is a .bat that runs the
+        # same script (its shebang line is only a comment to Python). It is a .bat,
+        # not a .cmd, because the lookup tries each candidate name across the whole
+        # PATH in turn: the tool guard's own snyk.bat further along PATH would be
+        # found before a snyk.cmd here, and its stand-in would run in this one's place.
         script = binary.parent / "snyk_stand_in.py"
         script.write_text(stand_in, encoding="utf-8")
-        binary.parent.joinpath("snyk.cmd").write_text(
+        binary.parent.joinpath("snyk.bat").write_text(
             f'@"{sys.executable}" -I "{script}" %*\r\n', encoding="utf-8"
         )
     else:
@@ -114,8 +117,8 @@ def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         binary.chmod(0o755)
     monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
     # On Windows the unit tool guard makes "snyk" resolve to its own snyk.bat
-    # alone, so this directory's snyk.cmd was never found and the guard's
-    # stand-in ran in its place. The program here is this test's own.
+    # alone; with the lookup's own names back, this directory's snyk.bat comes
+    # first on PATH and is the one found. The program here is this test's own.
     use_the_real_candidate_names(monkeypatch)
     monkeypatch.setenv("SNYK_TOKEN", "placeholder-token")
     monkeypatch.delenv("ASH_OFFLINE", raising=False)

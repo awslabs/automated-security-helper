@@ -190,9 +190,18 @@ def test_a_scan_into_a_pipe_rich_takes_for_a_terminal_finishes(tmp_path, extra):
 
     assert code in (0, 2), (code, written[-3000:])
     assert any((output / "reports").iterdir()), written[-3000:]
-    # Rich took the pipe for a terminal: the live display hid the cursor. Without
-    # this, a change that turned progress off off a terminal would pass here.
-    assert "\x1b[?25l" in written, written[-3000:]
+    # Rich took the pipe for a terminal: the live display ran. Without this, a change
+    # that turned progress off off a terminal would pass here.
+    if sys.platform == "win32":
+        # Platform contract: Rich decides a Windows stream with no console handle is a
+        # legacy Windows terminal (it draws square boxes there) and drives the cursor
+        # through the Win32 console API, which a pipe has none of, so no ANSI
+        # hide-cursor sequence is ever written. What shows the live layout ran is
+        # the two panels only it builds (core/progress.py).
+        assert "Log Messages" in written, written[-3000:]
+        assert "ASH Security Scan Progress" in written, written[-3000:]
+    else:
+        assert "\x1b[?25l" in written, written[-3000:]
 
 
 def test_a_scan_with_the_inspect_phase_finishes(tmp_path):
