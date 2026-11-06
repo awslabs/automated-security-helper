@@ -12,10 +12,11 @@ read by them.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+
+from tests.utils.env_assertions import environ_names
 
 pytestmark = pytest.mark.unit
 
@@ -30,8 +31,8 @@ def runner_variables(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_runners_variables_are_not_set_for_the_test(
     runner_variables, own_environment
 ):
-    assert "ASH_CONFIG" not in os.environ
-    assert "ASH_OUTPUT_DIR" not in os.environ
+    assert "ASH_CONFIG" not in environ_names()
+    assert "ASH_OUTPUT_DIR" not in environ_names()
 
 
 def test_the_working_directory_is_the_tests_own(

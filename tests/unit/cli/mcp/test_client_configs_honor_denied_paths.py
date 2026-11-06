@@ -1649,6 +1649,7 @@ def test_a_waiting_workspace_scan_sets_offline_only_once_it_holds_the_lock(
 
     from automated_security_helper.cli.mcp import workspace as workspace_module
     from automated_security_helper.cli.mcp.sessions import get_default_registry
+    from tests.utils.env_assertions import environ_names
 
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     seen: List[Any] = []
@@ -1667,12 +1668,12 @@ def test_a_waiting_workspace_scan_sets_offline_only_once_it_holds_the_lock(
     try:
         worker.join(timeout=0.5)
         assert worker.is_alive(), "the workspace scan did not wait for the lock"
-        assert "ASH_OFFLINE" not in os.environ
+        assert "ASH_OFFLINE" not in environ_names()
     finally:
         lock.release()
     worker.join(timeout=10)
     assert seen == ["YES"]
-    assert "ASH_OFFLINE" not in os.environ
+    assert "ASH_OFFLINE" not in environ_names()
 
 
 # ---------------------------------------------------------------------------

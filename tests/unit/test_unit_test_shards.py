@@ -94,6 +94,7 @@ from tests.utils.ci_tiers import (
     POOLS,
     UNIT_TEST_JOB_IDS,
 )
+from tests.utils.env_assertions import environ_names
 from tests.utils.helpers import iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -2034,7 +2035,7 @@ class TestATierRunThatExecutedNoTestFails:
         assert "0 (off)" in message, message
         assert "\n" not in message, "a one-line message"
         assert manager.get_plugin("ash-tier-run-outcome") is None
-        assert sharding.FLOOR_ENV_VAR not in os.environ
+        assert sharding.FLOOR_ENV_VAR not in environ_names()
 
     def test_an_empty_value_leaves_the_floor_off(self, monkeypatch):
         """An empty value is the same as no value."""
@@ -2060,7 +2061,7 @@ class TestATierRunThatExecutedNoTestFails:
         assert manager.get_plugin("ash-tier-run-outcome") is None
         assert config.stash[sharding._FLOOR_KEY] is False
         assert config.stash[sharding._FLOOR_WARN_KEY] is False
-        assert sharding.FLOOR_ENV_VAR not in os.environ
+        assert sharding.FLOOR_ENV_VAR not in environ_names()
 
     def test_the_value_warn_opts_a_run_in_as_a_report_only_floor(self, monkeypatch):
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
@@ -2071,7 +2072,7 @@ class TestATierRunThatExecutedNoTestFails:
         assert manager.get_plugin("ash-tier-run-outcome") is not None
         assert config.stash[sharding._FLOOR_KEY] is True
         assert config.stash[sharding._FLOOR_WARN_KEY] is True
-        assert sharding.FLOOR_ENV_VAR not in os.environ
+        assert sharding.FLOOR_ENV_VAR not in environ_names()
 
     def test_the_value_1_is_the_failing_floor_and_not_the_warning_one(
         self, monkeypatch
@@ -2152,7 +2153,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         monkeypatch.setenv(sharding.ENV_VAR, "2of3")
         config = self._config()
         sharding.configure(config)
-        assert sharding.ENV_VAR not in os.environ
+        assert sharding.ENV_VAR not in environ_names()
         assert config.stash[sharding._SHARD_KEY] == (2, 3)
 
     @pytest.mark.unit
@@ -2189,7 +2190,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         worker = self._config(workerinput=dict(node.workerinput))
         sharding.configure(worker)
         assert worker.stash[sharding._SHARD_KEY] == (2, 3)
-        assert sharding.ENV_VAR not in os.environ
+        assert sharding.ENV_VAR not in environ_names()
 
     @pytest.mark.unit
     def test_configure_removes_the_floor_opt_in_from_the_environment(self, monkeypatch):
@@ -2198,7 +2199,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "1")
         config = self._config()
         sharding.configure(config)
-        assert sharding.FLOOR_ENV_VAR not in os.environ
+        assert sharding.FLOOR_ENV_VAR not in environ_names()
         assert config.stash[sharding._FLOOR_KEY] is True
 
     @pytest.mark.unit
@@ -2219,7 +2220,7 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         sharding.configure(worker)
         assert worker.stash[sharding._FLOOR_KEY] is True
         assert sharding.is_ci_tier_run(worker) is True
-        assert sharding.FLOOR_ENV_VAR not in os.environ
+        assert sharding.FLOOR_ENV_VAR not in environ_names()
 
     @pytest.mark.unit
     def test_a_malformed_setting_is_a_usage_error(self, monkeypatch):
@@ -2363,7 +2364,8 @@ class TestTheActionRunsATier:
         run = str(step["run"])
         assert "--cov-fail-under" not in run
         assert "--cov=automated_security_helper" in run
-        assert "COVERAGE_FILE" not in step["env"], (
+        step_env_names = set(step["env"])
+        assert "COVERAGE_FILE" not in step_env_names, (
             "COVERAGE_FILE reaches every process a test starts, and a nested run could "
             "merge its data into the run's"
         )

@@ -21,7 +21,6 @@ Two readings that went wrong before, shared by ``trivy`` and ``trivy-repo``:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -37,6 +36,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfig,
     TrivyRepoScannerConfigOptions,
 )
+from tests.utils.env_assertions import environ_names
 
 pytestmark = pytest.mark.unit
 
@@ -118,7 +118,7 @@ def test_the_host_fixture_clears_trivys_update_settings_a_shell_may_hold(name):
     update-count assertions below read zero where they expect one. The autouse
     fixture has run by now: the setting is named in its list and is gone."""
     assert name in HOST_TRIVY_VARIABLES
-    assert name not in os.environ
+    assert name not in environ_names()
 
 
 # --- the update runs only for a scan that reads the database --------------------

@@ -61,7 +61,7 @@ from automated_security_helper.utils.cdk_nag_wrapper import (
     _normalize_rule_level,
     run_cdk_nag_against_cfn_template,
 )
-from tests.utils.env_assertions import environ_names
+from tests.utils.env_assertions import environ_names, environ_value
 from tests.utils.tool_guard import use_the_real_candidate_names
 
 pytestmark = pytest.mark.unit
@@ -2507,15 +2507,13 @@ def test_jsii_is_given_the_node_ash_resolved(
 ):
     """By absolute path: jsii starts "node" by name otherwise, which Windows looks
     for in the working directory first."""
-    import os
-
     node = _fake_node(tmp_path / "installed" / "bin")
     monkeypatch.setenv("PATH", str(node.parent))
 
     _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
 
     assert jsii_node_during_the_call == [str(node)]
-    assert "JSII_NODE" not in os.environ, "restored after the call"
+    assert "JSII_NODE" not in environ_names(), "restored after the call"
 
 
 def test_an_operators_jsii_node_is_kept(
@@ -3709,7 +3707,7 @@ def test_a_bare_jsii_node_is_resolved_to_the_path_the_check_approved(
 
     assert [command for command, _ in asked] == ["nodejs"]
     assert jsii_node_during_the_call == [str(resolved)]
-    assert os.environ.get("JSII_NODE") == "nodejs", "the operator's value is restored"
+    assert environ_value("JSII_NODE") == "nodejs", "the operator's value is restored"
 
 
 def test_a_bare_jsii_node_found_only_in_the_tree_is_refused(
@@ -3784,7 +3782,7 @@ def test_a_bare_jsii_node_reached_only_through_the_working_directory_is_refused(
     assert asked == ["nodejs"]
     assert str(copy) in str(raised.value)
     assert jsii_node_during_the_call == [], "cdk-nag started anyway"
-    assert os.environ.get("JSII_NODE") == "nodejs", "the operator's value is restored"
+    assert environ_value("JSII_NODE") == "nodejs", "the operator's value is restored"
 
 
 def test_a_bare_jsii_node_with_no_working_directory_copy_is_left_as_set(

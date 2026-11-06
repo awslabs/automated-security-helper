@@ -748,7 +748,8 @@ def test_the_in_tree_tools_variable_stays_in_the_shells_environment(
 
     run_ash_nix.run_ash_nix(argv=ras._nix_inner_argv(opts))
 
-    assert entered_shell["env"].get(ALLOW_IN_TREE_TOOLS_ENV) == "1"
+    allowed_in_tree = entered_shell["env"].get(ALLOW_IN_TREE_TOOLS_ENV)
+    assert allowed_in_tree == "1"
 
 
 @pytest.mark.parametrize(

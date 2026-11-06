@@ -339,6 +339,6 @@ def test_semgreps_own_offline_mode_reaches_the_real_resolvers_probe(
     assert argv[0] == UV_PATH
     assert argv[-4:] == ["--from", spec, "semgrep", "--version"]
     assert ("--offline" in argv) is scanner_offline, argv
-    assert (env.get("UV_OFFLINE") == "1") is scanner_offline, sorted(
-        key for key in env if key.startswith("UV_")
-    )
+    uv_offline_set = env.get("UV_OFFLINE") == "1"
+    uv_names = sorted(key for key in env if key.startswith("UV_"))
+    assert uv_offline_set is scanner_offline, uv_names

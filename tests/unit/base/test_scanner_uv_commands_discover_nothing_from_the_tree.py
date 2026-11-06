@@ -165,4 +165,5 @@ def test_the_overrides_reach_the_spawn_and_keep_the_scanners_own_env(
 
     seen.clear()
     scanner._run_subprocess(["uv", "tool", "run", "bandit"])
-    assert seen["env"] is None
+    passed_no_env = seen["env"] is None
+    assert passed_no_env
