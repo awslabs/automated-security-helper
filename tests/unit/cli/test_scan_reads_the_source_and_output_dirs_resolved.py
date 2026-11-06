@@ -24,6 +24,10 @@ import typer
 
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.interactions.run_ash_scan import (
+    OUTPUT_DIR_REFUSED_EXIT_CODE,
+    OutputDirRefusedExit,
+)
 from automated_security_helper.utils.output_dir_links import (
     OUTPUT_GITIGNORE_TEXT,
     OUTPUT_WORKING_DIRS,
@@ -62,6 +66,22 @@ def _refused(**kwargs) -> int:
     return refused.value.exit_code
 
 
+def _refused_for_a_link(**kwargs) -> OutputDirRefusedExit:
+    """Run the command with run_ash_scan replaced; the link refusal it exited with.
+
+    A link in the output directory is refused with ``OutputDirRefusedExit`` (exit
+    code 3, ``OUTPUT_DIR_REFUSED_EXIT_CODE``), not the ``typer.Exit(2)`` of a
+    usage error: ASH does not write to, clear or mount its output directory
+    through a link, whatever the sandbox mode.
+    """
+    context = MagicMock(resilient_parsing=False, invoked_subcommand=None)
+    with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
+        with pytest.raises(OutputDirRefusedExit) as refused:
+            run_ash_scan_cli_command(context, **kwargs)
+    run.assert_not_called()
+    return refused.value
+
+
 class TestTheCollisionGuardReadsResolvedPaths:
     def test_the_same_directory_spelled_through_dot_dot_is_moved(self):
         run = _scan(source_dir="src", output_dir="src/../src")
@@ -93,7 +113,14 @@ class TestTheCollisionGuardReadsResolvedPaths:
         output directory refusal names the link."""
         (tmp_path / "loop").symlink_to(tmp_path / "loop")
 
-        assert _refused(source_dir="src", output_dir="loop") == ASH_EXIT_USAGE_ERROR
+        refusal = _refused_for_a_link(source_dir="src", output_dir="loop")
+
+        assert refusal.code == OUTPUT_DIR_REFUSED_EXIT_CODE
+        assert refusal.found.endswith("loop is a symlink"), refusal.found
+        assert (
+            "does not write to, clear or mount its output directory through a link"
+            in (refusal.reason)
+        ), refusal.reason
 
 
 class TestASourceDirectoryTheScanWouldClearIsRefused:
@@ -223,7 +250,16 @@ class TestAnOutputDirectoryThatWouldClearTheScannedTreeIsRefused:
         real_log.write_text("2026-10-30 00:12:34,567\tINFO\tscan.py:12\tx \n")
         (docs / "ash.log").symlink_to(real_log)
 
-        assert _refused(source_dir="src", output_dir="src/docs") == ASH_EXIT_USAGE_ERROR
+        # The link at ash.log is an output path ASH would write through, so it is
+        # refused as a link (exit 3), not read as a marker that makes src/docs ASH's.
+        refusal = _refused_for_a_link(source_dir="src", output_dir="src/docs")
+
+        assert refusal.code == OUTPUT_DIR_REFUSED_EXIT_CODE
+        assert refusal.found.endswith("ash.log is a symlink"), refusal.found
+        assert (
+            "does not write to, clear or mount its output directory through a link"
+            in (refusal.reason)
+        ), refusal.reason
 
     @pytest.mark.skipif(
         os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
