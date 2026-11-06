@@ -1107,8 +1107,8 @@ def test_a_signal_handlers_write_during_a_byte_writes_encode_is_checked(monkeypa
     real_safe = css.CommandSafeStream._safe
 
     def safe(self, text, at_line_start):
-        checked, end = real_safe(self, text, at_line_start)
-        return EncodeThatSignals(checked), end
+        checked, end, carry = real_safe(self, text, at_line_start)
+        return EncodeThatSignals(checked), end, carry
 
     monkeypatch.setattr(css.CommandSafeStream, "_safe", safe)
     raw = io.BytesIO()
