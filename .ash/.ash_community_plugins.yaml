@@ -1463,6 +1463,69 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # === Test fixtures the community-plugins legs read as credentials (expires 2027-05-06) ===
+    # Each entry is per file and per rule, with no line range, because the lines move
+    # whenever a test is edited. The tests hold made-up values on purpose, to check
+    # that ASH hides, refuses or confines them. The key is expires, the canonical
+    # spelling (expiration is a deprecated alias, models/core.py); the date is six
+    # months out so the list is reviewed then and an entry whose fixture has been
+    # restructured is dropped.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_a_stateful_session_the_sweep_removes_is_ended.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_sessions_a_session_starts_without_a_workspace_root.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/config/test_sandbox_environment_setting.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/interactions/test_run_ash_nix.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_builtin/converters/test_jupyter_converter_edge_inputs.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_builtin/test_bandit_scanner_behavior.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/utils/sandbox/test_fs_guard_a_refused_pre_check_is_redacted_from_the_executor.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/utils/sandbox/test_scope_probe_cache_and_spawn_record.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_probe_selection_and_report_shapes.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_response_logging.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
     # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-24) ===
     # Same decision as the dnspython entries in .ash/.ash.yaml, restated here because
     # a suppression list is not inherited across config files. uv.lock holds two
