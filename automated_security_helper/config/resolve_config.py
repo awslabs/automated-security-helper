@@ -2334,6 +2334,18 @@ def resolve_config(
                 key = Path(path).resolve()
                 if key in reads:
                     client_documents.setdefault(Path(path), reads[key])
+            # The rules judge a file delivered by every name it was reached by
+            # (by_every_name over ``names``), and this chain carries its names
+            # as one flat list: the file a delivered link points at is judged
+            # by its own path, which is not under the workspace root, unless
+            # the names the chain was reached by (the link ASH_CONFIG names
+            # among them) go with it. Every name counts for every file, from
+            # the safe side, as the membership checks take them (_flat_names).
+            for path, names_for in _flat_names(
+                rules_chain,
+                [*rules_named, *([Path(env_named)] if env_named else [])],
+            ).items():
+                client_names.setdefault(path, names_for)
     config = clear_client_supplied_marks(config)
     config = apply_client_config_rules(
         config,
