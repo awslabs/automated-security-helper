@@ -27,6 +27,7 @@ from automated_security_helper.utils.directory_refusals import (
     REFUSED_CANNOT_BE_CREATED,
     REFUSED_NOT_A_DIRECTORY,
     REFUSED_NOT_A_VALID_PATH,
+    _WINDOWS_INVALID_NAME_ERRORS,
     output_dir_refusal,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -620,8 +621,14 @@ def source_directory_error(
             # An embedded NUL is worded as the CLI words it: a path no stat
             # can take is not a valid path (utils/directory_refusals.py).
             problem = "is not a valid path"
-        elif category is ErrorCategory.FILE_NOT_FOUND:
+        elif category is ErrorCategory.FILE_NOT_FOUND or (
+            # Windows answers a name it cannot hold (a newline, characters a
+            # name may not carry) with a WinError, where POSIX answers ENOENT;
+            # the CLI words both "does not exist" (utils/directory_refusals.py).
+            getattr(error, "winerror", None) in _WINDOWS_INVALID_NAME_ERRORS
+        ):
             problem = "does not exist"
+            category = ErrorCategory.FILE_NOT_FOUND
         else:
             # A name past the limit (invalid_path), or any other refusal.
             problem = "cannot be entered"
