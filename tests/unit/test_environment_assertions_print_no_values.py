@@ -2248,18 +2248,33 @@ def test_a_comparison_with_an_environment_mapping_is_explained_by_names(
     assert gives_notice, "the fallback explanation does not say values are not shown"
 
 
-@dataclasses.dataclass
+def _fields_not_shown(self: object) -> str:
+    """The repr of the carriers below, which hold ``os.environ`` as a field:
+    their type alone, so that no report of a failing cell (an argument or a
+    local, shown whole under ``-vv`` and ``-l``) is built from the field's
+    repr, whatever frames that repr is asked from. A dataclass's generated
+    repr runs in a ``dataclasses`` wrapper frame, which does not read as a
+    formatting layer to env_assertions' check of who asks, so it would give
+    the field's real repr, values included."""
+    return f"{type(self).__name__}(<fields not shown>)"
+
+
+@dataclasses.dataclass(repr=False)
 class _Result:
     env: object
     returncode: int
     stdout: str
     extra: object
 
+    __repr__ = _fields_not_shown
 
-@dataclasses.dataclass
+
+@dataclasses.dataclass(repr=False)
 class _ResultEnvironmentLast:
     returncode: int
     env: object
+
+    __repr__ = _fields_not_shown
 
 
 @pytest.mark.unit
@@ -2324,21 +2339,27 @@ DECIMAL = "ASH_TEST_DECIMAL"
 DIGIT = "ASH_TEST_DIGIT"
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(repr=False)
 class _Read:
     env: object
     other: object
 
+    __repr__ = _fields_not_shown
 
-@dataclasses.dataclass
+
+@dataclasses.dataclass(repr=False)
 class _ReadEnvironmentLast:
     other: object
     env: object
+
+    __repr__ = _fields_not_shown
 
 
 class _ReadCarried(NamedTuple):
     env: object
     other: object
+
+    __repr__ = _fields_not_shown
 
 
 class _Port(int):
