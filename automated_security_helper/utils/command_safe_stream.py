@@ -21,7 +21,11 @@ wraps a stream can use it without utils/console.py, whose import sets up rich's
 global console. utils/console.py builds every console ASH prints through on this
 stream.
 
-Limits: a command form split across two writes is not seen.
+Limits: a "##name[" split across two writes is seen only when the first write
+ends with its "#" or "##name": the "[" that completes it is written ``\\x5b``.
+A "::" split across two writes is not seen. Rich's Windows console render
+(``legacy_windows``) writes each styled run on its own, so a message holding a
+command can reach the stream that way.
 """
 
 from __future__ import annotations
@@ -75,6 +79,13 @@ _LINE_START_PREFIX = re.compile(rf"(:)(?=(?:{_TERMINAL_SEQUENCE})*:)")
 _NAMED_HASH_COMMAND = re.compile(
     rf"(?<!\\)(\\*)#(?=(?:{_TERMINAL_SEQUENCE})*#(?:[A-Za-z]|{_TERMINAL_SEQUENCE})*\[)"
 )
+
+#: A "##name[" in text, for the one that a write boundary splits (``_safe``).
+_NAMED_HASH_COMMAND_FORM = re.compile(r"##[A-Za-z]*\[")
+
+#: What a write may end with that the next write's "[" completes into a command:
+#: a "#", or "##" with the start of a name.
+_TRAILING_HASHES = re.compile(r"#(?:#[A-Za-z]*)?\Z")
 
 #: What a line start's command prefix has its first character written as.
 _LINE_START_ESCAPES = {":": "\\x3a"}
@@ -177,6 +188,10 @@ class CommandSafeStream:
         # Whether everything written since the last line break is whitespace or
         # terminal sequences, so the next text still starts the line.
         self._at_line_start = True
+        # The "#" or "##name" the last checked write ended its line with, so a
+        # "[" that starts the next write completes a command form the two
+        # writes split (see _safe).
+        self._carry = ""
         # One stream is written from several threads, each under a lock of its
         # own or none: sys.stderr's wrap in MCP server mode takes two Rich
         # consoles' writes, logging's lastResort, the warning and except hooks,
@@ -386,13 +401,30 @@ class CommandSafeStream:
     def _safe(self, text: str, at_line_start: bool) -> tuple[str, bool]:
         """*text* with its command forms broken when *at_line_start* starts it,
         and whether the next text starts a line. State goes in and comes out so
-        the caller commits it only once the text has reached the stream."""
+        the caller commits it only once the text has reached the stream.
+
+        The "#" or "##name" a line's last write ended with is kept (``_carry``):
+        Rich's Windows console render writes each styled run of a message on its
+        own, so "##vso" and "[task.setvariable ...]" can arrive in two writes.
+        The "[" that completes such a form is written ``\\x5b``, since the "#"
+        that began it has been written already."""
         pieces = _LINE_BREAK.split(text)
+        carry = self._carry
         for index in range(0, len(pieces), 2):
             if index:
                 at_line_start = True
+                carry = ""
+            piece = pieces[index]
+            if carry:
+                crossing = _NAMED_HASH_COMMAND_FORM.search(carry + piece)
+                if crossing is not None and crossing.start() < len(carry):
+                    at = crossing.end() - 1 - len(carry)
+                    piece = piece[:at] + "\\x5b" + piece[at + 1 :]
             # A "##name[" anywhere, then a "::" that starts the line.
-            piece = _NAMED_HASH_COMMAND.sub(_hash_command_broken, pieces[index])
+            piece = _NAMED_HASH_COMMAND.sub(_hash_command_broken, piece)
+            if piece:
+                tail = _TRAILING_HASHES.search(carry + piece)
+                carry = tail.group(0) if tail is not None else ""
             if at_line_start:
                 # _LINE_LEAD can match nothing, so it matches every piece.
                 lead_match = _LINE_LEAD.match(piece)
@@ -404,6 +436,7 @@ class CommandSafeStream:
                 if lead < len(piece):
                     at_line_start = False
             pieces[index] = piece
+        self._carry = carry
         return "".join(pieces), at_line_start
 
     @staticmethod

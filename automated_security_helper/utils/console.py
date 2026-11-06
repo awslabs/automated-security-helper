@@ -56,9 +56,10 @@ own escape so it still parses (cli/report.py's _write_report).
 console, so off a terminal its output is not always the configuration
 character for character.
 
-Limits: a command form split across two writes is not seen. Rich writes each
-print's render in one write, so that needs ASH to print one message in two
-parts.
+Limits: a "::" split across two writes is not seen, and a "##name[" is seen only
+as command_safe_stream.py says. Rich writes each print's render in one write,
+except on a Windows console it renders for itself (``legacy_windows``), which
+writes each styled run of a message on its own.
 """
 
 from __future__ import annotations

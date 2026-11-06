@@ -416,3 +416,35 @@ def test_the_checked_view_hands_out_no_raw_writer():
     assert target.buffer.raw is not None
     with pytest.raises(AttributeError):
         wrap.buffer.raw
+
+
+@pytest.mark.parametrize(
+    "writes",
+    [
+        ["x##vso", "[task.setvariable variable=x]"],
+        ["x#", "#vso[task.setvariable variable=x]"],
+        ["x##", "vso", "[task.setvariable variable=x]"],
+        ["x##", "[warning]x"],
+    ],
+    ids=["name-then-bracket", "hash-then-hash", "three-writes", "no-name"],
+)
+def test_a_hash_command_split_across_writes_is_broken(writes):
+    """Rich's Windows console render writes each styled run of a message on its
+    own, so the "##" and the "[" of ``##vso[`` can be two writes. The "[" that
+    completes the form is written as an escape, so no line holds the command."""
+    target = io.StringIO()
+    wrap = css.CommandSafeStream(lambda: target)
+    for text in writes:
+        wrap.write(text)
+    written = target.getvalue()
+    assert "".join(writes) != written, "control: the split form was changed"
+    assert css._NAMED_HASH_COMMAND_FORM.search(written) is None, written
+
+
+def test_a_hash_before_a_line_break_completes_no_command_in_the_next_line():
+    """The carry ends with the line: a "[" on the next line is no command's."""
+    target = io.StringIO()
+    wrap = css.CommandSafeStream(lambda: target)
+    wrap.write("x##vso")
+    wrap.write("\n[not a command]")
+    assert target.getvalue() == "x##vso\n[not a command]"
