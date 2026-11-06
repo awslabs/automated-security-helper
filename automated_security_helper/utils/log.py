@@ -794,9 +794,24 @@ def _console_writes() -> Optional[Callable[[str], bool]]:
     return writes
 
 
+def _system_name() -> str:
+    """``platform.system()``, which cannot fail the import of this module.
+
+    On Windows, Python before 3.12 learns the Windows version by running
+    ``cmd /c ver`` through ``subprocess.run`` the first time it is asked. This
+    module asks while it is imported, so a process whose ``subprocess.run`` is a
+    stand-in (a test's mock) raised TypeError out of ``import`` here. The
+    interpreter's own platform name answers when the probe fails.
+    """
+    try:
+        return platform.system()
+    except Exception:  # noqa: BLE001 -- the version probe is a subprocess run
+        return "Windows" if sys.platform == "win32" else ""
+
+
 def _detect_encoding_issues() -> bool:
     """Return True if running on Windows with an encoding that cannot represent Unicode."""
-    if platform.system().lower() != "windows":
+    if _system_name().lower() != "windows":
         return False
 
     # By value, as every other CI read here: CI set to "", "0" or "false" is

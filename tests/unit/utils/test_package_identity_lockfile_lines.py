@@ -16,7 +16,6 @@ unreadable lockfile into None, and failed the whole scanner run.
 from __future__ import annotations
 
 import json
-import sys
 
 import pytest
 
@@ -60,18 +59,24 @@ def test_a_line_separator_inside_a_string_does_not_shift_later_keys(tmp_path):
     assert by_key["node_modules/left-pad"].line == 5
 
 
-def test_a_lockfile_nested_past_the_recursion_limit_answers_none(tmp_path):
+def test_a_lockfile_nested_past_the_recursion_limit_answers_none(tmp_path, monkeypatch):
     depth = 100_000
     nested = "[" * depth + "]" * depth
     text = '{"packages": {"node_modules/a": {"version": "1"}}, "deep": ' + nested + "}"
-    # Whether json.loads raises at a given depth is a host interpreter/stack
-    # property; lower the limit so the precondition holds deterministically and
-    # the cell measures the product's except arm.
-    limit = sys.getrecursionlimit()
-    sys.setrecursionlimit(1_000)
-    try:
-        with pytest.raises(RecursionError):
-            json.loads(text)
-        assert load_npm_lock_entries(_lockfile(tmp_path, text)) is None
-    finally:
-        sys.setrecursionlimit(limit)
+    # Whether json.loads raises RecursionError at a given depth is a property of
+    # the interpreter and its stack, not of sys.setrecursionlimit: the C scanner
+    # on macOS Python 3.14 parses 100,000 levels at a limit of 1,000 and the
+    # lockfile then loads. The cell measures the product's except arm, so the
+    # error json raises past the limit is raised by json.loads itself, the same
+    # type and the same call site, on every interpreter.
+    real_loads = json.loads
+
+    def _loads(s, *args, **kwargs):
+        if isinstance(s, str) and s.endswith(nested + "}"):
+            raise RecursionError("maximum recursion depth exceeded while decoding")
+        return real_loads(s, *args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", _loads)
+    with pytest.raises(RecursionError):
+        json.loads(text)
+    assert load_npm_lock_entries(_lockfile(tmp_path, text)) is None

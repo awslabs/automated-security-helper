@@ -15,6 +15,7 @@ PATH at an empty directory.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess  # nosec B404 -- builds throwaway git repositories
 from pathlib import Path
@@ -328,7 +329,9 @@ def test_a_hung_git_diff_is_named(tmp_path, monkeypatch, caplog):
 
 
 @pytest.mark.unit
-def test_a_git_that_will_not_start_is_not_called_missing(tmp_path, monkeypatch, caplog):
+def test_a_git_that_will_not_start_is_not_called_missing(
+    tmp_path, tmp_path_factory, monkeypatch, caplog
+):
     """FileNotFoundError while git is on PATH: say it could not be started."""
     from automated_security_helper.utils import get_scan_set
 
@@ -336,8 +339,16 @@ def test_a_git_that_will_not_start_is_not_called_missing(tmp_path, monkeypatch, 
         def run(self, argv, **kwargs):
             raise FileNotFoundError(2, "No such file or directory", "git")
 
+    # A git that is really on PATH: ASH's lookup only answers with a file that
+    # exists, and "/usr/bin/git" is nowhere on Windows. Outside the working
+    # directory, where a lookup never reads.
+    stand_in = tmp_path_factory.mktemp("git-on-path") / (
+        "git.exe" if os.name == "nt" else "git"
+    )
+    stand_in.write_bytes(b"")
+    stand_in.chmod(0o755)
     monkeypatch.setattr(get_scan_set, "subprocess", _Unstartable())
-    monkeypatch.setattr(get_scan_set.shutil, "which", lambda name: "/usr/bin/git")
+    monkeypatch.setattr(get_scan_set.shutil, "which", lambda name: str(stand_in))
     with caplog.at_level(logging.WARNING):
         assert get_scan_set.get_changed_files(cwd=tmp_path) is None
     warned = " ".join(caplog.messages)
