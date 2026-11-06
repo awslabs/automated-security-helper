@@ -31,7 +31,11 @@ from automated_security_helper.utils.detect_secrets_worker import (
     START_COLUMN_KEY,
     _start_column,
 )
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, checkout_env
+from tests.utils.helpers import (
+    CHILD_TIMEOUT_SECONDS,
+    checkout_env,
+    importing_this_checkout,
+)
 from tests.utils.refusing_proxy import (
     RecordingProxy,
     route_through,
@@ -249,6 +253,7 @@ def _verifying_worker_run(tmp_path, verify):
         ],
         check=True,
         cwd=tmp_path,
+        env=checkout_env(),
         timeout=CHILD_TIMEOUT_SECONDS,
     )
     return json.loads(output.read_text(encoding="utf-8"))
@@ -399,7 +404,13 @@ def _spawn_pool_run(tmp_path, monkeypatch, refuse_env, verify=False):
     )
     try:
         subprocess.run(  # nosec B603 - fixed argv
-            [sys.executable, "-c", _SPAWN_WORKER, str(request), str(output)],
+            [
+                sys.executable,
+                "-c",
+                importing_this_checkout(_SPAWN_WORKER),
+                str(request),
+                str(output),
+            ],
             check=True,
             cwd=tmp_path,
             timeout=300,
@@ -641,7 +652,7 @@ def test_importing_the_worker_module_in_ash_refuses_nothing(tmp_path):
         "print(HTTPAdapter.send.__name__)\n"
     )
     result = subprocess.run(  # nosec B603 - fixed argv
-        [sys.executable, "-c", probe],
+        [sys.executable, "-c", importing_this_checkout(probe)],
         capture_output=True,
         text=True,
         check=True,

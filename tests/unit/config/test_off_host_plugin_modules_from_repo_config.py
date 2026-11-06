@@ -26,6 +26,7 @@ import yaml
 
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.utils.helpers import checkout_env, importing_this_checkout
 
 AWS = "automated_security_helper.plugin_modules.ash_aws_plugins"
 SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
@@ -282,7 +283,14 @@ def test_the_scan_engine_loads_them_only_from_the_command_line(
 
     def engine(*cli_modules: str) -> Dict[str, List[str]]:
         result = subprocess.run(
-            [sys.executable, "-c", _ENGINE_LOADS, str(source), package, *cli_modules],
+            [
+                sys.executable,
+                "-c",
+                importing_this_checkout(_ENGINE_LOADS),
+                str(source),
+                package,
+                *cli_modules,
+            ],
             cwd=tmp_path,
             capture_output=True,
             text=True,
@@ -618,7 +626,7 @@ def test_every_plugin_package_that_sends_data_off_the_host_is_listed(tmp_path):
     )
 
     result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", importing_this_checkout(code)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -899,6 +907,7 @@ def test_no_reporter_outside_those_packages_connects_or_starts_a_process(tmp_pat
             str(REPO),
             ",".join(OFF_HOST_PLUGIN_PACKAGES),
         ],
+        env=checkout_env(),
         cwd=tmp_path,
         capture_output=True,
         text=True,

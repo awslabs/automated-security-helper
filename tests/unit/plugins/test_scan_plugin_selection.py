@@ -51,6 +51,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
+from tests.utils.helpers import checkout_env
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS, path_without_the_guard
 
 SNYK_MODULE = "automated_security_helper.plugin_modules.ash_snyk_plugins"
@@ -431,7 +432,7 @@ class _Process:
         completed = subprocess.run(
             [sys.executable, "-c", _PROGRAM, json.dumps(scans)],
             cwd=self.workdir,
-            env=self._env(),
+            env=checkout_env(self._env()),
             capture_output=True,
             text=True,
             encoding="utf-8",
