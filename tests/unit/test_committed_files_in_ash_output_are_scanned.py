@@ -396,9 +396,13 @@ def test_each_tool_reads_the_committed_files_in_this_runs_output_dir(
 
     values = _exclusion_values(kind, seen["argv"])
     assert not _skipped_by_tool(kind, values, source, COMMITTED[0]), values
-    assert _skipped_by_tool(kind, values, source, _UNTRACKED_NAMED) is (
-        kind in _TOLD_TO_SKIP
-    ), values
+    # checkov is told nothing on Windows (checkov_scanner._output_dir_skip_patterns:
+    # its walked paths use "\\", so --skip-path is unreliable there); ASH drops the
+    # findings it reports in the directory after the scan, which `kept` checks.
+    told_to_skip = kind in _TOLD_TO_SKIP and not (kind == "checkov" and os.sep != "/")
+    assert _skipped_by_tool(kind, values, source, _UNTRACKED_NAMED) is told_to_skip, (
+        values
+    )
     assert kept == sorted(["app.py", COMMITTED[0]]), kept
 
 

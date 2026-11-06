@@ -62,8 +62,8 @@ its tool for a version: ``uv tool run --from bandit[...] bandit --version`` and
 the like. Online, one ``--check`` of the scanner page installed every scanner's
 tool into the user's home directory, though the page it produces is the same
 offline. :func:`isolate_run` therefore makes uv and pip offline, points every
-proxy variable at a local port this process holds and never listens on, so a
-connection is refused rather than made, and gives uv and the XDG directories
+proxy variable at a local port that has no listener, so a connection is refused
+rather than made, and gives uv and the XDG directories
 temporary homes that are removed when the generator exits.
 
 This module never imports ASH at module level, so importing it is cheap and safe
@@ -204,7 +204,7 @@ ISOLATED_DIRECTORIES = (
 )
 #: Set for the rest of the run: uv and pip do not reach an index.
 OFFLINE_ENVIRONMENT = {"UV_OFFLINE": "1", "PIP_NO_INDEX": "1"}
-#: Holds the socket behind the refusing proxy port for the life of the process.
+#: Holds the temporary root of the run for the life of the process.
 _ISOLATION: dict[str, Any] = {}
 
 
@@ -212,22 +212,23 @@ def isolate_run() -> list[str]:
     """Keep this process and its children off the network and out of the home directory.
 
     Returns the names set or removed. See "Why a run is kept off the network" above.
-    The proxy port is bound and never listened on, so nothing else can take it and
-    a connection to it is refused. The temporary directories live under one root,
-    removed at exit.
+    The proxy port is one the kernel just handed out and that has no listener, so a
+    connection to it is refused. It is not kept bound: macOS drops, rather than
+    refuses, a connection to a socket that is bound and not listening, which turned
+    a refusal into a five second timeout there. The temporary directories live under
+    one root, removed at exit.
     """
     import atexit
     import shutil
     import socket
     import tempfile
 
-    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    blocker.bind(("127.0.0.1", 0))
-    proxy = f"http://127.0.0.1:{blocker.getsockname()[1]}"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as picker:
+        picker.bind(("127.0.0.1", 0))
+        proxy = f"http://127.0.0.1:{picker.getsockname()[1]}"
     root = Path(tempfile.mkdtemp(prefix="ash-reference-run-"))
     atexit.register(shutil.rmtree, root, True)
-    atexit.register(blocker.close)
-    _ISOLATION.update(socket=blocker, root=root)
+    _ISOLATION.update(root=root)
 
     values = dict(OFFLINE_ENVIRONMENT)
     values.update(dict.fromkeys(PROXY_VARIABLES, proxy))
