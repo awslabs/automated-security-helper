@@ -77,7 +77,9 @@ def test_the_toml_parser_import_follows_the_version_gate(tmp_path, monkeypatch):
 
     good = tmp_path / "ash.toml"
     text = '[tool.ash]\nproject_name = "t"\n'
-    good.write_text(text, encoding="utf-8")
+    # The bytes as written: write_text would turn each newline into CRLF on
+    # Windows, and the stand-in records the document it was handed.
+    good.write_bytes(text.encode("utf-8"))
     opts = SimpleNamespace(run=True, config=str(good), source_dir=str(tmp_path))
     # The control, and the lazy imports: the real gate parses the config.
     assert _refuse_a_container_config_that_does_not_parse(opts) is None
