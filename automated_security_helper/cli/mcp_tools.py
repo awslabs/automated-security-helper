@@ -646,15 +646,22 @@ def _scan_snapshot_path(
 def _process_may_be_running(pid: int) -> bool:
     """False only when *pid* is provably not a running process.
 
-    A permission error means the process exists; any other failure to ask,
-    and every platform where signal 0 is not a harmless probe (Windows, where
-    os.kill terminates), reads as "may be running", since the sweep deletes
-    only what it can prove abandoned. A reused pid reads as running too: the
-    copy then stays until a later bind finds that pid free, which costs a
-    leftover file and never a live scan's copy.
+    A permission error means the process exists; any other failure to ask
+    reads as "may be running", since the sweep deletes only what it can prove
+    abandoned. Windows, where signal 0 would terminate the process, asks for a
+    query handle and reads the exit code (``_windows_process_is_running``): a
+    pid with no process, or a process that has exited, is provably gone, so a
+    dead writer's copy goes there as it does elsewhere; a probe that cannot ask
+    reads as "may be running". A reused pid reads as running too: the copy then
+    stays until a later bind finds that pid free, which costs a leftover file
+    and never a live scan's copy.
     """
     if os.name == "nt":
-        return True
+        from automated_security_helper.core.resource_management.scan_registry import (
+            _windows_process_is_running,
+        )
+
+        return _windows_process_is_running(pid, if_unasked=True)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
