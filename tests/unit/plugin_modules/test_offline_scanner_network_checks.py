@@ -163,6 +163,25 @@ def no_network(monkeypatch):
     assert proxy.external_requests() == [], proxy.requests
 
 
+@pytest.fixture(autouse=True)
+def _no_trivy_help_probe(monkeypatch):
+    """No test here reads trivy's ``--help``.
+
+    This module is a probe subject (tests/unit/conftest.py PROBE_SUBJECT_MODULES), so
+    the unit guard's probe stand-ins are not installed. A trivy-repo scan offline
+    reads trivy's default misconfiguration scanners from ``trivy repository --help``
+    (``trivy_default_misconfig_scanners``), which the guard records as a tool start
+    on a host without trivy and fails the test at teardown. None of these tests asks
+    about that list; the memo it reads first is replaced the way the guard replaces
+    it elsewhere, so no ``--help`` runs.
+    """
+    from tests.utils.tool_guard import _NoDefaultMisconfigScanners
+
+    monkeypatch.setattr(
+        trivy_base, "_DEFAULT_MISCONFIG_SCANNERS", _NoDefaultMisconfigScanners()
+    )
+
+
 def _inside(path: Path, root: Path) -> bool:
     return Path(os.path.realpath(path)).is_relative_to(Path(os.path.realpath(root)))
 
