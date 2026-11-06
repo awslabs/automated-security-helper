@@ -221,6 +221,11 @@ def run(tmp_path_factory):
             ],
             capture_output=True,
             text=True,
+            # Not the locale's: on Windows that is cp1252, which cannot decode the
+            # UTF-8 the console carries (byte 0x90), and the reader thread's
+            # UnicodeDecodeError left stdout None, so the DEBUG control read false.
+            encoding="utf-8",
+            errors="replace",
             timeout=900,
             cwd=work,
             env=env,
