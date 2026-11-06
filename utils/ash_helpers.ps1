@@ -1846,7 +1846,10 @@ function Invoke-ASH {
                 # that is there decides, as it does for ./ash and `ash scan`.
                 $nearest = $outputDirAbsolute
                 while ($nearest -and -not (Test-Path -LiteralPath $nearest)) {
-                    $nearest = Split-Path -LiteralPath $nearest -Parent
+                    # Split-Path has no -LiteralPath with -Parent parameter set (pwsh
+                    # on Windows: "Parameter set cannot be resolved"), and a path
+                    # with no parent reads as $null here, which ends the walk.
+                    $nearest = [System.IO.Path]::GetDirectoryName($nearest)
                 }
                 if ($nearest -and (Test-Path -LiteralPath $nearest -PathType Leaf)) {
                     $createReason = 'Not a directory'
