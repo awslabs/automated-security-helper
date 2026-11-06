@@ -478,7 +478,10 @@ def test_an_equal_value_in_an_unrelated_field_is_left_alone(tmp_path, probe_env)
 def test_an_anchored_path_has_only_its_env_part_replaced(tmp_path, probe_env):
     from automated_security_helper.config.resolve_config import resolve_config
 
-    probe_env.setenv("ASH_PROBE_RELATIVE", "cfg/bandit.yaml")
+    # Written with this platform's separator: the path is a Path once configured,
+    # and on Windows a "/" in the environment's text comes back as "\", so the
+    # text the environment gave is only found again when it is spelled that way.
+    probe_env.setenv("ASH_PROBE_RELATIVE", os.path.join("cfg", "bandit.yaml"))
     path = _operator_config(
         tmp_path,
         "scanners:\n  bandit:\n    options:\n      config_file: ${ASH_PROBE_RELATIVE}\n",
