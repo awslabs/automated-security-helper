@@ -9,7 +9,7 @@
     ]),
     'result': dict({
       'ash_command_available': True,
-      'ash_command_output': '<REPO>/bin/ash',
+      'ash_command_output': '/opt/ash/bin/ash',
       'installed': True,
       'installs_on_first_scan': list([
       ]),
