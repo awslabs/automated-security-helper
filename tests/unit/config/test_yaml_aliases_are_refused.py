@@ -380,6 +380,20 @@ NOT_ASH_CONFIGURATION = {
     # anything (_excludes), which follows no alias; refusing one would count a
     # valid policy as unreadable.
     "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
+    # Each of these reads a tool's own file or a scalar of a tool's format, not
+    # ASH configuration: trivy's --config file (_trivy_scanner_base), bandit's
+    # and checkov's config files, a quoted scalar of an actionlint message, a
+    # GitHub action.yml probed by zizmor, ferret's packaged default profiles,
+    # and the package-manager workspace file package_manager_child reads for its
+    # package list. Their formats allow anchors and aliases, and each read
+    # treats a file it cannot parse as setting nothing.
+    "plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py",
+    "plugin_modules/ash_builtin/scanners/actionlint_scanner.py",
+    "plugin_modules/ash_builtin/scanners/bandit_scanner.py",
+    "plugin_modules/ash_builtin/scanners/checkov_scanner.py",
+    "plugin_modules/ash_builtin/scanners/zizmor_scanner.py",
+    "plugin_modules/ash_ferret_plugins/ferret_scanner.py",
+    "utils/package_manager_child.py",
 }
 
 #: ASH configuration read with a loader of ASH's own that is not one of the two
@@ -389,7 +403,13 @@ NOT_ASH_CONFIGURATION = {
 #: shared loaders do (``_NoAliasSafeLoader``), so an aliased file is refused
 #: unchanged (``test_saving_a_suppression_into_the_file``). A direct PyYAML
 #: load anywhere else in that file is still an offender.
-AS_WRITTEN_LOADERS = {"config/ash_config.py": "_KeepsEnvReferences"}
+#: ``config_linter`` reads a config's text with ``_TagBlindLoader`` (a tag it
+#: has no constructor for loads as the plain value it tags), which derives from
+#: the shared alias-refusing loader.
+AS_WRITTEN_LOADERS = {
+    "config/ash_config.py": "_KeepsEnvReferences",
+    "config/config_linter.py": "_TagBlindLoader",
+}
 
 
 def loader_named_by(call: ast.Call) -> Optional[str]:

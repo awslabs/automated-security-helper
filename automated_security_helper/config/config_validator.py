@@ -40,6 +40,7 @@ from automated_security_helper.config.ash_config import (
     _PluginConfigSegment,
     env_reference_left_as_written,
     env_reference_value,
+    load_config_yaml,
     plugin_key_lookup_names,
     read_env_reference,
     resolve_env_references,
@@ -4539,7 +4540,7 @@ class ConfigValidator:
                     decision = True
                     continue
                 try:
-                    written = yaml.safe_load(text)
+                    written = load_config_yaml(text)
                 except yaml.YAMLError:
                     written = text
                 decision = written == value
