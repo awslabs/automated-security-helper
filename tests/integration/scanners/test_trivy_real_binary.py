@@ -351,8 +351,13 @@ def _debian_tree(root: Path, packages: tuple) -> Path:
     (root / "etc" / "os-release").write_text(
         'ID=debian\nVERSION_ID="11"\nPRETTY_NAME="Debian GNU/Linux 11 (bullseye)"\n',
         encoding="utf-8",
+        newline="\n",
     )
-    (root / "etc" / "debian_version").write_text("11.0\n", encoding="utf-8")
+    (root / "etc" / "debian_version").write_text(
+        "11.0\n", encoding="utf-8", newline="\n"
+    )
+    # Windows text mode would write CRLF, so the dpkg paragraphs would not split (the
+    # probe measured trivy reading only the first package); keep LF on every platform.
     (root / "var" / "lib" / "dpkg" / "status").write_text(
         "".join(
             f"Package: {name}\nStatus: install ok installed\nArchitecture: amd64\n"
@@ -360,6 +365,7 @@ def _debian_tree(root: Path, packages: tuple) -> Path:
             for name in packages
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return root
 
