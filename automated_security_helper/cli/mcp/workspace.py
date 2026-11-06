@@ -1121,14 +1121,20 @@ def _resolve_session_config(
     An unknown ``profile`` raises rather than falling back. A workspace scan is N
     repository scans; running them all under the default config because a profile
     name was misspelled, and reporting success, is the class of outcome this
-    module's confinement refusal exists to prevent. So does a bound session whose
-    registered copy is gone while its client copy is not: the client's copy is
-    never the operator's config, so there is nothing to layer over a project's
-    own config and nothing to resolve it against.
+    module's confinement refusal exists to prevent. A bound session whose
+    recorded files are gone is not refused: the binding is the source of truth
+    and the file is its materialization, so both files (the registered copy and,
+    for a client-patched binding, the client's copy) are written again from the
+    binding by ``resolve_session_config_path``. The client's copy is never the
+    operator's config, and the registered copy is what is layered.
 
     Raises:
         ProfileNotRegisteredError: ``profile`` is not registered.
-        RuntimeError: The session's registered copy is missing; exit 3.
+        RuntimeError: The session's bound profile cannot be read as the operator
+            registered it: it is no longer registered, or the files cannot be
+            written again (``BoundProfileUnavailableError``), or the state is of
+            a shape that cannot be rematerialized (a recorded config path with no
+            trusted path); exit 3.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
