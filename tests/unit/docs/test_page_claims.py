@@ -432,6 +432,7 @@ from automated_security_helper.utils import (  # noqa: E402
     pre_installed_tool as _pre_installed_module,
     uv_tool_runner as _uv_runner_module,
 )
+from tests.utils.tool_guard import use_the_real_candidate_names  # noqa: E402
 
 #: The tool probes as the code defines them, taken when this module is imported at
 #: collection, before any test's tool guard replaces them (``stub_tool_probes`` in
@@ -13305,6 +13306,9 @@ def test_a_uv_run_tool_keeps_the_file_it_found_first(
     # the guard's answers (no uv, a pre-installed tool that is not executable) are
     # put back; the programs probed are this test's own stand-ins under tmp_path.
     _use_the_real_tool_probes(monkeypatch, uv=True, pre_installed=True)
+    # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
+    # "uv" to its .bat stand-in, and this cell's stand-ins are .cmd files.
+    use_the_real_candidate_names(monkeypatch)
 
     pins_consulted: Set[str] = set()
 
@@ -13521,6 +13525,9 @@ def test_trivy_repo_counts_only_an_executable_trivy(
     )
     from automated_security_helper.utils.subprocess_utils import find_executable
 
+    # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
+    # "trivy" to its .bat stand-in, and this cell's trivy is trivy.exe.
+    use_the_real_candidate_names(monkeypatch)
     placed = {
         where: _place_tool(tmp_path / where, "trivy", kind) for where, kind in layout
     }
