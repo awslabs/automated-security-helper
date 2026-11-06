@@ -118,6 +118,7 @@ PROBE_SUBJECT_MODULES = frozenset(
         "plugin_modules/test_offline_trivy_terraform_modules.py",
         "plugin_modules/test_scanner_offline_option_reaches_probes.py",
         "plugin_modules/test_trivy_misconfig_list_cache.py",
+        "test_conftest_tool_state_isolation.py",
         "utils/test_a_bare_value_string_is_one_value.py",
         "utils/test_a_cache_reset_during_a_version_probe_drops_its_answer.py",
         "utils/test_a_parked_probe_waiter_stops_when_its_scan_is_cancelled.py",
