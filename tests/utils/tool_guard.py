@@ -527,6 +527,12 @@ _GIT_SIGNING_SETTINGS = frozenset(
 
 _GIT_FALSE = frozenset({"false", "no", "off", "0", ""})
 
+#: The spellings of "no hooks directory" for ``core.hooksPath``. ``os.devnull`` is
+#: ``nul`` on Windows, but ASH and its tests write ``/dev/null`` on every platform,
+#: and git for Windows opens that name as the null device (its own path mapping), so
+#: on Windows both name no directory. On POSIX the two are one string.
+_GIT_NULL_DEVICES = frozenset({os.devnull, "/dev/null"})
+
 #: git commands that read the repository and write neither its index nor its refs,
 #: so no hook runs for them. Any other command can (post-index-change and
 #: reference-transaction run for an index or ref git writes along the way).
@@ -566,7 +572,7 @@ def _git_setting_runs_a_program(key: str, value: str | None) -> bool:
     if key == "core.fsmonitor" or key in _GIT_SIGNING_SETTINGS:
         return value is None or text.lower() not in _GIT_FALSE
     if key == "core.hookspath":
-        return text != os.devnull
+        return text not in _GIT_NULL_DEVICES
     if section == "pager":
         return text.lower() not in _GIT_FALSE | {"true", "yes", "on", "1"}
     return (section, name) in _GIT_PROGRAM_SETTINGS and text != ""
@@ -906,7 +912,7 @@ def why_git_may_run_a_program(
     if (
         hooks is not None
         and not runs_no_hooks
-        and command_line.get("core.hookspath") != os.devnull
+        and command_line.get("core.hookspath") not in _GIT_NULL_DEVICES
     ):
         if hooks.is_dir() and any(
             hook.is_file() and not hook.name.endswith(".sample")
