@@ -336,9 +336,7 @@ async def test_a_machines_fixed_dir_uv_does_not_defeat_without_uv(
 
     machine_dir = tmp_path_factory.mktemp("machine-fixed-bin")
     _write_executable(machine_dir / "uv", UV_STAND_IN)
-    from automated_security_helper.utils import subprocess_utils
-
-    monkeypatch.setattr(subprocess_utils, "own_environment_dirs", lambda: [machine_dir])
+    sandbox.plant_machine_dirs([machine_dir])
     sandbox.remove_uv()
     monkeypatch.setattr(mcp_tools, "_builtin_scanner_classes", lambda: list(UV_TOOLS))
 
@@ -369,7 +367,7 @@ def test_a_planted_fixed_dir_uv_is_findable_and_then_hidden(
         machine_dir / "uv",
         '#!/bin/sh\necho "the planted uv must never run" >&2\nexit 97\n',
     )
-    monkeypatch.setattr(subprocess_utils, "own_environment_dirs", lambda: [machine_dir])
+    sandbox.plant_machine_dirs([machine_dir])
     sandbox.remove_uv()
 
     with monkeypatch.context() as bypass:
