@@ -1181,7 +1181,14 @@ def honored_path(
         # hidden before it is escaped (_shown_escaped), since an escaped value
         # no longer matches the value it was made from. The whole message is
         # shown once more for the key.
-        shown_path = _shown_escaped(_named(value, named, config, env_named), config)
+        # The path shown is the judged spelling, normalized (``./`` and ``..``
+        # applied), so a value written through them is named by the path it
+        # resolves to, while a link keeps the name it has in the scanned tree:
+        # the link is judged by that name, and the warning never names the file
+        # the link reaches. The fully resolved *path* (realpath) would.
+        shown_path = _shown_escaped(
+            _named(value, Path(os.path.normpath(named)), config, env_named), config
+        )
         ASH_LOGGER.warning(
             _shown(
                 f"Ignoring {key} ({shown_path}): "
