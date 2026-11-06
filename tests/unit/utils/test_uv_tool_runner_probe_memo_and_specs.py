@@ -498,7 +498,8 @@ class TestTheCallersOfflineMode:
         runner.run_tool("bandit")
         call = spawn.call_args
         assert "--offline" not in call.args[0]
-        assert "UV_OFFLINE" not in call.kwargs["env"]
+        names = set(call.kwargs["env"])
+        assert "UV_OFFLINE" not in names
 
     def test_the_version_probe_honors_the_callers_offline_mode(self, spawn, runner):
         spawn.return_value = subprocess.CompletedProcess([], 0, "1.0\n", "")

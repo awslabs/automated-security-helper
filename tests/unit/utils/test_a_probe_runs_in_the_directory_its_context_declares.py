@@ -74,7 +74,8 @@ def test_the_environment_is_the_callers_not_the_contexts(tmp_path, spawn):
     staleness._run_json(COMMAND, {"FROM_CALLER": "1"}, ctx=ctx)
 
     (call,) = spawn.calls
-    assert call["env"] == {"FROM_CALLER": "1"}
+    env_is_the_callers = call["env"] == {"FROM_CALLER": "1"}
+    assert env_is_the_callers
 
 
 @pytest.mark.parametrize(

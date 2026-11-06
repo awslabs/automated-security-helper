@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.utils.process_env import hold_environ, release_environ
+from tests.utils.env_assertions import environ_names, environ_value
 
 pytestmark = pytest.mark.unit
 
@@ -32,22 +33,18 @@ def _clean(monkeypatch):
 
 
 def test_the_value_stays_until_the_last_holder_releases(monkeypatch):
-    import os
-
     hold_environ(KEY, "YES")
     hold_environ(KEY, "YES")
     release_environ(KEY)  # the first scan ends while the second still runs
 
-    assert os.environ.get(KEY) == "YES"
+    assert environ_value(KEY) == "YES"
 
     release_environ(KEY)
 
-    assert KEY not in os.environ
+    assert KEY not in environ_names()
 
 
 def test_the_original_value_comes_back(monkeypatch):
-    import os
-
     monkeypatch.setenv(KEY, "YES")  # a server started offline
 
     hold_environ(KEY, "YES")
@@ -55,19 +52,17 @@ def test_the_original_value_comes_back(monkeypatch):
     release_environ(KEY)
     release_environ(KEY)
 
-    assert os.environ.get(KEY) == "YES"
+    assert environ_value(KEY) == "YES"
 
 
 def test_an_original_different_value_comes_back(monkeypatch):
-    import os
-
     monkeypatch.setenv(KEY, "NO")
 
     hold_environ(KEY, "YES")
-    assert os.environ.get(KEY) == "YES"
+    assert environ_value(KEY) == "YES"
     release_environ(KEY)
 
-    assert os.environ.get(KEY) == "NO"
+    assert environ_value(KEY) == "NO"
 
 
 def test_offline_mode_reads_held_until_the_last_release(monkeypatch):

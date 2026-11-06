@@ -12,11 +12,10 @@ nobody would release; the set now comes first.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from automated_security_helper.utils import process_env
+from tests.utils.env_assertions import environ_names
 
 pytestmark = pytest.mark.unit
 
@@ -29,14 +28,14 @@ def test_a_failed_override_puts_back_the_ones_already_set(monkeypatch):
     monkeypatch.delenv(SECOND, raising=False)
     with pytest.raises(TypeError):
         process_env.apply_environ_overrides({FIRST: "one", SECOND: 2})  # type: ignore[dict-item]
-    assert FIRST not in os.environ
-    assert SECOND not in os.environ
+    assert FIRST not in environ_names()
+    assert SECOND not in environ_names()
 
 
 def test_a_failed_hold_is_not_recorded(monkeypatch):
     monkeypatch.delenv(FIRST, raising=False)
     with pytest.raises(TypeError):
         process_env.hold_environ(FIRST, 2)  # type: ignore[arg-type]
-    assert FIRST not in os.environ
+    assert FIRST not in environ_names()
     with pytest.raises(RuntimeError):
         process_env.release_environ(FIRST)
