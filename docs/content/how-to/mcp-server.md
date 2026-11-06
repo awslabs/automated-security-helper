@@ -236,7 +236,9 @@ sends SIGKILL, such as the 10 seconds `docker stop` waits by default: a SIGKILL 
 leaves the scanners' tools running. A second Ctrl-C during the wait ends the server at once,
 with code 130. It kills the scanners' tools without waiting for the scans, and previous results
 a scan had not put back stay in `.ash_previous_results`, where the next MCP scan of that
-directory takes them back.
+directory takes them back. On Windows the second Ctrl-C ends the server just the same, but
+it does not kill the scanners' tools: the kill goes by process group, which is POSIX only, so
+a tool still running then outlives the server.
 
 ### Serve clients on another host
 

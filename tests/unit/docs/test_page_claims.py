@@ -432,6 +432,7 @@ from automated_security_helper.utils import (  # noqa: E402
     pre_installed_tool as _pre_installed_module,
     uv_tool_runner as _uv_runner_module,
 )
+from tests.utils.tool_guard import use_the_real_candidate_names  # noqa: E402
 
 #: The tool probes as the code defines them, taken when this module is imported at
 #: collection, before any test's tool guard replaces them (``stub_tool_probes`` in
@@ -10185,6 +10186,11 @@ _HTTP_SECOND_CTRL_C = (
     "not put back stay in `.ash_previous_results`, where the next MCP scan of that "
     "directory takes them back."
 )
+_HTTP_SECOND_CTRL_C_ON_WINDOWS = (
+    "On Windows the second Ctrl-C ends the server just the same, but it does not kill "
+    "the scanners' tools: the kill goes by process group, which is POSIX only, so a "
+    "tool still running then outlives the server."
+)
 #: The page's "at most 5 seconds", and the 10 seconds ``docker stop`` waits, inside
 #: which the whole stop fits.
 _HTTP_DRAIN_SECONDS = 5
@@ -10340,7 +10346,9 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     results back, with its own ``ash.log`` beside them.
 
     With a second Ctrl-C a second after the first, the server must exit with 130
-    within half the wait of it, before the 5 seconds are up. The tool must be gone.
+    within half the wait of it, before the 5 seconds are up. The tool must be gone,
+    except on Windows, where the kill goes by process group (POSIX only) and the page
+    says the tool outlives the server.
     The second Ctrl-C does not wait for the scans, and the page says: "previous
     results a scan had not put back stay in `.ash_previous_results`". A scan that
     unwound first may have put them back, or be halfway through, so they must be
@@ -10362,6 +10370,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     assert_on_page(MCP_SERVER, _HTTP_WAITS_FOR_OPEN_REQUESTS)
     assert_on_page(MCP_SERVER, _HTTP_STOP_FITS_THE_GRACE)
     assert_on_page(MCP_SERVER, _HTTP_SECOND_CTRL_C)
+    assert_on_page(MCP_SERVER, _HTTP_SECOND_CTRL_C_ON_WINDOWS)
     assert_on_page(MCP_SERVER, _MCP_NO_SIGTERM_ON_WINDOWS)
     if os.name == "nt" and stop == "sighup":
         assert not hasattr(signal, "SIGHUP")
@@ -10428,7 +10437,10 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
                 f"the server exited {ended - signaled:.1f} s after the first Ctrl-C, "
                 "once the wait was over, not at the second"
             )
-            assert _gone_soon(pid), "the scan's tool outlived the server"
+            if os.name != "nt":
+                # The kill goes by process group, which is POSIX only: on Windows
+                # the tool outlives the server, as the page says.
+                assert _gone_soon(pid), "the scan's tool outlived the server"
             _assert_previous_results_intact(setup.output)
         else:
             if held_open:
@@ -13305,6 +13317,9 @@ def test_a_uv_run_tool_keeps_the_file_it_found_first(
     # the guard's answers (no uv, a pre-installed tool that is not executable) are
     # put back; the programs probed are this test's own stand-ins under tmp_path.
     _use_the_real_tool_probes(monkeypatch, uv=True, pre_installed=True)
+    # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
+    # "uv" to its .bat stand-in, and this cell's stand-ins are .cmd files.
+    use_the_real_candidate_names(monkeypatch)
 
     pins_consulted: Set[str] = set()
 
@@ -13521,6 +13536,9 @@ def test_trivy_repo_counts_only_an_executable_trivy(
     )
     from automated_security_helper.utils.subprocess_utils import find_executable
 
+    # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
+    # "trivy" to its .bat stand-in, and this cell's trivy is trivy.exe.
+    use_the_real_candidate_names(monkeypatch)
     placed = {
         where: _place_tool(tmp_path / where, "trivy", kind) for where, kind in layout
     }

@@ -58,7 +58,14 @@ import json, os, resource, sys, tracemalloc
 from pathlib import Path
 
 limit = 1 << 30
-resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
+try:
+    resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
+except (ValueError, OSError):
+    # macOS refuses a data limit ("current limit exceeds maximum limit") and does
+    # not enforce one; the limit is a backstop, and the bound the test asserts is
+    # the traced peak below.
+    if sys.platform != "darwin":
+        raise
 
 import automated_security_helper
 from automated_security_helper.cli.inspect import inspect_findings_app as tui

@@ -407,7 +407,13 @@ def test_config_update_names_the_file_once(tmp_path, monkeypatch, name, text, sa
 
     assert result.exit_code == 3, result.output
     assert said in result.output, result.output
-    assert result.output.count(str(config)) == 1, result.output
+    # A parse error names the file in its posix form on every platform
+    # (config_sources.describe_config_path) and the frame names it as the path
+    # prints, which differ on Windows: each spelling counts, and the file is named
+    # once between them.
+    spellings = {str(config), config.as_posix()}
+    named = sum(result.output.count(spelling) for spelling in spellings)
+    assert named == 1, result.output
 
 
 def test_validate_s_parse_line_is_the_error_itself(tmp_path, monkeypatch):
