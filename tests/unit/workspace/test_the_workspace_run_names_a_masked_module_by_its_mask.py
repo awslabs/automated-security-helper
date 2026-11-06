@@ -63,6 +63,15 @@ def _recording(monkeypatch, method: str, name: str, seen: List[str]) -> None:
         without_masked_modules,
     )
 
+    from automated_security_helper.plugins import ash_plugin_manager
+
+    # An earlier test that patched the method on the manager instance leaves
+    # the bound method behind as an instance attribute when its patch is
+    # undone, and that hides this patch of the class: the call is never seen.
+    assert method not in vars(ash_plugin_manager), (
+        f"an earlier test patched {method} on the plugin manager instance; "
+        "patch type(ash_plugin_manager) instead"
+    )
     original = getattr(AshPluginManager, method)
 
     def recorder(self, *args, **kwargs):
