@@ -1840,10 +1840,23 @@ function Invoke-ASH {
                 $createReason = 'Not a directory'
             }
             catch {
-                # Any other error carries its errno on Linux and macOS, whose text
-                # the system gives; elsewhere there is none to give.
-                $errno = if ($_.Exception.InnerException) { $_.Exception.InnerException.HResult } else { 0 }
-                $createReason = if ($errno -gt 0 -and $errno -lt 4096) { [System.Runtime.InteropServices.Marshal]::GetPInvokeErrorMessage($errno) } else { 'it could not be made' }
+                $createError = $_
+                # Windows says a file on the way is an IOException ("already
+                # exists"), not a missing directory: the nearest part of the path
+                # that is there decides, as it does for ./ash and `ash scan`.
+                $nearest = $outputDirAbsolute
+                while ($nearest -and -not (Test-Path -LiteralPath $nearest)) {
+                    $nearest = Split-Path -LiteralPath $nearest -Parent
+                }
+                if ($nearest -and (Test-Path -LiteralPath $nearest -PathType Leaf)) {
+                    $createReason = 'Not a directory'
+                }
+                else {
+                    # Any other error carries its errno on Linux and macOS, whose text
+                    # the system gives; elsewhere there is none to give.
+                    $errno = if ($createError.Exception.InnerException) { $createError.Exception.InnerException.HResult } else { 0 }
+                    $createReason = if ($errno -gt 0 -and $errno -lt 4096) { [System.Runtime.InteropServices.Marshal]::GetPInvokeErrorMessage($errno) } else { 'it could not be made' }
+                }
             }
             if ($createReason) {
                 $global:LASTEXITCODE = $usageErrorExitCode
