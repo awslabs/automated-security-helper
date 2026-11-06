@@ -1983,8 +1983,41 @@ def test_the_linear_time_check_fails_a_square_time_shape_quickly(monkeypatch, n)
     # bound was dropped: it only restated this per-run bound (a run that is
     # not stopped took less than its limit), never failed first, and the
     # bound-armed runs gave it about nine seconds of slack.
+    #
+    # The allowance above is read from five-millisecond sleeps taken before
+    # the runs, so it cannot see a host that stalls for seconds while a run is
+    # in flight (a hosted macOS runner stopped the large size's run at 4.2 s
+    # against a 2.0 s limit, 0.2 s past 1.5 * 2.0 + 1.0). So the same stop is
+    # measured again here, in this process, right after the runs: a pure
+    # Python spin in this file (stoppable, and with no long native call in
+    # it) armed with the same limit. Its overshoot is the lateness the host
+    # adds to ANY stop of that length under the load of this window, and the
+    # run's overshoot is held to the same order -- a comparison of the two
+    # stops rather than a wall bound on one. A stop that never lands, lands
+    # inside no code, or waits on a long call of the redaction's own still
+    # overshoots by far more than a spin does on any host.
+    spin_overshoots = []
+    for _, limit, _ in stopped[:1]:
+
+        def spin(text, values, _limit=limit):
+            end = time.monotonic() + 3 * _limit
+            while time.monotonic() < end:
+                pass
+            return "spun"
+
+        monkeypatch.setattr(module, "redact_values", spin)
+        spin_started = time.monotonic()
+        spin_result = real_run("", [], "spun", limit)
+        spin_took = time.monotonic() - spin_started
+        assert spin_result is None, (spin_result, limit)
+        spin_overshoots.append(max(spin_took - limit, 0.0))
+    control = max(spin_overshoots, default=0.0)
     for _, limit, took in stopped:
-        assert took < 1.5 * limit + allowance, (lateness, runs)
+        assert took < 1.5 * limit + allowance + 4 * control, (
+            lateness,
+            control,
+            runs,
+        )
     # Which limit stopped them follows from what the recorder saw, on any host.
     # The size's own runs are armed with the bound, and one of them reaching it
     # fails the cell there. Otherwise each run of the larger size is armed with
