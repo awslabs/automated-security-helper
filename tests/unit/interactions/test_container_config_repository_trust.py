@@ -442,7 +442,8 @@ class TestTheScanInsideAppliesTheSameLimits:
         assert result.exit_code == 0, result.output
         assert seen["ASH_CONFIG"] == str(env)
         assert seen["kwargs"]["config"] is None
-        assert seen["env"] == [env.resolve()]
+        resolved_config = seen["env"] == [env.resolve()]
+        assert resolved_config
         # Membership over the NAMES only: a failed assert over the mapping
         # itself, or over its .get, makes pytest print every environment
         # value (the meta-test in tests/unit pins this file to this shape).

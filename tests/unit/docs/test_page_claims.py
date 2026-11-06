@@ -18102,9 +18102,10 @@ def test_each_quoted_input_check_error_is_the_workflows_own(
     errors = re.findall(r'echo "::error::(.*)"\s*$', step.get("run", ""), re.MULTILINE)
     if input_name is not None:
         variable = "INPUT_" + input_name.upper().replace("-", "_")
-        assert (step.get("env") or {}).get(variable) == (
-            f"${{{{ inputs.{input_name} }}}}"
-        ), f"step {step_id!r} does not read {input_name} as {variable}"
+        wired = (step.get("env") or {}).get(variable)
+        assert wired == (f"${{{{ inputs.{input_name} }}}}"), (
+            f"step {step_id!r} does not read {input_name} as {variable}"
+        )
         errors = [error.replace("${name//_/-}", input_name) for error in errors]
     assert quote in errors, f"step {step_id!r} prints none of the quote: {errors}"
 
@@ -18802,7 +18803,12 @@ def test_each_install_input_row_names_the_tool_the_input_installs() -> None:
         if key == "ASH_CFN_GUARD_RULES_DIR"
     ]
     assert "its rules" in rows["install-cfn-guard"], rows["install-cfn-guard"]
-    assert rules and all("inputs.install-cfn-guard" in str(v) for v in rules), rules
+    reads_input = bool(rules) and all(
+        "inputs.install-cfn-guard" in str(v) for v in rules
+    )
+    assert reads_input, (
+        "ASH_CFN_GUARD_RULES_DIR is not read from inputs.install-cfn-guard"
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -26,6 +26,7 @@ import pytest
 
 from automated_security_helper.interactions import run_ash_scan as run_ash_scan_module
 from automated_security_helper.interactions.run_ash_scan import ScanOptions
+from tests.utils.env_assertions import environ_names, environ_value
 
 pytestmark = pytest.mark.unit
 
@@ -101,14 +102,14 @@ def test_a_workspace_scan_stays_offline_after_a_local_scan_ends(stubs, tmp_path)
     local.release.set()
     first.join(WAIT)
 
-    assert os.environ.get("ASH_OFFLINE") == "YES", (
+    assert environ_value("ASH_OFFLINE") == "YES", (
         "the first scan to end took offline mode away from the one still running"
     )
 
     workspace.release.set()
     second.join(WAIT)
 
-    assert "ASH_OFFLINE" not in os.environ, "the process stayed offline afterwards"
+    assert "ASH_OFFLINE" not in environ_names(), "the process stayed offline afterwards"
 
 
 def test_a_local_scan_stays_offline_after_a_workspace_scan_ends(stubs, tmp_path):
@@ -121,12 +122,12 @@ def test_a_local_scan_stays_offline_after_a_workspace_scan_ends(stubs, tmp_path)
     workspace.release.set()
     first.join(WAIT)
 
-    assert os.environ.get("ASH_OFFLINE") == "YES"
+    assert environ_value("ASH_OFFLINE") == "YES"
 
     local.release.set()
     second.join(WAIT)
 
-    assert "ASH_OFFLINE" not in os.environ
+    assert "ASH_OFFLINE" not in environ_names()
 
 
 def test_control_each_scan_ran_offline(stubs, tmp_path):
@@ -137,4 +138,4 @@ def test_control_each_scan_ran_offline(stubs, tmp_path):
     thread.join(WAIT)
 
     assert local.seen == "YES"
-    assert "ASH_OFFLINE" not in os.environ
+    assert "ASH_OFFLINE" not in environ_names()
