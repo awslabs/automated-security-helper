@@ -688,7 +688,10 @@ def test_a_git_file_naming_a_missing_directory_is_named_in_the_refusal(
         "not a git repository" in message
         or "does not point to a valid repository" in message
     ), message
-    assert missing.as_posix() in message or (source / ".git").as_posix() in message, (
+    # git names the path in the host's own spelling: backslashes on Windows, where
+    # the gitdir line the test wrote is slash-separated.
+    slashed = message.replace("\\", "/")
+    assert missing.as_posix() in slashed or (source / ".git").as_posix() in slashed, (
         message
     )
     assert "ash_aggregated_results.json" in message, message
