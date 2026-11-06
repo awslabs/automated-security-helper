@@ -1137,15 +1137,13 @@ _INVOKE_ASH_SITES = {
         {"files": ["blocker"]},
         {},
         USAGE_ERROR_EXIT,
-        # The reason is the system's text for the error where the runtime gives an
-        # errno (Linux, macOS: ENOTDIR); a file on the way is an IOException with
-        # none on Windows, where the helper's own words stand
-        # (utils/ash_helpers.ps1, "elsewhere there is none to give").
-        (
-            "Outputdirectorycannotbecreated:blocker/out(itcouldnotbemade)"
-            if os.name == "nt"
-            else "Outputdirectorycannotbecreated:blocker/out(Notadirectory)"
-        ),
+        # A file on the way is "Not a directory" on every system: where the runtime
+        # gives an errno (Linux, macOS: ENOTDIR) it is the system's text, and on
+        # Windows, where the error is an IOException with none, the helper looks at
+        # the nearest part of the path that exists and says the same when that is a
+        # file (utils/ash_helpers.ps1, "Output directory cannot be created"), as
+        # ./ash and `ash scan` do.
+        "Outputdirectorycannotbecreated:blocker/out(Notadirectory)",
     ),
     "source-dir-missing": (
         _INVOKE.replace("-SourceDir src", "-SourceDir no-such-dir"),
