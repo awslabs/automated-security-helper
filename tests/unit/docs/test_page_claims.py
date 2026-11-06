@@ -7724,8 +7724,12 @@ def interrupt():
             # file, which is before ASH's main thread has handled the first one
             # (a slow Windows runner). A second Ctrl-C raised then lands in the
             # unwinding, before the wait that kills the child, so it never ran.
-            # An operator's second press is never within that window.
-            time.sleep(0.5)
+            # An operator's second press is never within that window. A loaded
+            # Windows runner took longer than half a second to get there (the
+            # stand-in logged both Ctrl-Cs and ASH never ended it), so the second
+            # one goes 2 seconds after the first, still inside the page's 5-second
+            # wait that it is meant to cut short.
+            time.sleep(2.0)
         print({sent!r}, time.monotonic(), file=sys.stderr, flush=True)
         if control.get("console_file"):
             with open(control["console_file"], "a", encoding="utf-8") as console_file:
