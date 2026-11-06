@@ -10989,19 +10989,25 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
 
         removing = threading.Event()
         release = threading.Event()
-        # The delete of the tree the sweep renamed aside. The sweep holds the
-        # session (try_begin_sweep) from its last look at the age until that
-        # delete is done, so a write meets the hold while this is open; the
-        # stale session has a workspace, so the sweep does not take the
-        # removal that has no guard (_remove_session_state).
-        real_remove = sessions._remove_set_aside_tree
+        # The rename of the stale tree aside, which the sweep makes under the
+        # presence guard. The sweep holds the session (try_begin_sweep) from its
+        # last look at the age, and the hold stands on the registry's entry until
+        # the sweep forgets the session (_set_session_state_aside), which it does
+        # right after the rename: from then on the session's path is free and a
+        # write is admitted into a fresh workspace, not refused
+        # (test_a_binding_made_during_the_sweeps_delete_is_kept). So the window
+        # in which a write meets the hold is this one, and the remover is held
+        # open here, before the rename. The stale session has a workspace, so
+        # the sweep does not take the removal that has no guard
+        # (_remove_session_state).
+        real_set_aside = source_delivery._set_aside_for_removal
 
-        def held_remove(doomed: Optional[Path]) -> None:
+        def held_set_aside(*args: Any, **kwargs: Any) -> Optional[Path]:
             removing.set()
             assert release.wait(timeout=30), "the test never released the remover"
-            real_remove(doomed)
+            return real_set_aside(*args, **kwargs)
 
-        monkeypatch.setattr(sessions, "_remove_set_aside_tree", held_remove)
+        monkeypatch.setattr(source_delivery, "_set_aside_for_removal", held_set_aside)
         removed: List[str] = []
         sweep = threading.Thread(
             target=lambda: removed.extend(
