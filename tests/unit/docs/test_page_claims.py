@@ -1571,7 +1571,10 @@ def _no_aws_credentials_environment(cwd: Path, **env: str) -> Dict[str, str]:
     for name in [name for name in environment if name.startswith("AWS_")]:
         del environment[name]
     environment.update(_aws_fence())
-    return environment
+    # Callers use this result as it is. _ash_environment already routed it and
+    # nothing here touches PYTHONPATH, so this adds no entry; it is here because
+    # the child-route scan cannot see that through the deletions and the update.
+    return checkout_env(environment, root=_IMPORTED_ROOT)
 
 
 def _ash_with_no_aws_credentials(
@@ -1581,9 +1584,7 @@ def _ash_with_no_aws_credentials(
     return subprocess.run(
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         cwd=cwd,
-        env=checkout_env(
-            _no_aws_credentials_environment(cwd, **env), root=_IMPORTED_ROOT
-        ),
+        env=_no_aws_credentials_environment(cwd, **env),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1752,9 +1753,7 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
             result = subprocess.run(
                 [sys.executable, "-m", "automated_security_helper.cli.main", *args],
                 cwd=work,
-                env=checkout_env(
-                    _moto_child_environment(work, endpoint), root=_IMPORTED_ROOT
-                ),
+                env=_moto_child_environment(work, endpoint),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2117,9 +2116,7 @@ def test_each_run_in_one_process_gives_the_error_for_a_missing_setting(
             *_S3_WITHOUT_A_REGION,
         ],
         cwd=tmp_path,
-        env=checkout_env(
-            _no_aws_credentials_environment(tmp_path), root=_IMPORTED_ROOT
-        ),
+        env=_no_aws_credentials_environment(tmp_path),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -8324,7 +8321,7 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         cwd=cwd,
-        env=checkout_env(_mcp_child_env(cwd), root=_IMPORTED_ROOT),
+        env=_mcp_child_env(cwd),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -8974,7 +8971,7 @@ def _mcp_serving_stdio(
     process = _server_popen(
         command or [*_ASH_MODULE, "mcp", "--quiet"],
         cwd=cwd,
-        env=checkout_env(_mcp_child_env(cwd), root=_IMPORTED_ROOT),
+        env=_mcp_child_env(cwd),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
