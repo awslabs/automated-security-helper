@@ -1651,6 +1651,34 @@ def run_own_directories(basetemp: Path, session_dir: str | None = None) -> list[
     ]
 
 
+def _keep_stand_ins_as_batch_files(monkeypatch, directory: Path) -> None:
+    """Start a stand-in ``.bat`` as the file it is, on Windows.
+
+    The spawn layer never hands a batch file to cmd.exe when it can avoid it
+    (``subprocess_utils._non_batch_substitute``): it runs the ``.exe`` beside the
+    shim, or else this interpreter with ``-m <the shim's name>`` when that name is
+    importable. ``uv`` is importable here, because ASH depends on the ``uv``
+    package, so the guard's ``uv.bat`` was replaced by ``runpy`` on the real ``uv``
+    module: the real uv ran, resolved tools from the index and wrote its cache under
+    the test's HOME, and the start was listed nowhere (a ``python -c`` start names
+    no guarded tool). Only the guard's own directory is exempt from the
+    substitution; any other batch file is substituted as before, and a start of a
+    real tool by its path is still a tool start.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    real = subprocess_utils._non_batch_substitute
+    stand_ins = os.path.normcase(os.path.realpath(directory))
+
+    def substitute(program):
+        parent = os.path.normcase(os.path.realpath(os.path.dirname(os.fspath(program))))
+        if parent == stand_ins:
+            return None
+        return real(program)
+
+    monkeypatch.setattr(subprocess_utils, "_non_batch_substitute", substitute)
+
+
 def install_tool_guard(
     monkeypatch,
     directory: Path,
@@ -1746,6 +1774,7 @@ def install_tool_guard(
         #: For a test whose subject is the candidate list itself
         #: (``use_the_real_candidate_names``).
         guard.real_candidate_names = real_candidates
+        _keep_stand_ins_as_batch_files(monkeypatch, directory)
     if "uv" in names:
         # find_uv_or_none asks for the uv installed with ASH before it searches
         # PATH, so that copy would answer ahead of the stand-in.
