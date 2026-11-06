@@ -2494,8 +2494,9 @@ async def mcp_resolve_workspace(
         ProfileNotRegisteredError,
         # ASH_CONFIG names a file that cannot be read or parsed: the server's
         # own config is refused with exit 3, as a project's is, instead of the
-        # tool raising.
-        ASHConfigSourceError,
+        # tool raising. ASHConfigValidationError is the base of the source
+        # errors and the class of the "names it, and it is not a file" refusal.
+        ASHConfigValidationError,
         OSError,
         RuntimeError,
     ) as exc:
@@ -2664,8 +2665,9 @@ async def _scan_workspace(
         ProfileNotRegisteredError,
         # ASH_CONFIG names a file that cannot be read or parsed: the server's
         # own config is refused with exit 3, as a project's is, instead of the
-        # tool raising.
-        ASHConfigSourceError,
+        # tool raising. ASHConfigValidationError is the base of the source
+        # errors and the class of the "names it, and it is not a file" refusal.
+        ASHConfigValidationError,
         OSError,
         RuntimeError,
     ) as exc:

@@ -131,7 +131,8 @@ def test_a_companion_name_outside_reports_refuses_the_command(
     monkeypatch.setattr(
         report_cli.ash_plugin_manager,
         "plugin_modules",
-        lambda plugin_type=None, **kwargs: [_Escaper],
+        # The name check passes the type and the filter positionally.
+        lambda plugin_type=None, *args, **kwargs: [_Escaper],
     )
 
     with pytest.raises(typer.Exit) as exited:
