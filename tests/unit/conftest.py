@@ -23,6 +23,7 @@ from typing import NamedTuple, Optional
 
 import pytest
 
+from automated_security_helper.utils import subprocess_utils as _subprocess_utils
 from tests.utils.tool_guard import (
     ToolGuard,
     install_tool_guard,
@@ -213,6 +214,44 @@ def in_ci() -> bool:
         os.environ.get(name, "").strip().lower() not in ("", "false", "0")
         for name in ("CI", "GITHUB_ACTIONS")
     )
+
+
+#: ``subprocess_utils.own_environment_dirs`` as it was when this file was imported,
+#: before any test could patch it; see ``pytest_runtest_teardown`` below.
+_IMPORT_TIME_OWN_ENVIRONMENT_DIRS = getattr(
+    _subprocess_utils, "own_environment_dirs", None
+)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item, nextitem):
+    """Fail the test that leaves ``own_environment_dirs`` patched, naming it.
+
+    On macOS under Python 3.10, one xdist worker saw ``own_environment_dirs()`` return
+    ``[]`` at test time in ``test_uv_installed_with_ash.py`` and
+    ``test_verified_present_pinned_tool.py``: some earlier test in that worker left a
+    permanent patch of it, and nine unrelated tests failed in its place.
+
+    This runs as a hook wrapper, after ``yield``, because that is after every fixture
+    finalizer of the test, ``monkeypatch``'s undo included, whatever order the
+    autouse fixtures were set up in. A fixture finalizer would run before the undo of
+    a ``monkeypatch`` that another autouse fixture requested first, and read an
+    in-test patch as a leak. A patch made for one test and undone by its fixture is
+    therefore never seen here. A patch still in place now is a leak, so the function
+    is put back (the next test is not made its victim) and this test is failed.
+    """
+    result = yield
+    original = _IMPORT_TIME_OWN_ENVIRONMENT_DIRS
+    if original is not None:
+        current = getattr(_subprocess_utils, "own_environment_dirs", None)
+        if current is not original:
+            _subprocess_utils.own_environment_dirs = original
+            raise AssertionError(
+                f"{item.nodeid} left subprocess_utils.own_environment_dirs patched "
+                f"({current!r} where the import-time function "
+                f"{original!r} belongs); the patch outlived the test's fixtures"
+            )
+    return result
 
 
 class UnitTestGuard(NamedTuple):
