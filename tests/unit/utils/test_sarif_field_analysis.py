@@ -4,6 +4,8 @@ import sys
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 
 @pytest.mark.unit
 class TestImportLocation:
@@ -321,7 +323,7 @@ class TestTheCsvFilesUnderAnAsciiLocale:
         )
 
         ran = subprocess.run(
-            [sys.executable, "-c", probe],
+            [sys.executable, "-c", importing_this_checkout(probe)],
             env=env,
             capture_output=True,
             text=True,

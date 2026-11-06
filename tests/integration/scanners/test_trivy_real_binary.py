@@ -39,6 +39,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import checkout_env
 from tests.utils.trivy_fixture import PINNED_TRIVY, materialize, version_of
 import yaml
 
@@ -460,7 +461,7 @@ def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
         encoding="utf-8",
         errors="replace",
         timeout=900,
-        env=env,
+        env=checkout_env(env),
     )
     log = f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-6000:]}\nSTDERR:\n{proc.stderr[-4000:]}"
     return proc, log

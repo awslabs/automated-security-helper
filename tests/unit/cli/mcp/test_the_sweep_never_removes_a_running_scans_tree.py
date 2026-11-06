@@ -31,7 +31,11 @@ import pytest
 from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
+from tests.utils.helpers import (
+    CHILD_TIMEOUT_SECONDS,
+    KillAfter,
+    importing_this_checkout,
+)
 
 DAY = 24 * 3600
 
@@ -150,7 +154,7 @@ with ScanPresence(sys.argv[1]):
 def _scan_in_another_process(root: Path, session_id: str):
     env = dict(os.environ, ASH_MCP_WORKSPACE_ROOT=str(root))
     child = subprocess.Popen(
-        [sys.executable, "-c", _HOLDER, session_id],
+        [sys.executable, "-c", importing_this_checkout(_HOLDER), session_id],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

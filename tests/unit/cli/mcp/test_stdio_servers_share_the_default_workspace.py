@@ -28,7 +28,7 @@ from typing import Dict
 import pytest
 
 from automated_security_helper.cli.mcp import sessions
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter, checkout_env
 
 
 def _zip() -> bytes:
@@ -46,7 +46,7 @@ def _server(root: Path, stderr) -> subprocess.Popen:
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=stderr,
-        env=env,
+        env=checkout_env(env),
         text=True,
     )
 

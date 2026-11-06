@@ -1480,8 +1480,10 @@ class TestPathologicalInput:
         import subprocess
         import sys
 
+        from tests.utils.helpers import importing_this_checkout
+
         completed = subprocess.run(
-            [sys.executable, "-c", _BACKSLASH_PROBE, "100000"],
+            [sys.executable, "-c", importing_this_checkout(_BACKSLASH_PROBE), "100000"],
             capture_output=True,
             text=True,
             timeout=120,

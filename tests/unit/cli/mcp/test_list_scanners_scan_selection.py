@@ -50,6 +50,7 @@ from typing import Dict, List
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
 from tests.utils.isolated_tool_env import (
     install_refusing_installers,
     isolated_tool_env,
@@ -300,7 +301,12 @@ class _Sequence:
 
     def run(self, steps: List[dict]) -> dict:
         completed = subprocess.run(
-            [sys.executable, "-c", _PROGRAM, json.dumps({"steps": steps})],
+            [
+                sys.executable,
+                "-c",
+                importing_this_checkout(_PROGRAM),
+                json.dumps({"steps": steps}),
+            ],
             cwd=self.workdir,
             env=self._env(),
             capture_output=True,

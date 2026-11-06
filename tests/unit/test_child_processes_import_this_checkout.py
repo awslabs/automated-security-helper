@@ -304,6 +304,321 @@ ALLOWED: Dict[str, str] = {
     "tests/utils/selection.py::get_tests_by_keyword::test-run#1@run": _SELECTION_TOOL,
     "tests/utils/selection.py::get_slow_tests::test-run#1@run": _SELECTION_TOOL,
     "tests/utils/selection.py::run_selected_tests::test-run#1@run": _SELECTION_TOOL,
+    "tests/unit/config/test_client_scanner_exclusions_pattern_bounds.py"
+    "::test_a_pass_starts_one_process_on_the_spawn_path"
+    "::fresh-interpreter#1@get_context": (
+        f"{_FRESH_INTERPRETER}; its target is os.getpid"
+    ),
+    "tests/unit/cli/mcp/test_a_value_error_from_running_git_is_not_a_bad_session_id.py"
+    "::delivery::unread-script#1@setattr": (
+        "a stand-in git script that imports only the stdlib; no ASH import"
+    ),
+    "tests/unit/cli/mcp/test_git_output_that_is_not_utf8_is_a_git_failure.py"
+    "::stand_in_git.install::unread-script#1@setattr": (
+        "a stand-in git script that imports only the stdlib; no ASH import"
+    ),
+    "tests/unit/cli/mcp/"
+    "test_set_source_git_refuses_unprintable_url_and_ref_up_front.py"
+    "::delivery::unread-script#1@setattr": (
+        "a stand-in git script that imports only the stdlib; no ASH import"
+    ),
+    "tests/unit/cli/mcp/test_set_source_git_times_out.py"
+    "::fake_git.install::unread-script#1@setattr": (
+        "a stand-in git script that imports only the stdlib; no ASH import"
+    ),
+    "tests/unit/docs/test_page_claims.py::_container_scan::unread-script#1@_ash+cwd": (
+        "the script is a stand-in container runtime (stdlib only); the ash child "
+        "itself is routed by _ash_environment"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is"
+    ".scan::unread-script#1@_ash+cwd": (
+        "the script is a stand-in container runtime (stdlib only); the ash child "
+        "itself is routed by _ash_environment"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is"
+    "::stdin#1@scan": (
+        "the stdin is the stand-in container runtime's; the ash child itself is "
+        "routed by _ash_environment"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_host"
+    "::unread-script#1@_ash+cwd": (
+        "the script is a stand-in container or nix runtime (stdlib only); the ash "
+        "child itself is routed by _ash_environment"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is"
+    "::unread-script#1@_ash+cwd": (
+        "the script is a stand-in container runtime (stdlib only); the ash child "
+        "itself is routed by _ash_environment"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own"
+    "::unread-script#1@_ash+cwd": (
+        "the script is a stand-in container runtime (stdlib only); the ash child "
+        "itself is routed by _ash_environment"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_ctrl_c_ends_ash_build_image_with_exit_code_130"
+    "::stdin#1@_run_interrupted": (
+        "the stand-in container runtime's stdin; the ash child itself is routed "
+        "by _ash_environment"
+    ),
+    "tests/unit/utils/sandbox/test_backends_carve_a_home_out_of_a_read_path.py"
+    "::_landlock_read_grants::stdin#1@plan": (
+        "LandlockBackend.plan only builds the plan document from the argv; it "
+        "starts nothing, and the plan is cleaned up unrun"
+    ),
+    "tests/unit/utils/sandbox/test_backends_carve_a_home_out_of_a_read_path.py"
+    "::_landlock_plan::stdin#1@plan": (
+        "LandlockBackend.plan only builds the plan document from the argv; it "
+        "starts nothing"
+    ),
+    "tests/unit/utils/test_offline_tool_env.py"
+    "::test_every_spawn_gets_them_offline::unread-code#1@"
+    "run_command_with_output_handling+cwd": (
+        "-c code from _print_variables, which imports only json and os and prints "
+        "environment variables; it imports nothing from ASH"
+    ),
+    "tests/unit/utils/test_offline_tool_env.py"
+    "::test_spawn_run_gets_them_offline::unread-code#1@spawn_run+cwd": (
+        "-c code from _print_variables, which imports only json and os and prints "
+        "environment variables; it imports nothing from ASH"
+    ),
+    "tests/unit/utils/test_python_child_reads_interpreter_and_uv_arguments.py"
+    "::test_a_path_in_argv_is_a_script_and_never_an_error"
+    "::unread-script#1@runs_module_or_code": (
+        "runs_module_or_code only reads an argv; nothing is started"
+    ),
+    "tests/unit/utils/test_python_child_reads_interpreter_and_uv_arguments.py"
+    "::test_a_path_in_argv_is_a_script_and_never_an_error"
+    "::unread-script#2@runs_module_or_code": (
+        "runs_module_or_code only reads an argv; nothing is started"
+    ),
+    "tests/unit/utils/test_sandbox_policy.py"
+    "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
+    "::stdin#1@run_command": (
+        "the backend's plan raises and subprocess.run and Popen are replaced by a "
+        "recorder, so nothing is started (the test asserts started == [])"
+    ),
+    "tests/unit/utils/test_sandbox_policy.py"
+    "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
+    "::stdin#1@run_command_stream_output": (
+        "the backend's plan raises and subprocess.run and Popen are replaced by a "
+        "recorder, so nothing is started (the test asserts started == [])"
+    ),
+    "tests/unit/utils/test_sandbox_policy.py"
+    "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
+    "::stdin#1@spawn_run": (
+        "the backend's plan raises and subprocess.run and Popen are replaced by a "
+        "recorder, so nothing is started (the test asserts started == [])"
+    ),
+    "tests/unit/utils/test_sandbox_policy.py"
+    "::TestScope.test_a_backend_that_fails_while_planning_starts_nothing"
+    "::stdin#1@create_process_with_pipes": (
+        "the backend's plan raises and subprocess.run and Popen are replaced by a "
+        "recorder, so nothing is started (the test asserts started == [])"
+    ),
+    "tests/unit/utils/test_stand_ins.py"
+    "::test_on_windows_the_stand_in_is_a_script_and_a_bat_launcher_for_it"
+    "::unread-script#1@launcher_text": (
+        "launcher_text only formats the text of a .bat launcher; nothing is started"
+    ),
+    "tests/unit/utils/test_subprocess_utils_exemption.py"
+    "::test_the_running_interpreter_is_admitted_inside_a_scanned_tree"
+    "::stdin#1@iter": (
+        "the interpreter's path is a candidate for a lookup that only compares "
+        "paths; nothing is started"
+    ),
+    "tests/unit/utils/test_the_pipes_record_hides_carried_values.py"
+    "::test_a_carried_value_in_a_mount_path_never_reaches_the_record"
+    "::unread-script#1@create_process_with_pipes": (
+        "Popen is replaced by a stub that raises _Reached after the record is "
+        "emitted; nothing is started"
+    ),
+    "tests/unit/utils/test_the_pipes_record_hides_carried_values.py"
+    "::test_the_same_text_uncarried_prints_as_it_is"
+    "::unread-script#1@create_process_with_pipes": (
+        "Popen is replaced by a stub that raises _Reached after the record is "
+        "emitted; nothing is started"
+    ),
+    "tests/unit/utils/test_uv_overrides_read_uvs_own_arguments.py"
+    "::test_a_path_like_program_is_uv::unread-script#1@uv_child_overrides": (
+        "uv_child_overrides only reads an argv; nothing is started"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestAnExtraTheInstalledVersionDoesNotDeclare"
+    ".test_it_is_unsatisfied_not_satisfied::unread-script#1@_dry_run": (
+        "pre_installed_tool._run is replaced by a stub answering a canned "
+        "CompletedProcess; nothing is started"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestAnExtraTheInstalledVersionDoesNotDeclare"
+    ".test_no_changes_without_the_warning_is_satisfied::unread-script#1@_dry_run": (
+        "pre_installed_tool._run is replaced by a stub answering a canned "
+        "CompletedProcess; nothing is started"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestAnExtraTheInstalledVersionDoesNotDeclare"
+    ".test_another_packages_missing_extra_is_not_this_copys::unread-script#1@_dry_run": (
+        "pre_installed_tool._run is replaced by a stub answering a canned "
+        "CompletedProcess; nothing is started"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestAnExtraTheInstalledVersionDoesNotDeclare"
+    ".test_the_requested_package_is_matched_by_its_canonical_name"
+    "::unread-script#1@_dry_run": (
+        "pre_installed_tool._run is replaced by a stub answering a canned "
+        "CompletedProcess; nothing is started"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestAnExtraTheInstalledVersionDoesNotDeclare"
+    ".test_the_requested_package_is_matched_whatever_its_version_spelling"
+    "::unread-script#1@_dry_run": (
+        "pre_installed_tool._run is replaced by a stub answering a canned "
+        "CompletedProcess; nothing is started"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestAnExtraTheInstalledVersionDoesNotDeclare"
+    ".test_a_drifted_warning_with_no_readable_package_is_unsatisfied"
+    "::unread-script#1@_dry_run": (
+        "pre_installed_tool._run is replaced by a stub answering a canned "
+        "CompletedProcess; nothing is started"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestTheCauseOfAnUnsatisfiedVerdict"
+    ".test_a_dependency_gap_blames_no_extra::unread-script#1@_judge": (
+        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestTheCauseOfAnUnsatisfiedVerdict"
+    ".test_an_extra_the_environment_lacks_is_still_named::unread-script#1@_judge": (
+        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestTheCauseOfAnUnsatisfiedVerdict"
+    ".test_a_missing_extra_spelled_by_a_hidden_value_is_hidden_in_the_summary"
+    "::unread-script#1@_judge": (
+        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestTheCauseOfAnUnsatisfiedVerdict"
+    ".test_a_missing_extra_no_value_spells_is_named_in_the_summary"
+    "::unread-script#1@_judge": (
+        "pre_installed_tool._dry_run is replaced by a stub; _judge starts nothing"
+    ),
+    "tests/unit/utils/test_pre_installed_tool_verdict_causes.py"
+    "::TestAProbeThatCouldNotRunNamesItsCause"
+    ".test_the_dry_runs_timeout_is_in_the_reason::unread-script#1@_dry_run": (
+        "pre_installed_tool.spawn_run is replaced by a stub that raises "
+        "TimeoutExpired; nothing is started"
+    ),
+    "tests/integration/docs/conftest.py::pytest_report_header::code#1@run": (
+        "reports the ASH the docs examples import, which by design is the one the "
+        "interpreter installs (the docs may be checked against another checkout's "
+        "code); the probe reads that installed copy, not this checkout"
+    ),
+    "tests/integration/docs/docs_runner.py"
+    "::PageRunner.run_block::unread-script#1@_run_process": (
+        "a docs example runs against the ASH installed in the interpreter's "
+        "environment, by design (docs checked against another checkout's code)"
+    ),
+    "tests/integration/docs/test_docs_runner_can_fail.py"
+    "::test_the_session_is_isolated_and_offline::console-script#1@_assert_all_ok": (
+        "the page runner under test starts blocks against the installed ASH; the "
+        "ash path is text inside a docs block, not a launch of this test"
+    ),
+    "tests/integration/docs/test_docs_runner_can_fail.py"
+    "::test_a_tool_on_the_host_path_is_not_on_the_session_path"
+    "::console-script#1@_assert_all_ok": (
+        "the page runner under test starts blocks against the installed ASH; the "
+        "ash path is text inside a docs block, not a launch of this test"
+    ),
+    "tests/unit/assets/test_install_pinned_tool.py"
+    "::TestAssertRootOnly.test_the_mode_exits_nonzero_and_names_the_path"
+    "::isolated-script#1@run": (
+        "install-pinned-tool.py runs under -I -S on the standard library alone; it "
+        "imports no ASH module"
+    ),
+    "tests/unit/core/phases/test_scanner_without_its_database.py"
+    "::TestTheGrypeStandInCanBeStartedOnWindows"
+    ".test_the_script_prints_the_status_and_exits_with_the_code"
+    "::unread-script#1@run": (
+        "the grype stand-in script prints a recorded status and imports only the "
+        "standard library"
+    ),
+    "tests/unit/interactions/test_container_build_and_mount_inputs.py"
+    "::TestTheImageIsBuiltFromAshsOwnDockerfile"
+    ".test_a_local_revision_outside_a_source_tree_never_builds_the_cwd"
+    "::code#1@run": (
+        "imports a copy of the package laid out as a wheel install puts it, from a "
+        "bare site directory, on purpose; the child asserts that copy is the one "
+        "imported"
+    ),
+    "tests/unit/interactions/test_container_installed_package_is_not_a_checkout.py"
+    "::test_markers_beside_an_installed_package_do_not_make_it_a_clone"
+    "::code#1@run": (
+        "imports a copy of the package laid out as pip installs it, from a bare site "
+        "directory, on purpose; this checkout must not be the one imported"
+    ),
+    "tests/unit/test_docs_mcp_contract.py"
+    "::test_the_generator_check_fails_on_a_renamed_error_type.run"
+    "::script#1@run+cwd": (
+        "the generator runs against a control or a planted copy of the package, "
+        "named by PYTHONPATH on purpose; routing it to this checkout would defeat "
+        "the planted copy"
+    ),
+    "tests/unit/test_generated_docs_freshness.py"
+    "::_run_generator::unread-script#1@run+cwd": (
+        "a generator imports the ASH the interpreter installs, by design (the docs "
+        "may be checked against another checkout's code); callers also pass a "
+        "planted copy of the package on PYTHONPATH"
+    ),
+    "tests/unit/test_generated_docs_freshness.py::_in_code_tree::code#1@run+cwd": (
+        "reads the ASH the interpreter installs, as the generators do, which is the "
+        "code the docs are checked against; the cwd is an empty directory on purpose"
+    ),
+    "tests/unit/test_nix_cfn_guard_rules_reseed.py::_script_check::script#1@run": (
+        "install-pinned-tool.py is standard-library only by design (nothing is "
+        "installed when it runs); it imports no ASH module"
+    ),
+    "tests/unit/test_nix_cfn_guard_rules_reseed.py"
+    "::test_check_needs_rules_bundle::script#1@run": (
+        "install-pinned-tool.py is standard-library only by design (nothing is "
+        "installed when it runs); it imports no ASH module"
+    ),
+    "tests/unit/test_docs_ci_runner_tools.py"
+    "::_run_isolated::isolated-unread-script#1@run+cwd": (
+        "the CI-runner scripts run standalone under -I on the standard library "
+        "alone, which the tests assert; they import no ASH module"
+    ),
+    "tests/unit/test_workflow_commands_print_no_unchecked_value.py"
+    "::_python_one_line::unread-code#1@run": (
+        "the -c code is the one_line helper and the json and unicodedata modules; "
+        "it imports no ASH module"
+    ),
+    "tests/unit/interactions/test_run_ash_nix.py"
+    "::TestTheInnerScanImportsNothingFromTheScanDirectory"
+    ".test_control_the_old_inner_command_imports_the_planted_package"
+    "::code#1@_run_in": (
+        "the control runs the old inner command, whose first import must find a "
+        "package planted in the working directory ahead of the installed one; "
+        "routing it to this checkout would hide what the control shows"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_ending_a_server_child_signals_its_group_only_while_its_leader_is_unreaped"
+    "::unread-code#1@_server_popen": (
+        "the child is `pass` or a sleep, a non-ASH Python child that imports "
+        "nothing; the test is about ending a server child's process group"
+    ),
+    "tests/unit/docs/test_page_claims.py"
+    "::test_the_ci_variables_do_not_choose_the_image_stage.build_target"
+    "::unread-script#1@setenv": (
+        "OCI_RUNNER_WRAPPER names a stand-in container runtime script that "
+        "imports the standard library only; ASH runs in this process"
+    ),
 }
 
 

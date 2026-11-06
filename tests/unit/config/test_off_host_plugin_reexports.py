@@ -34,6 +34,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from tests.utils.helpers import importing_this_checkout
+
 PACKAGE = "reexport_ash_plugins"
 SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
 AWS = "automated_security_helper.plugin_modules.ash_aws_plugins"
@@ -174,7 +176,7 @@ def _engines_process(
         [str(site), *filter(None, [os.environ.get("PYTHONPATH")])]
     )
     return subprocess.run(
-        [sys.executable, "-c", _ENGINE, json.dumps(scans)],
+        [sys.executable, "-c", importing_this_checkout(_ENGINE), json.dumps(scans)],
         cwd=site.parent,
         env=environment,
         capture_output=True,
@@ -529,7 +531,7 @@ def test_ash_report_runs_a_re_exported_reporter_only_from_the_operators_config(
     )
     spec = {"cwd": str(repo), "args": args}
     run = subprocess.run(
-        [sys.executable, "-c", _REPORT, json.dumps(spec)],
+        [sys.executable, "-c", importing_this_checkout(_REPORT), json.dumps(spec)],
         cwd=site.parent,
         env=environment,
         capture_output=True,

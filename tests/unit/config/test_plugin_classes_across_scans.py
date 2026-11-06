@@ -35,6 +35,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = pytest.mark.integration
 
 CARRY = "carry_ash_plugins"
@@ -344,7 +346,7 @@ def _run(site: Path, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         [str(site), *filter(None, [os.environ.get("PYTHONPATH")])]
     )
     result = subprocess.run(
-        [sys.executable, "-c", _DRIVER, json.dumps(steps)],
+        [sys.executable, "-c", importing_this_checkout(_DRIVER), json.dumps(steps)],
         cwd=site.parent,
         env=environment,
         capture_output=True,

@@ -30,6 +30,8 @@ from typing import List, Tuple
 import pytest
 import yaml
 
+from tests.utils.helpers import checkout_env
+
 pytestmark = pytest.mark.integration
 
 # Built at runtime so this file holds no secret-shaped literal. AWS's documented
@@ -106,6 +108,7 @@ def _scan(
         encoding="utf-8",
         errors="replace",
         timeout=600,
+        env=checkout_env(),
     )
     log = (
         f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\n"

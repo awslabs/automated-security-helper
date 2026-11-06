@@ -17,6 +17,7 @@ import sys
 import pytest
 
 import automated_security_helper
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = pytest.mark.unit
 
@@ -40,7 +41,10 @@ def test_importing_the_package_does_not_import_the_version_reader():
     )
 
     completed = subprocess.run(
-        [sys.executable, "-I", "-c", code], capture_output=True, text=True, check=False
+        [sys.executable, "-I", "-c", importing_this_checkout(code)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
     assert completed.returncode == 0, completed.stderr

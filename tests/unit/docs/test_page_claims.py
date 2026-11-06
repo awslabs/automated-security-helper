@@ -87,6 +87,12 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set,
 import pytest
 import yaml
 
+from tests.utils.helpers import (
+    checkout_env,
+    importing_this_checkout,
+    module_from_this_checkout,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTENT = REPO_ROOT / "docs" / "content"
 
@@ -424,7 +430,7 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
     }
     for name in ("ASH_CONFIG", "XDG_BIN_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
         environment.pop(name, None)
-    return {**environment, **env}
+    return checkout_env({**environment, **env})
 
 
 from automated_security_helper.utils import (  # noqa: E402
@@ -1567,7 +1573,7 @@ def _ash_with_no_aws_credentials(
     return subprocess.run(
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         cwd=cwd,
-        env=_no_aws_credentials_environment(cwd, **env),
+        env=checkout_env(_no_aws_credentials_environment(cwd, **env)),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1736,7 +1742,7 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
             result = subprocess.run(
                 [sys.executable, "-m", "automated_security_helper.cli.main", *args],
                 cwd=work,
-                env=_moto_child_environment(work, endpoint),
+                env=checkout_env(_moto_child_environment(work, endpoint)),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2099,7 +2105,7 @@ def test_each_run_in_one_process_gives_the_error_for_a_missing_setting(
             *_S3_WITHOUT_A_REGION,
         ],
         cwd=tmp_path,
-        env=_no_aws_credentials_environment(tmp_path),
+        env=checkout_env(_no_aws_credentials_environment(tmp_path)),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -7863,7 +7869,7 @@ def _interrupter(
     return [
         sys.executable,
         "-c",
-        _INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT),
+        importing_this_checkout(_INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT)),
         json.dumps(control),
     ]
 
@@ -8302,7 +8308,7 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
         cwd=cwd,
-        env=_mcp_child_env(cwd),
+        env=checkout_env(_mcp_child_env(cwd)),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -8312,7 +8318,12 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
-_ASH_MODULE = [sys.executable, "-m", "automated_security_helper.cli.main"]
+_ASH_MODULE = [
+    sys.executable,
+    "-I",
+    "-c",
+    module_from_this_checkout("automated_security_helper.cli.main"),
+]
 
 
 @pytest.mark.parametrize(
@@ -8527,8 +8538,7 @@ def _mcp_package_missing(
     cwd: Path, monkeypatch: pytest.MonkeyPatch, mcp_cli
 ) -> Tuple[int, str]:
     # A child interpreter in which the MCP SDK cannot be imported.
-    driver = (
-        "import sys\n"
+    driver = importing_this_checkout(
         "sys.modules['mcp'] = None\n"
         "from automated_security_helper.cli.main import app\n"
         "sys.argv = ['ash', 'mcp', '--quiet']\n"
@@ -8945,7 +8955,7 @@ def _mcp_serving_stdio(
     process = _server_popen(
         command or [*_ASH_MODULE, "mcp", "--quiet"],
         cwd=cwd,
-        env=_mcp_child_env(cwd),
+        env=checkout_env(_mcp_child_env(cwd)),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -9153,7 +9163,7 @@ def _mcp_http_server(
             *options,
         ],
         cwd=cwd,
-        env=env if env is not None else _mcp_child_env(cwd),
+        env=checkout_env(env if env is not None else _mcp_child_env(cwd)),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -15215,7 +15225,7 @@ def test_the_s3_reporter_sends_a_value_read_from_the_environment_as_its_referenc
         result = subprocess.run(
             [sys.executable, "-m", "automated_security_helper.cli.main", *args],
             cwd=tmp_path,
-            env=env,
+            env=checkout_env(env),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -16845,7 +16855,7 @@ def _child_answer(
     result = subprocess.run(
         [sys.executable, "-c", script, *args],
         cwd=cwd,
-        env=environment,
+        env=checkout_env(environment),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -19423,7 +19433,14 @@ def _report_through(
     if sink == "terminal":
         environment["TERM"] = "xterm-256color"
     environment.update(env)
-    argv = [sys.executable, "-c", _RECORDING_REPORT, str(record), "report", *args]
+    argv = [
+        sys.executable,
+        "-c",
+        importing_this_checkout(_RECORDING_REPORT),
+        str(record),
+        "report",
+        *args,
+    ]
     if sink == "file":
         stdout_path = workdir / "stdout.txt"
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
@@ -20722,7 +20739,7 @@ def _backend_unavailable(class_name: str) -> Optional[str]:
     # ASH's probe builds its child's environment itself, which is why an
     # in-process call cannot be contained from here.
     scratch = Path(tempfile.mkdtemp(prefix="ash-backend-probe-"))
-    probe = (
+    probe = importing_this_checkout(
         "from automated_security_helper.utils.sandbox import backends\n"
         f"print(repr(backends.{class_name}()._probe()))\n"
     )

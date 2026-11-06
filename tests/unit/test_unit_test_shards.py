@@ -95,7 +95,7 @@ from tests.utils.ci_tiers import (
     UNIT_TEST_JOB_IDS,
 )
 from tests.utils.env_assertions import environ_names
-from tests.utils.helpers import iter_repo_files
+from tests.utils.helpers import checkout_env, iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
@@ -241,7 +241,10 @@ def _pytest_ini_patterns(key: str) -> list[str]:
 
 
 def _clean_env(**extra: str) -> dict[str, str]:
-    """The environment of a child that must not join this run's coverage or options."""
+    """The environment of a child that must not join this run's coverage or options.
+
+    This checkout is first on its PYTHONPATH, so a child that imports ASH imports it.
+    """
     env = {
         k: v
         for k, v in os.environ.items()
@@ -249,7 +252,7 @@ def _clean_env(**extra: str) -> dict[str, str]:
         and k not in (sharding.ENV_VAR, sharding.FLOOR_ENV_VAR)
     }
     env.update(extra)
-    return env
+    return checkout_env(env)
 
 
 def _rendered_artifact_name(
@@ -858,7 +861,7 @@ class TestATierRunThatRanNothingInARealPytest:
                 *extra,
             ],
             cwd=root,
-            env=env,
+            env=checkout_env(env),
             capture_output=True,
             text=True,
             timeout=300,
@@ -1089,7 +1092,7 @@ class TestSkipifLegsAndWarnModeInARealPytest:
                 *extra,
             ],
             cwd=root,
-            env=env,
+            env=checkout_env(env),
             capture_output=True,
             text=True,
             timeout=300,

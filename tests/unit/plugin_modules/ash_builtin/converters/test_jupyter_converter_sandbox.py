@@ -53,7 +53,7 @@ from automated_security_helper.utils import (
 )
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, checkout_env
 from tests.utils.stand_ins import on_windows, write_stand_in
 
 # Marked per class, not per module: the stand-in backend runs every planned command
@@ -1135,6 +1135,7 @@ class TestTheStandInsCanBeStartedOnWindows:
         for name in self.NAMES:
             subprocess.run(  # nosec B603 - this interpreter, on the test's own script
                 [sys.executable, str(tools.bin / f"{name}.py"), "--version"],
+                env=checkout_env(),
                 capture_output=True,
                 check=False,
                 timeout=CHILD_TIMEOUT_SECONDS,

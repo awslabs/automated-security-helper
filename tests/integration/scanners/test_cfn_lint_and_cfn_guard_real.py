@@ -35,6 +35,7 @@ import yaml
 
 from automated_security_helper.utils.rules_bundles import RulesBundleUnavailable
 from automated_security_helper.utils.subprocess_utils import find_executable
+from tests.utils.helpers import checkout_env
 
 pytestmark = [pytest.mark.integration]
 
@@ -183,7 +184,7 @@ def _scan(
         encoding="utf-8",
         errors="replace",
         timeout=900,
-        env={**os.environ, **(env or {})},
+        env=checkout_env({**os.environ, **(env or {})}),
     )
     log = (
         f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\n"
@@ -492,7 +493,7 @@ def _scan_with_tree_config(
         encoding="utf-8",
         errors="replace",
         timeout=900,
-        env={**os.environ, "ASH_OFFLINE": "true"},
+        env=checkout_env({**os.environ, "ASH_OFFLINE": "true"}),
         cwd=cwd,
     )
     return proc, output

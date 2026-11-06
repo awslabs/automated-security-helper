@@ -44,7 +44,11 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.rules_bundles import (
     create_rules_bundle_install_command,
 )
-from tests.utils.helpers import bound_run_command
+from tests.utils.helpers import (
+    bound_run_command,
+    checkout_env,
+    importing_this_checkout,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = REPO_ROOT / "automated_security_helper"
@@ -140,7 +144,7 @@ def test_control_the_detect_secrets_worker_imports_the_planted_package(tmp_path)
     subprocess.run(
         [sys.executable, "-m", DETECT_SECRETS_WORKER, "request.json", "out.json"],
         cwd=repo,
-        env=_child_env(),
+        env=checkout_env(_child_env()),
         capture_output=True,
         check=False,
         timeout=120,
@@ -234,7 +238,7 @@ def test_the_bin_path_constant_follows_the_documented_contract(
         [
             sys.executable,
             "-c",
-            (
+            importing_this_checkout(
                 "from automated_security_helper.core.constants import ASH_BIN_PATH; "
                 "print(ASH_BIN_PATH)"
             ),
