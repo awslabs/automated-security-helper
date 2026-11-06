@@ -91,10 +91,13 @@ def test_a_named_config_in_a_config_root_is_the_operators(
 
 
 def test_a_discovered_config_is_never_the_clients_by_name(
-    layout: Path, recorded_every_file: List[Any]
+    layout: Path, recorded_every_file: List[Any], monkeypatch
 ) -> None:
     from automated_security_helper.cli.mcp_tools import _config_pre_check
 
+    # Discovery hands the caller's permit to every name it looks at, so the
+    # scanned directory is one the session may read (as a scan target is).
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(layout / "scan"))
     (layout / "scan" / ".ash.yaml").write_text(
         "project_name: discovered\n", encoding="utf-8"
     )
