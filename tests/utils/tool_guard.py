@@ -931,6 +931,26 @@ def reset_tool_lookup_caches() -> None:
     reset_pre_installed_tool_cache()
 
 
+def path_without_the_guard(path: str) -> str:
+    """*path*, a PATH string, without the directory of the stand-ins in force.
+
+    For the PATH of a child process that must find the host's own tools, or none:
+    the guard puts its stand-ins first on this process's PATH, so a child that
+    inherits it runs a stand-in, which is a tool start the guard records at
+    teardown, and finds a ``snyk`` where the host has none. Without a guard in
+    force the path is returned as it is.
+    """
+    guard = _ACTIVE
+    if guard is None:
+        return path
+    own = os.path.normcase(str(guard.directory))
+    return os.pathsep.join(
+        part
+        for part in path.split(os.pathsep)
+        if os.path.normcase(part.rstrip("\\/")) != own
+    )
+
+
 def use_the_real_candidate_names(monkeypatch) -> None:
     """Put back the lookup's own candidate list for a test whose subject is it.
 
