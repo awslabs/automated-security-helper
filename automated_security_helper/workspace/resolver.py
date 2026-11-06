@@ -184,6 +184,7 @@ from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.policy import (
     normalise_scanner_name,
     policy_for_project,
+    policy_search_root,
     refuse_package_paths_naming_no_project,
     resolve_workspace_policy,
 )
@@ -1737,7 +1738,7 @@ def _apply_workspace_policy(
         )
     ]
     policy, source = resolve_workspace_policy(
-        definition.root,
+        policy_search_root(definition.path, definition.root, permit_base),
         explicit=workspace_config,
         project_config_paths=own_configs,
         permit_base=permit_base,
