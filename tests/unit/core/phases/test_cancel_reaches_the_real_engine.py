@@ -1051,7 +1051,15 @@ def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
     """
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
+        NpmAuditScanner,
+    )
+
     stub_tool_probes(monkeypatch)
+    # npm-audit's dependency check also asks ``npm --version``; on Windows that
+    # start went through the guard's npm.bat and was recorded as a tool start
+    # at teardown. The version is not what this cell measures.
+    monkeypatch.setattr(NpmAuditScanner, "_probe_npm_version", lambda self: None)
     source = tmp_path / "project"
     source.mkdir()
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
