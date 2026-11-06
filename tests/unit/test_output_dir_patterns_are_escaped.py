@@ -348,7 +348,15 @@ def _checkov_skip_paths(source, output_dir):
         ("out{2}", "outt"),
         ("out[1]", "out1"),
         ("out]z", "outz"),
-        ("out|q", "q"),
+        pytest.param(
+            "out|q",
+            "q",
+            marks=pytest.mark.skipif(
+                os.name == "nt",
+                reason="a vertical bar cannot be in a Windows file name "
+                "(WinError 123), so no such output directory can exist there",
+            ),
+        ),
     ],
 )
 def test_checkov_skips_exactly_an_output_dir_named_with_regex_syntax(
