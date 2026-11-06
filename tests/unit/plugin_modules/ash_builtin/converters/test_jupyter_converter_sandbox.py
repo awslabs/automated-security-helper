@@ -289,6 +289,33 @@ def _give_launchers_an_interpreter(monkeypatch, tools: _Tools) -> None:
     monkeypatch.setattr(pre_installed_tool, "find_tool_interpreter", find)
 
 
+def _start_launchers_as_their_batch_file_does(monkeypatch, tools: _Tools) -> None:
+    """Start a stand-in's ``.bat`` launcher by what the launcher runs, on Windows.
+
+    The spawn layer never hands a batch file to cmd.exe when it can avoid it
+    (``subprocess_utils._non_batch_substitute``): it runs the ``.exe`` beside the
+    shim, or else the interpreter with ``-m <the shim's name>`` when that name is
+    importable here. ``uv`` is importable here, because ASH depends on the ``uv``
+    package, so the stand-in ``uv.bat`` was replaced by ``runpy`` on the real
+    ``uv`` module: the CI log of the Windows shard shows the real uv installing
+    nbconvert in a test that asserts the stand-in's install list, and its cache
+    left in the test's HOME. A launcher of ``tools`` is started as the launcher
+    itself would start it: this interpreter on the stand-in's script. Any other
+    batch file is substituted as before.
+    """
+    real = subprocess_utils._non_batch_substitute
+    stand_in_dir = os.path.normcase(os.path.realpath(tools.bin))
+
+    def substitute(program):
+        script = Path(os.path.splitext(os.fspath(program))[0] + ".py")
+        parent = os.path.normcase(os.path.realpath(script.parent))
+        if parent == stand_in_dir and script.is_file():
+            return [sys.executable, str(script)]
+        return real(program)
+
+    monkeypatch.setattr(subprocess_utils, "_non_batch_substitute", substitute)
+
+
 def _isolate_tool_lookup(monkeypatch, tools: _Tools, home: Path, *, online: bool):
     monkeypatch.setenv("PATH", str(tools.bin))
     monkeypatch.setenv("ASH_BIN_PATH", str(tools.bin))
@@ -318,6 +345,7 @@ def _isolate_tool_lookup(monkeypatch, tools: _Tools, home: Path, *, online: bool
         return None
 
     monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", stand_in_uv)
+    _start_launchers_as_their_batch_file_does(monkeypatch, tools)
     _give_launchers_an_interpreter(monkeypatch, tools)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv(TOKEN_VARIABLE, "token-value")
