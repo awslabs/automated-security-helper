@@ -17356,7 +17356,12 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
 )
 @pytest.mark.integration
 def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
-    tmp_path: Path, runner: str, wrapper: str, home_kind: str, expected: Dict[str, Any]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: str,
+    wrapper: str,
+    home_kind: str,
+    expected: Dict[str, Any],
 ) -> None:
     """run-in-a-container.md (Choose the container runtime).
 
@@ -17425,14 +17430,49 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
 
     expected = _substituted(expected)
 
-    answer, stderr = _child_answer(
-        _RESOLVE_THE_RUNTIME,
-        cwd,
-        _home_setting(home_kind, home),
-        [],
-        OCI_RUNNER=runner,
-        OCI_RUNNER_WRAPPER=wrapper,
-    )
+    if home_kind == "unset":
+        # The suite's Popen guard hands a Python child that has no HOME the test's
+        # own home (tests/conftest.py, guarded_init), so a child can never show the
+        # passwd fallback. The same two functions are asked in this process, with
+        # HOME removed from its environment and no child started.
+        if os.name == "nt":
+            pytest.skip(
+                "an unset home on Windows is rebuilt from HOMEDRIVE+HOMEPATH, "
+                "the real profile"
+            )
+        from automated_security_helper.interactions import (
+            run_ash_container as container,
+        )
+
+        for name in ("HOME", "USERPROFILE", "ASH_BIN_PATH"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("OCI_RUNNER", runner)
+        monkeypatch.setenv("OCI_RUNNER_WRAPPER", wrapper)
+        monkeypatch.chdir(cwd)
+
+        def _asked(call: Any) -> Dict[str, Any]:
+            try:
+                return {"value": call()}
+            except container.OciValueRefused as refusal:
+                return {"refused": str(refusal)}
+
+        answer = {
+            "environment": _asked(
+                lambda: container.oci_runner_for_this_run(runner, True)
+            ),
+            "typed": _asked(lambda: container.oci_runner_for_this_run(runner, False)),
+            "wrapper": _asked(container._get_oci_wrapper_prefix),
+        }
+        stderr = ""
+    else:
+        answer, stderr = _child_answer(
+            _RESOLVE_THE_RUNTIME,
+            cwd,
+            _home_setting(home_kind, home),
+            [],
+            OCI_RUNNER=runner,
+            OCI_RUNNER_WRAPPER=wrapper,
+        )
 
     refusals = {
         which: reply["refused"] for which, reply in answer.items() if "refused" in reply
