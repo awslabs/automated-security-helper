@@ -51,6 +51,12 @@ def test_a_link_at_the_file_name_is_refused_not_followed(tree):
     assert target.is_symlink(), "the refusal leaves the link where it was"
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "fwalk"),
+    reason="refuse_links_below walks directory descriptors (os.fwalk) and returns "
+    "without a walk where the platform has none, as Windows has not: its sandboxed "
+    "scanners do not exist",
+)
 def test_a_link_below_a_results_directory_is_refused_before_a_scan(tree):
     root, elsewhere = tree
     (root / "source" / "regular.txt").write_text("x")
@@ -167,6 +173,12 @@ def test_bytes_outside_a_registered_root_are_plain_open(tmp_path):
 # -- reading back a file ASH wrote there ------------------------------------------
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "fwalk"),
+    reason="no link is refused at a parent component without directory descriptors "
+    "(os.fwalk); on Windows the reader refuses a link at the file name only "
+    "(fs_guard._guarded_read_fd), which the tests below pin",
+)
 def test_a_read_back_through_a_linked_parent_is_refused(tree):
     root, elsewhere = tree
     (elsewhere / "out.log").write_text("a host file\n")
