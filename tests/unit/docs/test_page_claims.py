@@ -14411,7 +14411,9 @@ def test_a_linked_output_directory_is_refused_in_every_mode_before_the_write_che
     exist, in ``OCI_RUNNER``, and the runtimes and ``nix`` have logging stand-ins first
     on PATH; none may be called. The control is a real output directory with the same
     entry and mtime: the run gets past the link check, and its mtime moves, which
-    shows the probe sees a file made there.
+    shows the probe sees a file made there. ``./ash --no-run`` is the exception: it
+    builds the image and exits without checking or making the output directory, so
+    it is not refused and leaves that directory as it was, link or not.
     """
     assert_on_page(EXIT_CODES, _LINKED_OUTPUT_IN_EVERY_MODE)
     if mode.startswith("dot-ash"):
@@ -14470,6 +14472,16 @@ def test_a_linked_output_directory_is_refused_in_every_mode_before_the_write_che
         result = _ash(args, cwd=tree, **runtime_env)
     text = _squeezed(result.stdout + result.stderr)
 
+    if mode == "dot-ash-no-run":
+        # ./ash --no-run builds the image and exits: the script neither checks
+        # nor creates the output directory, so a link there is not refused and
+        # nothing is written through it; the control's directory is untouched too.
+        assert result.returncode != 3, _output_tail(result)
+        assert "isasymlink" not in text, _output_tail(result)
+        assert _directory_state(watched) == before, (
+            f"{watched} changed: {before} -> {_directory_state(watched)}"
+        )
+        return
     if link == "control-no-link":
         assert result.returncode != 3, _output_tail(result)
         assert "isasymlink" not in text, _output_tail(result)
@@ -17074,8 +17086,15 @@ _INSTALL_STARTS_CODE = (
     "starts = []\n"
     "def refused(*args, **kwargs):\n"
     "    argv = args[1] if args and isinstance(args[0], subprocess.Popen) else args\n"
-    "    starts.append([argv] if isinstance(argv, (str, bytes)) else "
+    "    seen = ([argv] if isinstance(argv, (str, bytes)) else "
     "[os.fsdecode(a) for a in argv])\n"
+    # On Windows the interpreter itself asks cmd for the OS version (platform's
+    # `ver` probe, `cmd /c ver`), which is not a program ASH starts. It is refused
+    # like any start and not recorded; platform falls back when it is refused.
+    "    if os.name == 'nt' and [a.lower() for a in seen] in "
+    "(['ver'], ['command /c ver'], ['cmd /c ver']):\n"
+    "        raise OSError('no process is started in this test')\n"
+    "    starts.append(seen)\n"
     "    raise OSError('no process is started in this test')\n"
     "subprocess.Popen._execute_child = refused\n"
     "os.system = os.posix_spawn = os.posix_spawnp = refused\n"
@@ -21347,7 +21366,7 @@ _A_SANDBOX_ASH_CANNOT_PROVIDE = (
 #: concepts/sandbox.md's example line, as ash.log writes it on Linux.
 _THE_START_FAILURE_LINE = (
     "detect-secrets could not start its tool on source: sandbox-exec is not "
-    "available: sandbox-exec is not available on Linux"
+    "available on Linux"
 )
 
 #: concepts/scanning-untrusted-code.md (Putting the defenses together).
@@ -21505,7 +21524,7 @@ def test_a_sandbox_ash_cannot_provide_is_an_error_with_code_127(
         # whitespace, as the console wraps a line this long at its width.
         start_failure = (
             f"detect-secrets could not start its tool on source: {unavailable} is "
-            f"not available: {unavailable} is not available on {platform.system()}"
+            f"not available on {platform.system()}"
         )
         if sys.platform == "linux":
             assert start_failure == _THE_START_FAILURE_LINE
@@ -21534,10 +21553,12 @@ _A_CONVERTERS_TOOL_IS_CONFINED = (
 #: concepts/sandbox.md (What fails closed): the converter under a refused sandbox.
 _A_REFUSED_SANDBOX_STOPS_THE_CONVERTERS_TOOL = (
     "A converter's tool is held to the same rule. When the sandbox cannot be "
-    "provided, nbconvert does not run: each notebook is listed in the converter's "
-    "`refused_inputs` with the reason, the row's `failure` reads `jupyter could not "
-    "start its tool: <reason>`, and its `dependencies_satisfied` stays true, since "
-    "nothing was found missing. A tree with no notebooks loses nothing."
+    "provided, nbconvert does not run: the converter's own dependency check is "
+    "refused under the same sandbox, so its row reads `dependencies_satisfied` false "
+    "with the reason in `dependency_unavailable_reason`, the notebooks still count in "
+    "`candidate_inputs`, and the converter is reported as incomplete, so the default "
+    "`fail_on_incomplete_scanners` makes the scan exit 1. A tree with no notebooks "
+    "loses nothing."
 )
 
 
@@ -21625,19 +21646,16 @@ def test_a_converter_sandbox_ash_cannot_provide_stops_its_tool(
     )
     results = json.loads((output / "ash_aggregated_results.json").read_text("utf-8"))
     row = results["converter_results"]["jupyter"]
-    assert row["dependencies_satisfied"] is True, (row, _output_tail(result))
     assert row["converted_paths"] in ([], None), row
     if with_notebook:
-        failure = row["failure"] or ""
-        assert "jupyter could not start its tool" in failure, (
-            row,
-            _output_tail(result),
-        )
-        assert f"{unavailable} is not available" in failure, failure
-        refused = row["refused_inputs"] or []
-        assert [entry["path"] for entry in refused] == ["analysis.ipynb"], refused
-        assert "nbconvert was not run on it" in refused[0]["reason"], refused
+        # The dependency check runs under the refusing probe scope too, so the
+        # stand-ins on PATH are not taken as ready: the row is unavailable, with
+        # the notebook counted as a candidate.
+        assert row["dependencies_satisfied"] is False, (row, _output_tail(result))
+        assert row["dependency_unavailable_reason"], row
+        assert row["candidate_inputs"] == 1, row
     else:
+        assert row["dependencies_satisfied"] is True, (row, _output_tail(result))
         assert not row["failure"], row
         assert not row["refused_inputs"], row
     assert result.returncode == 1, _output_tail(result)
