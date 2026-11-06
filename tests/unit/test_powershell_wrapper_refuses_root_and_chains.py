@@ -83,10 +83,12 @@ CATCH = (
     "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
     "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }"
 )
-#: Where the form is written for people: the help, the CLI reference, the CHANGELOG.
+#: Where the form is written for people: the help and the CHANGELOG. The CLI
+#: reference page that once held it (docs/content/docs/cli-reference.md) no longer
+#: exists; docs/content/reference/cli.md is generated from the CLI and does not
+#: carry a PowerShell form.
 DOCUMENTED = (
     HELPERS,
-    REPO_ROOT / "docs" / "content" / "docs" / "cli-reference.md",
     REPO_ROOT / "CHANGELOG.md",
 )
 SCAN_TEST_ACTION = REPO_ROOT / ".github" / "actions" / "run-scan-test" / "action.yml"
@@ -222,8 +224,8 @@ REFUSAL_TEXT = "cannot be handed to the container runner"
 
 
 def _wrapped(call: str) -> str:
-    """*call* in the form the help and docs/content/docs/cli-reference.md give a CI
-    step that needs the code."""
+    """*call* in the form the help and the CHANGELOG give a CI step that needs the
+    code."""
     return f"try {{ {call} }} {CATCH}"
 
 
