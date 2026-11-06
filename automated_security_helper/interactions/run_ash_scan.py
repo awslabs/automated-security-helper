@@ -5290,11 +5290,18 @@ def _workspace_policy_for_the_container(opts: ScanOptions) -> Optional[str]:
         return None
     from automated_security_helper.workspace.policy import (
         named_workspace_policy_path,
+        policy_search_root,
     )
 
-    named = named_workspace_policy_path(
-        plan.workspace_root, opts.workspace_config_as_named
+    # Where the plan's resolution looked: beside the definitions file's real path.
+    # A plan with no definitions file recorded keeps the root it holds.
+    definition_file = getattr(plan, "workspace_file", None)
+    search_root = (
+        policy_search_root(definition_file, plan.workspace_root)
+        if definition_file
+        else plan.workspace_root
     )
+    named = named_workspace_policy_path(search_root, opts.workspace_config_as_named)
     if named is None or os.path.realpath(named) != os.path.realpath(
         plan.workspace_config_source
     ):

@@ -62,6 +62,13 @@ wherever it points. A caller's ``permit_base`` covers the file the path reaches
 before anything reads it, and for a client's file (``client_supplied``) an error
 says where each problem is, not what the file holds.
 
+Discovery looks beside the definitions file's real path
+-------------------------------------------------------
+When the definitions file is a link, policy is looked for beside the file the
+link points to (``policy_search_root``), not beside the link. The real directory
+passes the caller's gate before it is searched, and a refusal there is the
+out-of-bounds refusal, never a fall back to the link side.
+
 What the ceiling can and cannot reach
 -------------------------------------
 ``effective_threshold`` is ``stricter_of(project, ceiling)``, so a stricter
@@ -681,6 +688,42 @@ def _policy_not_permitted(candidate: Path, root: Path) -> WorkspaceDefinitionErr
     refusal = _refuse(message)
     refusal.__cause__ = ASHConfigInputNotPermittedError(message)
     return refusal
+
+
+def policy_search_root(
+    definition_path: PathLike,
+    root: PathLike,
+    permit: Callable[[Path], bool] | None = None,
+) -> Path:
+    """The directory workspace policy is looked for in: beside the definition's file.
+
+    *root* is the directory holding the definitions file as it was named, the
+    workspace root that folder entries resolve against. When the definitions file
+    is a link, the file it is a copy of lives elsewhere, and policy is looked for
+    beside that file (its real path), not beside the link: the link side is
+    whatever directory the link happens to sit in, and the policy the operator
+    keeps with the definition is next to the definition. With no link the two are
+    the same directory and *root* is returned unchanged.
+
+    The real location gets no more trust than the link side had. *permit* (the
+    caller's gate on config it may read) judges the real directory before anything
+    in it is looked at, and a directory it refuses is refused with the same
+    refusal as an out-of-bounds policy file, never skipped in favor of the link
+    side: falling back would apply a different policy than the one the definition
+    sits beside, and a probe of the directories outside the gate would answer by
+    which side was searched.
+
+    Raises:
+        WorkspaceDefinitionError: When *permit* refuses the real directory,
+            raised from an ``ASHConfigInputNotPermittedError``.
+    """
+    named_root = Path(root)
+    real_root = Path(os.path.realpath(definition_path)).parent
+    if real_root == named_root:
+        return named_root
+    if permit is not None and not permit(real_root):
+        raise _policy_not_permitted(real_root, named_root)
+    return real_root
 
 
 def discover_workspace_policy_file(
