@@ -46,6 +46,7 @@ on the first commit and on the fix.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -290,6 +291,10 @@ def test_a_glob_character_in_the_directory_name_is_escaped(tmp_path):
 
     values = _skip_dirs(_scanner(source, output), source)
 
+    # A backslash is the path separator on Windows, so there a glob character is
+    # written as a one-character class and a lone ``]`` is literal
+    # (``skip_dirs_value``); elsewhere the characters are backslash-escaped.
+    escaped = "out[[]1]" if sys.platform == "win32" else "out\\[1\\]"
     assert sorted(values) == sorted(
-        f"out\\[1\\]/{name}" for name in ash_own_dir_names()
+        f"{escaped}/{name}" for name in ash_own_dir_names()
     ), values
