@@ -171,6 +171,30 @@ def _tool_name(program) -> str:
     return Path(program).stem
 
 
+def _same_file(a, b) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(
+        os.path.realpath(b)
+    )
+
+
+def _started(argv) -> tuple:
+    """``(tool, its arguments)`` for a planned argv, as the stand-in logs the call.
+
+    On POSIX the argv is the stand-in script and its arguments. On Windows the spawn
+    layer has already replaced a ``.bat`` launcher by what it runs (see
+    ``_start_launchers_as_their_batch_file_does``), so the planned argv is this
+    interpreter, the stand-in's ``<name>.py`` and the arguments, while the stand-in
+    logs ``[name, *arguments]``. Both name the same call.
+    """
+    if (
+        len(argv) > 1
+        and Path(argv[1]).suffix == ".py"
+        and _same_file(argv[0], sys.executable)
+    ):
+        return Path(argv[1]).stem, list(argv[2:])
+    return _tool_name(argv[0]), list(argv[1:])
+
+
 class _Tools:
     """The stand-in tools and what they were asked to do.
 
@@ -494,9 +518,9 @@ class TestNoInstallUnderASandbox:
         # `uv tool run --from nbconvert` fetches a package it does not have when it
         # can reach the index, so each one must have run without a network.
         offline_runs = {
-            tuple(argv[1:])
+            tuple(_started(argv)[1])
             for argv, policy, _env in backend.spawns
-            if _tool_name(argv[0]) == "uv" and policy.network is False
+            if _started(argv)[0] == "uv" and policy.network is False
         }
         unconfined = [
             c
@@ -598,9 +622,7 @@ class TestNbconvertRunsUnderTheSandbox:
         unplanned = [
             c
             for c in ran
-            if not any(
-                _tool_name(argv[0]) == c[0] and argv[1:] == c[1:] for argv in planned
-            )
+            if not any(_started(argv) == (c[0], c[1:]) for argv in planned)
         ]
         assert unplanned == [], (
             f"nbconvert processes ran without the sandbox backend: {unplanned}"
@@ -751,11 +773,12 @@ class TestASandboxedConversionRunsNbconvertItself:
         )
         planned = [argv for argv, _policy, _env in backend.spawns if "--to" in argv]
         assert planned and all(
-            _tool_name(argv[0]) == "jupyter-nbconvert" for argv in planned
+            _started(argv)[0] == "jupyter-nbconvert" for argv in planned
         ), f"nbconvert ran as {planned}"
         # nbconvert's own arguments follow the executable unchanged.
         assert all(
-            argv[1:5] == ["--log-level", "WARN", "--to", "python"] for argv in planned
+            _started(argv)[1][:4] == ["--log-level", "WARN", "--to", "python"]
+            for argv in planned
         ), f"nbconvert ran as {planned}"
 
     def test_without_a_sandbox_uv_still_runs_it(
@@ -1013,7 +1036,7 @@ class TestTheConverterConfinesItselfOutsideThePhase:
 
         def planned_since(spawns_before):
             return Counter(
-                (_tool_name(argv[0]), *argv[1:])
+                (_started(argv)[0], *_started(argv)[1])
                 for argv, _policy, _env in backend.spawns[spawns_before:]
             )
 
