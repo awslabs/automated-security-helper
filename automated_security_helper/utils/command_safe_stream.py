@@ -349,35 +349,20 @@ class CommandSafeStream:
         error is raised once the list is empty. Stranded items would land
         after some later write's text, or never. A KeyboardInterrupt raised
         while an item lands is held the same way: the items after it still
-        land, and it is raised once the list is empty."""
+        land, and it is raised once the list is empty.
+
+        A deferred text write never splits a held character: the multi-byte
+        tail a byte write left held stays held across every deferred item,
+        text included, and is joined to the rest of its character by the next
+        byte write (or written whole by a flush or a fresh write's own
+        landing). Emitted ahead of a deferred text item, the tail reached the
+        stream with the text between its two halves, which is invalid UTF-8
+        on the wire."""
         error: BaseException | None = None
-        if self._checked_buffer is not None and any(
-            isinstance(item, str) for item in self._pending
-        ):
-            # Bytes a buffer write left held land first, where they were
-            # written, as write() has them land before its own text: once, at
-            # the start, ahead of every deferred item. Emitted only right
-            # before the first deferred TEXT item, the tail landed after the
-            # deferred BYTE items before it (b"caf\xc3" then [b"B2", "T"] wrote
-            # caf, B2, \xc3, T), neither where it was written nor joined to the
-            # rest of its character. A batch of byte items alone leaves the tail
-            # held for the next write, which joins it to the rest of its
-            # character. The emit is inside the hold-first-error scheme like
-            # every item: a tail write that raised, outside it, left every
-            # pending item stranded.
-            try:
-                self._checked_buffer._emit_tail()
-            except BaseException as exc:
-                error = exc
         while self._pending:
             item = self._pending.pop(0)
             try:
                 if isinstance(item, str):
-                    if self._checked_buffer is not None:
-                        # A text item deferred while this drain ran, after a
-                        # byte item landed: the tail is already out (above), so
-                        # this is a no-op unless a write since then held one.
-                        self._checked_buffer._emit_tail()
                     self._write_text(item)
                 elif self._checked_buffer is not None:
                     # Bytes defer only through the wrap's own buffer view.
@@ -697,8 +682,9 @@ class CommandSafeBuffer(io.BufferedIOBase):
     def _emit_tail(self) -> None:
         """Write the held tail, checked from the line state, with _mid_write
         already set and under the owner's lock: the body of :meth:`_emit_held`,
-        also run by the owner's drain before a deferred text item lands, so
-        the tail of the byte write that deferred it lands ahead of it."""
+        also run by the owner's landing of what a fresh write finds held. The
+        drain of deferred writes does not run it: a deferred text write never
+        splits a held character."""
         owner = self._owner
         tail = self._decoder.decode(b"", True)
         self._decoder.reset()

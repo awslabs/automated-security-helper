@@ -1324,7 +1324,8 @@ def test_a_signal_handlers_write_leaves_a_byte_writes_held_tail_in_place(monkeyp
     """A byte write that ends inside a character holds the character's first
     bytes. A signal handler's text write while that byte write is still being
     checked must leave the tail held: emitted around its deferred landing, the
-    tail would be cut off from the character's rest, written next."""
+    tail would be cut off from the character's rest, written next. A deferred
+    text write never splits a held character."""
     import automated_security_helper.utils.command_safe_stream as css
     from automated_security_helper.utils.log import check_commands_of_stderr
 
