@@ -1984,17 +1984,19 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
             prepare_environment()
             names = json.loads(sys.argv[2])
             proxy = os.environ.get("https_proxy") or ""
-            refused = None
+            outcome = None
             if proxy:
                 host, port = proxy.rsplit("/", 1)[-1].rsplit(":", 1)
                 try:
                     socket.create_connection((host, int(port)), timeout=5).close()
-                    refused = False
+                    outcome = "connected"
                 except ConnectionRefusedError:
-                    refused = True
+                    outcome = "refused"
+                except TimeoutError:
+                    outcome = "dropped"
             print(json.dumps({
                 "env": {n: os.environ.get(n) for n in names},
-                "refused": refused,
+                "outcome": outcome,
                 "dirs": [os.path.isdir(os.environ.get(n) or "") for n in names[:5]],
             }))
             """
@@ -2029,7 +2031,10 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
     assert values["NO_PROXY"] is None and values["no_proxy"] is None
     proxies = {values[n] for n in PROXY_VARIABLES}
     assert len(proxies) == 1 and next(iter(proxies)).startswith("http://127.0.0.1:")
-    assert report["refused"] is True
+    # The port is held by the run and never listened on: Linux and Windows refuse a
+    # connection to it, macOS drops it. Neither ever connects.
+    allowed = {"refused", "dropped"} if sys.platform == "darwin" else {"refused"}
+    assert report["outcome"] in allowed, report["outcome"]
     assert report["dirs"] == [True] * len(ISOLATED_DIRECTORIES)
     roots = {Path(values[n]).parent for n in ISOLATED_DIRECTORIES}
     assert len(roots) == 1, f"{len(roots)} roots hold the isolated directories"
