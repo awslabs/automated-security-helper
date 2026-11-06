@@ -71,6 +71,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.env_assertions import environ_value
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
 DIGEST = "b" * 64
@@ -217,7 +219,7 @@ def test_a_verified_download_is_installed_with_its_layout_and_execute_bits(
     assert github_path.read_text(encoding="utf-8") == "", (
         "install_tools.py puts nothing on the job's PATH; the launch environment does"
     )
-    assert os.environ.get("PATH") == path_before
+    assert environ_value("PATH") == path_before
 
 
 @pytest.mark.unit

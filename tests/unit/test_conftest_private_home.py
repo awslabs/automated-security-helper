@@ -32,6 +32,7 @@ import pytest
 from automated_security_helper.core import constants
 from automated_security_helper.utils.download_utils import receipt_root, write_receipt
 from tests.utils import real_home_guard
+from tests.utils.env_assertions import environ_value
 
 pytestmark = pytest.mark.unit
 
@@ -194,7 +195,7 @@ def test_each_moved_xdg_directory_is_inside_it(
     effective = Path(os.environ.get(variable) or default)
     assert home in effective.parents, (variable, effective)
     # Set, not only defaulted: a child that falls back some other way still gets it.
-    assert os.environ.get(variable) == str(home.joinpath(*_MOVED_XDG[variable]))
+    assert environ_value(variable) == str(home.joinpath(*_MOVED_XDG[variable]))
     # And not the developer's own directory, set by them or defaulted under their home.
     # A boolean, so a failure does not print the environment.
     developers = developer_environment.get(variable) or developer_home.joinpath(

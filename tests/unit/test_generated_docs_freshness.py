@@ -2021,14 +2021,14 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     values = report["env"]
-    assert values["UV_OFFLINE"] == "1" and values["PIP_NO_INDEX"] == "1", values
-    assert values["NO_PROXY"] is None and values["no_proxy"] is None, values
+    assert values["UV_OFFLINE"] == "1" and values["PIP_NO_INDEX"] == "1"
+    assert values["NO_PROXY"] is None and values["no_proxy"] is None
     proxies = {values[n] for n in PROXY_VARIABLES}
     assert len(proxies) == 1 and next(iter(proxies)).startswith("http://127.0.0.1:")
     assert report["refused"] is True
     assert report["dirs"] == [True] * len(ISOLATED_DIRECTORIES)
     roots = {Path(values[n]).parent for n in ISOLATED_DIRECTORIES}
-    assert len(roots) == 1, values
+    assert len(roots) == 1, f"{len(roots)} roots hold the isolated directories"
     root = next(iter(roots))
     assert str(tmp_path) not in str(root), "the planted UV_CACHE_DIR was kept"
     assert not root.exists(), f"{root} was left behind after the run"

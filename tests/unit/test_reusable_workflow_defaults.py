@@ -481,7 +481,8 @@ def test_the_cfn_nag_assets_url_takes_the_pinned_commit():
     Reads YAML only, so it runs on every platform rather than with the shell tests.
     """
     (step,) = [step for step in _steps() if step.get("name") == "Install cfn-nag"]
-    assert "ASH_ASSETS_URL" not in (step.get("env") or {}), step.get("env")
+    step_env_names = set(step.get("env") or {})
+    assert "ASH_ASSETS_URL" not in step_env_names, sorted(step_env_names)
     (pin,) = [step for step in _steps() if step.get("id") == "ash-pin"]
     assert (
         "ASH_ASSETS_URL=https://raw.githubusercontent.com/${ASH_REPO}/${COMMIT}"
