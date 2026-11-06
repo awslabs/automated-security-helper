@@ -111,7 +111,10 @@ def test_removing_a_session_whose_id_names_no_directory_still_clears_its_state(
         "clear_session_state",
         lambda sid=None: (cleared.append(sid), real_clear(sid)),
     )
-    monkeypatch.setattr(registry, "disconnect", disconnected.append)
+    # The entry is dropped with forget, which never touches the disk
+    # (sessions._remove_session_state); disconnect would rename and delete
+    # whatever stands at the session's path.
+    monkeypatch.setattr(registry, "forget", disconnected.append)
 
     sessions._remove_session_state(session_id)
 
