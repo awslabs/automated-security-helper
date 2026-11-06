@@ -208,7 +208,8 @@ def test_a_reports_directory_that_is_a_link_is_refused_before_the_inner_run(
     Clearing it would rmtree through a link to a directory, which fails, or remove a
     dangling link without saying so. Container mode called on its own refuses it
     with the checks of what it mounts, which print the reason; nix mode carries it
-    on the exit.
+    on the exit. The container refusal is written to stderr (``_refuse_container_inputs``
+    echoes it with ``err=True``), so both streams are read.
     """
     opts = _opts(tmp_path)
     opts.output_dir.mkdir(parents=True)
@@ -234,8 +235,9 @@ def test_a_reports_directory_that_is_a_link_is_refused_before_the_inner_run(
 
     # Exit 3, as every output directory refused through a link does.
     assert refused.value.code == 3
+    shown = capsys.readouterr()
     said = getattr(refused.value, "reason", "") or "".join(
-        capsys.readouterr().out.split()
+        (shown.out + shown.err).split()
     )
     assert "".join(f"{reports.as_posix()} is a symlink".split()) in "".join(
         said.split()
