@@ -65,6 +65,38 @@ _BEFORE = textwrap.dedent(
     # ASH's lookup may try the uv installed beside this interpreter before PATH.
     if hasattr(_stand_in_runner, "bundled_uv_executable"):
         _stand_in_runner.bundled_uv_executable = lambda: None
+
+    # On Windows a batch file is not started by cmd.exe when a non-batch launch exists,
+    # and the ``uv`` package is importable here, so ``uv.cmd`` would be replaced by the
+    # real uv run as a module: it resolves tools from the index and writes its cache
+    # under HOME, and the stand-in never answers. The stand-in is started as the file
+    # it is; any other batch file is substituted as before.
+    import os as _stand_in_os
+
+    if _stand_in_os.name == "nt" and "UV_STUB_LOG" in _stand_in_os.environ:
+        from automated_security_helper.utils import subprocess_utils as _stand_in_spawn
+
+        _stand_in_substitute = _stand_in_spawn._non_batch_substitute
+        _stand_in_bin = _stand_in_os.path.normcase(
+            _stand_in_os.path.realpath(
+                _stand_in_os.path.join(
+                    _stand_in_os.path.dirname(_stand_in_os.environ["UV_STUB_LOG"]),
+                    "bin",
+                )
+            )
+        )
+
+        def _stand_in_not_substituted(program):
+            parent = _stand_in_os.path.normcase(
+                _stand_in_os.path.realpath(
+                    _stand_in_os.path.dirname(_stand_in_os.fspath(program))
+                )
+            )
+            if parent == _stand_in_bin:
+                return None
+            return _stand_in_substitute(program)
+
+        _stand_in_spawn._non_batch_substitute = _stand_in_not_substituted
     """
 )
 

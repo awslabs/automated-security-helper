@@ -527,6 +527,12 @@ _GIT_SIGNING_SETTINGS = frozenset(
 
 _GIT_FALSE = frozenset({"false", "no", "off", "0", ""})
 
+#: The spellings of "no hooks directory" for ``core.hooksPath``. ``os.devnull`` is
+#: ``nul`` on Windows, but ASH and its tests write ``/dev/null`` on every platform,
+#: and git for Windows opens that name as the null device (its own path mapping), so
+#: on Windows both name no directory. On POSIX the two are one string.
+_GIT_NULL_DEVICES = frozenset({os.devnull, "/dev/null"})
+
 #: git commands that read the repository and write neither its index nor its refs,
 #: so no hook runs for them. Any other command can (post-index-change and
 #: reference-transaction run for an index or ref git writes along the way).
@@ -566,7 +572,7 @@ def _git_setting_runs_a_program(key: str, value: str | None) -> bool:
     if key == "core.fsmonitor" or key in _GIT_SIGNING_SETTINGS:
         return value is None or text.lower() not in _GIT_FALSE
     if key == "core.hookspath":
-        return text != os.devnull
+        return text not in _GIT_NULL_DEVICES
     if section == "pager":
         return text.lower() not in _GIT_FALSE | {"true", "yes", "on", "1"}
     return (section, name) in _GIT_PROGRAM_SETTINGS and text != ""
@@ -906,7 +912,7 @@ def why_git_may_run_a_program(
     if (
         hooks is not None
         and not runs_no_hooks
-        and command_line.get("core.hookspath") != os.devnull
+        and command_line.get("core.hookspath") not in _GIT_NULL_DEVICES
     ):
         if hooks.is_dir() and any(
             hook.is_file() and not hook.name.endswith(".sample")
@@ -1517,6 +1523,73 @@ def _hold_to_the_home_rule(
 _THIS_INTERPRETER = [sys.executable]
 
 
+def _split_windows_command_line(text: str) -> list[str]:
+    """The arguments of a Windows command line, split as the C runtime splits it.
+
+    ``subprocess.Popen`` on Windows turns an argument list into a line with
+    ``list2cmdline`` before it raises its audit event, so a start arrives here as a
+    string, not as the list it was made from. The first word is the program: quoted
+    or up to the first blank, with no escapes. After it, a run of backslashes before
+    a double quote is halved and the quote is an argument character when the run is
+    odd, else it opens or closes a quoted stretch; a doubled quote inside one is a
+    quote character; backslashes before anything else are literal.
+    """
+    words: list[str] = []
+    i, n = 0, len(text)
+    while i < n and text[i] in " \t":
+        i += 1
+    if i >= n:
+        return words
+    if text[i] == '"':
+        end = text.find('"', i + 1)
+        end = n if end == -1 else end
+        words.append(text[i + 1 : end])
+        i = end + 1
+    else:
+        end = i
+        while end < n and text[end] not in " \t":
+            end += 1
+        words.append(text[i:end])
+        i = end
+    while True:
+        while i < n and text[i] in " \t":
+            i += 1
+        if i >= n:
+            return words
+        word: list[str] = []
+        quoted = False
+        while i < n:
+            char = text[i]
+            if char == "\\":
+                end = i
+                while end < n and text[end] == "\\":
+                    end += 1
+                run = end - i
+                if end < n and text[end] == '"':
+                    word.append("\\" * (run // 2))
+                    if run % 2:
+                        word.append('"')
+                        i = end + 1
+                    else:
+                        i = end
+                else:
+                    word.append("\\" * run)
+                    i = end
+            elif char == '"':
+                if quoted and i + 1 < n and text[i + 1] == '"':
+                    word.append('"')
+                    i += 2
+                else:
+                    quoted = not quoted
+                    i += 1
+            elif char in " \t" and not quoted:
+                break
+            else:
+                word.append(char)
+                i += 1
+        words.append("".join(word))
+
+
 def _audit(event: str, args: tuple) -> None:
     if event not in _RECORDED_EVENTS:
         return
@@ -1554,6 +1627,10 @@ def _audit(event: str, args: tuple) -> None:
         cwd: object = None
         if event == "subprocess.Popen":
             executable, argv, cwd, env = args[0], args[1], args[2], args[3]
+            if _on_windows() and isinstance(argv, str):
+                # Popen's Windows route joins the list with list2cmdline before it
+                # raises this event, so the guard reads the line as CreateProcess does.
+                argv = _split_windows_command_line(argv) or argv
             if executable is not None:
                 program = executable
             elif isinstance(argv, (list, tuple)) and argv:
@@ -1651,6 +1728,34 @@ def run_own_directories(basetemp: Path, session_dir: str | None = None) -> list[
     ]
 
 
+def _keep_stand_ins_as_batch_files(monkeypatch, directory: Path) -> None:
+    """Start a stand-in ``.bat`` as the file it is, on Windows.
+
+    The spawn layer never hands a batch file to cmd.exe when it can avoid it
+    (``subprocess_utils._non_batch_substitute``): it runs the ``.exe`` beside the
+    shim, or else this interpreter with ``-m <the shim's name>`` when that name is
+    importable. ``uv`` is importable here, because ASH depends on the ``uv``
+    package, so the guard's ``uv.bat`` was replaced by ``runpy`` on the real ``uv``
+    module: the real uv ran, resolved tools from the index and wrote its cache under
+    the test's HOME, and the start was listed nowhere (a ``python -c`` start names
+    no guarded tool). Only the guard's own directory is exempt from the
+    substitution; any other batch file is substituted as before, and a start of a
+    real tool by its path is still a tool start.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    real = subprocess_utils._non_batch_substitute
+    stand_ins = os.path.normcase(os.path.realpath(directory))
+
+    def substitute(program):
+        parent = os.path.normcase(os.path.realpath(os.path.dirname(os.fspath(program))))
+        if parent == stand_ins:
+            return None
+        return real(program)
+
+    monkeypatch.setattr(subprocess_utils, "_non_batch_substitute", substitute)
+
+
 def install_tool_guard(
     monkeypatch,
     directory: Path,
@@ -1746,6 +1851,7 @@ def install_tool_guard(
         #: For a test whose subject is the candidate list itself
         #: (``use_the_real_candidate_names``).
         guard.real_candidate_names = real_candidates
+        _keep_stand_ins_as_batch_files(monkeypatch, directory)
     if "uv" in names:
         # find_uv_or_none asks for the uv installed with ASH before it searches
         # PATH, so that copy would answer ahead of the stand-in.
