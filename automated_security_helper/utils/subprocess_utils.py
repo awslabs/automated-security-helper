@@ -5465,6 +5465,22 @@ def run_command_with_output_handling(
         returncode = result.returncode
 
         response = {"returncode": returncode}
+        # A backend whose plan declares that it reports a signal death as its
+        # own exit code (bwrap, firejail) says so on the response, so the
+        # reader can read an exit of 129..192 back as the likely signal
+        # (PluginBase._process_command_response). Left out for every other run.
+        if sandbox_plan is not None and sandbox_plan.signal_deaths_as_exit_codes:
+            response["sandbox_signal_exits"] = True
+            # Logged where the direct death is logged below, with the same
+            # wording the reader keeps as the run's cause.
+            if is_exit_code(returncode) and 129 <= returncode <= 192:
+                inferred = inferred_signal_death_message(returncode - 128, returncode)
+                ASH_LOGGER.error(
+                    shown_on_one_line(
+                        _logged_without(f"{cmd_str}: {inferred}", values)
+                    ),
+                    extra=NO_MARKUP,
+                )
         # The program that ran, as the spawn layer resolved it: the copied
         # argv's first element after _resolved_or_refused replaced it in
         # place. A caller judging the exit code (a scanner refusing one
