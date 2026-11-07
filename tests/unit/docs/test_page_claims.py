@@ -7740,6 +7740,13 @@ def interrupt():
             signal.raise_signal(signal.SIGINT)
         else:
             os.kill(os.getpid(), signal.SIGINT)
+        if number == len(control["waits"]) - 1:
+            # After the last send, a process still alive 30, 60 and 90 seconds
+            # later dumps every thread's stack to stderr, so a scan that outlives
+            # its last Ctrl-C shows where its main thread is.
+            import faulthandler
+
+            faulthandler.dump_traceback_later(30, repeat=True, exit=False)
 
 
 threading.Thread(target=interrupt, daemon=True).start()
@@ -7772,6 +7779,26 @@ if wait_on not in sys.argv[1:]:
     sys.exit(0)
 parent = os.getppid()
 interrupts = []
+parent_handle = None
+if os.name == "nt":
+    # os.getppid() keeps answering the creator's pid on Windows once it is gone, so
+    # the parent is watched through a handle to it instead (SYNCHRONIZE).
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        parent_handle = kernel32.OpenProcess(0x00100000, 0, parent)
+    except Exception:
+        parent_handle = None
+
+
+def parent_is_gone():
+    if parent_handle:
+        return kernel32.WaitForSingleObject(parent_handle, 0) == 0
+    return os.getppid() != parent
 
 
 def interrupted(signum, frame):
@@ -7789,7 +7816,7 @@ while time.monotonic() < deadline:
         while from_console < sent:
             from_console += 1
             interrupted(signal.SIGINT, None)
-    if os.getppid() != parent:
+    if parent_is_gone():
         note("orphaned")
         sys.exit(0)
     if interrupts and behavior == "stops":
@@ -8097,7 +8124,8 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
     events = _stand_in_events(stand_in_log)
     happened = [event for event, _ in events if event != "alive"]
     assert "orphaned" not in happened and "deadline" not in happened, (
-        f"ASH left the stand-in running: {happened}"
+        f"ASH left the stand-in running: {happened}; ASH ended "
+        f"{ended - sent[-1]:.1f} s after the last SIGINT:\n{_output_tail(result)}"
     )
     if ended_at_once:
         _assert_ended_at_once(events, sent[0])
