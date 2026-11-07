@@ -582,7 +582,11 @@ def fetch_pr_head(repo: Path, number: int) -> str | None:
 
 
 def _blob(repo: Path, rev: str, path: str) -> str:
-    return git(repo, "rev-parse", f"{rev}:{path}", check=False).strip()
+    # --verify keeps rev-parse from echoing an unresolvable argument to stdout, so a
+    # path absent from the revision reads as the empty string on both sides.
+    return git(
+        repo, "rev-parse", "--verify", "--quiet", f"{rev}:{path}", check=False
+    ).strip()
 
 
 def pr_chain_satisfies(
@@ -1136,6 +1140,22 @@ def _self_test_pr_chain(tmp: Path) -> list[str]:
     code, out = _run_check_captured(clone, rng)
     if code != 1 or "was checked" not in out:
         failures.append(f"landed bytes differ from the chain: expected failure: {out}")
+
+    up = _Repo(tmp / "chain-delete-up")
+    up.write(SNAP, "old\n")
+    before = up.commit("chore: add snapshot")
+    up._git("checkout", "-q", "-b", "pr")
+    (up.path / SNAP).unlink()
+    pr_tip = up.commit(f"test: drop the snapshot\n\n{GOOD}")
+    up._git("update-ref", "refs/pull/7/head", pr_tip)
+    up._git("checkout", "-q", "main")
+    (up.path / SNAP).unlink()
+    squash = up.commit("test: squashed (#7)")
+    clone = tmp / "chain-delete-clone"
+    git(tmp, "clone", "-q", str(up.path), str(clone))
+    code, out = _run_check_captured(clone, Range(before, squash, "push"))
+    if code != 0 or "refs/pull/7/head" not in out:
+        failures.append(f"deleted golden excused by the chain: expected pass: {out}")
 
     clone, rng, _up, _tip = _pr_scenario(tmp, "chain-pr-event", pr_trailer=True)
     rng.pr_chain = False
