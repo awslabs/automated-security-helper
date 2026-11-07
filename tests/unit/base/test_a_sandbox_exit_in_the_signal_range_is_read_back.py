@@ -16,11 +16,15 @@ No sandbox is needed: the declaration is data on the response.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
+from automated_security_helper.base import plugin_base
 from automated_security_helper.base.plugin_base import PluginBase
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from automated_security_helper.utils.subprocess_utils import (
     inferred_signal_death_message,
@@ -99,6 +103,43 @@ def test_a_count_exit_plugin_opts_out_of_the_read_back(code):
 
     assert host._scan_kept_flag is None
     assert host.exit_code == code
+
+
+@pytest.mark.parametrize("code", [129, 137, 192])
+def test_a_count_exit_plugin_logs_no_inferred_wording(code, monkeypatch):
+    logger = MagicMock()
+    monkeypatch.setattr(plugin_base, "ASH_LOGGER", logger)
+    host = _host()
+    host.tool_exit_code_is_a_count = True
+    host._process_command_response(
+        {
+            "stdout": "",
+            "stderr": "",
+            "returncode": code,
+            "sandbox_signal_exits": True,
+        }
+    )
+
+    wording = inferred_signal_death_message(code - 128, code)
+    assert wording not in repr(logger.mock_calls)
+    assert host._scan_kept_flag is None
+
+
+@pytest.mark.parametrize("code", [129, 137, 192])
+def test_the_plugin_arm_is_the_one_emission_point_of_the_inferred_wording(code):
+    host = _run(code)
+
+    assert host._scan_kept_flag == (
+        "signaled",
+        inferred_signal_death_message(code - 128, code),
+    )
+    # The runner layer only declares the sandbox's convention on the response;
+    # it builds no inferred wording of its own, so a count scanner (which the
+    # runner cannot know) never has it printed.
+    runner_source = Path(subprocess_utils.__file__).read_text(encoding="utf-8")
+    assert runner_source.count("inferred_signal_death_message(") == 1, (
+        "only the definition may name the builder in the runner layer"
+    )
 
 
 def test_a_plugin_that_does_not_declare_a_count_is_still_read_back():
