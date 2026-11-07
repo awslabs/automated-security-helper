@@ -84,6 +84,42 @@ def test_an_exit_in_the_range_with_no_declaration_is_not_read_back(code):
     assert host.exit_code == code
 
 
+@pytest.mark.parametrize("code", [129, 137, 192])
+def test_a_count_exit_plugin_opts_out_of_the_read_back(code):
+    host = _host()
+    host.tool_exit_code_is_a_count = True
+    host._process_command_response(
+        {
+            "stdout": "",
+            "stderr": "",
+            "returncode": code,
+            "sandbox_signal_exits": True,
+        }
+    )
+
+    assert host._scan_kept_flag is None
+    assert host.exit_code == code
+
+
+def test_a_plugin_that_does_not_declare_a_count_is_still_read_back():
+    host = _host()
+    host.tool_exit_code_is_a_count = False
+    host._process_command_response(
+        {
+            "stdout": "",
+            "stderr": "",
+            "returncode": 137,
+            "sandbox_signal_exits": True,
+        }
+    )
+
+    assert host._scan_kept_flag == (
+        "signaled",
+        inferred_signal_death_message(9, 137),
+    )
+    assert host.exit_code == 137
+
+
 def test_a_post_run_error_response_is_not_read_back():
     host = _host()
 

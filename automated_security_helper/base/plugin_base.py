@@ -1579,6 +1579,10 @@ class PluginBase(UVToolMixin, BaseModel):
                 self._scan_kept_flag = ("signaled", ending[1])
             elif (
                 response.get("sandbox_signal_exits") is True
+                # A plugin that declares its tool's exit code a count of
+                # findings (the cfn_nag convention) opts out of the read-back:
+                # its 137 under a sandbox grades by findings.
+                and getattr(self, "tool_exit_code_is_a_count", False) is not True
                 and is_exit_code(new_code)
                 and 129 <= new_code <= 192
             ):
