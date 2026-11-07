@@ -47,6 +47,7 @@ import os
 import re
 import shutil
 import subprocess  # nosec B404 - runs ./ash, the shell helper and pwsh, fixed argv
+import sys
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
@@ -1017,7 +1018,20 @@ class TestThePowerShellEntrypoint:
                 "reporters.x=1 --sandbox=bwrap",
                 True,
             ),
-            (['"--quiet`n--sandbox`nbwrap"'], "--quiet\n--sandbox\nbwrap", False),
+            pytest.param(
+                ['"--quiet`n--sandbox`nbwrap"'],
+                "--quiet\n--sandbox\nbwrap",
+                False,
+                marks=pytest.mark.skipif(
+                    sys.platform == "win32",
+                    reason=(
+                        "the stand-in runner is a .cmd on Windows, which cmd.exe "
+                        "reads only up to the first line feed of its command line, "
+                        "so an argument holding a line feed cannot reach it whole "
+                        "(measured: the words recorded were --sandbox off --quiet)"
+                    ),
+                ),
+            ),
         ],
         ids=["in-one-argument", "in-an-option-value", "over-lines"],
     )

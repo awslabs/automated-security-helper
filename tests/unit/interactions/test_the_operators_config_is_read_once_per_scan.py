@@ -147,12 +147,13 @@ def exit_field_loads(monkeypatch):
     return loads
 
 
-def _run_scan(source: Path, out: Path, config: Path) -> None:
+def _run_scan(source: Path, out: Path, config: Path, **options) -> None:
+    options = {"build": False, **options}
     ras.run_ash_scan(
         source_dir=str(source),
         output_dir=str(out),
         mode=RunMode.container,
-        build=False,
+        **options,
         config=str(config),
         show_summary=False,
         progress=False,
@@ -735,15 +736,18 @@ def test_the_exit_fields_read_one_shared_load(tmp_path, recording_runner, monkey
 def test_the_exit_fields_follow_the_file_the_gate_read_when_it_is_replaced_after(
     tmp_path, recording_runner, monkeypatch, model_loads_the_first_file
 ):
-    """With no build the image's ASH may hold another schema, so the gate reads
-    the config and judges only what holds for every revision. The exit-code
-    fields are then read from what the gate read, not from the file again: a
-    file replaced once the gate has finished must not give the exit code a
-    reading the gate never saw."""
+    """When the image is built with an ASH from another revision, the gate reads
+    the config and judges only what holds for every revision (a run that builds
+    no image keeps the full refusal of a file this tree's model refuses). The
+    exit-code fields are then read from what the gate read, not from the file
+    again: a file replaced once the gate has finished must not give the exit
+    code a reading the gate never saw."""
     source, out, _ = _scan_inputs(tmp_path)
     first = {"project_name": "op", "fail_on_findings": False}
+    options: dict = {}
     if not model_loads_the_first_file:
         first["global_settings"] = {"zz_option_a_later_schema_declares": True}
+        options = {"build": True, "ash_revision_to_install": "main"}
     config = _write(tmp_path / "ops" / "replaced.yaml", first)
     real_gate = ras._outer_mode_config_load
 
@@ -761,7 +765,7 @@ def test_the_exit_fields_follow_the_file_the_gate_read_when_it_is_replaced_after
 
     monkeypatch.setattr(ras, "_outer_mode_config_load", gate_then_replace)
     monkeypatch.setattr(ras, "_run_container_mode", watching)
-    _run_scan(source, out, config)
+    _run_scan(source, out, config, **options)
 
     assert forwarded["resolved_fail_on_findings"] is False, forwarded
 
@@ -775,8 +779,12 @@ def test_the_gate_reads_the_config_file_once_for_its_judgment_and_its_model(
     fields a reading the gate never judged."""
     source, out, _ = _scan_inputs(tmp_path)
     first = {"project_name": "op", "fail_on_findings": False}
+    options: dict = {}
     if not model_loads_the_first_file:
         first["global_settings"] = {"zz_option_a_later_schema_declares": True}
+        # Only an image built with an ASH from another revision leaves a model
+        # refusal of the file to the scan inside.
+        options = {"build": True, "ash_revision_to_install": "main"}
     config = _write(tmp_path / "ops" / "replaced.yaml", first)
     real_parse = ras._parse_and_confine_config
 
@@ -794,7 +802,7 @@ def test_the_gate_reads_the_config_file_once_for_its_judgment_and_its_model(
 
     monkeypatch.setattr(ras, "_parse_and_confine_config", parse_then_replace)
     monkeypatch.setattr(ras, "_run_container_mode", watching)
-    _run_scan(source, out, config)
+    _run_scan(source, out, config, **options)
 
     assert forwarded["resolved_fail_on_findings"] is False, forwarded
 

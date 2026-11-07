@@ -61,6 +61,22 @@ def _popen_argument(name, rest, kwargs, default=None):
     return rest[position] if len(rest) > position else default
 
 
+def _git_ash_starts():
+    """The git file ASH's own lookup resolves ``git`` to, normalized as ``real_git``
+    is, or ``real_git()`` where the lookup finds none.
+
+    ASH starts git by the path ``find_executable`` returns, which is not always the
+    file ``shutil.which`` finds first: on the Windows runners ASH started
+    ``...\\Git\\<dir>\\bin\\git.exe`` while ``real_git`` named another file of the same
+    install, so ASH's own git was refused. Every other git, a link named git
+    included, is still refused (``test_nothing_else_runs_under_gits_name``).
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    found = find_executable("git")
+    return os.path.normcase(os.path.realpath(found)) if found else real_git()
+
+
 @pytest.fixture(autouse=True)
 def _no_tool_runs(monkeypatch, request):
     """Building a scanner here must not start a tool.
@@ -101,7 +117,7 @@ def _no_tool_runs(monkeypatch, request):
             monkeypatch.setattr(module, "tracked_files_in", lambda directory: None)
     started = []
     real_init = subprocess.Popen.__init__
-    git = real_git()
+    git = _git_ash_starts()
 
     def refuse(popen, args, *rest, **kwargs):
         if in_a_checkout and popen_runs_only_git(
@@ -155,6 +171,18 @@ def _run(scanner, target, *patterns, target_type="source"):
         ],
     )
     return final_args
+
+
+def _output_entry(source, *parts):
+    """The ``--exclude`` entry for a directory of ASH's below ``source``.
+
+    The scanner spells it as bandit does while walking the target: the target as
+    given (forward slashes), then each component joined with the platform's
+    separator, then ``<separator>*``. On POSIX that is all ``/``; on Windows the
+    components are joined with a backslash, as ``os.walk`` joins them.
+    """
+    path = os.path.join(Path(source).as_posix(), *parts)
+    return glob.escape(path) + os.sep + "*"
 
 
 ANCHOR = "/work/repo"
@@ -260,10 +288,12 @@ def test_a_comma_in_the_output_dir_is_named_in_a_warning(tmp_path, caplog):
 def test_glob_characters_in_the_output_dir_are_escaped(tmp_path):
     context = _context_with_output(tmp_path, "out[1]")
     scanner = BanditScanner(context=context, config=BanditScannerConfig())
-    anchor = glob.escape(Path(context.source_dir).as_posix())
     entries = _entries(_run(scanner, context.source_dir))
-    assert f"{anchor}/{glob.escape('out[1]')}/*" in entries, entries
-    assert f"{anchor}/out[1]/*" not in entries
+    assert _output_entry(context.source_dir, "out[1]") in entries, entries
+    assert (
+        Path(context.source_dir).as_posix() + os.sep.join(["", "out[1]", "*"])
+        not in entries
+    )
 
 
 @pytest.mark.unit
@@ -299,9 +329,8 @@ def test_an_expired_global_ignore_path_does_not(scanner, context):
 
 @pytest.mark.unit
 def test_the_output_directory_is_excluded_from_the_source_pass(scanner, context):
-    anchor = glob.escape(Path(context.source_dir).as_posix())
     entries = _entries(_run(scanner, context.source_dir))
-    assert f"{anchor}/.ash/ash_output/*" in entries, entries
+    assert _output_entry(context.source_dir, ".ash", "ash_output") in entries, entries
 
 
 @pytest.mark.unit
@@ -392,11 +421,10 @@ def test_an_earlier_runs_default_output_dir_is_excluded_too(checkout_context):
     bandit read them back in."""
     context = checkout_context
     scanner = BanditScanner(context=context, config=BanditScannerConfig())
-    anchor = glob.escape(Path(context.source_dir).as_posix())
 
     entries = _entries(_run(scanner, context.source_dir))
 
-    assert f"{anchor}/.ash/ash_output/*" in entries, entries
+    assert _output_entry(context.source_dir, ".ash", "ash_output") in entries, entries
     assert scanner._ash_output_dirs_inside(Path(context.source_dir)) == [
         Path(".ash/ash_output")
     ]
@@ -432,13 +460,15 @@ def test_a_default_output_dir_with_committed_files_is_scanned(
         lambda _context: [str(committed)],
     )
     scanner = BanditScanner(context=context, config=BanditScannerConfig())
-    anchor = glob.escape(Path(context.source_dir).as_posix())
 
     entries = _entries(_run(scanner, context.source_dir))
 
-    assert f"{anchor}/.ash/ash_output/*" not in entries, entries
+    assert _output_entry(context.source_dir, ".ash", "ash_output") not in entries, (
+        entries
+    )
     assert {e for e in entries if "ash_output" in e} == {
-        f"{anchor}/.ash/ash_output/{name}/*" for name in ash_own_dir_names()
+        _output_entry(context.source_dir, ".ash", "ash_output", name)
+        for name in ash_own_dir_names()
     }, entries
 
 
@@ -733,7 +763,7 @@ def test_an_entry_a_path_contains_as_text_is_left_out(context, monkeypatch):
     assert not [e for e in entries if e in evil], entries
     anchor = glob.escape(Path(source).as_posix())
     assert f"{anchor}/vendor/*" in entries, entries
-    assert f"{anchor}/.ash/ash_output/*" in entries, entries
+    assert _output_entry(source, ".ash", "ash_output") in entries, entries
 
 
 @pytest.mark.unit
@@ -757,8 +787,7 @@ def test_the_output_dir_entry_is_kept_for_paths_inside_it(context, monkeypatch):
     )
     scanner = BanditScanner(context=context, config=BanditScannerConfig())
     entries = _entries(_run(scanner, context.source_dir))
-    anchor = glob.escape(Path(source).as_posix())
-    assert f"{anchor}/.ash/ash_output/*" in entries, entries
+    assert _output_entry(source, ".ash", "ash_output") in entries, entries
 
 
 @pytest.mark.unit

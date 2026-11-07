@@ -91,8 +91,28 @@ def tempfile_reads_this_tests_tmpdir(monkeypatch):
 
 @pytest.fixture
 def runtime_stand_in():
-    """The stand-in runtime class, shared by the tests that run the wait loop."""
-    return _RuntimeStandIn
+    """The stand-in runtime class, shared by the tests that run the wait loop.
+
+    The wait loop records a launcher child's pid in the die-now mirror and drops
+    it once the child's exit is observed. A stand-in that is still running when a
+    test stubs the stop out is never observed to exit, and where ``os.waitid``
+    is missing (macOS) or the pid is not a reapable child (Windows) the record
+    would stay and the worker-wide guard in tests/conftest.py would fail the test.
+    The stand-ins' pids are forgotten when the test ends, through the path that
+    discards a mirror entry.
+    """
+    made: list[_RuntimeStandIn] = []
+
+    class _Tracked(_RuntimeStandIn):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            made.append(self)
+
+    yield _Tracked
+    from automated_security_helper.core import cancellation
+
+    for runtime in made:
+        cancellation.discard_tool_pid(runtime.pid)
 
 
 @pytest.fixture(autouse=True)

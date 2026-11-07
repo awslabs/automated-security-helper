@@ -19,12 +19,12 @@ defaults and the operator control.
 """
 
 import json
+from types import SimpleNamespace
 
 import boto3
 import botocore.client
 import botocore.exceptions
 import pytest
-from typer.testing import CliRunner
 
 from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
     SecurityHubReporter,
@@ -334,22 +334,53 @@ class TestTheEnvironmentIsReadWhenAConfigIsBuilt:
 
 @pytest.mark.unit
 class TestReportCommand:
+    @pytest.fixture(autouse=True)
+    def _capture(self, capsys):
+        self.capsys = capsys
+
     def _report(self, output_dir, *extra, report_format="aws-security-hub"):
+        """``ash report``, run as ``CliRunner.invoke`` runs it, read with ``capsys``.
+
+        Not through ``CliRunner``: a record logged during ``invoke`` while pytest's
+        live logging is on reassigns ``sys.stdout``, which finalizes the runner's own
+        stream wrapper and closes the buffer it reads back
+        (``_keep_live_logging_off_the_ash_logger`` in tests/conftest.py explains the
+        mechanism; tests/unit/docs/test_page_claims.py does this for ``ash mcp``).
+        Which test hit ``ValueError: I/O operation on closed file`` depended on what
+        ran before it in the worker.
+        """
+        from typer.main import get_command
+
         from automated_security_helper.cli.main import app
 
-        return CliRunner().invoke(
-            app,
-            [
-                "report",
-                "--format",
-                report_format,
-                "--output-dir",
-                str(output_dir),
-                "--log-level",
-                "ERROR",
-                "--no-color",
-                *extra,
-            ],
+        self.capsys.readouterr()
+        try:
+            get_command(app).main(
+                args=[
+                    "report",
+                    "--format",
+                    report_format,
+                    "--output-dir",
+                    str(output_dir),
+                    "--log-level",
+                    "ERROR",
+                    "--no-color",
+                    *extra,
+                ],
+                prog_name="ash",
+                standalone_mode=True,
+            )
+            code = 0
+        except SystemExit as stopped:
+            # As CliRunner reads it: None is success, a message is failure.
+            code = stopped.code
+            if code is None:
+                code = 0
+            elif not isinstance(code, int):
+                code = 1
+        printed = self.capsys.readouterr()
+        return SimpleNamespace(
+            exit_code=code, output=printed.out + printed.err, stdout=printed.out
         )
 
     @staticmethod
@@ -387,7 +418,13 @@ class TestReportCommand:
     def test_a_cloud_reporter_the_operator_enabled_runs(
         self, tmp_path, requests, security_hub_runs
     ):
-        """Control: the operator's override turns it on."""
+        """Control: the operator's override turns it on.
+
+        ``ash report`` runs the reporter's dependency check first, as a scan
+        does. Every request here is refused: Security Hub's DescribeHub refusal
+        is tolerated (the check goes on), and the override names the account, so
+        the check needs no STS lookup and passes without a successful call.
+        """
         output_dir = tmp_path / "out"
         _stored_results(output_dir)
 
@@ -400,6 +437,8 @@ class TestReportCommand:
             "--config-overrides",
             "reporters.aws-security-hub.options.aws_region=us-east-1",
             "--config-overrides",
+            "reporters.aws-security-hub.options.account_id=123456789012",
+            "--config-overrides",
             "reporters.aws-security-hub.options.findings_scope=fixture-project",
         )
 
@@ -407,7 +446,7 @@ class TestReportCommand:
         assert security_hub_runs == ["SecurityHubReporter"]
         # The import receipt: the stored results hold no finding, so nothing
         # was sent and no AWS call was needed.
-        assert json.loads(result.output)["imported"] == 0
+        assert json.loads(result.stdout)["imported"] == 0
 
     def _s3_operator_config(self, root, enabled_line=""):
         """An operator config with every option S3 needs to upload, and ``enabled_line``."""
@@ -452,18 +491,40 @@ class TestReportCommand:
         assert requests == []
         assert sessions == []
 
-    def test_overrides_that_enable_s3_reach_put_object(self, tmp_path, requests):
+    def test_overrides_that_enable_s3_reach_put_object(
+        self, tmp_path, requests, monkeypatch
+    ):
         """Control: the operator's overrides turn it on and aim it, as far as PutObject.
 
         The config file still names the plugin module. Called directly rather
         than through CliRunner: the refused upload logs an error, and a record
         pytest's live logging writes during an invoke swaps sys.stdout under
         CliRunner, which then fails reading its own closed output stream.
+
+        ``ash report`` runs the reporter's dependency check first, as a scan
+        does, and S3's check needs an identity: STS GetCallerIdentity is
+        answered here (HeadBucket's refusal is tolerated by the check), so the
+        command gets as far as the upload, which every other request refuses.
         """
         import typer
 
         from automated_security_helper.cli.report import report_command
         from automated_security_helper.core.enums import AshLogLevel
+
+        refusing_request = botocore.client.BaseClient._make_api_call
+
+        def identity_answered(client, operation_name, api_params):
+            if (client.meta.service_model.service_name, operation_name) == (
+                "sts",
+                "GetCallerIdentity",
+            ):
+                requests.append(("sts", operation_name))
+                return {"Account": "123456789012"}
+            return refusing_request(client, operation_name, api_params)
+
+        monkeypatch.setattr(
+            botocore.client.BaseClient, "_make_api_call", identity_answered
+        )
 
         output_dir = tmp_path / "out"
         _stored_results(output_dir)

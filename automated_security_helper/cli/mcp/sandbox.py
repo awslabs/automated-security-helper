@@ -1484,7 +1484,9 @@ def validate_discovered_config(
         if refusal is not None:
             return refusal
     try:
-        selected = discover_config_source(source_dir).selected
+        selected = discover_config_source(
+            source_dir, permit=config_base_gate(session_id)
+        ).selected
     except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
         # The type alone: a parser's message can quote the file's text, and
         # discovery has no one file to name here.

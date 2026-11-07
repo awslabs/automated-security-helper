@@ -628,7 +628,8 @@ def test_the_rules_dir_is_where_the_install_step_writes_it(
 
     ctx = _context(tmp_path, event_name, cfn_guard=enabled, actionlint=True)
     scan_env = _step("Run ASH").get("env") or {}
-    assert "ASH_CFN_GUARD_RULES_DIR" in scan_env
+    scan_env_names = set(scan_env)
+    assert "ASH_CFN_GUARD_RULES_DIR" in scan_env_names
     pointed_at = _interpolate(scan_env["ASH_CFN_GUARD_RULES_DIR"], ctx)
     if not enabled:
         assert pointed_at == "", "with cfn-guard not installed ASH must use its default"

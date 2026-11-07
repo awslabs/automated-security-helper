@@ -331,7 +331,7 @@ def test_the_refusal_is_the_shared_formatter_s_sentence(
         # accept whatever a changed formatter adds between the type and the
         # place.
         expected = (
-            f"{config} could not be parsed (JSONDecodeError: {error.msg} "
+            f"{config.as_posix()} could not be parsed (JSONDecodeError: {error.msg} "
             f"at line {error.lineno}, column {error.colno})"
         )
     except yaml.YAMLError as error:

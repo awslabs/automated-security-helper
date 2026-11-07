@@ -421,14 +421,16 @@ def test_a_converted_finding_is_placed_by_the_source_the_converter_recorded(
 
 
 @needs_symlinks
-def test_a_link_at_ash_sarif_is_never_read_as_this_runs(tmp_path, monkeypatch, no_aws):
+def test_a_link_at_ash_sarif_is_never_read_as_this_runs(
+    tmp_path, monkeypatch, no_aws, capsys
+):
     """reports/ash.sarif is this run's only as a regular file the run wrote.
 
-    The identity follows no symlink, so a link there to another report this run
-    rewrites (ash.flat.json here) is not read as written this run, and the HIGH
-    finding this run reports fails the scan. A link survives into the run only
-    under --use-existing, as here, or in ``ash merge`` into a reused output
-    directory.
+    A link there to another report (ash.flat.json here) is never read as written
+    this run: ASH does not write a report through a link, so the run is refused
+    with exit 1 and a message naming the link, not graded by the HIGH finding the
+    link's target would show (exit 2). A link survives into the run only under
+    --use-existing, as here, or in ``ash merge`` into a reused output directory.
     """
     source = tmp_path / "repo" / "src"
     source.mkdir(parents=True)
@@ -446,11 +448,11 @@ def test_a_link_at_ash_sarif_is_never_read_as_this_runs(tmp_path, monkeypatch, n
         output_formats=[ExportFormat.MARKDOWN, ExportFormat.FLAT_JSON],
     )
 
-    # The link is still there, and its target was written this run.
+    # The link is still there, and the run is refused over it, not graded by it.
     assert (reports / "ash.sarif").is_symlink()
-    assert "untouched.py" in (reports / "ash.flat.json").read_text(encoding="utf-8")
-    assert exit_code == 2
-    assert told == [False]
+    assert exit_code == 1
+    assert "ash.sarif is a symlink" in capsys.readouterr().out
+    assert True not in told, told
 
 
 @pytest.mark.parametrize(

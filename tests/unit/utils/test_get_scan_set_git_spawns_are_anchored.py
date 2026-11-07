@@ -126,8 +126,10 @@ def test_each_helper_leaves_the_repository_location_variables_out(
     assert recorded, "git was not started"
     for _argv, kwargs in recorded:
         env = kwargs["env"]
-        assert env is not os.environ
-        assert not set(env) & set(LOCATION_VARIABLES), sorted(env)
+        is_a_separate_mapping = env is not os.environ
+        assert is_a_separate_mapping
+        names = set(env)
+        assert not names & set(LOCATION_VARIABLES), sorted(names)
 
 
 def _name_a_deployed_tree(tmp_path, monkeypatch) -> "tuple[str, str]":
@@ -157,7 +159,8 @@ def test_the_root_lookup_and_the_diff_keep_a_work_tree_the_caller_names(
     assert recorded, "git was not started"
     for _argv, kwargs in recorded:
         env = kwargs["env"]
-        assert env is not os.environ
+        is_a_separate_mapping = env is not os.environ
+        assert is_a_separate_mapping
         assert (env.get("GIT_DIR"), env.get("GIT_WORK_TREE")) == (bare, tree)
 
 
@@ -213,9 +216,11 @@ def test_the_core_worktree_read_for_git_dir_alone_is_anchored_too(
         "core.worktree",
     ]
     assert "--git-dir" not in probe_argv
-    assert not set(probe_kwargs["env"]) & set(LOCATION_VARIABLES)
+    probe_names = set(probe_kwargs["env"])
+    assert not probe_names & set(LOCATION_VARIABLES)
     _lookup_argv, lookup_kwargs = recorded[1]
-    assert not set(lookup_kwargs["env"]) & set(LOCATION_VARIABLES)
+    lookup_names = set(lookup_kwargs["env"])
+    assert not lookup_names & set(LOCATION_VARIABLES)
 
 
 @pytest.mark.parametrize("ask", HELPERS)
@@ -236,7 +241,8 @@ def test_each_helper_leaves_the_index_and_object_store_overrides_out(
 
     assert recorded, "git was not started"
     for _argv, kwargs in recorded:
-        assert not set(kwargs["env"]) & set(STATE_VARIABLES), sorted(kwargs["env"])
+        names = set(kwargs["env"])
+        assert not names & set(STATE_VARIABLES), sorted(names)
 
 
 @pytest.mark.parametrize("ask", LAYOUT_HELPERS)
@@ -261,7 +267,8 @@ def test_a_kept_layout_drops_the_index_override_and_keeps_the_object_stores(
     for _argv, kwargs in recorded:
         env = kwargs["env"]
         assert (env.get("GIT_DIR"), env.get("GIT_WORK_TREE")) == (bare, tree)
-        assert "GIT_INDEX_FILE" not in env
+        names = set(env)
+        assert "GIT_INDEX_FILE" not in names
         assert env["GIT_OBJECT_DIRECTORY"] == objects
         assert env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] == bare + "/objects"
 
@@ -278,7 +285,8 @@ def test_the_nesting_lookups_discover_even_when_the_caller_names_a_work_tree(
 
     assert recorded, "git was not started"
     for _argv, kwargs in recorded:
-        assert not set(kwargs["env"]) & set(LOCATION_VARIABLES)
+        names = set(kwargs["env"])
+        assert not names & set(LOCATION_VARIABLES)
 
 
 @pytest.mark.parametrize("ask", HELPERS)

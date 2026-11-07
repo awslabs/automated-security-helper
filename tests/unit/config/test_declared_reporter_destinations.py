@@ -40,6 +40,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.utils.helpers import importing_this_checkout
 
 PLUGIN = "standin_ash_plugins"
 REPORTER = "endpoint-reporter"
@@ -214,7 +215,7 @@ def _run(script: str, spec: Dict[str, Any], site: Path, env: Dict[str, str]) -> 
         [str(site), *filter(None, [os.environ.get("PYTHONPATH")])]
     )
     result = subprocess.run(
-        [sys.executable, "-c", script, json.dumps(spec)],
+        [sys.executable, "-c", importing_this_checkout(script), json.dumps(spec)],
         cwd=site.parent,
         env=environment,
         capture_output=True,

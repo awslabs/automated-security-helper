@@ -40,6 +40,7 @@ from automated_security_helper.config.ash_config import (
     _PluginConfigSegment,
     env_reference_left_as_written,
     env_reference_value,
+    load_config_yaml,
     plugin_key_lookup_names,
     read_env_reference,
     resolve_env_references,
@@ -4106,15 +4107,38 @@ class ConfigValidator:
         # them) would be the other file's path and would serve this file's data
         # for it, unread and unchecked.
         root_key = config_path.resolve()
+        # A document nested past the interpreter's recursion limit can parse
+        # (not every parser runs out of recursion on one, on every interpreter:
+        # CPython 3.14's JSON parser reads one that 3.13's refuses) and then
+        # run the walks below out of recursion. That is this file being too
+        # deep to read, so it is reported as a file that does not parse, as
+        # parse_config_text words its parser's own RecursionError.
+        unparsed: Optional[str] = None
+        try:
+            environment_values = cls.environment_values_of(
+                config_path, config_data, config_text
+            )
+            # The file's own references, at the place it writes each, from the
+            # same text; the chain's follow once it resolves.
+            file_references = cls.file_references_of(
+                config_path, config_data, config_text
+            )
+        except RecursionError as e:
+            unparsed = unparsed_config_reason(config_path, e)
+        if unparsed is not None:
+            kind = (
+                "JSON"
+                if is_json_file(config_path)
+                else "TOML"
+                if is_toml_file(config_path)
+                else "YAML"
+            )
+            result.errors.append(cls.PARSE_ERROR_PREFIXES[kind] + unparsed)
+            result.ignored_by_scan = True
+            return result
         result.config_data = config_data
-        result.environment_values = cls.environment_values_of(
-            config_path, config_data, config_text
-        )
-        # The file's own references, at the place it writes each, from the same
-        # text; the chain's follow once it resolves.
-        result.file_references = cls.file_references_of(
-            config_path, config_data, config_text
-        )
+        result.environment_values = environment_values
+        result.file_references = file_references
         result.references = list(result.file_references)
 
         # Imported here: resolve_config imports the config package, and this
@@ -4539,7 +4563,7 @@ class ConfigValidator:
                     decision = True
                     continue
                 try:
-                    written = yaml.safe_load(text)
+                    written = load_config_yaml(text)
                 except yaml.YAMLError:
                     written = text
                 decision = written == value

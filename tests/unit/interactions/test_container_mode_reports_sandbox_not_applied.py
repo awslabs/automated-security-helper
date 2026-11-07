@@ -395,6 +395,14 @@ class TestTheDroppedSandboxIsReported:
         assert WARNING in _one_line(output), output
         assert "(landlock," in _one_line(output)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "the section is passed as JSON, whose double quotes a batch-file "
+            "runner stand-in refuses as an argument (cmd.exe would read it "
+            "differently); ASH refuses to start it, as it should"
+        ),
+    )
     def test_a_sandbox_section_override(self, tmp_path, stand_in, project):
         output, _ = _scan(
             tmp_path,
@@ -1130,12 +1138,13 @@ class TestTheFloorWithoutTheConfig:
     ):
         """The twin inside the SCANNED source: ASH_CONFIG's operator root
         patches its own section case-variant while a base in the scanned
-        checkout holds a case-variant twin. The floor's one classified load
-        folds the patch as the local scan does and answers the chain's mode;
-        a read without the ownership refuses the chain as ambiguous and the
-        floor reported off. The floor has carried the scan's own load since
-        the carry landed, so this cell pins the end behavior, not any one
-        read site."""
+        checkout holds a case-variant twin. A local scan refuses this chain
+        (the operator's patch does not fit the document it patches; that
+        refusal is the contract, pinned by
+        test_readers_of_the_scan_chain_take_what_the_scan_takes.py), so the
+        floor's load of ASH_CONFIG does not succeed either, ASH_CONFIG sets no
+        floor, and with no operator config of its own the floor is the
+        fallback, off. The scan inside reports the refusal."""
         from tests.utils.helpers import mark_git_checkout
 
         source = tmp_path / "src"
@@ -1164,7 +1173,7 @@ class TestTheFloorWithoutTheConfig:
         )
         monkeypatch.setenv("ASH_CONFIG", str(root))
 
-        assert self._floor(options()) == ["firejail"]
+        assert self._floor(options()) == ["off"]
 
     def test_the_env_chain_is_read_once(self, tmp_path, options, monkeypatch):
         """The chain's files, the names that reached them AND the trusted

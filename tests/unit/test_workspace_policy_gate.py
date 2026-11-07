@@ -97,7 +97,8 @@ class TestWorkflowWiring:
     def test_the_temp_dir_override_sits_on_the_step(self, job, gate_step):
         """The gate builds its workspace with tempfile.mkdtemp; pointing TMPDIR
         at the runner's scratch space keeps the tree off the checkout."""
-        assert "TMPDIR" in (gate_step.get("env") or {})
+        gate_env_names = set(gate_step.get("env") or {})
+        assert "TMPDIR" in gate_env_names
         job_env = job.get("env") or {}
         assert not any("runner." in str(value) for value in job_env.values())
 

@@ -278,11 +278,16 @@ class TestIdenticalBinaryIsNotReinstalled:
         finally:
             subprocess_utils.clear_find_executable_cache()
 
-    def test_find_executable_searches_the_same_fallback_dirs(self, monkeypatch):
+    def test_find_executable_searches_the_same_fallback_dirs(
+        self, monkeypatch, tmp_path
+    ):
         """The skip's notion of "found by every scan" is find_executable's own list."""
-        monkeypatch.setenv("ASH_BIN_PATH", "/some/ash/bin")
+        # Anchored on every platform: "/some/ash/bin" has no drive on Windows, so it
+        # is a relative ASH_BIN_PATH there, which is not used (~/.ash/bin is).
+        ash_bin = tmp_path / "some" / "ash" / "bin"
+        monkeypatch.setenv("ASH_BIN_PATH", str(ash_bin))
         dirs = subprocess_utils.path_independent_dirs()
-        assert dirs[0] == Path("/some/ash/bin")
+        assert dirs[0] == ash_bin
         # Then the directories of ASH's own environment: the interpreter's, and its
         # scripts directory when that is another one (a Windows Python outside a
         # venv). A directory an earlier `ash dependencies install --bin-path` used

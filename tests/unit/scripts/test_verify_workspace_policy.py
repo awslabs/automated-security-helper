@@ -119,7 +119,8 @@ class TestChildEnvironment:
             tmp_path / "ws.code-workspace", tmp_path / "out", timeout=17.5
         )
         assert (code, payload, output) == (0, {}, "")
-        assert "ASH_EXCLUDED_SCANNERS" not in recorded["env"]
+        names = set(recorded["env"])
+        assert "ASH_EXCLUDED_SCANNERS" not in names
         assert recorded["encoding"] == "utf-8"
         assert recorded["errors"] == "replace"
         assert recorded["text"] is True

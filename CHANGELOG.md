@@ -1435,6 +1435,11 @@
 
 ### Behavior changes
 
+- In container mode, an `ASH_CONFIG` file (and each file it extends) that sits in another
+  git checkout is passed to the scan inside with `--config-file-from-another-checkout`,
+  which keeps the settings that only restrict, as the `--config` file already was. Only
+  a file in the scanned checkout takes `--config-file-from-scanned-repository`, and a
+  file outside every checkout is not marked.
 - `run_ash_scan()` raises `ValueError` for `severity_threshold_restriction` and
   `keep_previous_results` in container and nix mode, as it does for the other
   options only the local orchestrator applies (`untrusted_config`,

@@ -47,6 +47,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
     ArchiveConverter,
     ArchiveConverterConfig,
 )
+from automated_security_helper.utils.sandbox import fs_guard
 
 pytestmark = pytest.mark.unit
 
@@ -536,9 +537,20 @@ def test_log_lines_naming_members_and_archives_are_not_read_as_markup(
         assert all(getattr(r, "markup", True) is False for r in lines), fragment
 
 
-def _lines_naming(records, fragment):
-    """The records whose text holds ``fragment`` and a ``[/`` from a path."""
-    return [r for r in records if fragment in r.getMessage() and "[/" in r.getMessage()]
+def _lines_naming(records, fragment, sep=os.sep):
+    """The records whose text holds ``fragment`` and a ``[`` ending a path component.
+
+    The path spells that as ``[/`` where the separator is ``/`` and as ``[\\`` where
+    it is a backslash (Windows): the directory ``d[`` is displayed as ``d[<sep>x]``,
+    so the hazard the test names (a bracket then the separator) is spelled with the
+    separator of the host that made the path. A line that shows an archive by its
+    scan-set display name (``d[/x].zip``) always spells it with ``/``, whatever the
+    host, so it passes ``sep="/"``.
+    """
+    hazard = "[" + sep
+    return [
+        r for r in records if fragment in r.getMessage() and hazard in r.getMessage()
+    ]
 
 
 def test_debug_lines_naming_a_scan_set_path_are_not_read_as_markup(
@@ -584,7 +596,7 @@ def test_the_debug_line_for_an_archive_not_extracted_whole_is_not_read_as_markup
 
     _convert(test_plugin_context, monkeypatch, archive)
 
-    lines = _lines_naming(ash_records_at_every_level, "not extracted whole")
+    lines = _lines_naming(ash_records_at_every_level, "not extracted whole", "/")
     assert lines
     assert all(getattr(r, "markup", True) is False for r in lines)
 
@@ -885,13 +897,16 @@ def test_the_case_probe_is_written_beside_an_existing_extraction_directory_never
     extraction = results / "a.zip"
     extraction.mkdir(parents=True)
     probed: List[Path] = []
-    real_open = open
+    # The probe is written through the write guard (fs_guard.open_for_write, which
+    # _filesystem_folds_case imports when it runs), not through the builtin open,
+    # so the guard's entry point is where the probe's path is seen.
+    real_open_for_write = fs_guard.open_for_write
 
     def recording_open(path, *args, **kwargs):
         probed.append(Path(path))
-        return real_open(path, *args, **kwargs)
+        return real_open_for_write(path, *args, **kwargs)
 
-    monkeypatch.setattr(archive_converter, "open", recording_open, raising=False)
+    monkeypatch.setattr(fs_guard, "open_for_write", recording_open)
 
     archive_converter._filesystem_folds_case(extraction)
     archive_converter._filesystem_folds_case(results / "b.zip")

@@ -9,14 +9,14 @@ validate's ASH_CONFIG check (``config_validator``), MCP ``get_config``'s
 pre-check of a named file, and MCP ``get_config``'s search read when the
 searched directory has no config file. Each must load with the same
 confinement and ownership, or it refuses, with exit 3, a chain the scan
-itself takes: a repository file writing a case-variant twin of the operator's
-reporter section makes the operator's deep patch ambiguous to an
-ownership-less fold.
+itself takes. The scan refuses a repository file writing a case-variant twin of
+the operator's reporter section, because the operator's deep patch no longer
+fits the document (that refusal is the contract), so each reader must refuse the
+same chain with the same reason, and take the chain without the twin.
 
-The last cell pins the ownership compare's join rule: deep_merge joins an
-incoming key onto an existing key that is its uniform "-"/"_" swap, so the
-operator's write can end up standing under the repository's spelling, and the
-compare has to read that key as carrying the operator's write.
+The last cell pins the ownership compare's join rule: deep_merge keeps the
+operator's spelling when the repository wrote the uniform "-"/"_" swap of it,
+and the compare has to read that key as carrying the operator's write.
 
 Premises raise RuntimeError, so only the behavior under test fails a cell.
 """
@@ -102,20 +102,47 @@ def _scan_takes_it(src, checked):
         )
 
 
+#: The scan's refusal of a chain whose repository file writes a case-variant
+#: twin: the operator's patch does not fit the document it patches.
+_TWIN_REFUSAL = "the path does not fit the document it patches"
+
+
+def _scan_refuses_the_twin(src, checked=None):
+    """The scan's own load refuses the twin chain with ``_TWIN_REFUSAL``."""
+    try:
+        if checked is None:
+            resolve_config(source_dir=src)
+        else:
+            resolve_config(config_path=checked, source_dir=src)
+    except ASHConfigSourceError as error:
+        if _TWIN_REFUSAL not in str(error):
+            raise RuntimeError(
+                "the scan refuses the twin chain for another reason: "
+                + type(error).__name__
+            )
+        return
+    raise RuntimeError("the scan's own load takes the twin chain, so the cell is moot")
+
+
 def _validator_errors(tmp_path, monkeypatch, twin):
     from automated_security_helper.config.config_validator import ConfigValidator
 
     src = _env_chain(tmp_path, monkeypatch, twin=twin)
     checked = _checked(src)
-    _scan_takes_it(src, checked)
+    if twin:
+        _scan_refuses_the_twin(src, checked)
+    else:
+        _scan_takes_it(src, checked)
     return ConfigValidator.check_config_file(checked, source_dir=src).errors
 
 
 def test_config_validate_s_ash_config_check_takes_the_chain_the_scan_takes(
     tmp_path, monkeypatch
 ):
+    """Beside the twin the scan refuses the chain, and so does validate, with the
+    scan's reason."""
     errors = _validator_errors(tmp_path, monkeypatch, twin=True)
-    assert errors == [], [e[:160] for e in errors]
+    assert any(_TWIN_REFUSAL in e for e in errors), [e[:160] for e in errors]
 
 
 def test_control_without_the_twin_validate_reports_nothing(tmp_path, monkeypatch):
@@ -128,16 +155,21 @@ def _get_config_answer(tmp_path, monkeypatch, twin):
 
     src = _env_chain(tmp_path, monkeypatch, twin=twin)
     checked = _checked(src)
-    _scan_takes_it(src, checked)
+    if twin:
+        _scan_refuses_the_twin(src, checked)
+    else:
+        _scan_takes_it(src, checked)
     return mcp_get_config(config_path=str(checked))
 
 
 def test_mcp_get_config_s_pre_check_takes_the_chain_the_scan_takes(
     tmp_path, monkeypatch
 ):
+    """Beside the twin the scan refuses the chain, and so does get_config's
+    pre-check, with the scan's reason."""
     answer = _get_config_answer(tmp_path, monkeypatch, twin=True)
-    assert answer.get("project_name") == "checked", {
-        k: str(v)[:120] for k, v in answer.items()
+    assert answer.get("success") is False and _TWIN_REFUSAL in str(answer), {
+        k: str(v)[:160] for k, v in answer.items()
     }
 
 
@@ -154,22 +186,31 @@ def test_mcp_get_config_s_search_read_takes_the_chain_the_scan_takes(
 ):
     """With no config file in the searched directory, get_config loads the
     ASH_CONFIG chain itself. Beside a repository twin it must answer what the
-    scan's own load of that directory answers."""
+    scan's own load of that directory answers: the refusal with the twin, the
+    chain without it."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     src = _env_chain(tmp_path, monkeypatch, twin=twin)
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
-    try:
-        resolve_config(source_dir=src)
-    except _REFUSED as error:
-        raise RuntimeError(
-            "the scan's own load refuses, so the cell shows nothing: "
-            + type(error).__name__
-        )
+    if twin:
+        _scan_refuses_the_twin(src)
+    else:
+        try:
+            resolve_config(source_dir=src)
+        except _REFUSED as error:
+            raise RuntimeError(
+                "the scan's own load refuses, so the cell shows nothing: "
+                + type(error).__name__
+            )
     answer = mcp_get_config(search_dir=str(src))
-    assert answer.get("project_name") == "env", {
-        k: str(v)[:160] for k, v in answer.items()
-    }
+    if twin:
+        assert answer.get("success") is False and _TWIN_REFUSAL in str(answer), {
+            k: str(v)[:160] for k, v in answer.items()
+        }
+    else:
+        assert answer.get("project_name") == "env", {
+            k: str(v)[:160] for k, v in answer.items()
+        }
 
 
 def test_an_operator_key_joined_under_the_repository_s_swap_spelling_is_owned(
@@ -177,9 +218,9 @@ def test_an_operator_key_joined_under_the_repository_s_swap_spelling_is_owned(
 ):
     """The repository file comes first and spells the section as the whole
     "-"/"_" swap of the operator's, so deep_merge joins the operator's write
-    under the repository's spelling. The ownership compare's swap arm is what
-    still finds that key owned, so the operator's patch lands and the reporter
-    runs it."""
+    under the operator's own spelling. The ownership compare reads that key as
+    carrying the operator's write, so the operator's patch lands and the
+    reporter runs it."""
     from automated_security_helper.config.operator_only_options import (
         _reporter_section_of,
         reporter_section,
@@ -223,10 +264,10 @@ def test_an_operator_key_joined_under_the_repository_s_swap_spelling_is_owned(
         for key in reporters
         if isinstance(key, str) and folded_section_name(key) == hub_fold
     )
-    if hubs != ["aws_security_hub"]:
+    if hubs != ["aws-security-hub"]:
         raise RuntimeError(
             "deep_merge did not join the operator's write under the "
-            "repository's spelling: " + str(hubs)
+            "operator's spelling: " + str(hubs)
         )
     key = plugin_config_key(SecurityHubReporter)
     shown = _reporter_section_of(config, key)

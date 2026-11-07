@@ -9,12 +9,14 @@ Properties of ``utils/command_safe_stream.py`` that nothing else pins:
   state the checked model would have left, so a later checked write of the same
   wrap does not start mid-line by mistake, and a pass-through byte write lands
   after the tail an earlier checked byte write left held;
-- a text write deferred during a byte write lands after that write's held tail;
+- a deferred text write never splits a held character: a text write deferred
+  during a byte write lands while that write's multi-byte tail stays held, and
+  the tail is joined to the rest of its character by the next byte write;
 - a write deferred after a drain's last empty check lands before the next
   write's text, not after it, on a flush, and on the old target when the wrap is
   retargeted; its error, when it raises, follows the next write's text instead
   of replacing it;
-- the held tail lands once, ahead of every deferred item, byte items included;
+- the held tail stays held across every deferred item, byte items included;
 - a KeyboardInterrupt while a deferred item lands strands nothing after it;
 - ``copy.copy`` of a wrap or of its checked view does not recurse;
 - the checked byte view hands out no ``raw`` writer.
@@ -100,9 +102,11 @@ def test_a_pass_through_byte_write_lands_after_the_held_tail():
     assert terminal_raw.getvalue() == b"\xc3\xa9\n", terminal_raw.getvalue()
 
 
-def test_a_deferred_text_write_lands_after_the_held_tail():
-    """A text write deferred during a byte write that left a tail held lands
-    after that tail, not ahead of it."""
+def test_a_deferred_text_write_never_splits_a_held_character():
+    """A text write deferred during a byte write that left a multi-byte tail
+    held lands whole, with the tail still held: the tail is written together
+    with the rest of its character by the next byte write, so no text sits
+    between the two halves of the character and the wire stays valid UTF-8."""
     raw = _ReenteringBytes()
     # newline="\n": the deferred text lands through this text layer, whose
     # default newline mode writes os.linesep (\r\n on Windows), while the byte
@@ -114,8 +118,12 @@ def test_a_deferred_text_write_lands_after_the_held_tail():
     raw.reenter = lambda: wrap.write("X\n")
     wrap.buffer.write(b"caf\xc3")
     assert wrap._pending == [] and wrap._mid_write is False
+    # The deferred text landed; the tail \xc3 has not reached the stream.
+    assert raw.getvalue() == b"cafX\n", raw.getvalue()
     wrap.buffer.write(b"\xa9\n")
-    assert raw.getvalue() == b"caf\xc3X\n\xa9\n", raw.getvalue()
+    assert raw.getvalue() == b"cafX\n\xc3\xa9\n", raw.getvalue()
+    assert b"\xc3X" not in raw.getvalue()
+    raw.getvalue().decode("utf-8")
 
 
 def test_a_write_stranded_after_a_drain_lands_before_the_next_text():
@@ -232,10 +240,11 @@ class _TextWithBuffer:
         return False
 
 
-def test_a_failing_tail_write_does_not_strand_the_deferred_items():
-    """The held tail is emitted ahead of the first deferred text item; that write
-    raising used to leave the drain before its loop, so every pending item stayed
-    stranded. The error is held like an item's: the items land, then it is raised."""
+def test_a_drain_does_not_touch_the_held_tail_so_a_refusing_buffer_strands_nothing():
+    """The drain of a deferred text item never writes the held tail (a deferred
+    text write never splits a held character), so a buffer that would refuse
+    its next write is not reached: the item lands, nothing is raised, nothing
+    stays pending and the tail is still held for the next byte write."""
     target = _TextWithBuffer()
     wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
     wrap.buffer.write(b"caf\xc3")
@@ -244,17 +253,18 @@ def test_a_failing_tail_write_does_not_strand_the_deferred_items():
     # A signal handler's text write inside a byte write: deferred.
     wrap._mid_write = True
     wrap.write("T\n")
-    with pytest.raises(OSError, match="tail refused"):
-        wrap._end_write(failed=False)
+    wrap._end_write(failed=False)
     assert target.texts == ["T\n"], target.texts
+    assert target.buffer.writes == [b"caf"], target.buffer.writes
+    assert target.buffer.refuse_next is True
     assert wrap._pending == []
     assert wrap._mid_write is False
 
 
-def test_the_held_tail_lands_ahead_of_every_deferred_item():
-    """Bytes a byte write left held (an incomplete character's start) land once,
-    before the deferred items, byte items included: emitted only before the first
-    deferred text item, the tail landed after the deferred bytes before it."""
+def test_the_held_tail_stays_held_across_every_deferred_item():
+    """Bytes a byte write left held (an incomplete character's start) stay held
+    across the deferred items, byte items and text included, and land joined to
+    the rest of their character: a deferred text write never splits it."""
     raw = _ReenteringBytes()
     # newline="\n" for the same reason as in the deferred-text test above.
     target = io.TextIOWrapper(raw, encoding="utf-8", newline="\n", write_through=True)
@@ -268,7 +278,10 @@ def test_the_held_tail_lands_ahead_of_every_deferred_item():
 
     raw.reenter = handler
     wrap.buffer.write(b"caf\xc3")
-    assert raw.getvalue() == b"caf\xc3B2T\n", raw.getvalue()
+    assert raw.getvalue() == b"cafB2T\n", raw.getvalue()
+    wrap.buffer.write(b"\xa9\n")
+    assert raw.getvalue() == b"cafB2T\n\xc3\xa9\n", raw.getvalue()
+    raw.getvalue().decode("utf-8")
 
 
 def test_a_keyboard_interrupt_in_a_deferred_write_strands_nothing_after_it():
@@ -416,3 +429,35 @@ def test_the_checked_view_hands_out_no_raw_writer():
     assert target.buffer.raw is not None
     with pytest.raises(AttributeError):
         wrap.buffer.raw
+
+
+@pytest.mark.parametrize(
+    "writes",
+    [
+        ["x##vso", "[task.setvariable variable=x]"],
+        ["x#", "#vso[task.setvariable variable=x]"],
+        ["x##", "vso", "[task.setvariable variable=x]"],
+        ["x##", "[warning]x"],
+    ],
+    ids=["name-then-bracket", "hash-then-hash", "three-writes", "no-name"],
+)
+def test_a_hash_command_split_across_writes_is_broken(writes):
+    """Rich's Windows console render writes each styled run of a message on its
+    own, so the "##" and the "[" of ``##vso[`` can be two writes. The "[" that
+    completes the form is written as an escape, so no line holds the command."""
+    target = io.StringIO()
+    wrap = css.CommandSafeStream(lambda: target)
+    for text in writes:
+        wrap.write(text)
+    written = target.getvalue()
+    assert "".join(writes) != written, "control: the split form was changed"
+    assert css._NAMED_HASH_COMMAND_FORM.search(written) is None, written
+
+
+def test_a_hash_before_a_line_break_completes_no_command_in_the_next_line():
+    """The carry ends with the line: a "[" on the next line is no command's."""
+    target = io.StringIO()
+    wrap = css.CommandSafeStream(lambda: target)
+    wrap.write("x##vso")
+    wrap.write("\n[not a command]")
+    assert target.getvalue() == "x##vso\n[not a command]"

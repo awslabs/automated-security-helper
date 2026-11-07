@@ -69,7 +69,11 @@ def _shows_no_value(text: str) -> None:
 def test_the_configs_repr_shows_no_environment_value(config):
     text = repr(config)
     _shows_no_value(text)
-    assert "<value>" in text, "the env-read fields are not shown as <value>"
+    # AshConfig.__repr_args__ shows a field the files read from the environment
+    # as the file wrote it, the reference and not the value: a reference holds
+    # no value, and it says where the field came from.
+    assert "${ASH_ZR_REASON}" in text, "the nested env-read field lost its reference"
+    assert "${ASH_ZR_MOD}" in text, "the top-level env-read field lost its reference"
     assert LITERAL in text, "a literal value went unreadable"
 
 

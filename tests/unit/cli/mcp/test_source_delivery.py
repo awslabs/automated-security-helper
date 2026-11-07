@@ -251,7 +251,8 @@ class TestSetSourceGit:
             assert cmd[setting - 1] == "-c", cmd
             assert setting < cmd.index(subcommand), cmd
             env = kw.get("env") or {}
-            assert env.get("GIT_LFS_SKIP_SMUDGE") == "1", (subcommand, env)
+            skip_smudge = env.get("GIT_LFS_SKIP_SMUDGE")
+            assert skip_smudge == "1", (subcommand, skip_smudge)
         sd.clear_source(_SESSION, workspace_root=tmp_path)
 
     def test_clone_failure_raises_runtime_error(self, tmp_path):

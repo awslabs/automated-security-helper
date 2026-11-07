@@ -16,6 +16,7 @@ whose parameter is directory_path, can give the same ones
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess  # nosec B404 - each surface runs as a child process, as an operator runs it
@@ -123,15 +124,15 @@ def unmakeable(tmp_path, request):
     if request.param == "under-a-file":
         (tmp_path / "blocker").write_text("x\n", encoding="utf-8")
         out = tmp_path / "blocker" / "out"
-        # The reason is the system's own strerror for this mkdir, which is not
-        # the POSIX "Not a directory" everywhere; take it from the same failing
-        # operation instead of pinning the POSIX literal.
-        try:
+        # The product walks up to the first part of the path that is there and
+        # gives every platform that part's reason, ENOTDIR's strerror
+        # (utils/directory_refusals.py, _obstacle_on_the_way), because Windows
+        # mkdir under a file fails with "The system cannot find the path
+        # specified" and never says "Not a directory". The reason is therefore
+        # the platform's text for ENOTDIR, not the failing mkdir's own.
+        with pytest.raises(OSError):
             os.mkdir(out)
-        except OSError as error:
-            reason = error.strerror
-        else:  # pragma: no cover - a file blocks the way by construction
-            pytest.fail("mkdir under a file unexpectedly succeeded")
+        reason = os.strerror(errno.ENOTDIR)
         yield out, f"Output directory cannot be created: {out} ({reason})"
         return
     _without_permissions_skip()

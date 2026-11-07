@@ -420,7 +420,7 @@ class TestTheStandInRunsOnEveryHost:
         return scanner
 
     @pytest.mark.parametrize("name", ["semgrep", "opengrep"])
-    def test_control_a_scanner_left_off_runs_nothing_and_its_row_is_an_error(
+    def test_control_a_scanner_left_off_runs_nothing_and_its_row_is_skipped(
         self, plugin_context, monkeypatch, name
     ):
         rows = _rows(
@@ -433,9 +433,17 @@ class TestTheStandInRunsOnEveryHost:
         )
 
         row = rows["source"]
-        assert row.status == ScannerStatus.ERROR, row.status.value
-        assert any("returned no result" in str(error) for error in row.errors), (
-            f"the tool is never started for a scanner that is off; errors: {row.errors!r}"
+        # A scanner nobody asked to run is left unscanned: its row is SKIPPED
+        # and excluded, with the reason, not an ERROR "returned no result"
+        # (the executor's disabled branch). The tool is never started: the
+        # stand-in asserts when it is called for a target.
+        assert row.status == ScannerStatus.SKIPPED, row.status.value
+        assert row.excluded is True, row.excluded
+        assert "disabled in the configuration" in str(row.skipped_reason), (
+            f"the reason names the configuration; got {row.skipped_reason!r}"
+        )
+        assert not any("returned no result" in str(error) for error in row.errors), (
+            f"a scanner that is off is not a failure; errors: {row.errors!r}"
         )
 
     @pytest.mark.parametrize(

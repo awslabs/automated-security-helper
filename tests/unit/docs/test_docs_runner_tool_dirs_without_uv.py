@@ -36,11 +36,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.utils.env_assertions import environ_names
 
 pytestmark = pytest.mark.unit
 
@@ -178,7 +179,7 @@ def test_a_recorded_uv_tool_bin_dir_is_used_though_the_session_removed_it(
     real_home, ash_bin, local_bin = without_uv
     recorded = _planted_tool(tmp_path / "recorded-uv-tool-bin", "ash-docs-uv-tool")
     _record_developer_env(monkeypatch, real_home, UV_TOOL_BIN_DIR=str(recorded.parent))
-    assert "UV_TOOL_BIN_DIR" not in os.environ
+    assert "UV_TOOL_BIN_DIR" not in environ_names()
     found = _found()
     assert found == [ash_bin.resolve(), recorded.parent.resolve()]
     assert local_bin.resolve() not in found
@@ -190,7 +191,7 @@ def test_a_recorded_xdg_bin_home_is_used_though_the_session_removed_it(
     real_home, ash_bin, local_bin = without_uv
     recorded = _planted_tool(tmp_path / "recorded-xdg-bin", "ash-docs-xdg-tool")
     _record_developer_env(monkeypatch, real_home, XDG_BIN_HOME=str(recorded.parent))
-    assert "XDG_BIN_HOME" not in os.environ
+    assert "XDG_BIN_HOME" not in environ_names()
     found = _found()
     assert found == [ash_bin.resolve(), recorded.parent.resolve()]
     assert local_bin.resolve() not in found

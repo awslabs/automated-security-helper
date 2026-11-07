@@ -31,7 +31,12 @@ from automated_security_helper.utils.detect_secrets_worker import (
     START_COLUMN_KEY,
     _start_column,
 )
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, checkout_env
+from tests.utils.env_assertions import environ_names, environ_value
+from tests.utils.helpers import (
+    CHILD_TIMEOUT_SECONDS,
+    checkout_env,
+    importing_this_checkout,
+)
 from tests.utils.refusing_proxy import (
     RecordingProxy,
     route_through,
@@ -249,6 +254,7 @@ def _verifying_worker_run(tmp_path, verify):
         ],
         check=True,
         cwd=tmp_path,
+        env=checkout_env(),
         timeout=CHILD_TIMEOUT_SECONDS,
     )
     return json.loads(output.read_text(encoding="utf-8"))
@@ -399,7 +405,13 @@ def _spawn_pool_run(tmp_path, monkeypatch, refuse_env, verify=False):
     )
     try:
         subprocess.run(  # nosec B603 - fixed argv
-            [sys.executable, "-c", _SPAWN_WORKER, str(request), str(output)],
+            [
+                sys.executable,
+                "-c",
+                importing_this_checkout(_SPAWN_WORKER),
+                str(request),
+                str(output),
+            ],
             check=True,
             cwd=tmp_path,
             timeout=300,
@@ -508,15 +520,15 @@ def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
         )
 
     env = seen["env"]
-    assert isinstance(env, dict), env
+    env_is_a_dict = isinstance(env, dict)
+    assert env_is_a_dict, "the scanner passed no environment mapping"
+    refusal = env.get(REFUSE_HTTP_ENV)
     # Always stated, never absent: "0" is the one value the worker reads as
     # "this scan may verify", and "1" is the refusal. This test pins only what
     # the scanner states; how the worker reads the value, and what it does when
     # the variable is absent, is tested beside the worker (the spawned-pool
     # controls above drive the real worker under each shape).
-    assert env.get(REFUSE_HTTP_ENV) == ("0" if verify else "1"), env.get(
-        REFUSE_HTTP_ENV
-    )
+    assert refusal == ("0" if verify else "1"), refusal
 
 
 @pytest.mark.unit
@@ -550,8 +562,10 @@ def test_a_verifying_worker_does_not_inherit_the_refusal_from_the_parent(
             verify=True,
         )
 
-    assert isinstance(seen["env"], dict), seen["env"]
-    assert seen["env"].get(REFUSE_HTTP_ENV) == "0"
+    env_is_a_dict = isinstance(seen["env"], dict)
+    assert env_is_a_dict, "the scanner passed no environment mapping"
+    refusal = seen["env"].get(REFUSE_HTTP_ENV)
+    assert refusal == "0"
 
 
 def _without_refusal_variable(monkeypatch):
@@ -602,7 +616,7 @@ def test_run_leaves_the_refusal_variable_as_it_found_it(tmp_path, monkeypatch, p
 
     detect_secrets_worker.run(_in_process_run_request(tmp_path, verify=False))
 
-    assert os.environ.get(REFUSE_HTTP_ENV) == preset
+    assert environ_value(REFUSE_HTTP_ENV) == preset
 
 
 @pytest.mark.unit
@@ -626,7 +640,7 @@ def test_run_sets_the_refusal_variable_while_the_pool_runs(tmp_path, monkeypatch
     detect_secrets_worker.run(_in_process_run_request(tmp_path, verify=False))
 
     assert seen["during"] == "1"
-    assert REFUSE_HTTP_ENV not in os.environ
+    assert REFUSE_HTTP_ENV not in environ_names()
 
 
 @pytest.mark.integration
@@ -641,7 +655,7 @@ def test_importing_the_worker_module_in_ash_refuses_nothing(tmp_path):
         "print(HTTPAdapter.send.__name__)\n"
     )
     result = subprocess.run(  # nosec B603 - fixed argv
-        [sys.executable, "-c", probe],
+        [sys.executable, "-c", importing_this_checkout(probe)],
         capture_output=True,
         text=True,
         check=True,

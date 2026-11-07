@@ -924,6 +924,22 @@ def _gate_client_overrides(
             base = load_config_file_for_run(Path(session_config))[1]
         except ASHConfigValidationError:
             raise
+        except OSError as exc:
+            # A file the process cannot read is refused as a config file that
+            # could not be read, as a scan refuses one (exit 3), naming the
+            # file and the OS error without repeating the path.
+            from automated_security_helper.config.config_sources import (
+                describe_config_path,
+            )
+            from automated_security_helper.utils.error_text import (
+                os_error_without_named_file,
+            )
+
+            unreadable = Path(session_config)
+            raise ASHConfigSourceError(
+                f"could not read {describe_config_path(unreadable)}: "
+                f"{os_error_without_named_file(exc, unreadable)}"
+            ) from exc
         except Exception as exc:  # noqa: BLE001 -- a file that does not parse is a config error
             # A session config that does not parse is the operator's config
             # that is broken: reported as a scan reports it (exit 3), never as
@@ -1105,14 +1121,20 @@ def _resolve_session_config(
     An unknown ``profile`` raises rather than falling back. A workspace scan is N
     repository scans; running them all under the default config because a profile
     name was misspelled, and reporting success, is the class of outcome this
-    module's confinement refusal exists to prevent. So does a bound session whose
-    registered copy is gone while its client copy is not: the client's copy is
-    never the operator's config, so there is nothing to layer over a project's
-    own config and nothing to resolve it against.
+    module's confinement refusal exists to prevent. A bound session whose
+    recorded files are gone is not refused: the binding is the source of truth
+    and the file is its materialization, so both files (the registered copy and,
+    for a client-patched binding, the client's copy) are written again from the
+    binding by ``resolve_session_config_path``. The client's copy is never the
+    operator's config, and the registered copy is what is layered.
 
     Raises:
         ProfileNotRegisteredError: ``profile`` is not registered.
-        RuntimeError: The session's registered copy is missing; exit 3.
+        RuntimeError: The session's bound profile cannot be read as the operator
+            registered it: it is no longer registered, or the files cannot be
+            written again (``BoundProfileUnavailableError``), or the state is of
+            a shape that cannot be rematerialized (a recorded config path with no
+            trusted path); exit 3.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
@@ -2478,8 +2500,9 @@ async def mcp_resolve_workspace(
         ProfileNotRegisteredError,
         # ASH_CONFIG names a file that cannot be read or parsed: the server's
         # own config is refused with exit 3, as a project's is, instead of the
-        # tool raising.
-        ASHConfigSourceError,
+        # tool raising. ASHConfigValidationError is the base of the source
+        # errors and the class of the "names it, and it is not a file" refusal.
+        ASHConfigValidationError,
         OSError,
         RuntimeError,
     ) as exc:
@@ -2648,8 +2671,9 @@ async def _scan_workspace(
         ProfileNotRegisteredError,
         # ASH_CONFIG names a file that cannot be read or parsed: the server's
         # own config is refused with exit 3, as a project's is, instead of the
-        # tool raising.
-        ASHConfigSourceError,
+        # tool raising. ASHConfigValidationError is the base of the source
+        # errors and the class of the "names it, and it is not a file" refusal.
+        ASHConfigValidationError,
         OSError,
         RuntimeError,
     ) as exc:

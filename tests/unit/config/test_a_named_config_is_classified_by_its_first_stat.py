@@ -55,6 +55,17 @@ def _every_stat() -> bool:
     return True
 
 
+def _the_ash_config_lookup_stats() -> bool:
+    """Only the stats the ASH_CONFIG lookup itself makes.
+
+    The loader that reads the file afterwards stats it again to hold its
+    identity (``identity_to_hold``), and a denied stat there is correctly
+    refused as a file that changed; the property under test is that the
+    lookup classifies by its own first stat.
+    """
+    return _running("_ash_config_file", "default_config.py")
+
+
 def _the_scan_pre_checks_stats() -> bool:
     return _running("_run_local_mode", "run_ash_scan.py") and not _running(
         "_resolve_config", "resolve_config.py"
@@ -263,7 +274,7 @@ def test_the_ash_config_lookup_loads_the_file_its_stat_found(tmp_path, monkeypat
     named = tmp_path / "named.yaml"
     named.write_text("project_name: operator-choice\n", encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(named))
-    stat, seen = _passes_then_denied(named, os.stat, _every_stat)
+    stat, seen = _passes_then_denied(named, os.stat, _the_ash_config_lookup_stats)
     monkeypatch.setattr(os, "stat", stat)
 
     config = get_default_config()

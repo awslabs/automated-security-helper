@@ -182,7 +182,7 @@ class _Orchestrator:
         self.kwargs = kwargs
         built.append(self)
 
-    def execute_scan(self, phases=None):
+    def execute_scan(self, phases=None, **settle):
         from automated_security_helper.models.asharp_model import (
             AshAggregatedResults,
             ScannerTargetStatusInfo,
@@ -235,12 +235,59 @@ async def test_the_scan_layers_the_profile_never_the_clients_copy(
 
 
 @pytest.mark.asyncio
-async def test_a_patched_binding_that_lost_its_registered_copy_is_refused(tmp_path):
-    """The client's copy is never layered, so with the registered copy gone there
-    is nothing that can be: the call is refused rather than layering the copy."""
+async def test_a_patched_binding_whose_registered_copy_is_gone_is_written_again(
+    tmp_path,
+):
+    """The binding is the source of truth, and the file is its materialization:
+    a gone operator copy is written again from the registered profile, and the
+    client's patched copy is written again beside it. The client's copy never
+    becomes the operator's config."""
     _register(tmp_path, _PATCHABLE_PROFILE)
     _bind(patch_ops=[{"op": "replace", "path": "/project_name", "value": "client"}])
-    _operator_copy().unlink()
+    operator_copy = _operator_copy()
+    client_copy = operator_copy.parent.parent / "client-config" / "ash.yaml"
+    assert client_copy.is_file()
+    operator_copy.unlink()
+    workspace = _workspace(tmp_path, {"api": {"project_name": "the-api"}})
+
+    response = await _tool("mcp_resolve_workspace")(
+        workspace_file=str(workspace), session_id=SESSION
+    )
+
+    assert response["success"] is True, response.get("error")
+    assert operator_copy.is_file()
+    assert client_copy.is_file()
+    # The operator's copy is the registered profile, not the client's patch ...
+    written = yaml.safe_load(operator_copy.read_text("utf-8"))
+    assert written == _PATCHABLE_PROFILE
+    assert written["project_name"] == "operator"
+    # ... and the registered profile is still final over the project's own config.
+    projects = {project["project"]: project for project in response["projects"]}
+    assert projects["api"]["display_label"] == "operator"
+    assert projects["api"]["operator_config"] == operator_copy.as_posix()
+
+
+@pytest.mark.asyncio
+async def test_a_binding_whose_profile_is_no_longer_registered_is_refused(tmp_path):
+    """With the profile unregistered and both copies gone there is nothing to
+    write them again from, so the call is refused, exit 3, as the bound profile
+    being unavailable; nothing is layered in its place.
+
+    The other refusal in ``_resolve_session_config`` (a config path with no
+    trusted path) is not reachable from this tool surface: a binding that has a
+    recorded config path is rewritten from the registry or refused above before
+    that check runs, so it is left unpinned here."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_profile_registry,
+    )
+
+    _register(tmp_path, _PATCHABLE_PROFILE)
+    _bind(patch_ops=[{"op": "replace", "path": "/project_name", "value": "client"}])
+    operator_copy = _operator_copy()
+    client_copy = operator_copy.parent.parent / "client-config" / "ash.yaml"
+    clear_profile_registry()
+    operator_copy.unlink()
+    client_copy.unlink()
     workspace = _workspace(tmp_path, {"api": {"project_name": "the-api"}})
 
     response = await _tool("mcp_resolve_workspace")(
@@ -248,8 +295,11 @@ async def test_a_patched_binding_that_lost_its_registered_copy_is_refused(tmp_pa
     )
 
     assert response["success"] is False
+    assert response["error_type"] == "BoundProfileUnavailableError"
     assert response["exit_code"] == 3
-    assert "registered" in response["error"]
+    assert "no longer registered" in response["error"]
+    assert not operator_copy.exists()
+    assert not client_copy.exists()
 
 
 @pytest.mark.asyncio

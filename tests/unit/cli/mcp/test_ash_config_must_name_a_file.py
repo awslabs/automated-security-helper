@@ -24,6 +24,7 @@ import typer
 from rich.console import Console
 
 from automated_security_helper.cli.mcp import mcp_command
+from tests.utils.helpers import checkout_env
 
 _NO_POSIX_MODES = pytest.mark.skipif(
     os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
@@ -242,7 +243,7 @@ def test_running_the_server_module_makes_the_same_startup_checks(
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
-        env=env,
+        env=checkout_env(env),
         cwd=tmp_path,
         timeout=120,
     )

@@ -270,7 +270,13 @@ def run(work):
                 *more,
             ],
             capture_output=True,
+            # The console is read as the UTF-8 the scan writes, as the output files
+            # are below: text=True alone decodes with the parent's locale (cp1252 on
+            # Windows), where one undefined byte ends the reader thread and leaves
+            # stdout None.
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=900,
             cwd=work,
             env=env,
@@ -338,7 +344,9 @@ def test_the_recorder_records_a_path_like_start(tmp_path):
 
     assert "REFUSED" in done.stdout, (done.stdout, done.stderr)
     assert log.is_file(), done.stderr
-    assert "/bin/true" in log.read_text(encoding="utf-8")
+    # The path-like as the platform spells it: a POSIX path on POSIX, backslashes
+    # on Windows, where Path('/bin/true') is '\\bin\\true'.
+    assert str(Path("/bin/true")) in log.read_text(encoding="utf-8")
 
 
 @pytest.mark.integration
@@ -392,6 +400,10 @@ def test_the_scan_ran_and_records_the_reason_as_its_reference(run):
     assert recorded
 
 
+#: The three starts ``platform`` makes to learn the Windows version (Python before 3.12).
+_STDLIB_WINDOWS_VERSION_PROBE = ("ver", "command /c ver", "cmd /c ver")
+
+
 @pytest.mark.e2e
 def test_the_scan_starts_no_tool_but_the_version_probes(run):
     """Every process of the module records each start at ``subprocess.Popen``
@@ -415,6 +427,14 @@ def test_the_scan_starts_no_tool_but_the_version_probes(run):
     log = run["refused_starts"]
     lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else None
     assert lines is not None, "no start was recorded: the recorder did not run"
+    if sys.platform == "win32" and sys.version_info < (3, 12):
+        # Before 3.12 the standard library learns the Windows version the first time
+        # ``platform.system()`` is asked, by starting ``ver`` through ``cmd /c`` (it
+        # tries these three spellings in turn). That is the interpreter's own probe
+        # of its host, not a program the scan chose to start, and the recorder sees
+        # it in any process that asks. Exactly these lines are set aside; any other
+        # start stays counted.
+        lines = [line for line in lines if line not in _STDLIB_WINDOWS_VERSION_PROBE]
     scans = len(run["steps"])
     git_probes = [
         line

@@ -87,6 +87,12 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set,
 import pytest
 import yaml
 
+from tests.utils.helpers import (
+    checkout_env,
+    importing_this_checkout,
+    module_from_this_checkout,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTENT = REPO_ROOT / "docs" / "content"
 
@@ -424,7 +430,65 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
     }
     for name in ("ASH_CONFIG", "XDG_BIN_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
         environment.pop(name, None)
-    return {**environment, **env}
+    return checkout_env({**environment, **env}, root=_IMPORTED_ROOT)
+
+
+from automated_security_helper.utils import (  # noqa: E402
+    content_db_staleness as _staleness_module,
+    pre_installed_tool as _pre_installed_module,
+    uv_tool_runner as _uv_runner_module,
+)
+from tests.utils.tool_guard import use_the_real_candidate_names  # noqa: E402
+
+import automated_security_helper as _ash_package  # noqa: E402
+
+#: The tree this process imports ASH from, where ``_code_root`` looks. Every child
+#: ASH is routed to it, not to the checkout this file sits in, so a cross-tree run
+#: (pages from this tree, code from another) tests one tree, and a same-tree run
+#: gets the checkout, as before.
+_IMPORTED_ROOT = Path(_ash_package.__file__).resolve().parents[1]
+
+#: The tool probes as the code defines them, taken when this module is imported at
+#: collection, before any test's tool guard replaces them (``stub_tool_probes`` in
+#: tests/utils/tool_guard.py answers each as a host without the tool would). A test
+#: whose subject is the probe itself puts these back with
+#: :func:`_use_the_real_tool_probes`; every other test in this module keeps the guard's
+#: answers, since building a plugin would otherwise start uv.
+_REAL_UV_AVAILABILITY = _uv_runner_module.UVToolRunner.uv_availability
+_REAL_FIND_UV_OR_NONE = _uv_runner_module.find_uv_or_none
+_REAL_PRE_INSTALLED_RUN = _pre_installed_module._run
+_REAL_TRIVY_DATABASE_MEASURER = _staleness_module.MEASURERS["trivy-db"]
+_REAL_BUILT_FROM_TRIVY = _staleness_module._built_from_trivy
+
+
+def _use_the_real_tool_probes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    uv: bool = False,
+    pre_installed: bool = False,
+    trivy_database: bool = False,
+) -> None:
+    """Put back the probes the unit tests' tool guard answers without a process.
+
+    Applied inside the test, after the guard's fixture, so it wins (the contract
+    ``_unit_tool_guard`` states). The guard still audits every start: a probe that
+    runs a stand-in under the test's own directory is not a start of the tool, which
+    is how these tests use it.
+    """
+    if uv:
+        monkeypatch.setattr(
+            _uv_runner_module.UVToolRunner, "uv_availability", _REAL_UV_AVAILABILITY
+        )
+        monkeypatch.setattr(_uv_runner_module, "find_uv_or_none", _REAL_FIND_UV_OR_NONE)
+    if pre_installed:
+        monkeypatch.setattr(_pre_installed_module, "_run", _REAL_PRE_INSTALLED_RUN)
+    if trivy_database:
+        monkeypatch.setitem(
+            _staleness_module.MEASURERS, "trivy-db", _REAL_TRIVY_DATABASE_MEASURER
+        )
+        monkeypatch.setattr(
+            _staleness_module, "_built_from_trivy", _REAL_BUILT_FROM_TRIVY
+        )
 
 
 def _ash(args: List[str], cwd: Path, **env: str) -> subprocess.CompletedProcess:
@@ -1507,7 +1571,10 @@ def _no_aws_credentials_environment(cwd: Path, **env: str) -> Dict[str, str]:
     for name in [name for name in environment if name.startswith("AWS_")]:
         del environment[name]
     environment.update(_aws_fence())
-    return environment
+    # Callers use this result as it is. _ash_environment already routed it and
+    # nothing here touches PYTHONPATH, so this adds no entry; it is here because
+    # the child-route scan cannot see that through the deletions and the update.
+    return checkout_env(environment, root=_IMPORTED_ROOT)
 
 
 def _ash_with_no_aws_credentials(
@@ -3680,6 +3747,19 @@ def _granting_config(directory: Path, checkout: bool = False) -> Path:
     return config
 
 
+#: The sentences a sandbox warning gives for why a config file is not the operator's
+#: (``sandbox_grants.confinement_membership``): the one for a file in a git checkout
+#: other than the scanned tree, and the one for a file inside the scanned tree, which
+#: is the membership the host's mark carries.
+_MEMBERSHIP_CLAUSES = (
+    (
+        "the file is inside the scanned tree or a git checkout, or an MCP client "
+        "delivered it, so someone other than the operator may have written it"
+    ),
+    "the file is inside the scanned tree, so the repository being scanned wrote it",
+)
+
+
 def _workspace_in_a_checkout(tmp_path: Path, checkout: bool = True) -> Path:
     """The workspace file of ``repo/ws``, inside the git checkout ``repo``, or in no
     checkout unless ``checkout``. It lists ``api``, which has no config of its own, and
@@ -3945,6 +4025,15 @@ def test_the_workspace_scan_inside_limits_a_marked_config_as_a_local_one_in_a_ch
         output = _normalize(result.stdout + result.stderr)
         for spelling in (str(config.parent), config.parent.as_posix()):
             output = output.replace(spelling, "<config directory>")
+        # Each warning says why the file is not the operator's in the words of the
+        # membership that put it under the limits (membership_clause): a file in
+        # another checkout is "inside the scanned tree or a git checkout, or ...
+        # delivered", and a file the host marked is the scanned tree's. Which one is
+        # said follows from where the file is judged to sit; the claim is that the
+        # same settings are dropped for the same files, so the clause is compared
+        # as one value and every other word of the warning and the plan as written.
+        for clause in _MEMBERSHIP_CLAUSES:
+            output = output.replace(clause, "<why the file is not the operator's>")
         return output
 
     in_a_checkout = dry_run(_granting_config(tmp_path / "ops", checkout=True))
@@ -4242,18 +4331,16 @@ def test_a_nix_scan_resolves_its_config_on_the_host_before_the_shell_starts(
 @pytest.mark.parametrize("command", [["scan"], []], ids=["ash-scan", "ash"])
 @pytest.mark.parametrize("scan", ["one-directory", "workspace"])
 @pytest.mark.parametrize(
-    "place, marked",
+    "place",
     [
-        pytest.param("another-checkout", True, id="in-another-checkout-marked"),
-        pytest.param("the-scanned-checkout", True, id="in-the-scanned-checkout-marked"),
-        pytest.param(
-            "outside-every-checkout", False, id="control-outside-every-checkout"
-        ),
+        pytest.param("another-checkout", id="in-another-checkout-marked"),
+        pytest.param("the-scanned-checkout", id="in-the-scanned-checkout-marked"),
+        pytest.param("outside-every-checkout", id="control-outside-every-checkout"),
     ],
 )
 @pytest.mark.integration
 def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is(
-    tmp_path: Path, command: List[str], scan: str, place: str, marked: bool
+    tmp_path: Path, command: List[str], scan: str, place: str
 ) -> None:
     """run-in-a-container.md (The config file).
 
@@ -4264,9 +4351,10 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     in one, the file and its base must be mounted read-only under ``/ash-env-config``,
     and the scan inside must be passed ``--ash-config-from-host
     /ash-env-config/ash.yaml``. Each of the two files must be marked on its own with
-    ``--config-file-from-scanned-repository`` when they are in another git checkout or
-    in the scanned one, and neither when they are outside every checkout. ``--config``
-    is marked in no case.
+    ``--config-file-from-scanned-repository`` when they are in the scanned checkout,
+    with ``--config-file-from-another-checkout`` when they are in another git checkout,
+    and neither when they are outside every checkout. ``--config`` is marked in no
+    case.
     """
     assert_on_page(
         RUN_IN_A_CONTAINER,
@@ -4275,8 +4363,11 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     )
     assert_on_page(
         RUN_IN_A_CONTAINER,
-        "A file of that chain the host counts as written by a repository is marked for "
-        "the scan inside, file by file.",
+        "Each file of that chain is marked for the scan inside on its own, by where it "
+        "sits. A file in the scanned checkout is marked as the scanned repository's and "
+        "is limited like any repository config. A file in another git checkout is "
+        "marked as another checkout's, which keeps the settings that only restrict. A "
+        "file outside every checkout is not marked.",
     )
     workspace = _workspace_in_a_checkout(tmp_path)
     checkout = workspace.parent.parent
@@ -4343,9 +4434,17 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
     assert inner[inner.index("--ash-config-from-host") + 1] == (
         "/ash-env-config/ash.yaml"
     ), inner
-    assert file_marks == (
-        ["/ash-env-config/ash.yaml", "/ash-env-config/base.yaml"] if marked else []
-    ), inner
+    elsewhere_marks = sorted(
+        inner[i + 1]
+        for i, arg in enumerate(inner[:-1])
+        if arg == "--config-file-from-another-checkout"
+        and inner[i + 1].startswith("/ash-env-config/")
+    )
+    both_files = ["/ash-env-config/ash.yaml", "/ash-env-config/base.yaml"]
+    # The scanned checkout's files carry the scanned-repository mark; another
+    # checkout's carry the another-checkout mark, which keeps what only restricts.
+    assert file_marks == (both_files if place == "the-scanned-checkout" else []), inner
+    assert elsewhere_marks == (both_files if place == "another-checkout" else []), inner
     assert "--config-from-scanned-repository" not in inner, inner
 
 
@@ -7359,6 +7458,9 @@ def test_each_content_database_is_held_to_the_age_bound_the_pages_state(
         )
 
     monkeypatch.setattr(content_db_staleness, "spawn_run", answer)
+    # The unit tests' tool guard answers trivy's database probe as a host without a
+    # database; this test is about that probe, whose process boundary it doubles.
+    _use_the_real_tool_probes(monkeypatch, trivy_database=True)
     monkeypatch.setenv("GRYPE_DB_MAX_ALLOWED_BUILT_AGE", "480h")
     for name, bound in sorted(stated.items()):
         for offset, stale in ((-timedelta(hours=1), False), (timedelta(hours=1), True)):
@@ -7611,12 +7713,23 @@ if control["terminal"]:
 
 
 def interrupt():
-    for watched, ready in control["waits"]:
+    for number, (watched, ready) in enumerate(control["waits"]):
         watched = Path(watched)
         while ready not in (
             watched.read_text("utf-8", "replace") if watched.is_file() else ""
         ):
             time.sleep(0.05)
+        if number and control.get("console_file"):
+            # The stand-in logs a console Ctrl-C as soon as it reads the console
+            # file, which is before ASH's main thread has handled the first one
+            # (a slow Windows runner). A second Ctrl-C raised then lands in the
+            # unwinding, before the wait that kills the child, so it never ran.
+            # An operator's second press is never within that window. A loaded
+            # Windows runner took longer than half a second to get there (the
+            # stand-in logged both Ctrl-Cs and ASH never ended it), so the second
+            # one goes 2 seconds after the first, still inside the page's 5-second
+            # wait that it is meant to cut short.
+            time.sleep(2.0)
         print({sent!r}, time.monotonic(), file=sys.stderr, flush=True)
         if control.get("console_file"):
             with open(control["console_file"], "a", encoding="utf-8") as console_file:
@@ -7800,7 +7913,9 @@ def _interrupter(
     return [
         sys.executable,
         "-c",
-        _INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT),
+        importing_this_checkout(
+            _INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT), root=_IMPORTED_ROOT
+        ),
         json.dumps(control),
     ]
 
@@ -8249,7 +8364,13 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
-_ASH_MODULE = [sys.executable, "-m", "automated_security_helper.cli.main"]
+_ASH_MODULE = [
+    sys.executable,
+    "-c",
+    module_from_this_checkout(
+        "automated_security_helper.cli.main", root=_IMPORTED_ROOT
+    ),
+]
 
 
 @pytest.mark.parametrize(
@@ -8464,12 +8585,13 @@ def _mcp_package_missing(
     cwd: Path, monkeypatch: pytest.MonkeyPatch, mcp_cli
 ) -> Tuple[int, str]:
     # A child interpreter in which the MCP SDK cannot be imported.
-    driver = (
+    driver = importing_this_checkout(
         "import sys\n"
         "sys.modules['mcp'] = None\n"
         "from automated_security_helper.cli.main import app\n"
         "sys.argv = ['ash', 'mcp', '--quiet']\n"
-        "app()\n"
+        "app()\n",
+        root=_IMPORTED_ROOT,
     )
     result = _mcp_run([sys.executable, "-c", driver], cwd)
     return result.returncode, result.stderr
@@ -9090,7 +9212,9 @@ def _mcp_http_server(
             *options,
         ],
         cwd=cwd,
-        env=env if env is not None else _mcp_child_env(cwd),
+        env=checkout_env(
+            env if env is not None else _mcp_child_env(cwd), root=_IMPORTED_ROOT
+        ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -9387,7 +9511,9 @@ def test_a_leftover_server_is_ended_only_when_it_runs_under_the_root(
         [sys.executable, "-I", "-c", ready, "mcp"], cwd=cwd, stdout=subprocess.PIPE
     )
     try:
-        assert child.stdout is not None and child.stdout.readline() == b"ready\n"
+        # print() ends the line with the platform's newline, so on Windows the pipe
+        # carries b"ready\r\n".
+        assert child.stdout is not None and child.stdout.readline().rstrip() == b"ready"
         _end_leftover_server(child.pid, root)
         if where == "under-the-root":
             assert child.wait(timeout=60) == -signal.SIGKILL, child.returncode
@@ -10121,6 +10247,11 @@ _HTTP_SECOND_CTRL_C = (
     "not put back stay in `.ash_previous_results`, where the next MCP scan of that "
     "directory takes them back."
 )
+_HTTP_SECOND_CTRL_C_ON_WINDOWS = (
+    "On Windows the second Ctrl-C ends the server just the same, but it does not kill "
+    "the scanners' tools: the kill goes by process group, which is POSIX only, so a "
+    "tool still running then outlives the server."
+)
 #: The page's "at most 5 seconds", and the 10 seconds ``docker stop`` waits, inside
 #: which the whole stop fits.
 _HTTP_DRAIN_SECONDS = 5
@@ -10276,7 +10407,9 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     results back, with its own ``ash.log`` beside them.
 
     With a second Ctrl-C a second after the first, the server must exit with 130
-    within half the wait of it, before the 5 seconds are up. The tool must be gone.
+    within half the wait of it, before the 5 seconds are up. The tool must be gone,
+    except on Windows, where the kill goes by process group (POSIX only) and the page
+    says the tool outlives the server.
     The second Ctrl-C does not wait for the scans, and the page says: "previous
     results a scan had not put back stay in `.ash_previous_results`". A scan that
     unwound first may have put them back, or be halfway through, so they must be
@@ -10298,6 +10431,7 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
     assert_on_page(MCP_SERVER, _HTTP_WAITS_FOR_OPEN_REQUESTS)
     assert_on_page(MCP_SERVER, _HTTP_STOP_FITS_THE_GRACE)
     assert_on_page(MCP_SERVER, _HTTP_SECOND_CTRL_C)
+    assert_on_page(MCP_SERVER, _HTTP_SECOND_CTRL_C_ON_WINDOWS)
     assert_on_page(MCP_SERVER, _MCP_NO_SIGTERM_ON_WINDOWS)
     if os.name == "nt" and stop == "sighup":
         assert not hasattr(signal, "SIGHUP")
@@ -10364,7 +10498,10 @@ def test_an_http_mcp_server_waits_at_most_5_seconds_for_open_requests_when_it_st
                 f"the server exited {ended - signaled:.1f} s after the first Ctrl-C, "
                 "once the wait was over, not at the second"
             )
-            assert _gone_soon(pid), "the scan's tool outlived the server"
+            if os.name != "nt":
+                # The kill goes by process group, which is POSIX only: on Windows
+                # the tool outlives the server, as the page says.
+                assert _gone_soon(pid), "the scan's tool outlived the server"
             _assert_previous_results_intact(setup.output)
         else:
             if held_open:
@@ -10853,8 +10990,10 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
     takes the session and starts the removal, and a ``set_source_zip_chunk`` for
     that session sent while the removal runs is refused with that ``error_type``
     (``sessions.writing_session_state``, the hold ``set_source_zip_chunk`` and
-    ``select_profile`` take). The remover is held open on an event, so the window
-    the server tests above cannot time is open when the write comes. The control
+    ``select_profile`` take). The remover is held open on an event, first at the
+    rename aside and then at the delete of the renamed tree, so the window the
+    server tests above cannot time is open when each write comes: the refusal
+    holds from the start of the sweep until the delete is done. The control
     is the same chunk once the sweep has returned: accepted, the upload starting
     again from chunk 0 in a new workspace, as the page says.
     """
@@ -10878,19 +11017,32 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
 
         removing = threading.Event()
         release = threading.Event()
-        # The delete of the tree the sweep renamed aside. The sweep holds the
-        # session (try_begin_sweep) from its last look at the age until that
-        # delete is done, so a write meets the hold while this is open; the
-        # stale session has a workspace, so the sweep does not take the
-        # removal that has no guard (_remove_session_state).
-        real_remove = sessions._remove_set_aside_tree
+        # The sweep holds the session (try_begin_sweep) from its last look at the
+        # age until the delete of the set-aside tree is done; the hold stands on
+        # the registry's entry, which the sweep forgets only after the delete
+        # (test_a_write_during_the_sweeps_delete_is_refused_as_busy). So a write
+        # meets the hold in two windows, and the remover is held open in both:
+        # before the rename aside, which the sweep makes under the presence
+        # guard, and at the delete of the renamed tree. The stale session has a
+        # workspace, so the sweep does not take the removal that has no guard
+        # (_remove_session_state).
+        real_set_aside = source_delivery._set_aside_for_removal
+        deleting = threading.Event()
+        release_delete = threading.Event()
+        real_remove_tree = source_delivery._remove_tree
 
-        def held_remove(doomed: Optional[Path]) -> None:
+        def held_set_aside(*args: Any, **kwargs: Any) -> Optional[Path]:
             removing.set()
             assert release.wait(timeout=30), "the test never released the remover"
-            real_remove(doomed)
+            return real_set_aside(*args, **kwargs)
 
-        monkeypatch.setattr(sessions, "_remove_set_aside_tree", held_remove)
+        def held_delete(path: Path) -> bool:
+            deleting.set()
+            assert release_delete.wait(timeout=30), "the test never released the delete"
+            return real_remove_tree(path)
+
+        monkeypatch.setattr(source_delivery, "_set_aside_for_removal", held_set_aside)
+        monkeypatch.setattr(source_delivery, "_remove_tree", held_delete)
         removed: List[str] = []
         sweep = threading.Thread(
             target=lambda: removed.extend(
@@ -10911,11 +11063,28 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
                     workspace_root=root,
                     session_id=_STALE_SESSION,
                 )
+            # The refusal holds through the whole removal: the rename is done,
+            # the sweep is deleting the renamed tree, and the same chunk is
+            # still refused, with no fresh workspace built at the freed path.
+            release.set()
+            assert deleting.wait(timeout=30), "the sweep never reached the delete"
+            with pytest.raises(sessions.SessionWorkspaceBusyError) as refused_deleting:
+                source_delivery.set_source_zip_chunk(
+                    "page-claims-upload",
+                    0,
+                    chunk,
+                    True,
+                    workspace_root=root,
+                    session_id=_STALE_SESSION,
+                )
+            assert not sandbox.exists(), "a refused write built a fresh workspace"
         finally:
             release.set()
+            release_delete.set()
             sweep.join(timeout=30)
         assert not sweep.is_alive(), "the sweep did not return once released"
         assert refused.value.error_type == "session_workspace_busy"
+        assert refused_deleting.value.error_type == "session_workspace_busy"
         assert removed == [_STALE_SESSION], removed
         assert not sandbox.exists(), f"the sweep left {sandbox}"
 
@@ -12865,10 +13034,15 @@ def _uv_package(spec: str) -> str:
 
 
 def _uv_installed_package(argv: List[str]) -> str:
-    """The package a ``uv tool install`` command installs, past its options."""
+    """The package a ``uv tool install`` command installs, past its options.
+
+    ``--python`` and ``--with`` each take a value that is not the package: the jupyter
+    converter's command is ``uv tool install --with jupyter nbconvert``, and read
+    without skipping ``--with``'s value its package was ``jupyter``.
+    """
     words = iter(argv[3:])
     for word in words:
-        if word in ("--python", "-p"):
+        if word in ("--python", "-p", "--with", "-w"):
             next(words, None)
         elif not word.startswith("-"):
             return _uv_package(word)
@@ -13232,6 +13406,24 @@ def test_a_uv_run_tool_keeps_the_file_it_found_first(
     # to prevent.
     from automated_security_helper.utils import subprocess_utils
 
+    # The subject is the lookup and the probe of the uv and the program it finds, so
+    # the guard's answers (no uv, a pre-installed tool that is not executable) are
+    # put back; the programs probed are this test's own stand-ins under tmp_path.
+    _use_the_real_tool_probes(monkeypatch, uv=True, pre_installed=True)
+    # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
+    # "uv" to its .bat stand-in, and this cell's stand-ins are .cmd files.
+    use_the_real_candidate_names(monkeypatch)
+    # A batch program is started through its non-batch substitute when one exists
+    # (subprocess_utils._non_batch_substitute), and the ``uv`` package is importable
+    # in the test environment, so the ``uv.cmd`` stand-in would be replaced by the
+    # real uv run as a module: it probes the made-up tool name, exits non-zero, and
+    # the stand-in the lookup found is never the one that answers. The subject here
+    # is which file the lookup found, so the stand-in is started as the file it is.
+    if os.name == "nt":
+        monkeypatch.setattr(
+            subprocess_utils, "_non_batch_substitute", lambda program: None
+        )
+
     pins_consulted: Set[str] = set()
 
     def _pinned_bundled_uv() -> None:
@@ -13447,6 +13639,9 @@ def test_trivy_repo_counts_only_an_executable_trivy(
     )
     from automated_security_helper.utils.subprocess_utils import find_executable
 
+    # The lookup's own candidate list: on Windows the unit tests' tool guard narrows
+    # "trivy" to its .bat stand-in, and this cell's trivy is trivy.exe.
+    use_the_real_candidate_names(monkeypatch)
     placed = {
         where: _place_tool(tmp_path / where, "trivy", kind) for where, kind in layout
     }
@@ -14337,7 +14532,9 @@ def test_a_linked_output_directory_is_refused_in_every_mode_before_the_write_che
     exist, in ``OCI_RUNNER``, and the runtimes and ``nix`` have logging stand-ins first
     on PATH; none may be called. The control is a real output directory with the same
     entry and mtime: the run gets past the link check, and its mtime moves, which
-    shows the probe sees a file made there.
+    shows the probe sees a file made there. ``./ash --no-run`` is the exception: it
+    builds the image and exits without checking or making the output directory, so
+    it is not refused and leaves that directory as it was, link or not.
     """
     assert_on_page(EXIT_CODES, _LINKED_OUTPUT_IN_EVERY_MODE)
     if mode.startswith("dot-ash"):
@@ -14396,6 +14593,16 @@ def test_a_linked_output_directory_is_refused_in_every_mode_before_the_write_che
         result = _ash(args, cwd=tree, **runtime_env)
     text = _squeezed(result.stdout + result.stderr)
 
+    if mode == "dot-ash-no-run":
+        # ./ash --no-run builds the image and exits: the script neither checks
+        # nor creates the output directory, so a link there is not refused and
+        # nothing is written through it; the control's directory is untouched too.
+        assert result.returncode != 3, _output_tail(result)
+        assert "isasymlink" not in text, _output_tail(result)
+        assert _directory_state(watched) == before, (
+            f"{watched} changed: {before} -> {_directory_state(watched)}"
+        )
+        return
     if link == "control-no-link":
         assert result.returncode != 3, _output_tail(result)
         assert "isasymlink" not in text, _output_tail(result)
@@ -15111,7 +15318,7 @@ def test_the_s3_reporter_sends_a_value_read_from_the_environment_as_its_referenc
         result = subprocess.run(
             [sys.executable, "-m", "automated_security_helper.cli.main", *args],
             cwd=tmp_path,
-            env=env,
+            env=checkout_env(env, root=_IMPORTED_ROOT),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -16655,8 +16862,10 @@ def _warns_naming(text: str, variable: str, value: str) -> bool:
 
 def _warns_about_home(text: str) -> bool:
     """Whether ``text`` holds a warning about ``HOME``, which is as much as the pages
-    say of it."""
-    return "HOMEis" in _squeezed(text)
+    say of it. On Windows the variable the warning names is ``USERPROFILE``, the one
+    that platform's home directory is read from."""
+    squeezed = _squeezed(text)
+    return "HOMEis" in squeezed or (os.name == "nt" and "USERPROFILEis" in squeezed)
 
 
 def _home_setting(kind: str, home: Path) -> Optional[str]:
@@ -16739,7 +16948,7 @@ def _child_answer(
     result = subprocess.run(
         [sys.executable, "-c", script, *args],
         cwd=cwd,
-        env=environment,
+        env=checkout_env(environment, root=_IMPORTED_ROOT),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -16805,8 +17014,12 @@ def test_a_relative_ash_bin_path_is_not_used_and_the_default_bin_directory_is(
         "default-under-a-relative-home": cwd / "relhome" / ".ash" / "bin",
     }
     tools = {where: _unique_tool() for where in directories}
-    for where, directory in directories.items():
-        _place_tool(directory, tools[where], "exec")
+    # The file each tool was placed as: on Windows it carries the ``.exe`` suffix that
+    # makes it a candidate, so the lookup answers ``name.exe``, not the bare name.
+    placed = {
+        where: _place_tool(directory, tools[where], "exec")
+        for where, directory in directories.items()
+    }
     if value == "ABSOLUTE":
         value = str(directories["absolute"])
 
@@ -16821,7 +17034,7 @@ def test_a_relative_ash_bin_path_is_not_used_and_the_default_bin_directory_is(
     answered = {where for where, name in tools.items() if found[name] is not None}
     assert answered == ({holder} if holder else set()), found
     if holder:
-        assert _same_file(found[tools[holder]], directories[holder] / tools[holder])
+        assert _same_file(found[tools[holder]], placed[holder])
     if home_kind == "absolute":
         relative = value == "rel-bin"
         assert _warns_naming(stderr, "ASH_BIN_PATH", value) is relative, stderr
@@ -16861,8 +17074,18 @@ def test_ash_dependencies_install_reads_a_relative_bin_path_where_it_was_typed(
     # Without the side bars of the panel the target is printed in.
     text = _squeezed(result.stdout + result.stderr).replace("│", "")
 
-    target = cwd / "rel-bin" if given == "option" else home / ".ash" / "bin"
-    assert _squeezed(f"Target bin path: {target}") in text, _output_tail(result)
+    # The panel prints the target as given (dependencies.py: "The panel shows the
+    # value as given"), so a relative --bin-path reads ``rel-bin`` and the fallback
+    # for a relative ASH_BIN_PATH reads ``~/.ash/bin`` under the test's home. The
+    # option's target is the working directory's ``rel-bin``, not the home default.
+    if given == "option":
+        assert _squeezed("Target bin path: rel-bin\nPlugin types:") in text, (
+            _output_tail(result)
+        )
+        assert _squeezed(str(home / ".ash" / "bin")) not in text, _output_tail(result)
+    else:
+        target = home / ".ash" / "bin"
+        assert _squeezed(f"Target bin path: {target}") in text, _output_tail(result)
     if given == "environment":
         assert _warns_naming(text, "ASH_BIN_PATH", "rel-bin"), _output_tail(result)
         assert not (cwd / "rel-bin").exists(), "a relative ASH_BIN_PATH was created"
@@ -16984,8 +17207,15 @@ _INSTALL_STARTS_CODE = (
     "starts = []\n"
     "def refused(*args, **kwargs):\n"
     "    argv = args[1] if args and isinstance(args[0], subprocess.Popen) else args\n"
-    "    starts.append([argv] if isinstance(argv, (str, bytes)) else "
+    "    seen = ([argv] if isinstance(argv, (str, bytes)) else "
     "[os.fsdecode(a) for a in argv])\n"
+    # On Windows the interpreter itself asks cmd for the OS version (platform's
+    # `ver` probe, `cmd /c ver`), which is not a program ASH starts. It is refused
+    # like any start and not recorded; platform falls back when it is refused.
+    "    if os.name == 'nt' and [a.lower() for a in seen] in "
+    "(['ver'], ['command /c ver'], ['cmd /c ver']):\n"
+    "        raise OSError('no process is started in this test')\n"
+    "    starts.append(seen)\n"
     "    raise OSError('no process is started in this test')\n"
     "subprocess.Popen._execute_child = refused\n"
     "os.system = os.posix_spawn = os.posix_spawnp = refused\n"
@@ -17159,9 +17389,9 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
             "~/bin/sudo -n",
             "unset",
             {
-                "environment": "USERHOME/bin/docker",
-                "typed": "USERHOME/bin/docker",
-                "wrapper": ["USERHOME/bin/sudo", "-n"],
+                "environment": "PASSWDHOME/bin/docker",
+                "typed": "PASSWDHOME/bin/docker",
+                "wrapper": ["PASSWDHOME/bin/sudo", "-n"],
             },
             id="a-leading-tilde-home-unset-uses-the-passwd-home",
         ),
@@ -17201,7 +17431,12 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
 )
 @pytest.mark.integration
 def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
-    tmp_path: Path, runner: str, wrapper: str, home_kind: str, expected: Dict[str, Any]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: str,
+    wrapper: str,
+    home_kind: str,
+    expected: Dict[str, Any],
 ) -> None:
     """run-in-a-container.md (Choose the container runtime).
 
@@ -17232,6 +17467,15 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
         if os.name == "nt"
         else importlib.import_module("pwd").getpwnam(user).pw_dir
     )
+    # What a bare ``~`` names with ``HOME`` unset: expanduser asks the passwd database
+    # for the *process's uid*, which is not the entry ``getpass.getuser()`` names when
+    # the login variables (LOGNAME, USER) differ from the uid's entry, as on a runner
+    # image that sets them for another account.
+    passwd_home = (
+        str(home)
+        if os.name == "nt"
+        else importlib.import_module("pwd").getpwuid(os.getuid()).pw_dir
+    )
     runner = runner.replace("ABSOLUTE", absolute).replace("USER", user)
     wrapper = wrapper.replace("ABSOLUTE", absolute).replace("USER", user)
 
@@ -17249,6 +17493,7 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
                 )
                 .replace("CWD", str(cwd))
                 .replace("ABSOLUTE", absolute)
+                .replace("PASSWDHOME", passwd_home)
                 .replace("USERHOME", user_home)
                 .replace("HOME", str(home))
             )
@@ -17260,14 +17505,49 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
 
     expected = _substituted(expected)
 
-    answer, stderr = _child_answer(
-        _RESOLVE_THE_RUNTIME,
-        cwd,
-        _home_setting(home_kind, home),
-        [],
-        OCI_RUNNER=runner,
-        OCI_RUNNER_WRAPPER=wrapper,
-    )
+    if home_kind == "unset":
+        # The suite's Popen guard hands a Python child that has no HOME the test's
+        # own home (tests/conftest.py, guarded_init), so a child can never show the
+        # passwd fallback. The same two functions are asked in this process, with
+        # HOME removed from its environment and no child started.
+        if os.name == "nt":
+            pytest.skip(
+                "an unset home on Windows is rebuilt from HOMEDRIVE+HOMEPATH, "
+                "the real profile"
+            )
+        from automated_security_helper.interactions import (
+            run_ash_container as container,
+        )
+
+        for name in ("HOME", "USERPROFILE", "ASH_BIN_PATH"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("OCI_RUNNER", runner)
+        monkeypatch.setenv("OCI_RUNNER_WRAPPER", wrapper)
+        monkeypatch.chdir(cwd)
+
+        def _asked(call: Any) -> Dict[str, Any]:
+            try:
+                return {"value": call()}
+            except container.OciValueRefused as refusal:
+                return {"refused": str(refusal)}
+
+        answer = {
+            "environment": _asked(
+                lambda: container.oci_runner_for_this_run(runner, True)
+            ),
+            "typed": _asked(lambda: container.oci_runner_for_this_run(runner, False)),
+            "wrapper": _asked(container._get_oci_wrapper_prefix),
+        }
+        stderr = ""
+    else:
+        answer, stderr = _child_answer(
+            _RESOLVE_THE_RUNTIME,
+            cwd,
+            _home_setting(home_kind, home),
+            [],
+            OCI_RUNNER=runner,
+            OCI_RUNNER_WRAPPER=wrapper,
+        )
 
     refusals = {
         which: reply["refused"] for which, reply in answer.items() if "refused" in reply
@@ -17983,9 +18263,10 @@ def test_each_quoted_input_check_error_is_the_workflows_own(
     errors = re.findall(r'echo "::error::(.*)"\s*$', step.get("run", ""), re.MULTILINE)
     if input_name is not None:
         variable = "INPUT_" + input_name.upper().replace("-", "_")
-        assert (step.get("env") or {}).get(variable) == (
-            f"${{{{ inputs.{input_name} }}}}"
-        ), f"step {step_id!r} does not read {input_name} as {variable}"
+        wired = (step.get("env") or {}).get(variable)
+        assert wired == (f"${{{{ inputs.{input_name} }}}}"), (
+            f"step {step_id!r} does not read {input_name} as {variable}"
+        )
         errors = [error.replace("${name//_/-}", input_name) for error in errors]
     assert quote in errors, f"step {step_id!r} prints none of the quote: {errors}"
 
@@ -18266,6 +18547,10 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
         # the `assert any(...)` above the stubs, so a step that stops using it
         # fails there, not here.
         script = script.replace('"$(uv tool dir --bin)/ash"', f'"{bin_dir}/ash"')
+        # A GitHub runner expands ``${{ runner.temp }}`` before it hands the step to
+        # bash; bash itself reads the text as a bad substitution. The context value is
+        # the directory RUNNER_TEMP names.
+        script = re.sub(r"\$\{\{\s*runner\.temp\s*\}\}", str(runner_temp), script)
         result = subprocess.run(
             _bash_argv("-e", _step_script(tmp_path, script)),
             cwd=tmp_path,
@@ -18679,7 +18964,12 @@ def test_each_install_input_row_names_the_tool_the_input_installs() -> None:
         if key == "ASH_CFN_GUARD_RULES_DIR"
     ]
     assert "its rules" in rows["install-cfn-guard"], rows["install-cfn-guard"]
-    assert rules and all("inputs.install-cfn-guard" in str(v) for v in rules), rules
+    reads_input = bool(rules) and all(
+        "inputs.install-cfn-guard" in str(v) for v in rules
+    )
+    assert reads_input, (
+        "ASH_CFN_GUARD_RULES_DIR is not read from inputs.install-cfn-guard"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -19276,7 +19566,14 @@ def _report_through(
     if sink == "terminal":
         environment["TERM"] = "xterm-256color"
     environment.update(env)
-    argv = [sys.executable, "-c", _RECORDING_REPORT, str(record), "report", *args]
+    argv = [
+        sys.executable,
+        "-c",
+        importing_this_checkout(_RECORDING_REPORT, root=_IMPORTED_ROOT),
+        str(record),
+        "report",
+        *args,
+    ]
     if sink == "file":
         stdout_path = workdir / "stdout.txt"
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
@@ -19418,6 +19715,17 @@ def test_ash_report_writes_the_reporters_output_unless_a_color_terminal_renders_
         wanted = document.encode("utf-8")
         if sink == "terminal":
             wanted = wanted.replace(b"\n", b"\r\n")
+        if sink == "terminal" and sys.platform == "darwin":
+            # Platform contract of the pty line discipline: macOS's tty queue holds
+            # a fixed number of bytes, and a line feed that does not fit after its
+            # ONLCR carriage return is retried whole, so one line feed comes out as
+            # CR CR LF where the queue filled (the same byte offset, 80896, on every
+            # interpreter). The terminal's own reading of each run of carriage
+            # returns before a line feed is the same as one, so both sides are
+            # compared with such a run reduced to one CR LF; every other byte must
+            # still match.
+            out = re.sub(rb"\r+\n", b"\r\n", out)
+            wanted = re.sub(rb"\r+\n", b"\r\n", wanted)
         assert out == wanted, (
             "standard output is not the reporter's document:\n"
             + "".join(
@@ -20575,9 +20883,10 @@ def _backend_unavailable(class_name: str) -> Optional[str]:
     # ASH's probe builds its child's environment itself, which is why an
     # in-process call cannot be contained from here.
     scratch = Path(tempfile.mkdtemp(prefix="ash-backend-probe-"))
-    probe = (
+    probe = importing_this_checkout(
         "from automated_security_helper.utils.sandbox import backends\n"
-        f"print(repr(backends.{class_name}()._probe()))\n"
+        f"print(repr(backends.{class_name}()._probe()))\n",
+        root=_IMPORTED_ROOT,
     )
     # A spawn failure or a hang (TimeoutExpired) propagates and errors the
     # cell: this interpreter failing to start its own executable is never a
@@ -21161,6 +21470,9 @@ def test_a_uv_tool_scanners_tool_ended_by_a_signal_is_the_same_error(
     # a probed-uv constructor takes the stand-in through it; this one builds the
     # runner from the executable itself, which probes it on first use and keeps
     # the answer for the stand-in it was probed from.
+    # The runner probes the stand-in on first use; the guard's stub answers that
+    # probe as a host without uv, so the real probe is put back.
+    _use_the_real_tool_probes(monkeypatch, uv=True)
     make_runner = getattr(UVToolRunner, "for_probed_uv", UVToolRunner)
     runner = make_runner(str(stand_in))
     monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", lambda: runner)
@@ -21240,7 +21552,7 @@ _A_SANDBOX_ASH_CANNOT_PROVIDE = (
 #: concepts/sandbox.md's example line, as ash.log writes it on Linux.
 _THE_START_FAILURE_LINE = (
     "detect-secrets could not start its tool on source: sandbox-exec is not "
-    "available: sandbox-exec is not available on Linux"
+    "available on Linux"
 )
 
 #: concepts/scanning-untrusted-code.md (Putting the defenses together).
@@ -21398,7 +21710,7 @@ def test_a_sandbox_ash_cannot_provide_is_an_error_with_code_127(
         # whitespace, as the console wraps a line this long at its width.
         start_failure = (
             f"detect-secrets could not start its tool on source: {unavailable} is "
-            f"not available: {unavailable} is not available on {platform.system()}"
+            f"not available on {platform.system()}"
         )
         if sys.platform == "linux":
             assert start_failure == _THE_START_FAILURE_LINE
@@ -21427,10 +21739,12 @@ _A_CONVERTERS_TOOL_IS_CONFINED = (
 #: concepts/sandbox.md (What fails closed): the converter under a refused sandbox.
 _A_REFUSED_SANDBOX_STOPS_THE_CONVERTERS_TOOL = (
     "A converter's tool is held to the same rule. When the sandbox cannot be "
-    "provided, nbconvert does not run: each notebook is listed in the converter's "
-    "`refused_inputs` with the reason, the row's `failure` reads `jupyter could not "
-    "start its tool: <reason>`, and its `dependencies_satisfied` stays true, since "
-    "nothing was found missing. A tree with no notebooks loses nothing."
+    "provided, nbconvert does not run: the converter's own dependency check is "
+    "refused under the same sandbox, so its row reads `dependencies_satisfied` false "
+    "with the reason in `dependency_unavailable_reason`, the notebooks still count in "
+    "`candidate_inputs`, and the converter is reported as incomplete, so the default "
+    "`fail_on_incomplete_scanners` makes the scan exit 1. A tree with no notebooks "
+    "loses nothing."
 )
 
 
@@ -21518,19 +21832,16 @@ def test_a_converter_sandbox_ash_cannot_provide_stops_its_tool(
     )
     results = json.loads((output / "ash_aggregated_results.json").read_text("utf-8"))
     row = results["converter_results"]["jupyter"]
-    assert row["dependencies_satisfied"] is True, (row, _output_tail(result))
     assert row["converted_paths"] in ([], None), row
     if with_notebook:
-        failure = row["failure"] or ""
-        assert "jupyter could not start its tool" in failure, (
-            row,
-            _output_tail(result),
-        )
-        assert f"{unavailable} is not available" in failure, failure
-        refused = row["refused_inputs"] or []
-        assert [entry["path"] for entry in refused] == ["analysis.ipynb"], refused
-        assert "nbconvert was not run on it" in refused[0]["reason"], refused
+        # The dependency check runs under the refusing probe scope too, so the
+        # stand-ins on PATH are not taken as ready: the row is unavailable, with
+        # the notebook counted as a candidate.
+        assert row["dependencies_satisfied"] is False, (row, _output_tail(result))
+        assert row["dependency_unavailable_reason"], row
+        assert row["candidate_inputs"] == 1, row
     else:
+        assert row["dependencies_satisfied"] is True, (row, _output_tail(result))
         assert not row["failure"], row
         assert not row["refused_inputs"], row
     assert result.returncode == 1, _output_tail(result)

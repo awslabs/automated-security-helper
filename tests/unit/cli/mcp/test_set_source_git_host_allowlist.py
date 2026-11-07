@@ -179,7 +179,8 @@ def test_a_server_that_turns_lfs_smudging_on_does_not_reach_git(
     )
 
     assert result.get("success") is True, result
-    assert git[0]["env"]["GIT_LFS_SKIP_SMUDGE"] == "1", git[0]["env"]
+    skip_smudge = git[0]["env"]["GIT_LFS_SKIP_SMUDGE"]
+    assert skip_smudge == "1", skip_smudge
 
 
 def test_a_failed_https_clone_says_redirects_are_not_followed(monkeypatch) -> None:

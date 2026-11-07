@@ -360,16 +360,40 @@ def test_the_default_directory_gets_the_hint_when_ash_bin_path_points_elsewhere(
 
 
 @pytest.mark.unit
-def test_a_relative_ash_bin_path_gets_the_absolute_hint(
+def test_a_relative_ash_bin_path_installs_into_the_default_directory(
     tmp_path, fresh_lookup, monkeypatch
 ):
-    """A relative ASH_BIN_PATH means another directory as soon as a scan runs elsewhere."""
+    """A scan does not use a relative ASH_BIN_PATH, so neither does the install.
+
+    Both warn, naming the value, and use ``~/.ash/bin``: the install used to make
+    the value absolute and write into it while a scan searched no ASH bin
+    directory, so the two disagreed. Nothing is made under the working directory.
+    """
     monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
+    # The warning is once per value in a process; an earlier test may have used it.
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
     project = tmp_path / "project"
     result = _install(project)
     assert result.exit_code == 0, result.output
-    absolute = str(project / "rel-bin")
-    assert f"export ASH_BIN_PATH={shlex.quote(absolute)}" in _flat(result.output)
+    out = _flat(result.output)
+    assert "ASH_BIN_PATH is the relative path 'rel-bin'" in out, out
+    assert "uses ~/.ash/bin instead" in out, out
+    assert (fresh_lookup / ".ash" / "bin").is_dir()
+    assert not (project / "rel-bin").exists()
+    # A scan searches ~/.ash/bin for this value too, so there is nothing to export.
+    assert "export ASH_BIN_PATH" not in out, out
+
+
+@pytest.mark.unit
+def test_an_absolute_ash_bin_path_elsewhere_still_gets_the_hint(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    """Control for the one above: a scan that is not looking in the target is told."""
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "elsewhere"))
+    target = tmp_path / "chosen"
+    result = _install(tmp_path / "project", "--bin-path", str(target))
+    assert result.exit_code == 0, result.output
+    assert f"export ASH_BIN_PATH={shlex.quote(str(target))}" in _flat(result.output)
 
 
 @pytest.mark.unit

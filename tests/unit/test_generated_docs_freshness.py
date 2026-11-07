@@ -217,6 +217,10 @@ def _planted_tools(directory: Path) -> Path:
 def _planted_environment(root: Path, seed: str, home: str | None) -> tuple[dict, Path]:
     """The environment of one planted run, and the home it uses."""
     home_dir = Path(home) if home else root / "home"
+    if os.name == "nt" and home is not None:
+        # "/d" names no drive on Windows, so ASH reads it as a relative home, has no
+        # bin directory, and the scanner page lists "custom command" installs.
+        home_dir = Path(root.drive + home)
     if home is None:
         home_dir.mkdir(parents=True)
     tmp = root / "planted-tmp"
@@ -1980,17 +1984,19 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
             prepare_environment()
             names = json.loads(sys.argv[2])
             proxy = os.environ.get("https_proxy") or ""
-            refused = None
+            outcome = None
             if proxy:
                 host, port = proxy.rsplit("/", 1)[-1].rsplit(":", 1)
                 try:
                     socket.create_connection((host, int(port)), timeout=5).close()
-                    refused = False
+                    outcome = "connected"
                 except ConnectionRefusedError:
-                    refused = True
+                    outcome = "refused"
+                except TimeoutError:
+                    outcome = "dropped"
             print(json.dumps({
                 "env": {n: os.environ.get(n) for n in names},
-                "refused": refused,
+                "outcome": outcome,
                 "dirs": [os.path.isdir(os.environ.get(n) or "") for n in names[:5]],
             }))
             """
@@ -2021,14 +2027,17 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     values = report["env"]
-    assert values["UV_OFFLINE"] == "1" and values["PIP_NO_INDEX"] == "1", values
-    assert values["NO_PROXY"] is None and values["no_proxy"] is None, values
+    assert values["UV_OFFLINE"] == "1" and values["PIP_NO_INDEX"] == "1"
+    assert values["NO_PROXY"] is None and values["no_proxy"] is None
     proxies = {values[n] for n in PROXY_VARIABLES}
     assert len(proxies) == 1 and next(iter(proxies)).startswith("http://127.0.0.1:")
-    assert report["refused"] is True
+    # The port is held by the run and never listened on: Linux and Windows refuse a
+    # connection to it, macOS drops it. Neither ever connects.
+    allowed = {"refused", "dropped"} if sys.platform == "darwin" else {"refused"}
+    assert report["outcome"] in allowed, report["outcome"]
     assert report["dirs"] == [True] * len(ISOLATED_DIRECTORIES)
     roots = {Path(values[n]).parent for n in ISOLATED_DIRECTORIES}
-    assert len(roots) == 1, values
+    assert len(roots) == 1, f"{len(roots)} roots hold the isolated directories"
     root = next(iter(roots))
     assert str(tmp_path) not in str(root), "the planted UV_CACHE_DIR was kept"
     assert not root.exists(), f"{root} was left behind after the run"

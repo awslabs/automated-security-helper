@@ -313,12 +313,13 @@ class TestGitEnvironment:
         import os
 
         server_env = dict(os.environ)
+        visible = set(helpers(server_env, []))
         assert {
             "planted-global",
             "planted-xdg",
             "planted-system",
             "planted-env",
-        } <= set(helpers(server_env, [])), (
+        } <= visible, (
             "the planted configuration is not visible to git, so this test measures nothing"
         )
 

@@ -458,6 +458,10 @@ def test_a_relative_bin_path_under_a_deleted_working_directory_is_the_usage_refu
         raise FileNotFoundError(errno.ENOENT, "the working directory was removed")
 
     monkeypatch.setattr(os, "getcwd", gone)
+    # Python 3.10's Path.cwd calls a getcwd bound when pathlib was imported, so
+    # patching os.getcwd alone does not reach it there (the CI failure was exit 1
+    # with the FileNotFoundError, the install having gone on past the check).
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: gone()))
 
     if how == "option":
         result = runner.invoke(

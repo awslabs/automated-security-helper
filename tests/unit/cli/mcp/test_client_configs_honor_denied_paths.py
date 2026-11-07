@@ -23,6 +23,7 @@ import base64
 import hashlib
 import io
 import json
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
@@ -375,6 +376,19 @@ def test_ashs_own_repository_config_delivered_as_a_tree_scans(_server) -> None:
     own = Path(__file__).resolve().parents[4] / ".ash" / ".ash.yaml"
     source = _upload({".ash/.ash.yaml": own.read_text(encoding="utf-8")})
     config = _scan_resolution(source, None)
+    if sys.platform == "win32":
+        # Platform contract: opengrep and semgrep are "Off by default on Windows"
+        # (their ``enabled`` Field default is ``platform.system() != "windows"``),
+        # so the repository file's ``enabled: true`` for both is a non-default value
+        # a client may not set there. The refusal must name exactly those two
+        # fields and nothing else in the file.
+        assert isinstance(config, Exception), config
+        text = str(config)
+        assert "scanners.opengrep.enabled" in text, text
+        assert "scanners.semgrep.enabled" in text, text
+        listed = text.split("sets fields", 1)[1].split("Remove them", 1)[0]
+        assert listed.count("(path '") == 2, text
+        return
     assert not isinstance(config, Exception), config
 
 
@@ -1649,6 +1663,7 @@ def test_a_waiting_workspace_scan_sets_offline_only_once_it_holds_the_lock(
 
     from automated_security_helper.cli.mcp import workspace as workspace_module
     from automated_security_helper.cli.mcp.sessions import get_default_registry
+    from tests.utils.env_assertions import environ_names
 
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     seen: List[Any] = []
@@ -1667,12 +1682,12 @@ def test_a_waiting_workspace_scan_sets_offline_only_once_it_holds_the_lock(
     try:
         worker.join(timeout=0.5)
         assert worker.is_alive(), "the workspace scan did not wait for the lock"
-        assert "ASH_OFFLINE" not in os.environ
+        assert "ASH_OFFLINE" not in environ_names()
     finally:
         lock.release()
     worker.join(timeout=10)
     assert seen == ["YES"]
-    assert "ASH_OFFLINE" not in os.environ
+    assert "ASH_OFFLINE" not in environ_names()
 
 
 # ---------------------------------------------------------------------------

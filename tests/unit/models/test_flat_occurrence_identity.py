@@ -26,6 +26,7 @@ from automated_security_helper.models.flat_vulnerability import (
 )
 from automated_security_helper.schemas.sarif_schema_model import Result, SarifReport
 from automated_security_helper.utils import finding_identity
+from tests.utils.helpers import importing_this_checkout
 
 
 def _payload():
@@ -357,7 +358,7 @@ print(json.dumps([
     for seed, sort_keys in [("1", False), ("2", True)]:
         reordered = copy.deepcopy(payload)
         proc = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, "-c", importing_this_checkout(code)],
             input=json.dumps(reordered, sort_keys=sort_keys),
             text=True,
             capture_output=True,

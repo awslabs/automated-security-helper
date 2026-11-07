@@ -3,6 +3,7 @@
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from datetime import datetime as _DatetimeType
 from pathlib import Path
 import platform
 import time
@@ -1000,8 +1001,23 @@ class ScanExecutionEngine:
         without that the final stamp of a report-only run over fresh results
         read ``start`` as set and left the pre-report end in place.
         """
-        scan_duration = (scan_end_time - scan_start_time).total_seconds()
         stats = self._results.metadata.summary_stats
+        if (
+            getattr(self, "_run_stamped_timing", False)
+            # The class under its own name: the module's ``datetime`` is the
+            # clock the duration tests replace with a mock, and isinstance
+            # against a mock raises before the final stamp is written.
+            and isinstance(stats.end, _DatetimeType)
+            and stats.end > scan_end_time
+        ):
+            # The pre-report end is the start plus the monotonic elapsed time,
+            # the final one a wall-clock read. Where the two clocks tick at
+            # different phases and coarse steps (Windows, about 15 ms), the
+            # wall read can land before the end the reports already carried.
+            # A run's end only moves forward, so the final stamp never reads
+            # earlier than the one the report phase saw.
+            scan_end_time = stats.end
+        scan_duration = (scan_end_time - scan_start_time).total_seconds()
         if (
             "scan" in ordered_phases
             or stats.start is None

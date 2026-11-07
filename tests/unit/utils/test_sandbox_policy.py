@@ -2012,14 +2012,15 @@ class TestAshBinPathUnderAHome:
 
 @pytest.mark.unit
 class TestNoBinDirectoryToMount:
-    """A relative ASH_BIN_PATH, or none at all, leaves no bin directory to mount.
+    """A relative ASH_BIN_PATH is not mounted, and none at all can leave no bin directory.
 
     A relative value names a directory under the working directory, usually the
-    scanned repository, so the policy leaves it out of the mounts (the tool lookup
-    does not search it either). With no bin directory, the check that refuses a
-    home among ASH's own paths has nothing to measure. It used to hand the missing
-    directory to os.path.isdir, and every sandboxed spawn raised TypeError instead
-    of being planned.
+    scanned repository, so the policy leaves it out of the mounts: ``_bin_path``
+    warns and answers ``~/.ash/bin`` instead, as the tool lookup and ``ash
+    dependencies install`` do. With no bin directory at all (no usable home), the
+    check that refuses a home among ASH's own paths has nothing to measure. It
+    used to hand the missing directory to os.path.isdir, and every sandboxed
+    spawn raised TypeError instead of being planned.
     """
 
     @pytest.mark.parametrize(
@@ -2034,8 +2035,11 @@ class TestNoBinDirectoryToMount:
             named.mkdir(parents=True)
         monkeypatch.chdir(layout.source)
         monkeypatch.setenv("ASH_BIN_PATH", value)
-        # The input this test is about: a value that names no location by itself.
-        assert not subprocess_utils._is_anchored(str(subprocess_utils._bin_path()))
+        # The input this test is about: a value that names no location by itself,
+        # for which the bin directory is ~/.ash/bin and not the value.
+        assert Path(os.path.realpath(subprocess_utils._bin_path())) == Path(
+            os.path.realpath(layout.home / ".ash" / "bin")
+        )
         policy = _policy(layout)
         mounted = _resolved([*policy.read_only, *policy.executable])
         assert Path(os.path.realpath(named)) not in mounted
@@ -2047,11 +2051,14 @@ class TestNoBinDirectoryToMount:
 
         It is left out of the mounts, so neither it nor the home inside it is
         exposed, and nothing is measured against where the working directory would
-        put it.
+        put it. The bin directory is ``~/.ash/bin``, which is under the home but is
+        not the home.
         """
         monkeypatch.chdir(layout.source)
         monkeypatch.setenv("ASH_BIN_PATH", "..")
-        assert not subprocess_utils._is_anchored(str(subprocess_utils._bin_path()))
+        assert Path(os.path.realpath(subprocess_utils._bin_path())) == Path(
+            os.path.realpath(layout.home / ".ash" / "bin")
+        )
         policy = _policy(layout)
         mounted = _resolved([*policy.read_only, *policy.executable])
         assert Path(os.path.realpath(layout.source.parent)) not in mounted

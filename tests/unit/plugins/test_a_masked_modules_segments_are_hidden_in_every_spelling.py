@@ -622,7 +622,9 @@ def test_seg_ash_frame_stays_readable(
     )
     if not debug:
         raise RuntimeError("premise: the DEBUG traceback was logged")
-    assert must_survive in debug, debug[-500:]
+    # A traceback prints a file with the host's separator (backslashes on
+    # Windows), so the frame is read with its separators as slashes.
+    assert must_survive in debug.replace("\\", "/"), debug[-500:]
     # The control: a plain-leaf value with no ASH-word collision keeps the
     # same frame readable too, so the assertion above measures the needle
     # set, not the traceback's shape.
@@ -690,7 +692,8 @@ def test_seg_ash_fixed_words_stay_readable(
             bodies = [sources["refusal"]]
         else:
             bodies = [b for w, b in sources.items() if f":{where}:" in w]
-        text = "\n".join(bodies)
+        # File paths in a traceback use the host's separator; read them as slashes.
+        text = "\n".join(bodies).replace("\\", "/")
         lost = [word for word in words if word not in text]
         if lost:
             missing[where] = lost

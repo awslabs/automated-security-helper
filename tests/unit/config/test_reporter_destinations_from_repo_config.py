@@ -31,7 +31,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from tests.unit.config._client_policy_helpers import (
     narrow_client_rules as _narrow_client_rules,
 )
-from tests.utils.helpers import mark_git_checkout
+from tests.utils.helpers import importing_this_checkout, mark_git_checkout
 
 #: Values that read like what a repository would write, for some options, each of
 #: the type its options model validates and none of them a default. Every other
@@ -864,7 +864,7 @@ def test_off_by_their_models_default_the_loaded_reporters_stay_off(tmp_path):
         [
             sys.executable,
             "-c",
-            _ENGINE_WITH_DEFAULTS_OFF,
+            importing_this_checkout(_ENGINE_WITH_DEFAULTS_OFF),
             str(source),
             json.dumps(names),
         ],
@@ -1081,7 +1081,7 @@ _DESTINATION_LIKE = re.compile(
 @pytest.fixture(scope="module")
 def reporter_fields(tmp_path_factory):
     result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
-        [sys.executable, "-c", _DUMP_REPORTER_FIELDS],
+        [sys.executable, "-c", importing_this_checkout(_DUMP_REPORTER_FIELDS)],
         cwd=tmp_path_factory.mktemp("fields"),
         capture_output=True,
         text=True,
@@ -1313,7 +1313,7 @@ def test_the_field_walker_sees_unions_nested_models_and_aliases(tmp_path):
         "print(json.dumps(found))\n"
     )
     result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
-        [sys.executable, "-c", probe],
+        [sys.executable, "-c", importing_this_checkout(probe)],
         cwd=tmp_path,
         capture_output=True,
         text=True,

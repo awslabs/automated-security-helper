@@ -2095,6 +2095,7 @@
                 'policies': list([
                 ]),
                 'properties': dict({
+                  'ash_occurrence_context_version': 1,
                   'tags': list([
                   ]),
                 }),
@@ -2146,6 +2147,20 @@
                       'text': 'subprocess call with shell=True identified, security issue.',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'bandit',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'subprocess call with shell=True identified, security issue.',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'B602',
+                        }),
+                        'rule_index': 0,
+                        'version': 1,
+                      }),
                       'issue_confidence': 'HIGH',
                       'issue_severity': 'HIGH',
                       'scanner_details': dict({
@@ -2216,6 +2231,20 @@
                       'text': "Possible hardcoded password: 'hu**********************t'",
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'bandit',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': "Possible hardcoded password: 'hu**********************t'",
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'B105',
+                        }),
+                        'rule_index': 1,
+                        'version': 1,
+                      }),
                       'issue_confidence': 'MEDIUM',
                       'issue_severity': 'LOW',
                       'scanner_details': dict({
@@ -2286,6 +2315,20 @@
                       'text': 'S3 Bucket has an ACL defined which allows public READ access.',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'checkov',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'S3 Bucket has an ACL defined which allows public READ access.',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'CKV_AWS_20',
+                        }),
+                        'rule_index': 0,
+                        'version': 1,
+                      }),
                       'issue_severity': 'HIGH',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2355,6 +2398,20 @@
                       'text': 'Ensure the S3 bucket has access logging enabled',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'checkov',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'Ensure the S3 bucket has access logging enabled',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'CKV_AWS_18',
+                        }),
+                        'rule_index': 1,
+                        'version': 1,
+                      }),
                       'issue_severity': 'MEDIUM',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2424,6 +2481,20 @@
                       'text': 'Ensure the last USER is not root',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'checkov',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'Ensure the last USER is not root',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'CKV_DOCKER_8',
+                        }),
+                        'rule_index': 2,
+                        'version': 1,
+                      }),
                       'issue_severity': 'MEDIUM',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2493,6 +2564,20 @@
                       'text': 'Ensure that HEALTHCHECK instructions have been added to container images',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'checkov',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'Ensure that HEALTHCHECK instructions have been added to container images',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'CKV_DOCKER_2',
+                        }),
+                        'rule_index': 3,
+                        'version': 1,
+                      }),
                       'issue_severity': 'LOW',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2562,6 +2647,20 @@
                       'text': "The last user in the container is 'root'. Switch back to an unprivileged user.",
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'semgrep',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': "The last user in the container is 'root'. Switch back to an unprivileged user.",
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'dockerfile.security.last-user-is-root.last-user-is-root',
+                        }),
+                        'rule_index': 0,
+                        'version': 1,
+                      }),
                       'issue_severity': 'LOW',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2631,6 +2730,20 @@
                       'text': 'Command string built with an f-string; prefer an argument list.',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'semgrep',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'Command string built with an f-string; prefer an argument list.',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'python.lang.best-practice.unpinned-shell-command',
+                        }),
+                        'rule_index': 1,
+                        'version': 1,
+                      }),
                       'issue_severity': 'INFO',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2700,6 +2813,20 @@
                       'text': 'Secret of type Secret Keyword detected in file app/app.py at line 5',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'detect-secrets',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'Secret of type Secret Keyword detected in file app/app.py at line 5',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'SECRET-SECRET-KEYWORD',
+                        }),
+                        'rule_index': 0,
+                        'version': 1,
+                      }),
                       'issue_severity': 'HIGH',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2780,6 +2907,20 @@
                       'text': 'A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'grype',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'CVE-2018-18074-requests',
+                        }),
+                        'rule_index': 0,
+                        'version': 1,
+                      }),
                       'issue_severity': 'CRITICAL',
                       'scanner_details': dict({
                         'tool_invocation': dict({
@@ -2849,6 +2990,20 @@
                       'text': 'A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt',
                     }),
                     'properties': dict({
+                      'ash_occurrence_context': dict({
+                        'component': dict({
+                          'name': 'grype',
+                        }),
+                        'message': dict({
+                          'state': 'resolved',
+                          'text': 'A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt',
+                        }),
+                        'resolved_rule': dict({
+                          'id': 'CVE-2023-32681-requests',
+                        }),
+                        'rule_index': 1,
+                        'version': 1,
+                      }),
                       'issue_severity': 'MEDIUM',
                       'scanner_details': dict({
                         'tool_invocation': dict({

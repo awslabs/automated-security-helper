@@ -17,12 +17,12 @@ global_settings:
     # GuardDog's heuristics read source text, so test code that writes a fake
     # credentials file matches them. Pinned to the one line GuardDog reports, so a
     # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 775 and 991; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 775 only.
+    # twice, at lines 738 and 954; GuardDog 3.2.0 drops a match whose code snippet
+    # is the same as one it already reported, so it reports 738 only.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 775
-      line_end: 775
+      line_start: 738
+      line_end: 738
       reason: >-
         False positive. The line writes a creds.env holding a fake AWS key id and
         secret, generated per run with secrets.choice, into the test's temporary
@@ -1369,19 +1369,19 @@ global_settings:
     # needs its line updated, which is the point of not using a range or a glob.
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 253
-      line_end: 253
-      reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
-    - rule_id: threat-process-download-exec
-      path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 701
-      line_end: 701
+      line_start: 1030
+      line_end: 1030
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 973
-      line_end: 973
+      line_start: 1518
+      line_end: 1518
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 1612
+      line_end: 1612
+      reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 367
@@ -1394,38 +1394,38 @@ global_settings:
       reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 264
-      line_end: 264
+      line_start: 266
+      line_end: 266
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 272
-      line_end: 272
+      line_start: 274
+      line_end: 274
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 782
-      line_end: 782
+      line_start: 784
+      line_end: 784
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1469
-      line_end: 1469
+      line_start: 1471
+      line_end: 1471
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
-      line_start: 404
-      line_end: 404
+      line_start: 406
+      line_end: 406
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1131
-      line_end: 1131
+      line_start: 1170
+      line_end: 1170
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 392
-      line_end: 392
+      line_start: 417
+      line_end: 417
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
@@ -1463,6 +1463,69 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # === Test fixtures the community-plugins legs read as credentials (expires 2027-05-06) ===
+    # Each entry is per file and per rule, with no line range, because the lines move
+    # whenever a test is edited. The tests hold made-up values on purpose, to check
+    # that ASH hides, refuses or confines them. The key is expires, the canonical
+    # spelling (expiration is a deprecated alias, models/core.py); the date is six
+    # months out so the list is reviewed then and an entry whose fixture has been
+    # restructured is dropped.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_a_stateful_session_the_sweep_removes_is_ended.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/cli/mcp/test_sessions_a_session_starts_without_a_workspace_root.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/config/test_sandbox_environment_setting.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/interactions/test_run_ash_nix.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_builtin/converters/test_jupyter_converter_edge_inputs.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_builtin/test_bandit_scanner_behavior.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/utils/sandbox/test_fs_guard_a_refused_pre_check_is_redacted_from_the_executor.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/utils/sandbox/test_scope_probe_cache_and_spawn_record.py
+      expires: "2027-05-06"
+      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_probe_selection_and_report_shapes.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_response_logging.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
+    - rule_id: generic-api-key
+      path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
+      expires: "2027-05-06"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
     # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-24) ===
     # Same decision as the dnspython entries in .ash/.ash.yaml, restated here because
     # a suppression list is not inherited across config files. uv.lock holds two
@@ -1484,6 +1547,28 @@ global_settings:
         CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: minimatch CVE-2026-118764 / GHSA-g3hv-75wg-m249, bundled in aws-cdk-lib (expires 2027-02-06) ===
+    # The flagged copy is node_modules/aws-cdk-lib/node_modules/minimatch 10.2.5
+    # (inBundle: true) in deploy/cdk/package-lock.json. The repository's own override
+    # already pins the top-level minimatch to 11.x, but a bundled copy ships inside the
+    # aws-cdk-lib tarball and no override reaches it. The advisory lists 11.0.1 as the
+    # only patched release (affected >= 7.0.0, < 11.0.1). Measured 2026-11-06: the latest
+    # aws-cdk-lib, 2.275.0, declares minimatch ^10.2.6 and bundles it, and main declares
+    # the same range, so no released aws-cdk-lib carries a fixed bundle yet. The version
+    # is pinned in the entry, so a different bundled version reports again. trivy and
+    # trivy-repo both report the CVE id as is, so one entry covers both.
+    # Revisit when an aws-cdk-lib release declares minimatch >=11.0.1.
+    - rule_id: "CVE-2026-118764"
+      path: "deploy/cdk/package-lock.json"
+      package_name: "minimatch"
+      package_version: "10.2.5"
+      expires: "2027-02-06"
+      reason: >-
+        CVE-2026-118764 (GHSA-g3hv-75wg-m249): minimatch 10.2.5 bundled inside aws-cdk-lib
+        (inBundle), so the repository's override, which pins the top-level minimatch to 11.x,
+        cannot reach it. Fix = aws-cdk-lib >= none released yet (2.275.0 declares minimatch
+        ^10.2.6; the fix is minimatch 11.0.1). Revisit when a release bundles minimatch
+        >=11.0.1.
     # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===
     #
     # The same unquoted-assignment and name-matching dispositions as the ferret-scan

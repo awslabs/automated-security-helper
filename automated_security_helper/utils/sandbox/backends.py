@@ -438,6 +438,13 @@ def _probe_env() -> Dict[str, str]:
     from automated_security_helper.core.constants import usable_home
 
     env = {"PATH": os.environ.get("PATH", "")}
+    if os.name == "nt":
+        # A Windows process started without SYSTEMROOT cannot get random numbers
+        # (CPython: "failed to get random numbers to initialize Python") or load
+        # its DLLs, so no probe, Python or otherwise, would start.
+        system_root = os.environ.get("SYSTEMROOT")
+        if system_root:
+            env["SYSTEMROOT"] = system_root
     home = usable_home()
     if home is not None:
         env["USERPROFILE" if os.name == "nt" else "HOME"] = str(home)

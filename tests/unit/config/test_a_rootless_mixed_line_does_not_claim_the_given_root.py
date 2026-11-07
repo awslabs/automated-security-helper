@@ -52,7 +52,9 @@ def test_a_direct_callers_rootless_mixed_shape_names_no_given_root(caplog):
 
     files = [Path("/zz-marked/cfg.yaml"), Path("/zz-elsewhere/base.yaml")]
     resolved = AshConfig()
-    resolved.ash_plugin_modules = ["zz_rootless_mixed_mod"]
+    # In the plugin namespace (a name outside it is kept unjudged, so no
+    # "Ignoring ash_plugin_modules" line would be written for it).
+    resolved.ash_plugin_modules = ["zz_rootless_mixed_mod_ash_plugins"]
     resolved.sandbox.extra_read_paths = ["/zz-rootless-mixed-read"]
     with caplog.at_level(logging.WARNING):
         confine_sandbox_grants(

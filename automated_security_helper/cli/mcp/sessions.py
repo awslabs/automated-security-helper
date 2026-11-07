@@ -827,11 +827,19 @@ def _set_session_state_aside(session_id: str, sandbox: Path) -> Optional[Path]:
 
     So this does the rename aside (``source_delivery._set_aside_for_removal``:
     None when nothing is on disk, the workspace itself when the rename is
-    refused), drops the delivered-source record, the bound profile and the
-    registry entry, and returns the path to give :func:`_remove_set_aside_tree`
-    once the guard is released. ``sandbox`` is the session's directory the caller
-    resolved; the caller has already decided the session has one (a session with
-    none takes :func:`_remove_session_state` and no guard).
+    refused), drops the delivered-source record and the bound profile, and
+    returns the path to give :func:`_remove_set_aside_tree` once the guard is
+    released. ``sandbox`` is the session's directory the caller resolved; the
+    caller has already decided the session has one (a session with none takes
+    :func:`_remove_session_state` and no guard).
+
+    The registry entry is NOT forgotten here. The TTL sweep keeps it until the
+    delete of the set-aside tree is done, because the entry carries the sweep's
+    hold (``MCPSession.try_begin_sweep``): a write for the session that comes
+    during the delete finds the hold and is refused ``session_workspace_busy``,
+    where a forgotten entry would let it build a fresh workspace under the
+    delete. The caller forgets the entry when it is done with it
+    (``end_session`` right after this returns; the sweep after the delete).
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         clear_session_state,
@@ -857,7 +865,6 @@ def _set_session_state_aside(session_id: str, sandbox: Path) -> Optional[Path]:
         doomed = None
     _drop_session_source_dir(session_id)
     clear_session_state(session_id)
-    get_default_registry().forget(session_id)
     return doomed
 
 
@@ -1053,6 +1060,9 @@ def _remove_unless_a_scan_elsewhere_holds(
             if _a_scan_holds(holder):
                 return False
             doomed = _set_session_state_aside(session_id, sandbox)
+            # The end holds the session's change, which refuses a write for the
+            # whole removal, so the entry can go now.
+            get_default_registry().forget(session_id)
             with contextlib.suppress(OSError):
                 holder.rmdir()
         # The guard is released: the tree, renamed to its hidden delete name,
@@ -2571,31 +2581,43 @@ def _remove_stale_session_state(
         try:
             if not _is_stale_workspace(sandbox, cutoff):
                 return False
-            with contextlib.ExitStack() as stack:
-                try:
-                    stack.enter_context(
-                        _scan_presence_guard(root, wait=_SWEEP_LOCK_WAIT_SECONDS)
-                    )
-                except OSError as exc:
-                    _warn_guard_refused_once(root, exc, "running the TTL sweep")
-                    return False
-                if _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id):
-                    return False
-                # The age read before the guard is not the age now: a scan in
-                # another server that ended meanwhile touched the workspace and
-                # then took this guard to drop its entry (ScanPresence.__exit__,
-                # in that order), so this sweep, let in right after it, sees no
-                # entry and a fresh mtime. Re-read under the guard, where that
-                # order guarantees the touch is visible before the entry is gone.
-                if not _is_stale_workspace(sandbox, cutoff):
-                    return False
-                doomed = _set_session_state_aside(session_id, sandbox)
-                _forget_sweep_failure(session_id)
-                with contextlib.suppress(OSError):
-                    (root / SCAN_PRESENCE_DIR / session_id).rmdir()
-            # The guard is released: the tree is deleted under its hidden name
-            # without holding up the other servers (_set_session_state_aside).
-            _remove_set_aside_tree(doomed)
+            set_aside = False
+            try:
+                with contextlib.ExitStack() as stack:
+                    try:
+                        stack.enter_context(
+                            _scan_presence_guard(root, wait=_SWEEP_LOCK_WAIT_SECONDS)
+                        )
+                    except OSError as exc:
+                        _warn_guard_refused_once(root, exc, "running the TTL sweep")
+                        return False
+                    if _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id):
+                        return False
+                    # The age read before the guard is not the age now: a scan in
+                    # another server that ended meanwhile touched the workspace and
+                    # then took this guard to drop its entry (ScanPresence.__exit__,
+                    # in that order), so this sweep, let in right after it, sees no
+                    # entry and a fresh mtime. Re-read under the guard, where that
+                    # order guarantees the touch is visible before the entry is gone.
+                    if not _is_stale_workspace(sandbox, cutoff):
+                        return False
+                    doomed = _set_session_state_aside(session_id, sandbox)
+                    set_aside = True
+                    _forget_sweep_failure(session_id)
+                    with contextlib.suppress(OSError):
+                        (root / SCAN_PRESENCE_DIR / session_id).rmdir()
+                # The guard is released: the tree is deleted under its hidden name
+                # without holding up the other servers (_set_session_state_aside).
+                # The registry entry, and the sweep's hold on it, stay through the
+                # delete: a write for this session is refused session_workspace_busy
+                # from the start of the sweep until the delete is done.
+                _remove_set_aside_tree(doomed)
+            finally:
+                # Released whatever the delete did, so a failed delete never
+                # leaves the session busy: the entry goes, and the next request
+                # for the id builds a fresh workspace.
+                if set_aside:
+                    get_default_registry().forget(session_id)
         except OSError as exc:
             # The check for a scan, or the removal, failed after the guard was
             # taken: the workspace stays for the next pass, and the failure is

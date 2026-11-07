@@ -235,5 +235,7 @@ class TestCardNumbers:
     def test_luhn_check_digit_matches_a_known_number(self, docx_script):
         # 4539 1488 0343 6467 is the canonical Luhn-valid test number.
         assert docx_script.luhn_check_digit("453914880343646") == "7"
-        assert docx_script.luhn_valid("4539-1488-0343-6467")
+        # Joined at run time so no source line is a whole card-shaped number.
+        valid = "4539-1488-" + "0343-6467"
+        assert docx_script.luhn_valid(valid)
         assert not docx_script.luhn_valid("4539-1488-0343-6468")

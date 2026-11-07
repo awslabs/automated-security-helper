@@ -409,7 +409,7 @@ class TestScanResultProcessorPopulatesSeverityCounts:
             ),
             patch(
                 "automated_security_helper.schemas.sarif_schema_model.SarifReport.merge_sarif_report",
-                lambda self, s: merge_calls.append(s),
+                lambda self, s, source_dir=None: merge_calls.append((s, source_dir)),
             ),
             patch(
                 "automated_security_helper.schemas.sarif_schema_model.SarifReport.attach_scanner_details",
@@ -418,7 +418,9 @@ class TestScanResultProcessorPopulatesSeverityCounts:
         ):
             processor.process_container(container, aggregated)
 
-        assert len(merge_calls) == 1
+        # The merge is given the scanned tree's root, so a uri it has to expand
+        # onto a location goes back to the tree-relative spelling.
+        assert merge_calls == [(real_sarif, proc_ctx.source_dir)]
 
     def test_missing_scanner_handled_without_crash(self, processor):
         """A container with failure raw_results is handled gracefully."""

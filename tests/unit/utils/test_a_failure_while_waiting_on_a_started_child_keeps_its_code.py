@@ -105,12 +105,29 @@ def _runner(kind: Optional[str]) -> Iterator[None]:
         yield
 
 
+def _is_asks_to_stop(process) -> bool:
+    """Whether ``process`` is the taskkill ASH runs to stop a tool's tree on Windows.
+
+    These cells make ASH's wait on the TOOL fail by patching Popen's methods for
+    the whole class. On Windows a stop inside a cancel scope runs taskkill through
+    ``subprocess.run``, which goes through the same patched methods, so the stop
+    itself failed with the injected error and the tool was reported as one ASH
+    could not stop. The injected failure belongs to the tool's wait alone.
+    """
+    args = getattr(process, "args", None)
+    first = args[0] if isinstance(args, (list, tuple)) and args else args
+    return os.path.basename(os.fsdecode(first or "")).lower() == "taskkill.exe"
+
+
 def _reading_the_pipes_fails():
-    return patch.object(
-        subprocess.Popen,
-        "_communicate",
-        side_effect=RuntimeError("reading the pipes failed"),
-    )
+    real = subprocess.Popen._communicate
+
+    def _communicate(self, *args, **kwargs):
+        if _is_asks_to_stop(self):
+            return real(self, *args, **kwargs)
+        raise RuntimeError("reading the pipes failed")
+
+    return patch.object(subprocess.Popen, "_communicate", _communicate)
 
 
 def _tool_that_exits_3(marker) -> list:
@@ -124,6 +141,8 @@ def _communicate_returns_then_raises():
     real = subprocess.Popen.communicate
 
     def communicate(self, *args, **kwargs):
+        if _is_asks_to_stop(self):
+            return real(self, *args, **kwargs)
         real(self, *args, **kwargs)
         raise RuntimeError("handling the output failed")
 
@@ -211,7 +230,7 @@ def _waiting_fails_once_the_stderr_was_read(
     failed: list = []
 
     def communicate(self, *args, **kwargs):
-        if any(process is self for process in failed):
+        if _is_asks_to_stop(self) or any(process is self for process in failed):
             return real(self, *args, **kwargs)
         failed.append(self)
         to_send = args[0] if args else kwargs.get("input")
@@ -512,7 +531,10 @@ def test_a_raise_while_noting_the_start_stops_the_child(tmp_path, monkeypatch, k
     class _Recorded(subprocess.Popen):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            started.append(self)
+            # The tool's children only: on Windows the stop runs taskkill, a
+            # Popen of ASH's own that is not one of the two children counted.
+            if not _is_asks_to_stop(self):
+                started.append(self)
 
     monkeypatch.setattr(subprocess, "Popen", _Recorded)
     # Put back afterwards: a cancellable spawn that raised here may have left its

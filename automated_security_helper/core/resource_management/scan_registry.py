@@ -600,14 +600,15 @@ def _tool_may_be_running(pid: int) -> bool:
     return True
 
 
-def _windows_process_is_running(pid: int) -> bool:
+def _windows_process_is_running(pid: int, *, if_unasked: bool = False) -> bool:
     """The Windows probe behind ``_tool_may_be_running``.
 
     A handle whose exit code reads STILL_ACTIVE is a running process; an open
     refused for access is a running process of another user; any other refusal
     is no process. A probe that cannot ask at all (no kernel32, a call that
-    raises) answers False with a debug line, so a directory is never held for
-    good by a probe that cannot answer.
+    raises) answers ``if_unasked`` with a debug line: False by default, so a
+    directory is never held for good by a probe that cannot answer; a caller
+    that deletes only what it can prove abandoned passes True.
     """
     import ctypes
 
@@ -631,7 +632,7 @@ def _windows_process_is_running(pid: int) -> bool:
             f"Could not ask whether process {pid} is running: "
             f"{type(probe_error).__name__}"
         )
-        return False
+        return if_unasked
 
 
 def _shown_tool_name(tool: Any) -> str:

@@ -477,15 +477,17 @@ def test_arguments_a_program_would_not_get_whole_are_refused(
     os.name != "nt", reason="Windows PowerShell 5.1 runs only on Windows"
 )
 @pytest.mark.parametrize(
-    ("parameter", "refusal"),
+    ("parameter", "refusal", "exit_kind"),
     [
-        ("-Scanners 'a\"b'", "holds a double quote"),
-        ("-Scanners ''", "is empty"),
-        ("-Config 'a b\\'", "ends with a backslash"),
+        ("-Scanners 'a\"b'", "holds a double quote", "refusal"),
+        # A parameter given an empty value is a usage error (exit 5, as ./ash
+        # refuses an option given no value), checked before the quoting refusals.
+        ("-Scanners ''", "needs a value", "usage"),
+        ("-Config 'a b\\'", "ends with a backslash", "refusal"),
     ],
 )
 def test_windows_powershell_refuses_what_its_quoting_would_break(
-    tmp_path, parameter, refusal
+    tmp_path, parameter, refusal, exit_kind
 ):
     windows_powershell = shutil.which("powershell.exe")
     if windows_powershell is None:
@@ -495,7 +497,8 @@ def test_windows_powershell_refuses_what_its_quoting_would_break(
         _wrapped(f"Invoke-ASH -NoBuild -SourceDir src -OutputDir out {parameter}"),
         interpreter=windows_powershell,
     )
-    assert result.returncode == REFUSAL_EXIT, result.stdout + result.stderr
+    expected_exit = {"refusal": REFUSAL_EXIT, "usage": USAGE_ERROR_EXIT}[exit_kind]
+    assert result.returncode == expected_exit, result.stdout + result.stderr
     assert _unwrapped(refusal) in _unwrapped(result.stderr), result.stderr
     assert calls == []
 
@@ -1134,6 +1137,12 @@ _INVOKE_ASH_SITES = {
         {"files": ["blocker"]},
         {},
         USAGE_ERROR_EXIT,
+        # A file on the way is "Not a directory" on every system: where the runtime
+        # gives an errno (Linux, macOS: ENOTDIR) it is the system's text, and on
+        # Windows, where the error is an IOException with none, the helper looks at
+        # the nearest part of the path that exists and says the same when that is a
+        # file (utils/ash_helpers.ps1, "Output directory cannot be created"), as
+        # ./ash and `ash scan` do.
         "Outputdirectorycannotbecreated:blocker/out(Notadirectory)",
     ),
     "source-dir-missing": (
@@ -2993,7 +3002,10 @@ def _github_pwsh_arguments(shell: str, script: Path) -> list[str]:
     assert command == "pwsh", shell
     if not argument_format.strip():
         return ["-command", f". '{script}'"]
-    return shlex.split(argument_format.replace("{0}", str(script)))
+    # Split the format, then put the path in: shlex reads a backslash as an escape,
+    # so a Windows path split with the format lost every separator
+    # ("D:\a\_temp\step.ps1" became "D:a_tempstep.ps1").
+    return [token.replace("{0}", str(script)) for token in shlex.split(argument_format)]
 
 
 def _github_pwsh_contents(run: str) -> str:

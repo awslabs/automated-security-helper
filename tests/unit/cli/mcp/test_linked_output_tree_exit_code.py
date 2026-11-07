@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict
 from unittest.mock import AsyncMock, MagicMock
 
@@ -137,7 +137,9 @@ def test_both_scans_refuse_the_same_link_with_exit_code_3(tmp_path, executions, 
         assert response["exit_code_meaning"] == ASH_EXIT_CODES[3], response
     for field in ("error", "error_type", "error_category", "context"):
         assert single[field] == workspace[field], (field, single, workspace)
-    assert single["context"]["output_component"] == linked, single
+    # The component is named as the platform spells the path (".ash\ash_output" on
+    # Windows); the parameter is the posix spelling.
+    assert PurePath(single["context"]["output_component"]).as_posix() == linked, single
     assert executions == [], "the workspace scan ran with a linked output tree"
     assert _contents(tmp_path / "outside") == before
 

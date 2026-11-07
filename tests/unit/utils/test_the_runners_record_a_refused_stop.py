@@ -250,6 +250,7 @@ _LEADER_RUNS_WITH_SURVIVOR = (
 )
 
 
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX's case")
 def test_a_kill_the_kernel_reports_done_with_a_survivor_is_a_failed_stop(
     tmp_path, monkeypatch
 ):
@@ -307,6 +308,7 @@ def test_a_kill_the_kernel_reports_done_with_a_survivor_is_a_failed_stop(
             leader.wait(timeout=10)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX's case")
 def test_a_refused_stop_reports_no_exit_code(tmp_path, monkeypatch):
     """A tool ASH could not stop has no exit code to report (error_after's own
     contract): the leader's exit code is the leader's alone, and a survivor may

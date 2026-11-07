@@ -179,8 +179,16 @@ class TestSafeReadJsonFileNamesEachFailure:
 
         assert data is None
         assert error is not None
-        assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
-        assert "not a file" in str(error)
+        if os.name == "nt":
+            # Windows refuses to open a directory at all (PermissionError), so
+            # the window never reaches the fstat: the read is refused at the
+            # open and categorized as a permission failure, and nothing is read.
+            assert error.context["error_category"] == (
+                ErrorCategory.PERMISSION_DENIED.value
+            )
+        else:
+            assert error.context["error_category"] == ErrorCategory.INVALID_PATH.value
+            assert "not a file" in str(error)
 
     def test_the_control_a_regular_file_is_read_through_the_descriptor(self, tmp_path):
         path = tmp_path / "ASH.ScanResults.json"

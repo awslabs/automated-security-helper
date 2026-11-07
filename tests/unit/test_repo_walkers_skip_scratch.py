@@ -506,10 +506,11 @@ _EXEMPT.update(
             "writes a per-run directory there."
         ),
         # literal globs
-        (".github/scripts/combine-unit-coverage.py", "main", "results"): (
+        (".github/scripts/combine-unit-coverage.py", "find_shard_dirs", "results"): (
             "results is the --results-dir the CI job downloads its own shard "
-            "artifacts into (a tmp directory in the self-tests); artifact_prefix "
-            "carries no wildcard or separator, so the glob matches one directory "
+            "artifacts into (a tmp directory in the self-tests); the prefix "
+            "main() builds from the job's OS, label and Python version carries "
+            "no wildcard or separator, so the glob matches one directory "
             "level of that store and never descends."
         ),
         ("tests/unit/deploy/test_deploy_ash_cli_contract.py", "_pins", "DEPLOY"): (

@@ -136,7 +136,10 @@ def scan(tmp_path_factory, installed_example):
     )
     # Not a template: its name ends in a space. A converter that strips the
     # scan-set names reads it as settings.py.tmpl and converts that file twice.
-    (tree / "settings.py.tmpl ").write_text("NAME = 'other'\n", encoding="utf-8")
+    # Windows drops a trailing space from a file name, so there this write would
+    # replace the real template; the decoy is a POSIX file name.
+    if sys.platform != "win32":
+        (tree / "settings.py.tmpl ").write_text("NAME = 'other'\n", encoding="utf-8")
     output = base / "out"
 
     env = _scan_env(base)

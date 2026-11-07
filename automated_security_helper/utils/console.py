@@ -56,9 +56,10 @@ own escape so it still parses (cli/report.py's _write_report).
 console, so off a terminal its output is not always the configuration
 character for character.
 
-Limits: a command form split across two writes is not seen. Rich writes each
-print's render in one write, so that needs ASH to print one message in two
-parts.
+Limits: a "::" split across two writes is not seen, and a "##name[" is seen only
+as command_safe_stream.py says. Rich writes each print's render in one write,
+except on a Windows console it renders for itself (``legacy_windows``), which
+writes each styled run of a message on its own.
 """
 
 from __future__ import annotations
@@ -201,6 +202,9 @@ def typer_console(*, stderr: bool = True) -> Console:
         force_terminal = True
     if os.environ.get("_TYPER_FORCE_DISABLE_TERMINAL"):
         force_terminal = False
+    # A Windows pipe child reads legacy_windows true and the legacy renderer writes
+    # no ANSI, defeating the force; a forced terminal gets the ANSI renderer.
+    legacy_windows: Optional[bool] = False if force_terminal else None
     width = _typer_terminal_width(os.environ.get("TERMINAL_WIDTH", ""))
     return ash_console(
         stderr=stderr,
@@ -218,6 +222,7 @@ def typer_console(*, stderr: bool = True) -> Console:
         highlighter=rich_utils.highlighter,
         color_system=rich_utils.COLOR_SYSTEM,
         force_terminal=force_terminal,
+        legacy_windows=legacy_windows,
         width=width,
     )
 

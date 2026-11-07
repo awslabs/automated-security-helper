@@ -21,7 +21,11 @@ wraps a stream can use it without utils/console.py, whose import sets up rich's
 global console. utils/console.py builds every console ASH prints through on this
 stream.
 
-Limits: a command form split across two writes is not seen.
+Limits: a "##name[" split across two writes is seen only when the first write
+ends with its "#" or "##name": the "[" that completes it is written ``\\x5b``.
+A "::" split across two writes is not seen. Rich's Windows console render
+(``legacy_windows``) writes each styled run on its own, so a message holding a
+command can reach the stream that way.
 """
 
 from __future__ import annotations
@@ -75,6 +79,13 @@ _LINE_START_PREFIX = re.compile(rf"(:)(?=(?:{_TERMINAL_SEQUENCE})*:)")
 _NAMED_HASH_COMMAND = re.compile(
     rf"(?<!\\)(\\*)#(?=(?:{_TERMINAL_SEQUENCE})*#(?:[A-Za-z]|{_TERMINAL_SEQUENCE})*\[)"
 )
+
+#: A "##name[" in text, for the one that a write boundary splits (``_safe``).
+_NAMED_HASH_COMMAND_FORM = re.compile(r"##[A-Za-z]*\[")
+
+#: What a write may end with that the next write's "[" completes into a command:
+#: a "#", or "##" with the start of a name.
+_TRAILING_HASHES = re.compile(r"#(?:#[A-Za-z]*)?\Z")
 
 #: What a line start's command prefix has its first character written as.
 _LINE_START_ESCAPES = {":": "\\x3a"}
@@ -177,6 +188,10 @@ class CommandSafeStream:
         # Whether everything written since the last line break is whitespace or
         # terminal sequences, so the next text still starts the line.
         self._at_line_start = True
+        # The "#" or "##name" the last checked write ended its line with, so a
+        # "[" that starts the next write completes a command form the two
+        # writes split (see _safe).
+        self._carry = ""
         # One stream is written from several threads, each under a lock of its
         # own or none: sys.stderr's wrap in MCP server mode takes two Rich
         # consoles' writes, logging's lastResort, the warning and except hooks,
@@ -317,10 +332,12 @@ class CommandSafeStream:
             # state the check would have left. Read alone: the checked text
             # itself is not written here.
             self._at_line_start = self._line_state_after(text, self._at_line_start)
+            self._carry = self._carry_after(text, self._carry)
             return written
-        safe, at_line_start = self._safe(text, self._at_line_start)
+        safe, at_line_start, carry = self._safe(text, self._at_line_start)
         target.write(safe)
         self._at_line_start = at_line_start
+        self._carry = carry
         return len(text)
 
     def _drain_pending(self) -> None:
@@ -332,35 +349,20 @@ class CommandSafeStream:
         error is raised once the list is empty. Stranded items would land
         after some later write's text, or never. A KeyboardInterrupt raised
         while an item lands is held the same way: the items after it still
-        land, and it is raised once the list is empty."""
+        land, and it is raised once the list is empty.
+
+        A deferred text write never splits a held character: the multi-byte
+        tail a byte write left held stays held across every deferred item,
+        text included, and is joined to the rest of its character by the next
+        byte write (or written whole by a flush or a fresh write's own
+        landing). Emitted ahead of a deferred text item, the tail reached the
+        stream with the text between its two halves, which is invalid UTF-8
+        on the wire."""
         error: BaseException | None = None
-        if self._checked_buffer is not None and any(
-            isinstance(item, str) for item in self._pending
-        ):
-            # Bytes a buffer write left held land first, where they were
-            # written, as write() has them land before its own text: once, at
-            # the start, ahead of every deferred item. Emitted only right
-            # before the first deferred TEXT item, the tail landed after the
-            # deferred BYTE items before it (b"caf\xc3" then [b"B2", "T"] wrote
-            # caf, B2, \xc3, T), neither where it was written nor joined to the
-            # rest of its character. A batch of byte items alone leaves the tail
-            # held for the next write, which joins it to the rest of its
-            # character. The emit is inside the hold-first-error scheme like
-            # every item: a tail write that raised, outside it, left every
-            # pending item stranded.
-            try:
-                self._checked_buffer._emit_tail()
-            except BaseException as exc:
-                error = exc
         while self._pending:
             item = self._pending.pop(0)
             try:
                 if isinstance(item, str):
-                    if self._checked_buffer is not None:
-                        # A text item deferred while this drain ran, after a
-                        # byte item landed: the tail is already out (above), so
-                        # this is a no-op unless a write since then held one.
-                        self._checked_buffer._emit_tail()
                     self._write_text(item)
                 elif self._checked_buffer is not None:
                     # Bytes defer only through the wrap's own buffer view.
@@ -383,16 +385,35 @@ class CommandSafeStream:
         finally:
             self._mid_write = False
 
-    def _safe(self, text: str, at_line_start: bool) -> tuple[str, bool]:
+    def _safe(self, text: str, at_line_start: bool) -> tuple[str, bool, str]:
         """*text* with its command forms broken when *at_line_start* starts it,
-        and whether the next text starts a line. State goes in and comes out so
-        the caller commits it only once the text has reached the stream."""
+        whether the next text starts a line, and the carry the next text
+        starts from. State goes in and comes out so the caller commits it
+        (``_at_line_start`` and ``_carry`` together) only once the text has
+        reached the stream.
+
+        The "#" or "##name" a line's last write ended with is kept (``_carry``):
+        Rich's Windows console render writes each styled run of a message on its
+        own, so "##vso" and "[task.setvariable ...]" can arrive in two writes.
+        The "[" that completes such a form is written ``\\x5b``, since the "#"
+        that began it has been written already."""
         pieces = _LINE_BREAK.split(text)
+        carry = self._carry
         for index in range(0, len(pieces), 2):
             if index:
                 at_line_start = True
+                carry = ""
+            piece = pieces[index]
+            if carry:
+                crossing = _NAMED_HASH_COMMAND_FORM.search(carry + piece)
+                if crossing is not None and crossing.start() < len(carry):
+                    at = crossing.end() - 1 - len(carry)
+                    piece = piece[:at] + "\\x5b" + piece[at + 1 :]
             # A "##name[" anywhere, then a "::" that starts the line.
-            piece = _NAMED_HASH_COMMAND.sub(_hash_command_broken, pieces[index])
+            piece = _NAMED_HASH_COMMAND.sub(_hash_command_broken, piece)
+            if piece:
+                tail = _TRAILING_HASHES.search(carry + piece)
+                carry = tail.group(0) if tail is not None else ""
             if at_line_start:
                 # _LINE_LEAD can match nothing, so it matches every piece.
                 lead_match = _LINE_LEAD.match(piece)
@@ -404,7 +425,23 @@ class CommandSafeStream:
                 if lead < len(piece):
                     at_line_start = False
             pieces[index] = piece
-        return "".join(pieces), at_line_start
+        return "".join(pieces), at_line_start, carry
+
+    @staticmethod
+    def _carry_after(text: str, carry: str) -> str:
+        """The carry once *text* has been written as is: what :meth:`_safe`
+        would have left, read without building the checked text. A write that
+        passes as is keeps the carry current, so a checked write after it
+        (the as-is-to-checked transition) still breaks a form that began in
+        the as-is text."""
+        pieces = _LINE_BREAK.split(text)
+        if len(pieces) > 1:
+            carry = ""
+        last = pieces[-1]
+        if last:
+            tail = _TRAILING_HASHES.search(carry + last)
+            carry = tail.group(0) if tail is not None else ""
+        return carry
 
     @staticmethod
     def _line_state_after(text: str, at_line_start: bool) -> bool:
@@ -600,6 +637,7 @@ class CommandSafeBuffer(io.BufferedIOBase):
             written = target.write(given)
             text = tail + codecs.decode(given, "utf-8", "surrogateescape")
             owner._at_line_start = owner._line_state_after(text, owner._at_line_start)
+            owner._carry = owner._carry_after(text, owner._carry)
             return written
         if deferred:
             # A deferred byte write, drained after the write it interrupted:
@@ -611,9 +649,10 @@ class CommandSafeBuffer(io.BufferedIOBase):
             text = codecs.decode(given, "utf-8", "surrogateescape")
         else:
             text = self._decoder.decode(given)
-        safe, at_line_start = owner._safe(text, owner._at_line_start)
+        safe, at_line_start, carry = owner._safe(text, owner._at_line_start)
         target.write(_encoded(safe))
         owner._at_line_start = at_line_start
+        owner._carry = carry
         return len(given)
 
     def _emit_held(self) -> None:
@@ -643,15 +682,17 @@ class CommandSafeBuffer(io.BufferedIOBase):
     def _emit_tail(self) -> None:
         """Write the held tail, checked from the line state, with _mid_write
         already set and under the owner's lock: the body of :meth:`_emit_held`,
-        also run by the owner's drain before a deferred text item lands, so
-        the tail of the byte write that deferred it lands ahead of it."""
+        also run by the owner's landing of what a fresh write finds held. The
+        drain of deferred writes does not run it: a deferred text write never
+        splits a held character."""
         owner = self._owner
         tail = self._decoder.decode(b"", True)
         self._decoder.reset()
         if tail:
-            safe, at_line_start = owner._safe(tail, owner._at_line_start)
+            safe, at_line_start, carry = owner._safe(tail, owner._at_line_start)
             self._target_buffer().write(_encoded(safe))
             owner._at_line_start = at_line_start
+            owner._carry = carry
 
     def flush(self) -> None:
         # Quiet on a target that is closed or detached, not on a closed view:

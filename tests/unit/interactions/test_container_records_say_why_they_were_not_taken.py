@@ -62,6 +62,15 @@ def test_a_platform_without_directory_descriptors_takes_no_record_and_says_nothi
     assert logged.at(logging.WARNING) == [], logged.at(logging.WARNING)
 
 
+# Windows has no directory descriptors, so no state directory is made or opened
+# there and nothing is reported: the first cell above is its contract.
+_NEEDS_DIRECTORY_DESCRIPTORS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows takes no container record (the cell above pins that)",
+)
+
+
+@_NEEDS_DIRECTORY_DESCRIPTORS
 def test_a_state_directory_that_cannot_be_made_is_reported_as_that_at_debug(
     monkeypatch, logged
 ):
@@ -78,6 +87,7 @@ def test_a_state_directory_that_cannot_be_made_is_reported_as_that_at_debug(
     assert "ash-scan-1-0a1b2c3d" in reasons[0]
 
 
+@_NEEDS_DIRECTORY_DESCRIPTORS
 def test_a_state_directory_that_is_a_symlink_still_gets_the_warning(
     tmp_path, monkeypatch, logged
 ):

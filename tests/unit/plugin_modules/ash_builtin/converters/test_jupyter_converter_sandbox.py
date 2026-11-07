@@ -53,7 +53,7 @@ from automated_security_helper.utils import (
 )
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, checkout_env
 from tests.utils.stand_ins import on_windows, write_stand_in
 
 # Marked per class, not per module: the stand-in backend runs every planned command
@@ -169,6 +169,30 @@ sys.exit(2)
 def _tool_name(program) -> str:
     """The tool a started program stands for: ``uv`` for ``uv`` and for ``uv.bat``."""
     return Path(program).stem
+
+
+def _same_file(a, b) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(
+        os.path.realpath(b)
+    )
+
+
+def _started(argv) -> tuple:
+    """``(tool, its arguments)`` for a planned argv, as the stand-in logs the call.
+
+    On POSIX the argv is the stand-in script and its arguments. On Windows the spawn
+    layer has already replaced a ``.bat`` launcher by what it runs (see
+    ``_start_launchers_as_their_batch_file_does``), so the planned argv is this
+    interpreter, the stand-in's ``<name>.py`` and the arguments, while the stand-in
+    logs ``[name, *arguments]``. Both name the same call.
+    """
+    if (
+        len(argv) > 1
+        and Path(argv[1]).suffix == ".py"
+        and _same_file(argv[0], sys.executable)
+    ):
+        return Path(argv[1]).stem, list(argv[2:])
+    return _tool_name(argv[0]), list(argv[1:])
 
 
 class _Tools:
@@ -289,12 +313,63 @@ def _give_launchers_an_interpreter(monkeypatch, tools: _Tools) -> None:
     monkeypatch.setattr(pre_installed_tool, "find_tool_interpreter", find)
 
 
+def _start_launchers_as_their_batch_file_does(monkeypatch, tools: _Tools) -> None:
+    """Start a stand-in's ``.bat`` launcher by what the launcher runs, on Windows.
+
+    The spawn layer never hands a batch file to cmd.exe when it can avoid it
+    (``subprocess_utils._non_batch_substitute``): it runs the ``.exe`` beside the
+    shim, or else the interpreter with ``-m <the shim's name>`` when that name is
+    importable here. ``uv`` is importable here, because ASH depends on the ``uv``
+    package, so the stand-in ``uv.bat`` was replaced by ``runpy`` on the real
+    ``uv`` module: the CI log of the Windows shard shows the real uv installing
+    nbconvert in a test that asserts the stand-in's install list, and its cache
+    left in the test's HOME. A launcher of ``tools`` is started as the launcher
+    itself would start it: this interpreter on the stand-in's script. Any other
+    batch file is substituted as before.
+    """
+    real = subprocess_utils._non_batch_substitute
+    stand_in_dir = os.path.normcase(os.path.realpath(tools.bin))
+
+    def substitute(program):
+        script = Path(os.path.splitext(os.fspath(program))[0] + ".py")
+        parent = os.path.normcase(os.path.realpath(script.parent))
+        if parent == stand_in_dir and script.is_file():
+            return [sys.executable, str(script)]
+        return real(program)
+
+    monkeypatch.setattr(subprocess_utils, "_non_batch_substitute", substitute)
+
+
 def _isolate_tool_lookup(monkeypatch, tools: _Tools, home: Path, *, online: bool):
     monkeypatch.setenv("PATH", str(tools.bin))
     monkeypatch.setenv("ASH_BIN_PATH", str(tools.bin))
     # The uv beside this interpreter is preferred over PATH's; the stand-in is
     # the uv every check here must reach.
     monkeypatch.setattr(uv_tool_runner, "bundled_uv_executable", lambda: None)
+    # find_executable also searches ASH's own environment after PATH, once per
+    # candidate suffix: on Windows it tries ``uv.exe`` in every directory (the
+    # environment's Scripts directory included) before it tries the stand-in's
+    # ``uv.bat``, so the real uv.exe beside this interpreter answered, ran in the
+    # test's HOME and left its cache there. Only the stand-ins' directory is searched.
+    monkeypatch.setattr(subprocess_utils, "own_environment_dirs", list)
+
+    # On Windows the project venv's Scripts directory outranks the stand-ins on
+    # PATH, and a probe there read ``find_uv_or_none()`` and
+    # ``UVToolRunner().uv_executable`` both as ``.venv\Scripts\uv.exe``: the real
+    # uv verified and installed during these tests and left its cache in HOME. So
+    # the resolver itself answers with the stand-in's launcher, the one file the
+    # directory holds for uv, or None once a test has taken the stand-in away.
+    # ``UVToolRunner.uv_executable`` and the pre-installed check both ask this
+    # function, so no other uv can be reached.
+    def stand_in_uv() -> str | None:
+        for candidate in ("uv.bat", "uv"):
+            path = tools.bin / candidate
+            if path.is_file():
+                return str(path)
+        return None
+
+    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", stand_in_uv)
+    _start_launchers_as_their_batch_file_does(monkeypatch, tools)
     _give_launchers_an_interpreter(monkeypatch, tools)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv(TOKEN_VARIABLE, "token-value")
@@ -443,9 +518,9 @@ class TestNoInstallUnderASandbox:
         # `uv tool run --from nbconvert` fetches a package it does not have when it
         # can reach the index, so each one must have run without a network.
         offline_runs = {
-            tuple(argv[1:])
+            tuple(_started(argv)[1])
             for argv, policy, _env in backend.spawns
-            if _tool_name(argv[0]) == "uv" and policy.network is False
+            if _started(argv)[0] == "uv" and policy.network is False
         }
         unconfined = [
             c
@@ -547,9 +622,7 @@ class TestNbconvertRunsUnderTheSandbox:
         unplanned = [
             c
             for c in ran
-            if not any(
-                _tool_name(argv[0]) == c[0] and argv[1:] == c[1:] for argv in planned
-            )
+            if not any(_started(argv) == (c[0], c[1:]) for argv in planned)
         ]
         assert unplanned == [], (
             f"nbconvert processes ran without the sandbox backend: {unplanned}"
@@ -700,11 +773,12 @@ class TestASandboxedConversionRunsNbconvertItself:
         )
         planned = [argv for argv, _policy, _env in backend.spawns if "--to" in argv]
         assert planned and all(
-            _tool_name(argv[0]) == "jupyter-nbconvert" for argv in planned
+            _started(argv)[0] == "jupyter-nbconvert" for argv in planned
         ), f"nbconvert ran as {planned}"
         # nbconvert's own arguments follow the executable unchanged.
         assert all(
-            argv[1:5] == ["--log-level", "WARN", "--to", "python"] for argv in planned
+            _started(argv)[1][:4] == ["--log-level", "WARN", "--to", "python"]
+            for argv in planned
         ), f"nbconvert ran as {planned}"
 
     def test_without_a_sandbox_uv_still_runs_it(
@@ -962,7 +1036,7 @@ class TestTheConverterConfinesItselfOutsideThePhase:
 
         def planned_since(spawns_before):
             return Counter(
-                (_tool_name(argv[0]), *argv[1:])
+                (_started(argv)[0], *_started(argv)[1])
                 for argv, _policy, _env in backend.spawns[spawns_before:]
             )
 
@@ -1135,6 +1209,7 @@ class TestTheStandInsCanBeStartedOnWindows:
         for name in self.NAMES:
             subprocess.run(  # nosec B603 - this interpreter, on the test's own script
                 [sys.executable, str(tools.bin / f"{name}.py"), "--version"],
+                env=checkout_env(),
                 capture_output=True,
                 check=False,
                 timeout=CHILD_TIMEOUT_SECONDS,

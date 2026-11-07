@@ -105,6 +105,10 @@ def test_the_runner_keeps_the_exit_code_when_the_log_write_raises(tmp_path, exit
 
 #: What the stderr tool writes: two lines, one holding an ESC.
 TOOL_STDERR = "warning: one\nwarning: two \x1b[31mred\n"
+# What the stderr LOG holds: ASH writes the captured text to the log in text
+# mode, so on Windows each "\n" is stored as "\r\n", and the read-back returns
+# the log's bytes as they are.
+LOG_STDERR = TOOL_STDERR.replace("\n", os.linesep)
 
 
 def _tool_with_stderr(exit_code: int) -> List[str]:
@@ -318,7 +322,7 @@ def test_under_write_the_stderr_log_is_read_back(tmp_path):
     response = _handling_fails_after(tmp_path, _tool_with_stderr(1))
 
     assert response["post_run_error"] is True, response
-    assert response.get("stderr") == TOOL_STDERR, response
+    assert response.get("stderr") == LOG_STDERR, response
 
 
 @pytest.mark.integration
@@ -350,7 +354,7 @@ def test_a_stderr_log_read_back_is_bounded(tmp_path, monkeypatch):
 
     response = _handling_fails_after(tmp_path, _tool_with_stderr(1))
 
-    assert response.get("stderr") == TOOL_STDERR[:16] + " ...[truncated]", response
+    assert response.get("stderr") == LOG_STDERR[:16] + " ...[truncated]", response
 
 
 class _LogReplacedByALink(_IgnoresTheResponse):

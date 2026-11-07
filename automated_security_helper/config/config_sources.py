@@ -3550,8 +3550,9 @@ def _normalize_pointer(
     two patch walks reach one canonical path and a spelling whose type word
     a separator splits -- which folds by name alone but names no plugin the
     lookup reads -- stays as typed on both. Only when EXACTLY ONE existing
-    key matches: a merged document can hold two case-variant keys of an
-    undeclared section (deep_merge joins only "-"/"_" twins), and picking
+    key matches: a document can hold two case-variant keys of a section
+    (deep_merge joins every spelling of a plugin section the plugin lookup
+    reads, and only "-"/"_" twins elsewhere), and picking
     one by insertion order would land the op on a key the plugin does not
     read while the override resolver refuses the same spelling as ambiguous
     -- so an ambiguous segment stays as typed. A deeper key that happens to
@@ -4832,10 +4833,16 @@ def _resolve(
                     if stat.S_ISDIR(mode)
                     else OSError(errno.EINVAL, "Not a regular file")
                 )
+            # An extends value read from the environment is named by reference
+            # (``ref`` is then ENVIRONMENT_VALUE_SHOWN, ``_shown_chain_path``'s
+            # word), whatever spelling ``resolve`` gave the path: where a link
+            # loop fails early (Windows, 3.14) ``real`` is not the path the
+            # environment chose and the membership test above misses it.
+            by_reference = hidden or ref == ENVIRONMENT_VALUE_SHOWN
             raise ASHConfigSourceError(
                 f"'{EXTENDS_KEY}: {ref}' in {state.shown(extending)} names "
-                f"{state.shown(real) if hidden else real.as_posix()}, which does "
-                "not exist or is not a file"
+                f"{ENVIRONMENT_VALUE_SHOWN if by_reference else real.as_posix()}, "
+                "which does not exist or is not a file"
             ) from cause
         # Judged by the name the entry spells as well as the file it reaches, as
         # the root is: a base reached through a client's link is the client's.

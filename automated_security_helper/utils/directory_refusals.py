@@ -52,7 +52,7 @@ import errno
 import os
 import secrets
 import stat
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 from typing_extensions import Self
 
@@ -64,6 +64,10 @@ REFUSED_CANNOT_BE_ENTERED = "cannot_be_entered"
 REFUSED_CANNOT_BE_CREATED = "cannot_be_created"
 REFUSED_CANNOT_BE_WRITTEN = "cannot_be_written"
 REFUSED_NOT_A_VALID_PATH = "not_a_valid_path"
+
+#: The Windows error codes (``OSError.winerror``) stat gives a name that cannot
+#: exist: ERROR_INVALID_PARAMETER, ERROR_INVALID_NAME and ERROR_BAD_PATHNAME.
+_WINDOWS_INVALID_NAME_ERRORS = frozenset({87, 123, 161})
 
 
 class DirectoryRefusal(str):
@@ -83,15 +87,18 @@ class DirectoryRefusal(str):
     kind: str
     error_number: Optional[int]
 
-    def __new__(cls, text: str, kind: str, error_number: Optional[int] = None) -> Self:
-        refusal = super().__new__(cls, text)
+    @classmethod
+    def of(cls, text: str, kind: str, error_number: Optional[int] = None) -> Self:
+        """The refusal reading *text*, for the reason *kind* (and *error_number*).
+
+        Made from the text alone and given its reason after, so the class keeps no
+        constructor of its own: a copy or a pickle carries the reason in its
+        instance state, with the text from ``str``'s own reduction.
+        """
+        refusal = cls(text)
         refusal.kind = kind
         refusal.error_number = error_number
         return refusal
-
-    def __getnewargs__(self) -> tuple[Any, ...]:
-        # So a copy or a pickle of the refusal rebuilds it with its reason.
-        return (str(self), self.kind, self.error_number)
 
 
 def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
@@ -112,6 +119,13 @@ def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
     except OSError as error:
         # A link that leads back to itself names nothing, as a link to nothing does.
         if error.errno == errno.ELOOP:
+            return f"Source directory does not exist: {path}"
+        # Windows answers a name it cannot hold (a control character such as a
+        # newline, or characters a name may not carry) with a WinError instead
+        # of ENOENT: 87 (invalid parameter), 123 (invalid name) or 161 (bad
+        # path). POSIX answers ENOENT for the same name, which is "does not
+        # exist"; a name that cannot exist is not one that cannot be entered.
+        if getattr(error, "winerror", None) in _WINDOWS_INVALID_NAME_ERRORS:
             return f"Source directory does not exist: {path}"
         return f"Source directory cannot be entered: {path}"
     if not stat.S_ISDIR(mode):
@@ -153,7 +167,7 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
     except ValueError:
         # The OS takes no such path, so nothing could ever make or enter it:
         # its own refusal, worded as the source directory's is.
-        return DirectoryRefusal(
+        return DirectoryRefusal.of(
             f"Output directory is not a valid path: {path}", REFUSED_NOT_A_VALID_PATH
         )
     except OSError as error:
@@ -161,11 +175,11 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
             path, error.strerror or type(error).__name__, error.errno
         )
     if not stat.S_ISDIR(mode):
-        return DirectoryRefusal(
+        return DirectoryRefusal.of(
             f"Output directory is not a directory: {path}", REFUSED_NOT_A_DIRECTORY
         )
     if not os.access(path, os.X_OK):
-        return DirectoryRefusal(
+        return DirectoryRefusal.of(
             f"Output directory cannot be entered: {path}",
             REFUSED_CANNOT_BE_ENTERED,
             errno.EACCES,
@@ -190,7 +204,7 @@ def output_dir_invalid_path(output_dir: PathLike) -> Optional[DirectoryRefusal]:
     """
     path = os.fspath(output_dir)
     if "\x00" in path:
-        return DirectoryRefusal(
+        return DirectoryRefusal.of(
             f"Output directory is not a valid path: {path}", REFUSED_NOT_A_VALID_PATH
         )
     return None
@@ -291,7 +305,7 @@ def output_dir_unmakeable(
     *error_number* is the error's errno, kept on the refusal for a caller that
     sorts refusals (:class:`DirectoryRefusal`).
     """
-    return DirectoryRefusal(
+    return DirectoryRefusal.of(
         f"Output directory cannot be created: {os.fspath(output_dir)} ({reason})",
         REFUSED_CANNOT_BE_CREATED,
         error_number,
@@ -304,7 +318,7 @@ def output_dir_unwritable(
     """The refusal for *output_dir* when no file could be made in it, *reason* being
     the error's strerror, such as ``Permission denied``, and *error_number* its
     errno (``ENOSPC`` for a full disk, which is not a permission)."""
-    return DirectoryRefusal(
+    return DirectoryRefusal.of(
         f"Output directory cannot be written: {os.fspath(output_dir)} ({reason})",
         REFUSED_CANNOT_BE_WRITTEN,
         error_number,

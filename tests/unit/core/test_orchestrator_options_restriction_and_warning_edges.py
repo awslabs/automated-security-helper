@@ -32,6 +32,7 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.env_assertions import environ_names
 from tests.utils.helpers import results_of_a_scan
 
 pytestmark = pytest.mark.unit
@@ -124,7 +125,7 @@ class TestTheOptionsTheCallerSet:
 
         # Red at the base: nothing set the variable, so every scanner ran online.
         assert seen == ["YES"]
-        assert "ASH_OFFLINE" not in os.environ
+        assert "ASH_OFFLINE" not in environ_names()
 
     def test_an_online_run_leaves_the_variable_alone(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ASH_OFFLINE", raising=False)
@@ -163,7 +164,7 @@ class TestTheOptionsTheCallerSet:
         orchestrator.execute_scan(phases=["report"])
 
         assert seen == ["YES"]
-        assert "ASH_OFFLINE" not in os.environ
+        assert "ASH_OFFLINE" not in environ_names()
 
     def test_the_hold_nests_with_the_callers_own(self, tmp_path, monkeypatch):
         """The CLI and the workspace hold the same value around the whole run; the

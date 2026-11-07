@@ -152,6 +152,11 @@ def test_the_models_reproduce_the_measured_over_matches():
 def _tree(tmp_path: Path, output: str, look_alike: str, source_name: str = "repo"):
     source = tmp_path / source_name
     for relative in (look_alike, output, "src"):
+        if os.name == "nt" and set(relative) & set('<>:"|?*'):
+            # Windows cannot hold a directory with one of these characters in
+            # its name, so there is none to create: the output directory is
+            # only a name there, and the checks that follow read the name.
+            continue
         (source / relative).mkdir(parents=True, exist_ok=True)
         (source / relative / "x.py").write_text("x = 1\n", encoding="utf-8")
     return source, source / output
@@ -343,7 +348,15 @@ def _checkov_skip_paths(source, output_dir):
         ("out{2}", "outt"),
         ("out[1]", "out1"),
         ("out]z", "outz"),
-        ("out|q", "q"),
+        pytest.param(
+            "out|q",
+            "q",
+            marks=pytest.mark.skipif(
+                os.name == "nt",
+                reason="a vertical bar cannot be in a Windows file name "
+                "(WinError 123), so no such output directory can exist there",
+            ),
+        ),
     ],
 )
 def test_checkov_skips_exactly_an_output_dir_named_with_regex_syntax(

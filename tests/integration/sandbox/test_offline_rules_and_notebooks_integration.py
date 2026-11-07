@@ -32,6 +32,7 @@ import pytest
 
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
+from tests.utils.helpers import checkout_env
 
 pytestmark = pytest.mark.integration
 
@@ -103,7 +104,7 @@ def _rules(tmp_path: Path, content: str) -> Path:
 def _scan(tmp_path: Path, sandbox: str, *, scanners: str, env_extra: dict, extra=()):
     source = tmp_path / "src"
     output = tmp_path / "out"
-    env = {**os.environ, **env_extra}
+    env = checkout_env({**os.environ, **env_extra})
     command = [
         _ash_executable(),
         "scan",

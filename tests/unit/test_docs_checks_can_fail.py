@@ -24,11 +24,14 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.utils.helpers import checkout_env, importing_this_checkout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKS_PATH = REPO_ROOT / "scripts" / "docs_checks.py"
@@ -3418,15 +3421,17 @@ def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
         capture_output=True,
         text=True,
         check=False,
+        env=checkout_env(),
     )
-    # The package a fresh interpreter imports, which is what the gate process sees; in
-    # this process the current directory may come first on the import path.
+    # The package a fresh interpreter imports, which is what the gate process sees
+    # (both are pointed at this checkout); in this process the current directory may
+    # come first on the import path.
     probe = subprocess.run(
         [
             sys.executable,
             "-I",
             "-c",
-            (
+            importing_this_checkout(
                 "import importlib.util, pathlib; s = importlib.util.find_spec("
                 "'automated_security_helper'); print(pathlib.Path("
                 "next(iter(s.submodule_search_locations))).resolve())"
@@ -3447,7 +3452,11 @@ def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
         line for line in lines if line.startswith("        - the check did not run: ")
     ]
     assert not_run, result.stdout
-    assert all("docs/content/reference/" in line for line in not_run), not_run
+    # The error text quotes the path as the OS spells it: on Windows with
+    # backslashes, doubled by the repr of the message, so a run of them is a separator.
+    assert all(
+        "docs/content/reference/" in re.sub(r"\\+", "/", line) for line in not_run
+    ), not_run
     assert result.returncode == 2
 
 

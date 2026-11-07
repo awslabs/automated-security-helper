@@ -47,17 +47,28 @@ LATE_MARKER = "zq8late_marker_line"
 #: with each finished run's handlers off the logger, it reaches neither log.
 AFTER_MARKER = "zq8after_runs_marker"
 
+#: Every built-in scanner, disabled in the test configs so each scan runs only
+#: its own zq8 scanner. cfn-lint and zizmor were left enabled: each asks uv for
+#: its tool, and on Windows a real uv (not the stand-in) resolved them from the
+#: index and wrote its cache and tool directory under the unit guard's HOME,
+#: which the guard's teardown then refused ("left a tool's files in HOME").
 BUILT_INS = (
+    "actionlint",
     "bandit",
     "cdk-nag",
+    "cfn-guard",
+    "cfn-lint",
     "cfn-nag",
     "checkov",
     "detect-secrets",
+    "gitleaks",
     "grype",
     "npm-audit",
     "opengrep",
     "semgrep",
     "syft",
+    "trivy",
+    "zizmor",
 )
 
 GOOD_SOURCE = textwrap.dedent(

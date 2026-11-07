@@ -53,6 +53,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import pytest
 import yaml
 
+from tests.utils.helpers import checkout_env
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
 PACKAGE = "_ash_ci_runners"
@@ -1666,7 +1668,8 @@ def test_each_launcher_starts_its_runner_with_env_i(tmp_path, launcher):
     assert kwargs.get("cwd") == tmp_path
     assert kwargs.get("stdin") == subprocess.DEVNULL
     assert kwargs.get("stdout") not in (None, sys.stdout), "output goes to the log"
-    assert kwargs.get("env") == {"PATH": _api("env", "SYSTEM_PATH")}, (
+    env_is_system_path_only = kwargs.get("env") == {"PATH": _api("env", "SYSTEM_PATH")}
+    assert env_is_system_path_only, (
         "env itself is found on the system PATH, never on the test process's own"
     )
     assert kwargs.get("timeout") is None
@@ -1864,7 +1867,7 @@ def _collect(path: Path, *flags: str) -> subprocess.CompletedProcess:
         text=True,
         timeout=300,
         check=False,
-        env=_not_a_hosted_runner(),
+        env=checkout_env(_not_a_hosted_runner()),
     )
 
 

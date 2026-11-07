@@ -112,7 +112,9 @@ class BlockResult:
             return True
         if self.expected == "nonzero":
             # 126 and 127: the command could not run at all, which is a broken
-            # example, not the failure the block is meant to show.
+            # example, not the failure the block is meant to show. macOS
+            # /bin/bash 3.2 exits 1 for a non-executable file, so there the
+            # guard is weaker by the shell, not by this runner.
             return self.exit_code not in (0, *COULD_NOT_RUN)
         return self.exit_code == int(self.expected)
 
@@ -400,11 +402,21 @@ def page_sessions(page) -> list[tuple[int, str, object]]:
     return sessions
 
 
-def _refusing_port() -> socket.socket:
-    """A bound, never-listening socket: connections to its port are refused at once."""
+def _refusing_port() -> tuple[socket.socket, int]:
+    """A socket and a loopback port on which connections are refused at once.
+
+    On Linux a bound, never-listening socket answers a connection with a reset, and
+    holding it keeps the port from being handed to another process. On macOS a
+    connection to such a socket is not answered and the client waits out its timeout
+    (a 30 s urlopen timed out instead of being refused), so there the socket is
+    closed once the port is read: a port nothing holds is refused by every OS.
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
-    return sock
+    port = sock.getsockname()[1]
+    if sys.platform != "linux":
+        sock.close()
+    return sock, port
 
 
 @dataclass
@@ -475,8 +487,8 @@ class PageRunner:
             target.parent.mkdir(parents=True, exist_ok=True)
             if path.name != ".keep":
                 shutil.copy2(path, target)
-        port = _refusing_port()
-        env = self._base_env(root, port.getsockname()[1])
+        port, port_number = _refusing_port()
+        env = self._base_env(root, port_number)
         for args in (
             ["init", "-q", "-b", "main"],
             ["add", "-A"],
@@ -611,6 +623,15 @@ class PageRunner:
             state = session.root / "state.env"
             cwd_file = session.root / "state.cwd"
             interpreter = "sh" if block.lang == "sh" else "bash"
+            if os.name == "nt":
+                # A bare "bash" given to CreateProcess is the WSL launcher in the
+                # system directory ("Windows Subsystem for Linux has no installed
+                # distributions"). Use the bash that ships with Git for Windows.
+                from tests.utils.github_actions import git_for_windows_bash
+
+                git_bash = git_for_windows_bash()
+                if git_bash:
+                    interpreter = git_bash
             code, output, timed_out = self._run_process(
                 [interpreter, str(script), str(state), str(cwd_file)],
                 session.cwd,

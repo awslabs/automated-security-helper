@@ -33,6 +33,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_sc
     ActionlintScannerConfigOptions,
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
+from tests.utils.helpers import checkout_env
 
 pytestmark = pytest.mark.integration
 
@@ -115,7 +116,7 @@ def _ash(
         encoding="utf-8",
         errors="replace",
         timeout=600,
-        env=env,
+        env=checkout_env(env),
         cwd=cwd,
     )
 

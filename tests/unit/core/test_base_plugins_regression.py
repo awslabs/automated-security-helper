@@ -82,6 +82,10 @@ class TestInvalidExpirationWarnsInsteadOfSilentSkip:
         suppression = MagicMock()
         suppression.rule_id = "TEST-RULE"
         suppression.expiration = "not-a-date"
+        # The matcher reads the entry's ``expires`` (the single date both
+        # spellings, expiration and expires, resolve to), so a stand-in must
+        # carry the date there too; a bare MagicMock attribute is not a date.
+        suppression.expires = "not-a-date"
         suppression.paths = []
         suppression.reason = "test"
         suppression.justification = "test"

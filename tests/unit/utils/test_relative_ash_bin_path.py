@@ -26,6 +26,7 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 from tests.utils.helpers import checkout_env
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 EXE = ".exe" if sys.platform == "win32" else ""
 WARNING_TEXT = "ASH_BIN_PATH is the relative path"
@@ -46,6 +47,9 @@ def lookup(tmp_path, monkeypatch):
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
     monkeypatch.setattr(subprocess_utils, "own_environment_dirs", list)
+    # The lookup's own candidate list: on Windows the unit tests' tool guard
+    # narrows "grype" to its .bat stand-in, and these cells' stubs are .exe.
+    use_the_real_candidate_names(monkeypatch)
     # A fresh "warned already" record, so each test sees its own first warning.
     monkeypatch.setattr(
         subprocess_utils, "_warned_relative_bin_paths", set(), raising=False

@@ -553,7 +553,11 @@ def _stream_in_place(monkeypatch, name: str, encoding: str, errors: str = "stric
     monkeypatch.setattr(
         sys,
         name,
-        io.TextIOWrapper(raw, encoding=encoding, errors=errors, write_through=True),
+        # newline="": the bytes compared are the ones written, not Windows' CRLF
+        # translation of a "\n".
+        io.TextIOWrapper(
+            raw, encoding=encoding, errors=errors, write_through=True, newline=""
+        ),
     )
     return raw
 
@@ -881,7 +885,7 @@ def test_a_write_in_the_held_tail_emits_window_leaves_the_tail_with_its_line():
     from automated_security_helper.utils.command_safe_stream import CommandSafeStream
 
     raw = io.BytesIO()
-    target = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
+    target = io.TextIOWrapper(raw, encoding="utf-8", write_through=True, newline="")
     state: dict = {"wrap": None, "armed": False}
 
     def targets():
@@ -1103,8 +1107,8 @@ def test_a_signal_handlers_write_during_a_byte_writes_encode_is_checked(monkeypa
     real_safe = css.CommandSafeStream._safe
 
     def safe(self, text, at_line_start):
-        checked, end = real_safe(self, text, at_line_start)
-        return EncodeThatSignals(checked), end
+        checked, end, carry = real_safe(self, text, at_line_start)
+        return EncodeThatSignals(checked), end, carry
 
     monkeypatch.setattr(css.CommandSafeStream, "_safe", safe)
     raw = io.BytesIO()
@@ -1320,7 +1324,8 @@ def test_a_signal_handlers_write_leaves_a_byte_writes_held_tail_in_place(monkeyp
     """A byte write that ends inside a character holds the character's first
     bytes. A signal handler's text write while that byte write is still being
     checked must leave the tail held: emitted around its deferred landing, the
-    tail would be cut off from the character's rest, written next."""
+    tail would be cut off from the character's rest, written next. A deferred
+    text write never splits a held character."""
     import automated_security_helper.utils.command_safe_stream as css
     from automated_security_helper.utils.log import check_commands_of_stderr
 

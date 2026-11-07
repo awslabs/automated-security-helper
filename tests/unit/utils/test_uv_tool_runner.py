@@ -134,9 +134,17 @@ class TestExitDescription:
     def test_a_negative_code_is_a_signal_death(self):
         from automated_security_helper.utils.uv_tool_runner import _exit_description
 
-        assert _exit_description(self._result(returncode=-15)) == (
-            "the command was ended by signal 15"
+        import os
+
+        # Windows has no signal deaths (signal_death answers None there), so a
+        # negative code is read as the exit value it is; the cell below pins
+        # that fall-through on every platform.
+        expected = (
+            "the command exited -15"
+            if os.name == "nt"
+            else "the command was ended by signal 15"
         )
+        assert _exit_description(self._result(returncode=-15)) == expected
 
     def test_a_plain_code_reads_as_the_exit(self):
         from automated_security_helper.utils.uv_tool_runner import _exit_description

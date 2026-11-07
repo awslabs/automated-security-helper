@@ -168,6 +168,7 @@ def test_a_root_that_is_not_utf8_is_refused_before_anything_is_read(
     assert not _has_a_surrogate(message), ascii(message)
 
 
+@_NO_NON_UTF8_NAMES
 @pytest.mark.unit
 def test_a_folder_that_is_not_utf8_is_refused_and_named(tmp_path):
     root = tmp_path / "cafe"
@@ -215,7 +216,7 @@ def test_the_name_is_shown_not_obeyed(tmp_path):
     "where",
     [
         "root",
-        "folder",
+        pytest.param("folder", marks=_NO_NON_UTF8_NAMES),
         pytest.param("file", marks=_NO_NON_UTF8_NAMES),
         "policy",
         "config",

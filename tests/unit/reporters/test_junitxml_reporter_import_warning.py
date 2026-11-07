@@ -23,6 +23,8 @@ import sys
 
 import pytest
 
+from tests.utils.helpers import checkout_env
+
 pytestmark = pytest.mark.integration
 
 #: Imports everything first, so only what building the reporter does is recorded.
@@ -67,6 +69,7 @@ def test_building_the_reporter_issues_no_deprecation_warning(tmp_path):
         capture_output=True,
         text=True,
         timeout=300,
+        env=checkout_env(),
         cwd=tmp_path,
     )
 

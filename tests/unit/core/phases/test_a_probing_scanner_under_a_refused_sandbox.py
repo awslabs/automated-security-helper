@@ -56,6 +56,7 @@ from automated_security_helper.core.unified_metrics import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.sandbox import scope as sandbox_scope_module
+from automated_security_helper.utils.sandbox.backends import AUTO_ORDER
 from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
     clear_backend_cache,
@@ -199,7 +200,10 @@ def test_a_probing_scanner_under_auto_is_missing_naming_the_sandbox(
     assert row.status == ScannerStatus.MISSING, row.status
     reason = row.missing_reason or ""
     assert "sandbox" in reason, reason
-    assert "bwrap" in reason, reason
+    # Auto tries this platform's own order: bwrap first on Linux, only
+    # sandbox-exec on macOS.
+    first = AUTO_ORDER["darwin" if sys.platform == "darwin" else "linux"][0]
+    assert first in reason, reason
 
 
 @pytest.mark.parametrize("mode", ["bwrap", "auto"])

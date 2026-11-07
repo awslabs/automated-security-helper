@@ -544,6 +544,11 @@ def jupyter(request, test_plugin_context, monkeypatch, tmp_path):
             "subprocess",
             types.SimpleNamespace(
                 run=run,
+                # The launch passes stdin=subprocess.DEVNULL (jupyter_converter.py);
+                # a stand-in without it raised AttributeError, which the converter
+                # reports as "conversion raised AttributeError" for every input.
+                DEVNULL=subprocess.DEVNULL,
+                PIPE=subprocess.PIPE,
                 CompletedProcess=subprocess.CompletedProcess,
                 CalledProcessError=subprocess.CalledProcessError,
                 TimeoutExpired=subprocess.TimeoutExpired,

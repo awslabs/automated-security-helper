@@ -646,15 +646,22 @@ def _scan_snapshot_path(
 def _process_may_be_running(pid: int) -> bool:
     """False only when *pid* is provably not a running process.
 
-    A permission error means the process exists; any other failure to ask,
-    and every platform where signal 0 is not a harmless probe (Windows, where
-    os.kill terminates), reads as "may be running", since the sweep deletes
-    only what it can prove abandoned. A reused pid reads as running too: the
-    copy then stays until a later bind finds that pid free, which costs a
-    leftover file and never a live scan's copy.
+    A permission error means the process exists; any other failure to ask
+    reads as "may be running", since the sweep deletes only what it can prove
+    abandoned. Windows, where signal 0 would terminate the process, asks for a
+    query handle and reads the exit code (``_windows_process_is_running``): a
+    pid with no process, or a process that has exited, is provably gone, so a
+    dead writer's copy goes there as it does elsewhere; a probe that cannot ask
+    reads as "may be running". A reused pid reads as running too: the copy then
+    stays until a later bind finds that pid free, which costs a leftover file
+    and never a live scan's copy.
     """
     if os.name == "nt":
-        return True
+        from automated_security_helper.core.resource_management.scan_registry import (
+            _windows_process_is_running,
+        )
+
+        return _windows_process_is_running(pid, if_unasked=True)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -1098,7 +1105,9 @@ def _config_pre_check(
     client_named = config_path is not None
     if config_path is None:
         try:
-            config_path = find_config_file(source_dir)
+            config_path = find_config_file(
+                source_dir, permit=config_base_gate(session_id)
+            )
         except (ASHConfigValidationError, OSError):
             # Discovery's own refusals are the scan's to report.
             return _ConfigPreCheck(None, None, ())
@@ -1259,7 +1268,11 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
             "success": False,
             "operation": operation,
             "error": raw_controls_on_one_line(error_text(error)),
-            "error_type": CONFIG_INPUT_NOT_PERMITTED,
+            "error_type": (
+                CONFIG_CHECK_FAILED
+                if isinstance(error, ConfigCheckFailedError)
+                else CONFIG_INPUT_NOT_PERMITTED
+            ),
             "error_category": error.context["error_category"],
         },
         REFUSED_CONFIG_EXIT_CODE,
@@ -2165,7 +2178,47 @@ async def mcp_scan_directory(
     )
 
     counted: Optional[Any] = None
-    limit = per_session_scan_limit(session_id)
+    try:
+        limit = per_session_scan_limit(session_id)
+    except BaseException as limit_error:
+        # The claim above is held and no task exists to give it back: give it
+        # back here, or a clear_source is refused as "a scan is running" forever.
+        if claimed_session is not None:
+            await _release_what_the_scan_held_off_the_loop(
+                None,
+                claimed_session,
+                session_id,
+                scan_id=None,
+                environment_values=environment_values,
+            )
+        if not isinstance(limit_error, Exception):
+            # A cancellation or an exit is not a failure to answer: it leaves
+            # the tool as it came, with the claim given back above.
+            raise
+        # A failure of the limit lookup is answered as the unexpected-error arm
+        # below answers one, as a refusal, never as an exception out of the tool.
+        log_unexpected_error(
+            _logger,
+            limit_error,
+            "Unexpected error starting scan",
+            values=environment_values,
+        )
+        return with_exit_code(
+            create_error_response(
+                error=MCPResourceError(
+                    "Unexpected error starting scan: "
+                    f"{error_text(limit_error, environment_values)}",
+                    context={
+                        "directory_path": directory_path,
+                        "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
+                        "error_type": type(limit_error).__name__,
+                        "error_message": error_text(limit_error, environment_values),
+                    },
+                ),
+                operation="scan_directory",
+            ),
+            REFUSED_INTERNAL_EXIT_CODE,
+        )
     if claimed_session is not None:
         if limit is None:
             # No limit applies, and with none try_start_scan always counts. The
@@ -3610,7 +3663,8 @@ async def _run_scan(
                     # for a scan that has its results.
                     _logger.error(
                         f"Scan {scan_id}: could not complete the end of its "
-                        f"session: {error_text(end_error, environment_values)}"
+                        "session: "
+                        f"{error_text(end_error, environment_values)}"
                     )
 
     try:
@@ -5335,7 +5389,9 @@ def _answer_get_config(
                 refusal = validate_discovered_config(search, session_id)
             if refusal is None:
                 try:
-                    path = find_config_file(search_dir=search)
+                    path = find_config_file(
+                        search_dir=search, permit=config_base_gate(session_id)
+                    )
                 except ASHConfigSourceError as exc:
                     # Discovery's own read failure: a pyproject.toml that
                     # declares [tool.ash] but cannot be read. Refused as a

@@ -16,6 +16,7 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
 )
 from automated_security_helper.core.exceptions import ScannerError
 from tests.utils.env_assertions import environ_value
+from tests.utils.helpers import checkout_env
 from tests.utils.fake_tool_paths import fake_tool_path
 
 
@@ -1330,6 +1331,7 @@ class TestFerretPluginValidation:
 
         result = subprocess.run(  # nosec B603 B607 — test invokes ferret-scan binary
             [sys.executable, "scripts/validate_ferret_plugin.py"],
+            env=checkout_env(),
             capture_output=True,
             text=True,
             timeout=30,

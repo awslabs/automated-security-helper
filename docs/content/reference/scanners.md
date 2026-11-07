@@ -190,7 +190,7 @@ Options, under `scanners.cfn-lint.options`. An option not listed here refuses th
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `cfn_nag_scan`
-- Install: none declared
+- Install: `gem install cfn-nag -v 0.8.10` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -259,7 +259,7 @@ Options, under `scanners.detect-secrets.options`. An option not listed here refu
 | <a id="scanners.detect-secrets.options.baseline_file"></a>`baseline_file` | path, string, or null | `null` | Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided. |
 | <a id="scanners.detect-secrets.options.scan_settings"></a>`scan_settings` | mapping | see the section | Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file |
 | <a id="scanners.detect-secrets.options.skip_generated_lockfiles"></a>`skip_generated_lockfiles` | boolean | `true` | Skip machine-generated dependency lockfiles (package-lock.json, yarn.lock, poetry.lock, and similar) before scanning. These are dense with integrity hashes and are regenerated rather than hand-edited, so findings in them are usually noise. Hand-authored dependency declarations such as requirements.txt, Pipfile and environment.yml are always scanned and are not affected by this option. Set to false to scan generated lockfiles as well. |
-| <a id="scanners.detect-secrets.options.max_worker_output_mib"></a>`max_worker_output_mib` | integer, greater than 0, at most 4,096 | `256` | The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Honored only from --config-overrides or a config file outside the scanned tree. |
+| <a id="scanners.detect-secrets.options.max_worker_output_mib"></a>`max_worker_output_mib` | integer, greater than 0, at most 4,096 | `256` | The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. |
 
 ## `gitleaks`
 

@@ -671,6 +671,12 @@ def test_the_signal_flags_splat_into_every_keeper_without_translation():
     )
 
     flags, _reason = _signaled_failure(-9, "tool", "e", log_the_death=False)
+    if os.name == "nt":
+        # Windows has no signal deaths: a negative code names no signal, so the
+        # producer answers no flags. The keepers' constructors take the same
+        # names there, so the dict a POSIX producer answers is spelled out.
+        assert flags == {}, flags
+        flags = {"signaled": True, "signal": 9}
     assert flags == {"signaled": True, "signal": 9}, flags
 
     result = PostRunErrorProcess(
@@ -747,6 +753,14 @@ def test_the_returned_run_check_site_raises_with_both_flags(monkeypatch):
     code-0 shape could not tell a dropped splat from a correct one."""
     _a_returned_run_whose_record_then_raises(monkeypatch)
 
+    if os.name == "nt":
+        # Windows has no signal deaths: the returned code is not a signal's, so
+        # nothing is recorded, nothing raises, and the run comes back as it was.
+        result = run_command([sys.executable, "-c", "pass"], check=True)
+        assert result.returncode == -_STAND_IN_SIGNAL, result
+        assert not isinstance(result, PostRunErrorProcess), result
+        return
+
     with pytest.raises(PostRunError) as raised:
         run_command([sys.executable, "-c", "pass"], check=True)
 
@@ -761,6 +775,12 @@ def test_the_returned_run_result_site_keeps_both_flags(monkeypatch):
     _a_returned_run_whose_record_then_raises(monkeypatch)
 
     result = run_command([sys.executable, "-c", "pass"], check=False)
+
+    if os.name == "nt":
+        # Windows has no signal deaths: the code is returned as the plain run's.
+        assert not isinstance(result, PostRunErrorProcess), result
+        assert result.returncode == -_STAND_IN_SIGNAL, result
+        return
 
     assert isinstance(result, PostRunErrorProcess), result
     assert result.signaled is True, result

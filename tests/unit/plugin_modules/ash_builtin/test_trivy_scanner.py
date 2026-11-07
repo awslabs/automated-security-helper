@@ -1373,20 +1373,37 @@ def test_an_assessment_that_cannot_ask_trivy_repo_still_records_trivy_db():
 
 
 @pytest.mark.parametrize(
-    "name, expected",
+    "platform, name, expected",
     [
-        (".ash/ash_output", ".ash/ash_output"),
-        ("c,[d]", '"c,\\[d\\]"'),
-        ('e"f', '"e""f"'),
-        ("g\\h", "g\\\\h"),
-        ("q{z}", "q\\{z\\}"),
+        # POSIX: a backslash escapes each glob character, a backslash included.
+        ("linux", ".ash/ash_output", ".ash/ash_output"),
+        ("linux", "c,[d]", '"c,\\[d\\]"'),
+        ("linux", 'e"f', '"e""f"'),
+        ("linux", "g\\h", "g\\\\h"),
+        ("linux", "q{z}", "q\\{z\\}"),
+        ("linux", "a*b?c", "a\\*b\\?c"),
+        # Windows: a backslash is the path separator, so each of * ? [ { } is a
+        # one-character bracket class; ] and \ are left as they are.
+        ("win32", ".ash/ash_output", ".ash/ash_output"),
+        ("win32", "c,[d]", '"c,[[]d]"'),
+        ("win32", 'e"f', '"e""f"'),
+        ("win32", "g\\h", "g\\h"),
+        ("win32", "q{z}", "q[{]z[}]"),
+        ("win32", "a*b?c", "a[*]b[?]c"),
     ],
 )
-def test_skip_dirs_values_are_escaped_as_trivy_reads_them(name, expected):
-    """Each expected value was checked against trivy 0.69.3: it skips that directory."""
+def test_skip_dirs_values_are_escaped_as_trivy_reads_them(
+    monkeypatch, platform, name, expected
+):
+    """Each posix expected value was checked against trivy 0.69.3: it skips that
+    directory. The function reads sys.platform on each call, so the cell sets it."""
+    import sys
+
     from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
         skip_dirs_value,
     )
+
+    monkeypatch.setattr(sys, "platform", platform)
 
     assert skip_dirs_value(name) == expected
 

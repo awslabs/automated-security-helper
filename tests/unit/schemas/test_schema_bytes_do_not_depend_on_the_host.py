@@ -40,6 +40,8 @@ from typing import Any, Dict
 
 import pytest
 
+from tests.utils.helpers import checkout_env
+
 pytestmark = pytest.mark.unit
 
 REPOSITORY = Path(__file__).resolve().parents[3]
@@ -93,7 +95,7 @@ def _generate(
     done = subprocess.run(
         [sys.executable, "-c", CHILD, system, str(destination)],
         cwd=REPOSITORY,
-        env=environment,
+        env=checkout_env(environment),
         capture_output=True,
         text=True,
         timeout=600,

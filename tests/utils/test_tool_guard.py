@@ -53,11 +53,14 @@ def test_a_lookup_cached_before_the_guard_resolves_to_the_guard(
     from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 
     host = tmp_path_factory.mktemp("host-bin")
-    _host_tool(host, "semgrep")
-    _host_tool(host, "grype")
+    # A lookup finds a Windows launcher by its extension (PATHEXT), not by an
+    # executable bit, so on Windows the host's copies are named as batch files.
+    suffix = ".bat" if _on_windows() else ""
+    host_semgrep = _host_tool(host, f"semgrep{suffix}")
+    host_grype = _host_tool(host, f"grype{suffix}")
     monkeypatch.setenv("PATH", f"{host}{os.pathsep}{os.environ.get('PATH', '')}")
-    assert subprocess_utils.find_executable("semgrep") == (host / "semgrep").as_posix()
-    assert uv_tool_runner.find_executable("grype") == (host / "grype").as_posix()
+    assert Path(subprocess_utils.find_executable("semgrep")) == host_semgrep
+    assert Path(uv_tool_runner.find_executable("grype")) == host_grype
 
     guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
 
@@ -263,12 +266,16 @@ def test_a_tool_inside_the_landlock_wrapper_is_judged_by_itself(
 
     _popen_event([*wrapper, str(host / "some-tool"), "--version"])
     _popen_event([*wrapper, str(guard.directory / "semgrep"), "scan"])
-    # The line the stand-in writes when the wrapper runs it.
+    # The line the stand-in writes when the wrapper runs it: its name and arguments
+    # on POSIX, its name alone from a Windows batch stand-in.
+    semgrep_line = guard._as_logged(
+        "semgrep", [str(guard.directory / "semgrep"), "scan"]
+    )
     with guard.log.open("a", encoding="utf-8") as log:
-        log.write("semgrep scan\n")
+        log.write(f"{semgrep_line}\n")
 
     assert guard.started == [
-        "semgrep scan",
+        semgrep_line,
         f"{host / 'some-tool'} --version (not through a stand-in)",
     ], guard.started
 
@@ -395,11 +402,17 @@ def test_a_probe_through_the_landlock_wrapper_is_a_probe(monkeypatch, tmp_path_f
     _popen_event([*wrapper, str(stand_in), "--version"])
     _popen_event([*wrapper, *more])
     # The lines the stand-in writes when the wrapper runs it: for the probe it
-    # answers, and with more arguments.
-    with guard.probe_log.open("a", encoding="utf-8") as log:
-        log.write(f"{stand_in}\n")
-    with guard.log.open("a", encoding="utf-8") as log:
-        log.write(guard._as_logged("grype", more) + "\n")
+    # answers, and with more arguments. A Windows batch stand-in writes one line
+    # to the log for every call, a probe marked "--probe", and keeps no probe log.
+    if _on_windows():
+        with guard.log.open("a", encoding="utf-8") as log:
+            log.write("grype --probe\n")
+            log.write(guard._as_logged("grype", more) + "\n")
+    else:
+        with guard.probe_log.open("a", encoding="utf-8") as log:
+            log.write(f"{stand_in}\n")
+        with guard.log.open("a", encoding="utf-8") as log:
+            log.write(guard._as_logged("grype", more) + "\n")
 
     # Only exactly [<path>, "--version"] after the -- is a probe.
     assert guard.probes == ["grype --version"], guard.probes
@@ -407,11 +420,11 @@ def test_a_probe_through_the_landlock_wrapper_is_a_probe(monkeypatch, tmp_path_f
 
 
 @pytest.mark.unit
-def test_the_windows_stand_in_answers_a_probe_without_reading_arguments(
+def test_the_windows_stand_in_reads_only_a_quoted_probe_argument(
     monkeypatch, tmp_path_factory
 ):
-    """cmd parses an argument it expands, so the .bat prints the version for every
-    call; which call was the probe is decided from the audited argv."""
+    """cmd parses an argument it expands, so the .bat reads %~1 only inside quotes,
+    and only to tell a lone --version, -v or --help from any other call."""
     from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
     monkeypatch.setattr(platform, "system", lambda: "Windows")
@@ -419,7 +432,15 @@ def test_the_windows_stand_in_answers_a_probe_without_reading_arguments(
     guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
 
     text = (guard.directory / "grype.bat").read_text(encoding="utf-8")
-    assert "%1" not in text and "%~" not in text and "%*" not in text, text
+    # The only argument references are the quoted probe comparisons on %~1 and
+    # %~2; none is expanded outside quotes, and "%*" and a bare "%1" are absent.
+    assert "%*" not in text and "%1" not in text, text
+    assert all(line.count("%~") == line.count('"%~') for line in text.splitlines()), (
+        text
+    )
+    assert not any(
+        "%~" in line and not line.startswith("@if ") for line in text.splitlines()
+    ), text
     assert f"grype {TOOL_VERSIONS['grype'].removeprefix('v')}" in text, text
 
 
@@ -2145,3 +2166,51 @@ def test_the_starts_without_an_audit_event_are_held_to_the_home_rule(
             )
     assert started == []
     assert len(guard.home_refusals) == 1, guard.home_refusals
+
+
+@pytest.mark.unit
+def test_a_windows_probe_by_a_child_is_a_probe_and_not_a_start(
+    monkeypatch, tmp_path_factory
+):
+    """A child scan's lone --version, -v or --help is logged by the .bat with the
+    probe mark; the log keeps it, but it is counted as a probe, not as a start."""
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    text = (guard.directory / "grype.bat").read_text(encoding="utf-8")
+    for probe in ("--version", "-v", "--help"):
+        assert f'if /i "%~1"=="{probe}" goto probe' in text, text
+    with guard.log.open("a", encoding="utf-8") as log:
+        log.write("grype --probe\n")
+        log.write("grype --probe\n")
+        log.write("grype\n")
+
+    assert guard.probes == ["grype --version"], guard.probes
+    assert guard.started == ["grype"], guard.started
+    assert guard.tool_starts == ["grype"], guard.tool_starts
+    assert guard.log.read_text(encoding="utf-8").count("--probe") == 2
+
+
+@pytest.mark.unit
+def test_a_windows_stand_in_exits_zero_for_a_lone_version_call_only(
+    monkeypatch, tmp_path_factory
+):
+    """The scanner inventory accepts a version probe only on exit 0 and otherwise
+    asks again with ``version``, which the stand-in logs as a start; the POSIX
+    stand-in exits 0 for a lone --version, so the Windows one does too. Any other
+    call still exits 1."""
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    lines = (
+        (guard.directory / "grype.bat")
+        .read_text(encoding="utf-8")
+        .replace("\r\n", "\n")
+        .splitlines()
+    )
+    start_section = lines[: lines.index(":probe")]
+    probe_section = lines[lines.index(":probe") + 1 :]
+    assert start_section[-1] == "@exit /b 1", start_section
+    assert "@exit /b 0" not in start_section, start_section
+    assert '@if /i "%~1"=="--version" exit /b 0' in probe_section, probe_section
+    assert probe_section[-1] == "@exit /b 1", probe_section

@@ -136,7 +136,7 @@ class TestValidateTrivyOfflineMode:
 
     def test_old_db_returns_true_with_warning(self, tmp_path, monkeypatch):
         from automated_security_helper.utils.content_databases import (
-            get_content_database,
+            get as get_content_database,
         )
 
         cache_dir = tmp_path / "trivy-cache"

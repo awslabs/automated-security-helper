@@ -2334,6 +2334,18 @@ def resolve_config(
                 key = Path(path).resolve()
                 if key in reads:
                     client_documents.setdefault(Path(path), reads[key])
+            # The rules judge a file delivered by every name it was reached by
+            # (by_every_name over ``names``), and this chain carries its names
+            # as one flat list: the file a delivered link points at is judged
+            # by its own path, which is not under the workspace root, unless
+            # the names the chain was reached by (the link ASH_CONFIG names
+            # among them) go with it. Every name counts for every file, from
+            # the safe side, as the membership checks take them (_flat_names).
+            for path, names_for in _flat_names(
+                rules_chain,
+                [*rules_named, *([Path(env_named)] if env_named else [])],
+            ).items():
+                client_names.setdefault(path, names_for)
     config = clear_client_supplied_marks(config)
     config = apply_client_config_rules(
         config,
@@ -4695,6 +4707,12 @@ def trusted_base_config(
             trusted.sandbox.mode = operator.config.sandbox.mode
             if not operator_delivered:
                 keep_restrictions(trusted, operator.config)
+            # ASH_CONFIG's file, when it is outside the scanned tree too,
+            # keeps what it only restricts beside the operator's: a base
+            # that dropped it would be looser than one built without
+            # --config. The mode stays the operator's.
+            if default_outside and not default_delivered:
+                keep_restrictions(trusted, ash_config_base())
         elif default_outside:
             kept_from = ash_config_base()
             trusted.sandbox.mode = kept_from.sandbox.mode
@@ -4776,7 +4794,7 @@ def _load_operator_config(
     only path they hold, the client's delivered file, and blamed that file
     for the operator's copy of a profile that would not parse. A base of the
     chain is already reworded by the walk, and a file the process cannot
-    read is raised as it is, for the caller to name in its own words.
+    read is refused as ``ASHConfigSourceError`` ("could not read ...").
     """
     if trusted_config_path is None:
         return None
@@ -4803,6 +4821,15 @@ def _load_operator_config(
             raise
         # The parser's own words can quote the file (unparsed_config_reason).
         unparsed = unparsed_config_reason(Path(trusted_config_path), exc)
+    except OSError as exc:
+        # A file the process cannot read is refused as a config error, as a
+        # named or ASH_CONFIG file is, not raised bare: a workspace scan exits
+        # 3 for it and not 1.
+        operator_file = Path(trusted_config_path)
+        raise ASHConfigSourceError(
+            f"could not read {describe_config_path(operator_file)}: "
+            f"{os_error_without_named_file(exc, operator_file)}"
+        ) from exc
     if unparsed is not None:
         # Outside the handler (unparsed_config_reason).
         raise ASHConfigUnparsedError(unparsed)

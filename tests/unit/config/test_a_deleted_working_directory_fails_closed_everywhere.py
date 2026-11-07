@@ -26,6 +26,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.operator_only_options import reporter_section
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.config.sandbox_grants import scanned_trees
+from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
 from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
     SecurityHubReporter,
 )
@@ -688,22 +689,26 @@ def _mode_chain_with_a_twin(tmp_path, with_twin=True):
 def test_the_uncarried_mode_read_folds_with_the_scans_ownership(tmp_path, monkeypatch):
     """The sandbox-mode floor read with nothing carried (no operator config,
     the trusted base already the defaults) loads the ASH_CONFIG chain with
-    the ownership the scan's own load applies: the operator root's
-    case-variant patch folds onto the operator's own section beside the twin
-    a base in the scanned checkout wrote, and the mode read answers the
-    chain's mode. A read without the ownership finds the fold ambiguous and
-    refuses a chain the local scan takes, so the floor it feeds reported no
-    sandbox where the local scan applies one."""
+    the ownership the scan's own load applies, so it refuses what the scan
+    refuses. A base in the scanned checkout wrote a case-variant twin of the
+    operator's reporter section, so the operator root's case-variant patch
+    does not fit the document it patches: the decision on case-variant twins
+    made that refusal the contract (a local scan refuses the chain, pinned by
+    test_readers_of_the_scan_chain_take_what_the_scan_takes.py), and the read
+    that feeds the floor takes the same ownership and raises the same
+    refusal. The control below, with no twin, answers the chain's mode."""
     from automated_security_helper.config.resolve_config import trusted_base_config
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
 
     source, root = _mode_chain_with_a_twin(tmp_path)
     monkeypatch.setenv("ASH_CONFIG", str(root))
 
-    base = trusted_base_config(
-        None, scanned_trees(source), default_in_tree=True, merged_fallback=False
-    )
-
-    assert base.sandbox.mode == "firejail"
+    with pytest.raises(
+        ASHConfigSourceError, match="the path does not fit the document it patches"
+    ):
+        trusted_base_config(
+            None, scanned_trees(source), default_in_tree=True, merged_fallback=False
+        )
 
 
 def test_control_the_uncarried_mode_read_without_the_twin(tmp_path, monkeypatch):
@@ -812,16 +817,21 @@ def test_a_vanished_client_path_leaves_the_operator_chain_the_operator_s(
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     _delete_cwd(tmp_path, monkeypatch)
 
-    config = resolve_config(
-        config_path=str(tmp_path / "nope" / "missing.yaml"),
-        untrusted_config=True,
-        fallback_to_default=True,
-    )
+    # A named path that is not there is refused by name, whatever the fallback
+    # flag says (resolve_config: every stat problem is refused as the problem
+    # it is, a missing file included): the fallback never answers it, so no
+    # chain is loaded for it and the ASH_CONFIG checkout file's module entry is
+    # never reached.
+    missing = tmp_path / "nope" / "missing.yaml"
+    with pytest.raises(ASHConfigFileNotFoundError) as refused:
+        resolve_config(
+            config_path=str(missing),
+            untrusted_config=True,
+            fallback_to_default=True,
+        )
 
-    assert config.project_name == "env"
-    assert "zz_vanish_mod_ash_plugins" not in (config.ash_plugin_modules or []), (
-        config.ash_plugin_modules
-    )
+    assert str(refused.value).startswith("Configuration file not found: "), refused
+    assert missing.as_posix() in str(refused.value), refused
 
 
 def test_the_any_checkout_arm_judges_a_location_by_its_checkout(tmp_path, monkeypatch):
@@ -1053,16 +1063,18 @@ def test_an_installed_module_outside_every_checkout_is_kept_on_the_fallback(
     monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
     _delete_cwd(tmp_path, monkeypatch)
 
-    config = resolve_config(
-        config_path=str(tmp_path / "nope" / "missing.yaml"),
-        untrusted_config=True,
-        fallback_to_default=True,
-    )
+    # The same current contract as the cell above: a named path that is not
+    # there is refused by name and the fallback does not answer it.
+    missing = tmp_path / "nope" / "missing.yaml"
+    with pytest.raises(ASHConfigFileNotFoundError) as refused:
+        resolve_config(
+            config_path=str(missing),
+            untrusted_config=True,
+            fallback_to_default=True,
+        )
 
-    kept = config.ash_plugin_modules or []
-    assert config.project_name == "env"
-    assert "zz9_outside_mod_ash_plugins" in kept, kept
-    assert "zz9_inside_mod_ash_plugins" not in kept, kept
+    assert str(refused.value).startswith("Configuration file not found: "), refused
+    assert missing.as_posix() in str(refused.value), refused
 
 
 def test_a_given_root_judges_client_modules_as_a_scan_of_it_would(

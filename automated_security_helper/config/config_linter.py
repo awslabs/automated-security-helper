@@ -34,6 +34,7 @@ from typing import (
 
 import yaml
 
+from automated_security_helper.config.ash_config import _NoAliasSafeLoader
 from automated_security_helper.config.config_sources import (
     is_config_parse_error,
     is_json_file,
@@ -1217,7 +1218,10 @@ class ConfigLinter:
         would resolve to does not matter; a load that raised on the tag would
         leave the comparison unmade for exactly the files a scan accepts."""
 
-        class _TagBlindLoader(yaml.SafeLoader):
+        # Refuses aliases as every ASH configuration parse does
+        # (ash_config.load_config_yaml); a refused alias leaves the comparison
+        # unmade, as any other file that does not load.
+        class _TagBlindLoader(_NoAliasSafeLoader):
             pass
 
         def _construct_untagged(

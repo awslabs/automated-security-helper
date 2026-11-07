@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.archive_builders import TEBIBYTE, tar_bytes, zip_bytes
+from tests.utils.helpers import module_from_this_checkout
 
 pytestmark = pytest.mark.integration
 
@@ -51,8 +52,8 @@ def _scan(base: Path, archives: dict[str, bytes]) -> tuple[int, str, Path]:
         [
             sys.executable,
             "-I",
-            "-m",
-            "automated_security_helper.cli.main",
+            "-c",
+            module_from_this_checkout("automated_security_helper.cli.main"),
             "scan",
             "--source-dir",
             str(tree),

@@ -26,6 +26,7 @@ from automated_security_helper.interactions.run_ash_nix import (
     run_ash_nix,
     shown_flake_ref,
 )
+from tests.utils.helpers import checkout_env
 
 
 @pytest.mark.unit
@@ -371,7 +372,7 @@ def _plant_ash(directory: Path, marker: Path) -> None:
 
 
 def _run_in(argv, cwd: Path) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if k != "PYTHONSAFEPATH"}
+    env = checkout_env({k: v for k, v in os.environ.items() if k != "PYTHONSAFEPATH"})
     return subprocess.run(
         [*argv, "--version"],
         cwd=cwd,
@@ -782,7 +783,10 @@ class TestEnterShell:
         )
         from automated_security_helper.interactions.run_ash_nix import _enter_shell
 
-        result = _enter_shell(["nix", "develop"], env={})
+        # An otherwise empty environment, but for SYSTEMROOT: a Windows interpreter
+        # started without it cannot seed its hash randomization and exits 1.
+        env = {name: os.environ[name] for name in ("SYSTEMROOT",) if name in os.environ}
+        result = _enter_shell(["nix", "develop"], env=env)
 
         assert result.returncode == 0
         assert given.get("stdin") is subprocess.DEVNULL

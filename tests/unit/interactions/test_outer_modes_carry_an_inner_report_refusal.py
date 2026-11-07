@@ -59,7 +59,7 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.subprocess_utils import create_completed_process
-from tests.utils.helpers import REPO_ROOT
+from tests.utils.helpers import REPO_ROOT, checkout_env
 
 RUN_ASH_SCAN = "automated_security_helper.interactions.run_ash_scan"
 RUN_ID_ENV = "ASH_OUTER_RUN_ID"
@@ -1019,7 +1019,7 @@ def test_ash_scan_in_nix_mode_exits_1_when_the_inner_run_refuses_a_name(tmp_path
             capture_output=True,
             text=True,
             timeout=600,
-            env=env,
+            env=checkout_env(env),
             cwd=tmp_path,
         )
 

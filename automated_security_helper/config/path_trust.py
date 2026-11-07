@@ -1078,6 +1078,7 @@ def honored_path(
     derived_dirs: Collection[Union[str, Path]] = (),
     operator_written: bool = False,
     env_named: bool = False,
+    env_read: bool = False,
 ) -> Optional[Path]:
     """The resolved path to hand the tool, or None when it may not be used.
 
@@ -1114,6 +1115,12 @@ def honored_path(
             caller read. A value an environment variable chose is never
             printed: the warning names only *key*, and the path shows as the
             shown form.
+        env_read: Whether *value* is an environment variable's value the caller
+            read and joined to the working directory, where the warning still
+            names the path (unlike *env_named*). The path is then named as the
+            variable gives it, joined to the working directory, with ``..``
+            kept; any other value is named by the normalized path it resolves
+            to.
     """
     if value is None or str(value).strip() == "":
         return None
@@ -1181,7 +1188,15 @@ def honored_path(
         # hidden before it is escaped (_shown_escaped), since an escaped value
         # no longer matches the value it was made from. The whole message is
         # shown once more for the key.
-        shown_path = _shown_escaped(_named(value, named, config, env_named), config)
+        # The path shown is the judged spelling, normalized (``./`` and ``..``
+        # applied), so a value written through them is named by the path it
+        # resolves to, while a link keeps the name it has in the scanned tree:
+        # the link is judged by that name, and the warning never names the file
+        # the link reaches. The fully resolved *path* (realpath) would.
+        # Source split: a value read from an environment variable (env_read)
+        # keeps the spelling the variable gives, joined to the working directory.
+        judged = named.absolute() if env_read else Path(os.path.normpath(named))
+        shown_path = _shown_escaped(_named(value, judged, config, env_named), config)
         ASH_LOGGER.warning(
             _shown(
                 f"Ignoring {key} ({shown_path}): "

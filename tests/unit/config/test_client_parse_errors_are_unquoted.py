@@ -130,7 +130,12 @@ def test_a_delivered_ash_config_beside_the_operators_config(
 def test_control_an_operator_file_keeps_the_parsers_message(
     tmp_path: Path, repo: Path, mcp_root: Path
 ) -> None:
-    """Outside the MCP root and outside every checkout, the file is the operator's."""
+    """Outside the MCP root and outside every checkout, the file is the operator's.
+
+    Every unparsed config is refused in the shared words (``unparsed_config_reason``):
+    the files, the error type and the position, and nothing the file holds. The
+    operator's refusal differs from a client's file in naming the paths.
+    """
     ops = tmp_path / "ops"
     ops.mkdir()
     (ops / "base.yaml").write_text(DOES_NOT_PARSE, encoding="utf-8")
@@ -140,4 +145,8 @@ def test_control_an_operator_file_keeps_the_parsers_message(
     with pytest.raises(ASHConfigValidationError) as raised:
         resolve_config(config_path=root, source_dir=repo)
 
-    assert CANARY in str(raised.value)
+    message = str(raised.value)
+    assert (ops / "base.yaml").as_posix() in message, message
+    assert root.as_posix() in message, message
+    assert "could not be parsed (ComposerError at line 1" in message, message
+    assert CANARY not in message, message

@@ -31,6 +31,7 @@ import importlib
 import json
 import logging
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -562,17 +563,26 @@ def test_the_real_verifications_recorded_reason_names_no_path_or_output(world):
         pre_installed_tool, "verify_pre_installed_tool", _REAL_VERIFY
     )
     pre_installed_tool.reset_pre_installed_tool_cache()
-    world.installed.write_text(
-        '#!/bin/sh\necho "CARRIED-VALUE $0" >&2\nexit 7\n', encoding="utf-8"
-    )
+    installed = world.installed
+    if sys.platform == "win32":
+        # Windows runs no "#!/bin/sh" file (WinError 193): the probe's program is
+        # a batch file that says the same thing on stderr and exits 7.
+        installed = installed.with_name("jupyter-nbconvert.cmd")
+        installed.write_text(
+            "@echo CARRIED-VALUE %~f0 1>&2\r\n@exit /b 7\r\n", encoding="utf-8"
+        )
+    else:
+        installed.write_text(
+            '#!/bin/sh\necho "CARRIED-VALUE $0" >&2\nexit 7\n', encoding="utf-8"
+        )
 
-    found = world.converter._verified_direct_nbconvert(str(world.installed))
+    found = world.converter._verified_direct_nbconvert(str(installed))
 
     assert found.path is None
     # The log's detail names the copy and quotes the probe (controls that the
     # real messages ran).
-    assert str(world.installed) in found.detail, found.detail
+    assert str(installed) in found.detail, found.detail
     assert "CARRIED-VALUE" in found.detail, found.detail
     assert "exited 7" in found.reason, found.reason
-    assert str(world.installed) not in found.reason, found.reason
+    assert str(installed) not in found.reason, found.reason
     assert "CARRIED-VALUE" not in found.reason, found.reason

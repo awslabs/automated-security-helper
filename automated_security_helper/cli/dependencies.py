@@ -1908,26 +1908,23 @@ def _bin_path_hint(target: Path, from_environment: Optional[str]) -> Optional[st
     directory ``--bin-path`` named. None when ``target`` is what a scan with this
     environment searches anyway: the absolute ``ASH_BIN_PATH`` itself, however it
     is spelled, or ``~/.ash/bin`` with ``ASH_BIN_PATH`` unset. A relative
-    ``ASH_BIN_PATH`` gets the hint, since it names another directory as soon as a
-    scan runs somewhere else. The directory is given absolutely for the same reason.
+    ``ASH_BIN_PATH`` is not used by a scan, which warns and searches ``~/.ash/bin``
+    instead (``subprocess_utils._bin_path``), so it counts as unset here: a target
+    of ``~/.ash/bin`` gets no hint, and any other directory gets it. The directory
+    is given absolutely, since a scan runs somewhere else.
     With no usable home directory there is no ``~/.ash/bin`` a scan searches
     (``core.constants.home_bin_path``), so the hint is given.
     """
     directory = Path(os.path.abspath(target))
-    if is_blank_bin_path(from_environment):
+    # Anchored, as the lookup requires (subprocess_utils.find_executable): on
+    # Windows before Python 3.13 isabs accepts a drive-less "\\tools", which the
+    # lookup does not use, so it falls back to ~/.ash/bin like an unset value.
+    # is_blank_bin_path is True for None.
+    if is_blank_bin_path(from_environment) or not is_anchored(from_environment or ""):
         default = home_bin_path()
         if default is not None and directory == Path(os.path.abspath(default)):
             return None
-    # is_blank_bin_path is True for None, so this branch always has a string; the
-    # check says so to the type checker, which cannot see through the helper.
-    # Anchored, as the lookup requires (subprocess_utils.find_executable): on
-    # Windows before Python 3.13 isabs accepts a drive-less "\\tools", which the
-    # lookup does not search, so the hint is owed for it.
-    elif (
-        from_environment is not None
-        and is_anchored(from_environment)
-        and Path(os.path.abspath(from_environment)) == directory
-    ):
+    elif Path(os.path.abspath(from_environment or "")) == directory:
         return None
     text = str(directory)
     powershell = text
