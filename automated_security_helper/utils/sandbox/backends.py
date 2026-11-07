@@ -253,6 +253,13 @@ class SpawnPlan:
     #: the plan's own: ``caches_are_throwaway`` on the backend is a record of the
     #: filesystems probed so far, and a later plan can meet one that refuses.
     caches_read_only: bool = True
+    #: Whether the backend reports a signal death of the tool as its own exit
+    #: code (``128 + N``, the shell convention) rather than as the negative
+    #: code ``subprocess`` gives a direct child. True for bwrap and firejail,
+    #: whose wrapper process exits with that code; False for landlock and
+    #: sandbox-exec. The runner copies it onto the response, and the plugin
+    #: reads an exit of 129..192 under it back as the likely signal.
+    signal_deaths_as_exit_codes: bool = False
 
     def run_cleanup(self) -> None:
         """Run each cleanup once; later calls do nothing."""
@@ -1144,6 +1151,7 @@ class BwrapBackend(SandboxBackend):
             cleanup=cleanup,
             private_dirs=private_dirs,
             caches_read_only=caches_read_only,
+            signal_deaths_as_exit_codes=True,
         )
 
 
@@ -1484,6 +1492,7 @@ class FirejailBackend(SandboxBackend):
             cleanup=cleanup,
             start_new_session=True,
             private_dirs=private_dirs,
+            signal_deaths_as_exit_codes=True,
         )
 
 
