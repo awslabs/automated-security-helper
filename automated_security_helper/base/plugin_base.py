@@ -69,6 +69,7 @@ from automated_security_helper.utils.subprocess_utils import (
     could_not_stop_default,
     exit_status,
     flagged_returncode,
+    inferred_signal_death_message,
     is_exit_code,
     response_could_not_stop,
     signal_ending,
@@ -1576,6 +1577,25 @@ class PluginBase(UVToolMixin, BaseModel):
             )
             if ending is not None:
                 self._scan_kept_flag = ("signaled", ending[1])
+            elif (
+                response.get("sandbox_signal_exits") is True
+                # A plugin that declares its tool's exit code a count of
+                # findings (the cfn_nag convention) opts out of the read-back:
+                # its 137 under a sandbox grades by findings.
+                and getattr(self, "tool_exit_code_is_a_count", False) is not True
+                and is_exit_code(new_code)
+                and 129 <= new_code <= 192
+            ):
+                # A backend whose plan declares that it reports a signal death
+                # as its own exit code (bwrap, firejail) gives 128 + N for a
+                # tool a signal ended, and a tool's own exit of that number
+                # reads the same (fail-closed). The death is inferred, so the
+                # reason says "likely" and names the code. The code itself is
+                # kept as it is. The runner logged the same wording.
+                self._scan_kept_flag = (
+                    "signaled",
+                    inferred_signal_death_message(new_code - 128, new_code),
+                )
         self.exit_code = _folded_exit_code(self, self.exit_code, new_code)
 
     @property
