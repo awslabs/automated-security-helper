@@ -4178,7 +4178,9 @@ snyk-code, and trivy-repo) are covered in
    <code>.exe</code>, <code>.bat</code>, and <code>.cmd</code> before the bare name.</li>
 <li>ASH's bin directory: the directory in <code>ASH_BIN_PATH</code>, or <code>~/.ash/bin</code> if it is not
    set or is empty. This is where <code>ash dependencies install</code> puts tools, so you do not
-   need to add it to <code>PATH</code>. A <code>~</code> at the start of the value is expanded.
+   need to add it to <code>PATH</code>. A <code>~</code> at the start of the value is expanded. A relative
+   <code>ASH_BIN_PATH</code> is not used: ASH logs a warning that names it and uses <code>~/.ash/bin</code>,
+   for lookups and for <code>ash dependencies install</code> alike.
    <code>~/.ash/bin</code>, and a <code>~</code> in <code>ASH_BIN_PATH</code>, need a usable home directory: <code>HOME</code>
    when it is set to an absolute path, or, when <code>HOME</code> is not set, the home in your
    passwd entry if that is absolute (on Windows, the profile directory). With <code>HOME</code>

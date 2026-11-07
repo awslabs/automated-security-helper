@@ -3683,7 +3683,9 @@ sends SIGKILL, such as the 10 seconds <code>docker stop</code> waits by default:
 leaves the scanners' tools running. A second Ctrl-C during the wait ends the server at once,
 with code 130. It kills the scanners' tools without waiting for the scans, and previous results
 a scan had not put back stay in <code>.ash_previous_results</code>, where the next MCP scan of that
-directory takes them back.</p>
+directory takes them back. On Windows the second Ctrl-C ends the server just the same, but
+it does not kill the scanners' tools: the kill goes by process group, which is POSIX only, so
+a tool still running then outlives the server.</p>
 <h3 id="serve-clients-on-another-host">Serve clients on another host<a class="headerlink" href="#serve-clients-on-another-host" title="Permanent link">&para;</a></h3>
 <p>ASH serves plain HTTP. Put a proxy you control in front of it for TLS, and keep the server on
 the loopback interface when the proxy runs on the same host. If the proxy forwards the

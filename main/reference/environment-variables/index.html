@@ -3854,7 +3854,7 @@ SOFTWARE.
 <td><code>HOME</code></td>
 <td></td>
 <td><code>${ASHUSER_HOME}</code> (non-root)</td>
-<td><code>automated_security_helper/core/constants.py</code> (<code>usable_home</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_policy_home</code>)</td>
+<td><code>automated_security_helper/core/constants.py</code> (<code>usable_home</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_policy_home</code>)<br><code>automated_security_helper/utils/sandbox/scope.py</code> (<code>scanner_sandbox_scope</code>)</td>
 <td>On POSIX it is HOME when HOME is set, not empty, and absolute. (<code>automated_security_helper/core/constants.py</code>, <code>usable_home</code>)</td>
 </tr>
 <tr>
@@ -4043,8 +4043,8 @@ SOFTWARE.
 <td><code>SYSTEMROOT</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_windows_system_directory</code>)</td>
-<td>Purpose not documented in code.</td>
+<td><code>automated_security_helper/utils/sandbox/backends.py</code> (<code>_probe_env</code>)<br><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_windows_system_directory</code>)</td>
+<td>A Windows process started without SYSTEMROOT cannot get random numbers (CPython: "failed to get random numbers to initialize Python") or load its DLLs, so no probe, Python or otherwise, would start. (<code>automated_security_helper/utils/sandbox/backends.py</code>, <code>_probe_env</code>)</td>
 </tr>
 <tr>
 <td><code>SystemDrive</code></td>
@@ -4198,7 +4198,7 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>ash</code> (top level)</td>
-<td>Purpose not documented in code.</td>
+<td>A relative first word names a file under the working directory, usually the repository being scanned. It is refused, as the ash CLI refuses it: not run, and the runtime does not start without the wrapper the operator asked for. (<code>ash</code>)</td>
 </tr>
 <tr>
 <td><code>WRITE_CHECK</code></td>
@@ -4303,12 +4303,12 @@ SOFTWARE.
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>automated_security_helper/config/environment_record.py (_value_read) [environ.get] value = os.environ.get(name)
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>automated_security_helper/core/constants.py (warn_if_home_unusable) [environ.get] value = os.environ.get(variable)
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, &quot;&quot;)
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = os.environ.get(name, &quot;&quot;)
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/interactions/run_ash_container.py (run_ash_container) [environ.get] for value in (os.environ.get(name, &quot;&quot;),)
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name, &quot;&quot;)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name.upper(), &quot;&quot;)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
