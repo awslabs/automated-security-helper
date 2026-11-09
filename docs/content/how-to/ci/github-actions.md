@@ -617,3 +617,51 @@ its file on both events.
 
 Code scanning already shows a pull request only the alerts on lines it changed, so for the
 SARIF upload alone you do not need this option.
+
+## Run in Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`, and the reusable
+    workflows' `ash-mode` input takes `local` or `container`, not `nix`. Write the steps
+    yourself, as below, and install ASH from `main`. Pin a commit SHA instead of `main`
+    when you need to know which code ran.
+
+Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
+ASH's `flake.nix`, so the job installs neither Ruby nor the scanner binaries. The job
+needs Nix on the runner, and ASH installed with the `cdk` extra: Nix mode does not install
+ASH, and cdk-nag runs on the Python environment ASH is installed in. ASH passes
+`nix-command` and `flakes` on each invocation. A `main` install cannot find a release tag
+that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s flake.
+
+<!-- doctest: illustrative reason="installs Nix and ASH from main over the network" -->
+```yaml
+name: ASH (Nix mode)
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ash-nix:
+    runs-on: ubuntu-latest
+    env:
+      ASH_NIX_FLAKE_REF: github:awslabs/automated-security-helper/main
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - name: Install ASH
+        run: uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+      - name: Scan in Nix mode
+        run: |
+          export PATH="$(uv tool dir --bin):${PATH}"
+          ash scan --mode nix --no-progress \
+            --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+```
+
+`cachix/install-nix-action` is the action ASH's own install-methods workflow uses for its
+Nix legs. Exit codes and the output directory are the same as in local mode, so the report
+and SARIF steps from [Write the steps yourself](#plain-steps) apply unchanged. The Nix
+shell supplies the tools of every built-in scanner except cdk-nag; it does not supply
+ferret-scan or the Snyk CLI. [Install ASH](../install.md#nix-mode) has the full list.

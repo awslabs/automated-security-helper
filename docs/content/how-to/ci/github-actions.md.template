@@ -6,6 +6,9 @@ tools, scans the repository, and reports the result on the pull request.
 write the steps yourself. For a first setup, follow
 [Add ASH to a GitHub Actions pipeline](../../getting-started/ci.md).
 
+If developers also run the pre-commit hook, it covers only five scanners; this workflow
+runs the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
+
 ## Call the reusable workflows {#reusable}
 
 <!-- doctest: config kind=github-actions -->
@@ -238,6 +241,48 @@ On a pull request from a fork, `GITHUB_TOKEN` is read-only, so the reporting job
 comment and the check run and prints a notice. The scan, its exit code, the job summary,
 and the artifact are unchanged. On a push, the comment goes to the pull request that the
 pushed commit came from, if there is one.
+
+## Scan inside a container with ash-mode: container {#container-mode}
+
+Set `ash-mode: container` to build ASH's image on the runner and scan inside it. The image
+holds every scanner tool, so the runner needs none of them. ASH publishes no image, so each
+run builds one; see [Run ASH in a container](../run-in-a-container.md).
+
+<!-- doctest: config kind=github-actions -->
+```yaml
+name: ASH container scan
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ash:
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v{{VERSION}}
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    with:
+      ash-version: v{{VERSION}}
+      ash-mode: container
+```
+
+The `install-*` inputs only matter in local mode, where they download scanner tools onto
+the runner. In container mode the scanners run inside the image, so the example sets none
+of them. The inputs a workflow accepts depend on its version: the workflow at `v{{VERSION}}`
+defines only `install-grype`, `install-syft`, and `install-opengrep`, all defaulting to
+`false`, and a caller that passes an input the referenced workflow does not define fails
+before any job starts. Check the workflow file at the tag you pin before adding one.
+
+`changed-files-only` does not work with container mode. ASH ignores
+`--changed-files-only` there and would report the findings in every file, so the job
+stops before the scan with an error instead (a non-zero exit). To report only a pull request's changes,
+use the default `ash-mode: local`, as described in
+[Scan only the files a pull request changes](#changed-files).
+
+`ash-args: --mode container` has the same effect as `ash-mode: container`, and an
+explicit `--mode` in `ash-args` wins over `ash-mode` if the two disagree, with no warning.
+Set one of them.
 
 ## Upload SARIF with upload-ash-sarif.yml {#sarif}
 
@@ -572,3 +617,51 @@ its file on both events.
 
 Code scanning already shows a pull request only the alerts on lines it changed, so for the
 SARIF upload alone you do not need this option.
+
+## Run in Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`, and the reusable
+    workflows' `ash-mode` input takes `local` or `container`, not `nix`. Write the steps
+    yourself, as below, and install ASH from `main`. Pin a commit SHA instead of `main`
+    when you need to know which code ran.
+
+Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
+ASH's `flake.nix`, so the job installs neither Ruby nor the scanner binaries. The job
+needs Nix on the runner, and ASH installed with the `cdk` extra: Nix mode does not install
+ASH, and cdk-nag runs on the Python environment ASH is installed in. ASH passes
+`nix-command` and `flakes` on each invocation. A `main` install cannot find a release tag
+that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s flake.
+
+<!-- doctest: illustrative reason="installs Nix and ASH from main over the network" -->
+```yaml
+name: ASH (Nix mode)
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ash-nix:
+    runs-on: ubuntu-latest
+    env:
+      ASH_NIX_FLAKE_REF: github:awslabs/automated-security-helper/main
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - name: Install ASH
+        run: uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+      - name: Scan in Nix mode
+        run: |
+          export PATH="$(uv tool dir --bin):${PATH}"
+          ash scan --mode nix --no-progress \
+            --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+```
+
+`cachix/install-nix-action` is the action ASH's own install-methods workflow uses for its
+Nix legs. Exit codes and the output directory are the same as in local mode, so the report
+and SARIF steps from [Write the steps yourself](#plain-steps) apply unchanged. The Nix
+shell supplies the tools of every built-in scanner except cdk-nag; it does not supply
+ferret-scan or the Snyk CLI. [Install ASH](../install.md#nix-mode) has the full list.

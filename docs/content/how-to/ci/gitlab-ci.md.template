@@ -4,6 +4,9 @@ This page adds an ASH job to `.gitlab-ci.yml` that publishes ASH's findings as a
 report and its JUnit file as a test report, and a second job that fails the pipeline when
 ASH found something.
 
+If developers also run the pre-commit hook, it covers only five scanners; these jobs run
+the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
+
 Prerequisites:
 
 - A runner with the Docker executor, or any runner whose job image is based on Debian or
@@ -258,3 +261,55 @@ python3 -c "import json; report = json.load(open('.ash/ash_output/reports/ash.gl
 ```
 
 [Scale to large repositories](../scale-large-repos.md#changed-files) has the details.
+
+## Run in Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`. The job below installs
+    ASH from `main`. Pin a commit SHA instead when you need to know which code ran.
+
+Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
+ASH's `flake.nix`, so the job needs no `apt-get` packages for the scanners and no
+`ash dependencies install` step. The job image needs Nix on `PATH`, Python 3.10 or later,
+and git; set the CI/CD variable `NIX_IMAGE` to an image that has them. ASH passes
+`nix-command` and `flakes` on each invocation, so you do not have to enable them in
+`nix.conf`. Nix mode does not install ASH, and cdk-nag runs on the Python environment ASH
+is installed in, so install ASH with the `cdk` extra. A `main` install cannot find a
+release tag that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s
+flake.
+
+<!-- doctest: illustrative reason="installs ASH from main and needs Nix and the network" -->
+```yaml
+ash-scan-nix:
+  stage: test
+  image: $NIX_IMAGE
+  variables:
+    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main"
+    ASH_NIX_FLAKE_REF: "github:awslabs/automated-security-helper/main"
+  before_script:
+    - python -m venv /opt/ash
+    - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
+    - export PATH="/opt/ash/bin:$PATH"
+  script:
+    - ash_exit=0
+    - >-
+      ash scan --mode nix --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+  artifacts:
+    when: always
+    paths:
+      - .ash/ash_output/reports/
+      - .ash/ash_output/ash_aggregated_results.json
+      - ash-exit-code.txt
+    reports:
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+      junit: .ash/ash_output/reports/ash.junit.xml
+```
+
+The report files, exit codes, and the `ash-gate` job from [Add the jobs](#add-the-jobs) are
+the same as in local mode; set the gate job's `needs` to `ash-scan-nix` when this job
+replaces `ash-scan`. The Nix shell supplies the tools of every built-in scanner
+except cdk-nag; it does not supply ferret-scan or the Snyk CLI.
+[Install ASH](../install.md#nix-mode) has the full list of what Nix mode needs.
