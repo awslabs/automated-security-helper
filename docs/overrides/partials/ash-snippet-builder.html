@@ -11,9 +11,10 @@
   CI system changes, change its entry in `backends`, `picks` or `families` in the
   same PR as the integrations page's Backends and CI tables, which this mirrors.
 
-  Without JavaScript every family is readable: the family for the default pick is
-  shown, the others carry `hidden`, and the noscript sheet in main.html shows them
-  all, stacked, each under its own title.
+  Every family is rendered visible, so a page whose script is blocked or fails to load
+  still shows all of them, stacked, each under its own title. The pickers carry
+  `hidden` until ash-snippet-builder.js reveals them, and its first render hides the
+  families that do not answer the default pick.
 -#}
 {% from "partials/ash-icons.html" import icon %}
 {% set ref = config.extra.install_ref or ("v" ~ page.meta.ash_version) %}
@@ -319,7 +320,7 @@ ash scan --mode local --no-progress \
    [("Shell", t_local_brew)],
    [("Homebrew", "how-to/install/#homebrew"), ("Run ASH locally", "getting-started/local/")]),
 
-  ("pc-hook", "precommit", "uvtool uvx pipx pip", "pre-commit hook",
+  ("pc-hook", "precommit", "uvtool uvx pipx pip brew", "pre-commit hook",
    "pre-commit builds the hook's environment, so the way you installed ASH does not change this block. The hook runs a fixed set of five scanners.", "",
    [(".pre-commit-config.yaml", t_pc_hook), ("Shell", t_pc_hook_run)],
    [("Run ASH with pre-commit", "how-to/pre-commit/#add"), ("What the hook runs", "how-to/pre-commit/#behavior")]),
@@ -327,12 +328,12 @@ ash scan --mode local --no-progress \
    "Builds ASH's container image on first use, which takes several minutes, and needs a container runtime. Run it before a push or by hand.", "",
    [(".pre-commit-config.yaml", t_pc_full), ("Shell", t_pc_full_run)],
    [("The ash-full-scan hook", "how-to/pre-commit/#full-scan")]),
-  ("pc-na", "precommit", "nix brew", "pre-commit: not offered for Nix or Homebrew",
+  ("pc-na", "precommit", "nix", "pre-commit: not offered for Nix",
    "There is no pre-commit snippet for this backend. The pre-commit guide has a Nix recipe for main, and a hook that runs an ASH you already installed.", nix_caveat,
    [],
    [("Run ASH with pre-commit", "how-to/pre-commit/"), ("Run the hook in Nix mode", "how-to/pre-commit/#nix"), ("Integrations overview", "integrations/")]),
 
-  ("gha-local", "gha", "uvtool uvx pipx pip", "GitHub Actions: reusable workflows",
+  ("gha-local", "gha", "uvtool uvx pipx pip brew", "GitHub Actions: reusable workflows",
    "The workflow installs ASH itself, so the way you installed ASH does not change it. ash-version matches the uses ref, so the workflow runs the ASH it was written for.", "",
    [("GitHub Actions workflow", t_gha)],
    [("Run ASH in GitHub Actions", "how-to/ci/github-actions/#reusable"), ("Quickstart", "getting-started/ci/")]),
@@ -340,7 +341,7 @@ ash scan --mode local --no-progress \
    "ash-mode: container builds ASH's image on the runner and scans inside it. changed-files-only is not supported in container mode.", "",
    [("GitHub Actions workflow", t_gha_container)],
    [("Run ASH in GitHub Actions", "how-to/ci/github-actions/#reusable"), ("Run ASH in a container", "how-to/run-in-a-container/")]),
-  ("gha-na", "gha", "nix brew", "GitHub Actions: not offered for Nix or Homebrew",
+  ("gha-na", "gha", "nix", "GitHub Actions: not offered for Nix",
    "The reusable workflow takes local or container for ash-mode and installs ASH on the runner. The GitHub Actions guide has a Nix recipe for main.", nix_caveat,
    [],
    [("Run in Nix mode", "how-to/ci/github-actions/#nix"), ("Other CI systems", "how-to/ci/other-ci/"), ("Integrations overview", "integrations/")]),
@@ -412,7 +413,7 @@ ash scan --mode local --no-progress \
 
   <div class="ash-builder__panels">
     {% for id, pick, on, title, note, caveat, blocks, links in families %}
-    <section class="ash-builder__panel" aria-labelledby="builder-{{ id }}" data-ash-panel="{{ id }}" data-ash-pick-for="{{ pick }}" data-ash-backends-for="{{ on }}" data-ash-title="{{ title | e }}"{% if caveat %} data-ash-caveat="{{ caveat | e }}"{% endif %}{% if not (pick == "local" and "uvtool" in on.split(" ")) %} hidden{% endif %}>
+    <section class="ash-builder__panel" aria-labelledby="builder-{{ id }}" data-ash-panel="{{ id }}" data-ash-pick-for="{{ pick }}" data-ash-backends-for="{{ on }}" data-ash-title="{{ title | e }}"{% if caveat %} data-ash-caveat="{{ caveat | e }}"{% endif %}>
       <h3 class="ash-builder__title" id="builder-{{ id }}">{{ title }}</h3>
       <p class="ash-builder__note">{{ note }}</p>
       {% if caveat %}<p class="ash-builder__caveat">{{ caveat }}</p>{% endif %}

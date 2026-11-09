@@ -446,30 +446,23 @@ a { text-decoration: none; }
 .ash-terminal__dots i { width: 7px; height: 7px; border-radius: 50%; background: #c08579; }
 .ash-terminal__dots i:nth-child(2) { background: #bfa371; }
 .ash-terminal__dots i:nth-child(3) { background: #7c9a7b; }
-.ash-tabs { display: flex; gap: 23px; padding-inline: 24px; border-bottom: 1px solid var(--ash-line); }
-.ash-tabs button { display: flex; align-items: center; gap: 8px; position: relative; padding-block: 17px; border-bottom: 1px solid transparent; color: var(--ash-dim); font: 12px var(--ash-mono); background: transparent; }
-.ash-tabs button[aria-selected="true"] { color: var(--ash-accent); border-bottom-color: var(--ash-accent); }
-.ash-tabs button > span { padding: 2px 5px; border-radius: 3px; background: var(--ash-soft-accent); font: 12px "Open Sans", sans-serif; color: var(--ash-dim); }
-.ash-install-panel { padding: 21px 24px 0; }
 .ash-terminal__comment { color: var(--ash-dim); font: 12px/1.6 var(--ash-mono); }
 .ash-terminal__command { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; }
 .ash-terminal__command > span { padding-top: 3px; color: var(--ash-accent); font: 12px/1.7 var(--ash-mono); }
 .ash-terminal__command > code { min-width: 0; padding-top: 3px; color: var(--ash-ink); font: 12px/1.9 var(--ash-mono); overflow-wrap: anywhere; }
 .ash-terminal__command > .ash-copy { margin-left: auto; margin-top: -1px; }
-.ash-terminal__scan { padding: 24px; }
 .ash-mode-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 17px; }
 .ash-mode-picker button { display: inline-flex; align-items: center; gap: 6px; padding: 10px 12px; min-height: 44px; border: 1px solid var(--ash-line); border-radius: 999px; color: var(--ash-muted); font-size: 12px; background: transparent; transition: transform var(--ash-feedback) var(--ash-ease); }
 .ash-mode-picker button:active { transform: scale(.97); }
 .ash-mode-picker button .ash-icon { width: 13px; height: 13px; }
 .ash-mode-picker button[aria-pressed="true"] { border-color: var(--ash-accent); color: var(--ash-accent); background: var(--ash-soft-accent); }
-.ash-mode-note { margin-top: 11px !important; min-height: 38px; color: var(--ash-muted); font-size: 12px; line-height: 1.8; }
 .ash-steps ~ .ash-text-link + .ash-text-link { margin-left: 24px; }
 .ash-builder__pickers { display: grid; gap: 18px; padding: 22px 24px 0; }
 .ash-builder__label { display: block; color: var(--ash-dim); font: 12px var(--ash-mono); }
 .ash-builder__pickers .ash-mode-picker { margin-top: 8px; }
 .ash-mode-picker button > .ash-builder__tag { padding: 1px 5px; border-radius: 3px; background: var(--ash-soft-accent); color: var(--ash-dim); font-size: 12px; }
 .ash-builder__panels { padding: 20px 24px 24px; }
-.ash-builder__panel + .ash-builder__panel { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--ash-line); }
+.ash-builder__panel:not([hidden]) ~ .ash-builder__panel:not([hidden]) { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--ash-line); }
 .ash-builder__title { color: var(--ash-ink); font: 600 14px/1.5 "Open Sans", sans-serif; }
 .ash-builder__note { margin-top: 6px; color: var(--ash-muted); font-size: 13px; line-height: 1.7; }
 .ash-builder__caveat { margin-top: 8px; color: var(--ash-medium); font-size: 13px; line-height: 1.7; }
@@ -727,10 +720,7 @@ a { text-decoration: none; }
   .ash-quickstart__grid { grid-template-columns: 1fr 1.1fr; gap: 30px; }
   .ash-section-description { font-size: 13px; }
   .ash-terminal__chrome { padding-inline: 16px; border-radius: 0; }
-  .ash-tabs, .ash-install-panel, .ash-terminal__scan, .ash-demo { padding-inline: 18px; }
-  .ash-tabs { gap: 19px; }
-  .ash-tabs button { font-size: 12px; }
-  .ash-tabs button > span { font-size: 12px; }
+  .ash-demo { padding-inline: 18px; }
   .ash-terminal__command > code { font-size: 12px; }
   .ash-terminal__comment { font-size: 12px; }
   .ash-demo__lines { font-size: 12px; }
@@ -809,12 +799,7 @@ a { text-decoration: none; }
   .ash-terminal__command > code { font-size: 12px; }
   .ash-terminal__comment { font-size: 12px; }
   .ash-demo__lines { font-size: 12px; }
-  .ash-tabs button { font-size: 12px; }
-  .ash-tabs button > span { font-size: 12px; }
-  .ash-tabs { gap: 24px; }
-  .ash-terminal__scan { padding-block: 23px; }
   .ash-mode-picker button { font-size: 12px; }
-  .ash-mode-note { font-size: 12px; min-height: 0; }
   .ash-ecosystem .ash-section-heading > a { margin-top: 18px; }
   .ash-filter { gap: 6px; }
   .ash-filter button { font-size: 12px; padding: 10px 12px; }

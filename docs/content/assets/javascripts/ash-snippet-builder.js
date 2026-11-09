@@ -1,7 +1,9 @@
 /* Home page snippet builder: shows the one snippet family that answers the picked
    (workflow, backend) pair. The snippets are rendered into the page by
-   docs/overrides/partials/ash-snippet-builder.html, so the page reads fully without
-   this file; the copy buttons are wired by ash.js through data-ash-copy. */
+   docs/overrides/partials/ash-snippet-builder.html with every family visible, so the
+   page reads fully when this file is blocked or fails to load; the first render below
+   hides the families that do not answer the default pick. The copy buttons are wired
+   by ash.js through data-ash-copy. */
 (function () {
   const host = document.querySelector("[data-ash-builder]");
   if (!host) return;
@@ -43,7 +45,7 @@
   picks.forEach((button) => button.addEventListener("click", () => choose("pick", button.dataset.ashPick)));
   backends.forEach((button) => button.addEventListener("click", () => choose("backend", button.dataset.ashBackend)));
 
-  // Without this file the pickers stay hidden and every family stays readable.
+  // Without this file the pickers stay hidden and every family stays visible.
   if (pickers) pickers.hidden = false;
   render(false);
 })();
