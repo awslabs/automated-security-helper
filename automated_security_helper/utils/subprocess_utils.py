@@ -1820,25 +1820,42 @@ def stop_after_interrupt(
     # branch interrupts a recorded launcher child once more and leaves one
     # that ignores the interrupt running, and the process died of raw SIGINT
     # with no interrupted-scan message instead of the documented 130.
-    with interrupt_stop_in_progress():
-        try:
-            _wait_out(process, grace)
-        except KeyboardInterrupt:
-            discard_tool_pid_once_exited(process)
-            if _kill_unless_refused(process):
-                # Observed, discarded, then reaped: the die-now record must not
-                # outlive the reap (discard_tool_pid_before_reap). The reap is
-                # bounded: a child SIGKILL did not end, in uninterruptible sleep
-                # say, is not waited for without end (_wait_after_kill).
+    #
+    # The registration raises the counter the dispatcher reads as it is entered,
+    # so a press chained the moment the counter is visible must already have an
+    # arm to land in: the whole block sits in an outer try, armed before the
+    # counter exists, and a press in the gap between the two is stopped by the
+    # outer arm exactly as the inner one stops it.
+    stopped_in_the_wait = False
+    try:
+        with interrupt_stop_in_progress():
+            try:
+                _wait_out(process, grace)
+            except KeyboardInterrupt:
+                stopped_in_the_wait = True
+                discard_tool_pid_once_exited(process)
+                if _kill_unless_refused(process):
+                    # Observed, discarded, then reaped: the die-now record must
+                    # not outlive the reap (discard_tool_pid_before_reap). The
+                    # reap is bounded: a child SIGKILL did not end, in
+                    # uninterruptible sleep say, is not waited for without end
+                    # (_wait_after_kill).
+                    discard_tool_pid_before_reap(process)
+                    _wait_after_kill(process)
+                raise
+            except Exception:
+                discard_tool_pid_once_exited(process)
+                if not _kill_unless_refused(process):
+                    return False
                 discard_tool_pid_before_reap(process)
                 _wait_after_kill(process)
-            raise
-        except Exception:
+    except KeyboardInterrupt:
+        if not stopped_in_the_wait:
             discard_tool_pid_once_exited(process)
-            if not _kill_unless_refused(process):
-                return False
-            discard_tool_pid_before_reap(process)
-            _wait_after_kill(process)
+            if _kill_unless_refused(process):
+                discard_tool_pid_before_reap(process)
+                _wait_after_kill(process)
+        raise
     return True
 
 
