@@ -814,7 +814,7 @@ _INTERRUPT_STOP_WAITS_WRITE_LOCK = threading.Lock()
 #: The child processes those waits are waiting out, as a snapshot tuple. A
 #: writer replaces the whole tuple under the same lock; the SIGINT handler
 #: reads the name once and never takes the lock, as it does for the counter.
-_INTERRUPT_STOP_PROCESSES: tuple = ()
+_INTERRUPT_STOP_PROCESSES: tuple[Any, ...] = ()
 
 
 @contextlib.contextmanager
