@@ -129,9 +129,9 @@ directory, as the `cd` does, so that a config in a repository cannot change what
 A server started this way applies every setting on this page, and the `env` block shown below
 works the same way. It differs from an installed `ash` in one respect: the entry installs ASH
 without the `cdk` extra, so the cdk-nag scanner is reported MISSING when the project has files
-it scans. To include it, pass the `--from` specification from
+it scans. To include it, pass the `uvx --from` specification from
 [Run without installing: uvx](install.md#run-without-installing-uvx), which has the extra, as
-two arguments (`"--from"` and the specification) in place of the `--from=` argument.
+two arguments (`uvx --from` and the specification) in place of the `uvx --from=` argument.
 
 The ref after `@` in these commands pins what is installed: a release tag does not move, while a
 branch like `main` resolves to its newest commit at install time. Change it

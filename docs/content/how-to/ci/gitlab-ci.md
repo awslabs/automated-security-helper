@@ -102,6 +102,7 @@ install and a shell function that wraps the `uvx --from` specification from
 the `ash dependencies install` line, the `script`, the artifacts, and the `ash-gate` job stay
 as above, and the function stands in for `ash` in both:
 
+<!-- doctest: config kind=gitlab-ci -->
 ```yaml
 ash-scan:
   stage: test
