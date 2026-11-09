@@ -102,7 +102,6 @@ install and a shell function that wraps the `uvx --from` specification from
 the `ash dependencies install` line, the `script`, the artifacts, and the `ash-gate` job stay
 as above, and the function stands in for `ash` in both:
 
-<!-- doctest: illustrative reason="installs uv, ASH, and scanner tools from the network" -->
 ```yaml
 ash-scan:
   stage: test
@@ -278,7 +277,7 @@ is installed in, so install ASH with the `cdk` extra. A `main` install cannot fi
 release tag that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s
 flake.
 
-<!-- doctest: illustrative reason="installs ASH from main and needs Nix and the network" -->
+<!-- doctest: config kind=gitlab-ci runner=none reason="installs ASH from main, which the runner cannot swap for the pull request's wheel" -->
 ```yaml
 ash-scan-nix:
   stage: test

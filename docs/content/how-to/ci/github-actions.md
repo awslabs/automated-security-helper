@@ -248,23 +248,13 @@ Set `ash-mode: container` to build ASH's image on the runner and scan inside it.
 holds every scanner tool, so the runner needs none of them. ASH publishes no image, so each
 run builds one; see [Run ASH in a container](../run-in-a-container.md).
 
-<!-- doctest: config kind=github-actions -->
+Add it to the call in [Call the reusable workflows](#reusable), keeping the call's other
+`with:` entries as they are. The `ash-args` line is the gate, so leave it in place.
+
 ```yaml
-name: ASH container scan
-on:
-  pull_request:
-permissions:
-  contents: read
-jobs:
-  ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.1
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
-    with:
-      ash-version: v3.7.1
-      ash-mode: container
+with:
+  ash-version: v3.7.1
+  ash-mode: container
 ```
 
 The `install-*` inputs only matter in local mode, where they download scanner tools onto
@@ -277,10 +267,10 @@ before any job starts. Check the workflow file at the tag you pin before adding 
 `changed-files-only` does not work with container mode. The workflow checks the mode before
 it runs ASH, whether it comes from `ash-mode` or from `--mode container` in `ash-args`, and
 stops the job with its own error (a non-zero exit) instead of starting the scan. The check
-is the workflow's: ASH on `main` also refuses the combination, with exit code 5, but a
-release through v3.7.1 ignores `--changed-files-only` in container mode and reports the
-findings in every file. To report only a pull request's changes, use the default `ash-mode: local`, as described in
-[Scan only the files a pull request changes](#changed-files).
+is the workflow's: releases through v3.7.1 ignore `--changed-files-only` in container mode
+and report the findings in every file, while later builds refuse the combination with exit
+code 5. To report only a pull request's changes, use the default `ash-mode: local`, as
+described in [Scan only the files a pull request changes](#changed-files).
 
 `ash-args: --mode container` has the same effect as `ash-mode: container`, and an
 explicit `--mode` in `ash-args` wins over `ash-mode` if the two disagree, with no warning.
@@ -635,7 +625,7 @@ ASH, and cdk-nag runs on the Python environment ASH is installed in. ASH passes
 `nix-command` and `flakes` on each invocation. A `main` install cannot find a release tag
 that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s flake.
 
-<!-- doctest: illustrative reason="installs Nix and ASH from main over the network" -->
+<!-- doctest: config kind=github-actions runner=none reason="installs ASH from main, which the runner cannot swap for the pull request's build" -->
 ```yaml
 name: ASH (Nix mode)
 on:
@@ -654,12 +644,34 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
       - name: Install ASH
-        run: uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+        run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main' \
+            2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       - name: Scan in Nix mode
         run: |
-          export PATH="$(uv tool dir --bin):${PATH}"
-          ash scan --mode nix --no-progress \
-            --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          {
+            export PATH="$(uv tool dir --bin):${PATH}"
+            ash scan --mode nix --no-progress \
+              --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+          } 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
 ```
 
 `cachix/install-nix-action` is the action ASH's own install-methods workflow uses for its

@@ -266,7 +266,7 @@ with the scanners that ASH's `flake.nix` supplies, add a `local` hook that calls
 `ash scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
 `ash-full-scan`:
 
-<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix, an ASH from main and the network" -->
+<!-- doctest: config kind=pre-commit -->
 ```yaml
 repos:
   - repo: local
@@ -289,6 +289,6 @@ This is a different hook from `ash`: it runs the scanners of a normal scan, not 
 of precommit mode, so it takes longer and belongs on `manual` or `pre-push`. It uses the
 installation on `PATH`, so install ASH with the `cdk` extra for cdk-nag. A `main` install
 cannot find a release tag that contains `flake.nix`, so the hook's `entry` sets
-`ASH_NIX_FLAKE_REF` itself through `env`, so the hook finds `flake.nix` on a `pre-push` or
-from an IDE or GUI client as well, where a variable exported in your shell may not be set.
+`ASH_NIX_FLAKE_REF` itself through `env`. The hook then finds `flake.nix` on a `pre-push`
+or from an IDE or GUI client as well, where a variable exported in your shell may not be set.
 [Install ASH](install.md#nix-mode) covers Nix mode's requirements.

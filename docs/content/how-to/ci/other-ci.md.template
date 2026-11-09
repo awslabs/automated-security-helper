@@ -112,9 +112,9 @@ tool. Two more things differ in CI:
 - A job that runs as root, as AWS CodeBuild and container-based jobs do, needs
   `--build-target ci`: ASH refuses to build the non-root image, whose user would get
   UID 0.
-- `--changed-files-only` is not supported in container mode. ASH on `main` refuses it with
-  exit code 5 before anything is built or run, also when `ASH_CHANGED_FILES_ONLY` sets it; a
-  release through v3.7.1 ignores it with a warning and reports the findings in every file.
+- `--changed-files-only` is not supported in container mode. Releases through v3.7.1
+  ignore it with a warning and report the findings in every file; later builds refuse it
+  with exit code 5 before anything is built or run, also when `ASH_CHANGED_FILES_ONLY` sets it.
   The GitHub Actions workflow does not leave this to ASH: it stops the job with its own
   error before ASH runs ([Run ASH in GitHub Actions](github-actions.md)).
 

@@ -102,7 +102,7 @@ to the ref you want, as described in
 The entry does not install the scanner tools; step 1
 still applies, and [Install the ASH plugin for your agent](../how-to/agent-plugins.md) shows how
 to run `ash dependencies install` through `uvx`. Step 1 does not change what the entry
-installs: it installs ASH without the `cdk` extra, so the cdk-nag scanner is reported MISSING,
+installs: the entry installs ASH without the `cdk` extra, so the cdk-nag scanner is reported MISSING,
 and [Run the MCP server](../how-to/mcp-server.md#start-the-server-with-uvx-instead-of-an-installed-ash)
 shows how to add the extra. To run the server in a container or over HTTP
 instead, see [Run the MCP server](../how-to/mcp-server.md#run-in-a-container).
