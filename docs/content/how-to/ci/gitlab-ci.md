@@ -4,6 +4,9 @@ This page adds an ASH job to `.gitlab-ci.yml` that publishes ASH's findings as a
 report and its JUnit file as a test report, and a second job that fails the pipeline when
 ASH found something.
 
+If developers also run the pre-commit hook, it covers only five scanners; these jobs run
+the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
+
 Prerequisites:
 
 - A runner with the Docker executor, or any runner whose job image is based on Debian or
