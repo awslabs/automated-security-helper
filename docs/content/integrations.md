@@ -64,8 +64,11 @@ set. The `ash-full-scan` hook uses `--mode=container`. The
 | Distributed CodePipeline executor | [Deploy on AWS](how-to/deploy-on-aws.md#targets) | Shard and merge stages |
 | CDK Pipelines | [Deploy on AWS](how-to/deploy-on-aws.md#targets) | The `ASHScanStep` construct |
 
-Every CI system gates on the scan's [exit code](reference/exit-codes.md). The
-[CI pages](how-to/ci/other-ci.md#modes) explain local mode and container mode.
+The runner-based CI systems gate on the scan's
+[exit code](reference/exit-codes.md). The AWS CodeCommit pull request gate
+comments on the pull request and blocks nothing until you add an approval rule
+that requires its role; see [Deploy on AWS](how-to/deploy-on-aws.md#targets).
+The [CI pages](how-to/ci/other-ci.md#modes) explain local mode and container mode.
 
 ## Connect an AI assistant
 
