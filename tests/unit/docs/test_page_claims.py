@@ -7720,16 +7720,27 @@ def interrupt():
         ):
             time.sleep(0.05)
         if number and control.get("console_file"):
-            # The stand-in logs a console Ctrl-C as soon as it reads the console
-            # file, which is before ASH's main thread has handled the first one
-            # (a slow Windows runner). A second Ctrl-C raised then lands in the
-            # unwinding, before the wait that kills the child, so it never ran.
-            # An operator's second press is never within that window. A loaded
-            # Windows runner took longer than half a second to get there (the
-            # stand-in logged both Ctrl-Cs and ASH never ended it), so the second
-            # one goes 2 seconds after the first, still inside the page's 5-second
-            # wait that it is meant to cut short.
-            time.sleep(2.0)
+            # The documented contract is "a second Ctrl-C DURING THE WAIT kills it
+            # at once". The stand-in logs a console Ctrl-C as soon as it reads the
+            # console file, which is before ASH's main thread has handled the
+            # first one, and a second Ctrl-C raised then lands in the unwinding,
+            # before the wait that kills the child, so it never ran. A fixed delay
+            # raced a slow runner to that wait. This driver runs inside the ASH
+            # process, so it enters the documented window by observing the wait
+            # counter that the second-interrupt handler itself consults
+            # (cancellation._INTERRUPT_STOP_WAITS, raised while stop_after_interrupt
+            # waits the child out). The poll is bounded; on expiry the press is
+            # still sent and the assertions report what happened. The window
+            # between interrupt_stop_in_progress() entry and its guarded try is a
+            # named, accepted limit.
+            from automated_security_helper.core import cancellation
+
+            poll_deadline = time.monotonic() + {grace}
+            while (
+                cancellation._INTERRUPT_STOP_WAITS <= 0
+                and time.monotonic() < poll_deadline
+            ):
+                time.sleep(0.05)
         print({sent!r}, time.monotonic(), file=sys.stderr, flush=True)
         if control.get("console_file"):
             with open(control["console_file"], "a", encoding="utf-8") as console_file:
@@ -7941,7 +7952,10 @@ def _interrupter(
         sys.executable,
         "-c",
         importing_this_checkout(
-            _INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT), root=_IMPORTED_ROOT
+            _INTERRUPTED_ASH.format(
+                sent=_INTERRUPT_SENT, grace=_INTERRUPT_GRACE_SECONDS + 5
+            ),
+            root=_IMPORTED_ROOT,
         ),
         json.dumps(control),
     ]
