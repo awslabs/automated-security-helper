@@ -122,11 +122,16 @@ afterward, so the client's machine needs uv, git, and network access to GitHub o
 start. Desktop clients often do not see your shell's `PATH`; if the client cannot start the
 server, put the absolute path that `command -v uvx` prints in `command`. The scanner tools are
 not part of that install: install them once for your user with
-`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.1 ash dependencies install`,
+`(cd "$(mktemp -d)" && uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.1 ash dependencies install)`,
 or accept `incomplete` scans as described in
-[Connect an AI agent to ASH](../getting-started/agents.md#1-install-ash). A server started this
-way runs scans exactly as an installed one does, and every setting on this page applies to it.
-The `env` block shown below works the same way.
+[Connect an AI agent to ASH](../getting-started/agents.md#1-install-ash). Run it from an empty
+directory, as the `cd` does, so that a config in a repository cannot change what it installs.
+A server started this way applies every setting on this page, and the `env` block shown below
+works the same way. It differs from an installed `ash` in one respect: the entry installs ASH
+without the `cdk` extra, so the cdk-nag scanner is reported MISSING when the project has files
+it scans. To include it, pass the `--from` specification from
+[Run without installing: uvx](install.md#run-without-installing-uvx), which has the extra, as
+two arguments (`"--from"` and the specification) in place of the `--from=` argument.
 
 The ref after `@` in these commands pins what is installed: a release tag does not move, while a
 branch like `main` resolves to its newest commit at install time. Change it

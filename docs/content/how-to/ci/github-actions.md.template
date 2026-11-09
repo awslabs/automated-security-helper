@@ -103,7 +103,7 @@ affect.
 | `install-cfn-guard` | `true` | Install cfn-guard and the rule files it evaluates. |
 | `install-gitleaks` | `true` | Install gitleaks. |
 | `install-trivy` | `true` | Install trivy. trivy downloads its vulnerability database during each scan. |
-| `changed-files-only` | `false` | Passes `--changed-files-only` and `--base-ref`, and checks out the repository's whole history to compute the changed files; see [Scan only the files a pull request changes](#changed-files). Not supported with `ash-mode: container`: the scan stops with exit code 5. |
+| `changed-files-only` | `false` | Passes `--changed-files-only` and `--base-ref`, and checks out the repository's whole history to compute the changed files; see [Scan only the files a pull request changes](#changed-files). Not supported with `ash-mode: container`: the workflow stops the job with its own error before the scan. |
 | `base-ref` | `origin/main` | The base for `changed-files-only` on events other than `pull_request` and `merge_group`, which use their own base commit. |
 | `artifact-name` | `ash_output` | Name of the artifact the scan's output directory is uploaded as. A matrix, or a caller that calls this workflow more than once in one run, must give each call its own name: in the first attempt a second upload under a name already taken fails, and in a re-run it replaces the earlier upload. |
 
@@ -274,10 +274,12 @@ defines only `install-grype`, `install-syft`, and `install-opengrep`, all defaul
 `false`, and a caller that passes an input the referenced workflow does not define fails
 before any job starts. Check the workflow file at the tag you pin before adding one.
 
-`changed-files-only` does not work with container mode. ASH ignores
-`--changed-files-only` there and would report the findings in every file, so the job
-stops before the scan with an error instead (a non-zero exit). To report only a pull request's changes,
-use the default `ash-mode: local`, as described in
+`changed-files-only` does not work with container mode. The workflow checks the mode before
+it runs ASH, whether it comes from `ash-mode` or from `--mode container` in `ash-args`, and
+stops the job with its own error (a non-zero exit) instead of starting the scan. The check
+is the workflow's: ASH on `main` also refuses the combination, with exit code 5, but a
+release through v3.7.1 ignores `--changed-files-only` in container mode and reports the
+findings in every file. To report only a pull request's changes, use the default `ash-mode: local`, as described in
 [Scan only the files a pull request changes](#changed-files).
 
 `ash-args: --mode container` has the same effect as `ash-mode: container`, and an

@@ -29,7 +29,10 @@ Run it from the root of the checkout. The reports land in `.ash/ash_output/repor
 To use [uv](https://docs.astral.sh/uv/) instead of a virtual environment, replace the first
 three lines with a function that runs ASH through `uvx`, using the specification from
 [Run without installing: uvx](../install.md#run-without-installing-uvx). The rest of the
-recipe is unchanged, and every system section below can use either form:
+recipe is unchanged. A shell function lasts only as long as the shell that defines it, so
+this form works where the commands share one shell: the generic shell step, Jenkins, and
+CodeBuild below. Azure Pipelines and CircleCI start a new shell for each step, and keep
+the virtual environment form unless you take the extra step in their sections:
 
 <!-- doctest: illustrative reason="installs ASH and scanner tools from the network" -->
 ```bash
@@ -109,8 +112,11 @@ tool. Two more things differ in CI:
 - A job that runs as root, as AWS CodeBuild and container-based jobs do, needs
   `--build-target ci`: ASH refuses to build the non-root image, whose user would get
   UID 0.
-- `--changed-files-only` is not supported in container mode: the scan stops with exit code 5
-  before anything is built or run, also when `ASH_CHANGED_FILES_ONLY` sets it.
+- `--changed-files-only` is not supported in container mode. ASH on `main` refuses it with
+  exit code 5 before anything is built or run, also when `ASH_CHANGED_FILES_ONLY` sets it; a
+  release through v3.7.1 ignores it with a warning and reports the findings in every file.
+  The GitHub Actions workflow does not leave this to ASH: it stops the job with its own
+  error before ASH runs ([Run ASH in GitHub Actions](github-actions.md)).
 
 For many repositories, build the image once, push it to your registry, and use it as the
 build image, running `ash scan --mode local` inside it. Nothing is installed per build. See
@@ -322,6 +328,12 @@ steps:
   from Microsoft DevLabs reads. With the extension installed in your organization, the run
   shows the SARIF findings in a tab of its own.
 - The `apt-get` line adds the Ruby headers and libyaml that building cfn-nag's gems needs.
+- Each `script` step is a new shell, so the `ash()` function from the [recipe](#recipe) is
+  gone by the next step and the call fails with exit status 127. To run ASH through `uvx`
+  here, have the install step write an executable `ash` wrapper script that runs
+  `uvx ... ash "$@"` into a directory outside the checkout, and add that directory to the
+  `PATH` with `##vso[task.prependpath]`, as the install step does for the virtual
+  environment's `bin`. Otherwise keep the virtual environment form above.
 
 ## CircleCI {#circleci}
 
@@ -383,6 +395,10 @@ workflows:
 - Each `run` step starts a new shell. The line that appends to `$BASH_ENV` puts the
   virtual environment's `bin` on `PATH` for every later step. The virtual environment is
   in the home directory, outside the checkout in `~/project`.
+- A shell function from the [recipe](#recipe) does not carry from one `run` step to the
+  next either. To run ASH through `uvx` here, append the `ash()` function to `$BASH_ENV` in
+  the install step in place of the `PATH` line, so that each later step's shell defines it.
+  The image needs `uv` on its `PATH`. Otherwise keep the virtual environment form above.
 - `save_cache` comes before the scan because, by default, it runs only when every step
   before it succeeded, and a scan with findings fails its step. CircleCI never overwrites
   a saved key, so key the cache on the ASH version, as above: each version pins its own
