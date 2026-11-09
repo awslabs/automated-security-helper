@@ -95,7 +95,10 @@ the first time the server starts:
 }
 ```
 
-This is the entry the generated plugins use. It does not install the scanner tools; step 1
+This is the entry the generated plugins use. The `@v3.7.1` tag pins the release and does not
+update itself; change it to the tag you want, as described in
+[Change the ASH version a plugin uses](../how-to/agent-plugins.md#change-the-ash-version-a-plugin-uses).
+The entry does not install the scanner tools; step 1
 still applies, and [Install the ASH plugin for your agent](../how-to/agent-plugins.md) shows how
 to run `ash dependencies install` through `uvx`. To run the server in a container or over HTTP
 instead, see [Run the MCP server](../how-to/mcp-server.md#run-in-a-container).

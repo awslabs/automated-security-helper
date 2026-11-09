@@ -96,8 +96,8 @@ Clients start the server with this command and arguments:
 
 If you would rather not install ASH, let the client start the server with `uvx`. This is the
 same entry the generated agent plugins use (see
-[Install the ASH plugin for your agent](agent-plugins.md), which lists the config file of each
-of the 16 supported clients):
+[Install the ASH plugin for your agent](agent-plugins.md), which covers the 16 supported
+platforms; Aider and the generic skill ship no MCP server, so they cannot use this entry):
 
 <!-- doctest: config kind=mcp-client -->
 ```json
@@ -125,6 +125,10 @@ or accept `incomplete` scans as described in
 [Connect an AI agent to ASH](../getting-started/agents.md#1-install-ash). A server started this
 way runs scans exactly as an installed one does, and every setting on this page applies to it.
 The `env` block shown below works the same way.
+
+The `@v3.7.1` tag in these commands pins the release. It does not update itself, so change it
+to the tag you want to run, as described in
+[Change the ASH version a plugin uses](agent-plugins.md#change-the-ash-version-a-plugin-uses).
 
 On stdio the server's standard output carries the protocol, so ASH writes every message and
 log line to standard error, and so do the scans and the tools they run. `--quiet` hides the
