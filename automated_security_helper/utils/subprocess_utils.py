@@ -1819,7 +1819,9 @@ def stop_after_interrupt(
     # registration the SIGINT handler's die-now branch would take it: that
     # branch interrupts a recorded launcher child once more and leaves one
     # that ignores the interrupt running, and the process died of raw SIGINT
-    # with no interrupted-scan message instead of the documented 130.
+    # with no interrupted-scan message instead of the documented 130. The
+    # registration also hands the dispatcher the child, so the second press
+    # stops it even when the chained interrupt lands outside these arms.
     #
     # The registration raises the counter the dispatcher reads as it is entered,
     # so a press chained the moment the counter is visible must already have an
@@ -1828,7 +1830,7 @@ def stop_after_interrupt(
     # outer arm exactly as the inner one stops it.
     stopped_in_the_wait = False
     try:
-        with interrupt_stop_in_progress():
+        with interrupt_stop_in_progress(process):
             try:
                 _wait_out(process, grace)
             except KeyboardInterrupt:
