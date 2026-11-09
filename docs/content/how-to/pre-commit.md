@@ -147,7 +147,9 @@ gate:
 
 If you want CI to enforce the same hook configuration, `pre-commit run ash --all-files`
 works on a runner that has pre-commit, Python 3.10 to 3.14, and network access to GitHub
-and PyPI. It runs only the precommit scanner set, so keep a direct ASH scan in the
+and PyPI. If the repository has CloudFormation templates or a `package.json` with a
+lockfile, the runner also needs Node.js and npm, or the hook exits 1 on every run (see
+[Behavior](#behavior) for the `--exclude-scanners` alternative). It runs only the precommit scanner set, so keep a direct ASH scan in the
 pipeline as well; the hook does not replace it.
 
 ## Use an ASH you already installed {#local-hook}
