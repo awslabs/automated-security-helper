@@ -20,7 +20,7 @@ flowchart LR
     report -.-> inspect[Inspect phase, optional<br/>analysis/]
 ```
 
-The dotted arrow marks the optional inspect phase, which runs after the report phase only when you ask for it (`--phases inspect`, or `ash scan --inspect`). It analyzes the SARIF fields of the finished scan and writes the result to `analysis/` in the output directory. It does not scan anything.
+The dotted arrow marks the optional inspect phase, which runs after the report phase only when you ask for it with `ash scan --inspect`. Naming `inspect` in `--phases` replaces the default phase list, so include the other phases there as well. It analyzes the SARIF fields of the finished scan and writes the result to `analysis/` in the output directory. It does not scan anything.
 
 In the convert phase, converters turn files that scanners cannot read into files they can. Two converters ship with ASH:
 

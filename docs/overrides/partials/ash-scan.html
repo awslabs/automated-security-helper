@@ -25,7 +25,7 @@
         {% for category, label, file, symbol, scanner, second, finding, severity in tracks %}
         <button class="ash-scan__file is-selected" type="button" data-scan-category="{{ category }}" data-scan-source="{{ category }}" aria-pressed="false" title="Trace {{ label | lower }}: {{ file }}" disabled>
           <span class="ash-scan__file-icon">{{ icon(symbol) }}</span>
-          <span><span class="ash-scan__file-label">{{ label }}</span><code>{{ file }}</code>{% if category == "notebooks" %}<span class="ash-scan__converted" data-scan-converted>{{ icon("check-circle-outline") }}converted to analysis.py</span>{% endif %}</span>
+          <span><span class="ash-scan__file-label">{{ label }}</span><code>{{ file }}</code>{% if category == "notebooks" %}<span class="ash-scan__converted" data-scan-converted>{{ icon("check-circle-outline") }}converted to analysis-converted.py</span>{% endif %}</span>
         </button>
         {% endfor %}
       </div>
