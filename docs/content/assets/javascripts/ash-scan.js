@@ -27,9 +27,12 @@ function initialize(example) {
       finding: example.querySelector(`[data-scan-finding="${category}"]`),
     };
   });
-  const DURATION = 10000;
-  const STEP_TIMES = [0, 2200, 5300, DURATION];
-  const stepLabels = ["Discovering files", "Running scanners", "Collecting findings", "Writing reports"];
+  // CONVERT is the time the convert step adds; everything after files is shifted by it.
+  const CONVERT = 1500;
+  const DURATION = 10000 + CONVERT;
+  const STEP_TIMES = [0, 2200, 2200 + CONVERT, 5300 + CONVERT, DURATION];
+  const LAST_STEP = STEP_TIMES.length - 1;
+  const stepLabels = ["Discovering files", "Converting notebooks and archives", "Running scanners", "Collecting findings", "Writing reports"];
   const ease = cubicBezier(.32, .1, .2, 1);
   let timeline;
   let category = "all";
@@ -75,7 +78,7 @@ function initialize(example) {
   function finish() {
     requestedPlaying = false;
     timeline?.pause().seek(DURATION, true);
-    describeStep(3, true);
+    describeStep(LAST_STEP, true);
     updateButton();
   }
 
@@ -98,7 +101,7 @@ function initialize(example) {
   }
 
   function stepAt(time) {
-    return time < 2200 ? 0 : time < 5300 ? 1 : time < 7800 ? 2 : 3;
+    return time < STEP_TIMES[1] ? 0 : time < STEP_TIMES[2] ? 1 : time < STEP_TIMES[3] ? 2 : time < 7800 + CONVERT ? 3 : 4;
   }
 
   function svgElement(tag, attributes) {
@@ -202,10 +205,19 @@ function initialize(example) {
       const drawOutput = createDrawable(output.active);
       const inputMotion = createMotionPath(input.active);
       const outputMotion = createMotionPath(output.active);
-      const start = 220 + index * 170;
-      const findingStart = 5100 + index * 150;
+      // A notebook leaves the Files column only after the convert step has turned it into a script.
+      const converts = track.category === "notebooks";
+      const start = converts ? 2800 : 220 + index * 170;
+      const findingStart = 5100 + CONVERT + index * 150;
       const scannerProgress = track.engine.querySelector(".ash-scan__scanner-progress");
       const scannerCheck = track.engine.querySelector(".ash-scan__scanner-check");
+      const converted = track.source.querySelector("[data-scan-converted]");
+      if (converted) {
+        // Hidden until the convert step runs; the static end state shows it.
+        timeline
+          .set(converted, { opacity: 0 }, 0)
+          .add(converted, { opacity: [0, 1], duration: 400 }, 2400);
+      }
 
       timeline
         .set(scannerProgress, { scaleX: 0 }, 0)
@@ -218,10 +230,10 @@ function initialize(example) {
         .add(input.packet, { opacity: 0, duration: 160 }, start + 1280)
         .add(scannerProgress, {
           scaleX: [0, 1], duration: 1700,
-        }, 2200 + index * 100)
+        }, 2200 + CONVERT + index * 100)
         .add(scannerCheck, {
           scale: [.6, 1], opacity: [0, 1], duration: 320,
-        }, 4100 + index * 100)
+        }, 4100 + CONVERT + index * 100)
         .add(drawOutput, { draw: ["0 0", "0 1"], duration: 1050 }, findingStart)
         .add(output.packet, {
           translateX: outputMotion.translateX, translateY: outputMotion.translateY,
@@ -238,16 +250,16 @@ function initialize(example) {
       .set(example.querySelectorAll(".ash-scan__report-lines i"), { scaleX: 0 }, 0)
       .add(example.querySelector("[data-scan-coverage] .ash-icon"), {
         scale: [.7, 1], opacity: [0, 1], duration: 320,
-      }, 7500)
+      }, 7500 + CONVERT)
       .add(example.querySelector("[data-scan-report]"), {
         translateY: [6, 0], duration: 500,
-      }, 7850)
+      }, 7850 + CONVERT)
       .add(example.querySelectorAll(".ash-scan__report-lines i"), {
         scaleX: [0, 1], duration: 700, delay: stagger(90),
-      }, 8100)
+      }, 8100 + CONVERT)
       .add(example.querySelectorAll("[data-scan-format]"), {
         translateY: [4, 0], duration: 500, delay: stagger(80),
-      }, 8800);
+      }, 8800 + CONVERT);
 
     // Seeking is also the static and reduced-motion renderer, not a separate approximation.
     timeline.seek(Math.min(previousTime, DURATION), true);
@@ -292,7 +304,7 @@ function initialize(example) {
       pause();
       const index = +button.dataset.scanStep;
       timeline.seek(STEP_TIMES[index], true);
-      describeStep(index, index === 3);
+      describeStep(index, index === LAST_STEP);
       updateButton();
       announcement.textContent = `Example step ${index + 1}: ${button.textContent.trim().replace(/^0\d\s*/, "")}.`;
     });
