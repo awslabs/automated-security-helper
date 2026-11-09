@@ -643,6 +643,8 @@ jobs:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: latest
       - name: Install ASH
         run: |
           token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
