@@ -6,7 +6,8 @@
 | --- | --- | --- |
 | Local development | [Run ASH locally](getting-started/local.md) | A scan you can inspect in the terminal or an offline HTML report |
 | Pull requests and CI | [Run ASH in CI](getting-started/ci.md) | A reproducible check, an actionable summary, and report artifacts |
-| Before a commit | [Set up pre-commit](how-to/pre-commit.md) | A faster project check before committing |
+| Before a commit | [Set up pre-commit](how-to/pre-commit.md) | A faster check with a fixed five-scanner set, before committing |
+| Pre-commit and CI together | [Pre-commit and CI together](how-to/pre-commit.md#with-ci) | What the hook skips and the CI scan covers |
 | An AI coding assistant | [Connect an MCP client](getting-started/agents.md) | Scan, poll progress, and retrieve findings from your editor |
 | Several projects | [Workspace scanning over MCP](how-to/scale-large-repos.md) | Per-project results with a combined workspace view |
 

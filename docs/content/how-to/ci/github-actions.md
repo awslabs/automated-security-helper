@@ -6,6 +6,9 @@ tools, scans the repository, and reports the result on the pull request.
 write the steps yourself. For a first setup, follow
 [Add ASH to a GitHub Actions pipeline](../../getting-started/ci.md).
 
+If developers also run the pre-commit hook, it covers only five scanners; this workflow
+runs the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
+
 ## Call the reusable workflows {#reusable}
 
 <!-- doctest: config kind=github-actions -->

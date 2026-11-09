@@ -6,6 +6,9 @@ fail the build. This page gives that recipe as plain shell, then shows it in Jen
 CodeBuild, Azure Pipelines, and CircleCI. GitHub Actions and GitLab CI have their own pages:
 [Run ASH in GitHub Actions](github-actions.md) and [Run ASH in GitLab CI](gitlab-ci.md).
 
+If developers also run the pre-commit hook, it covers only five scanners; a CI scan runs
+the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
+
 ## The recipe {#recipe}
 
 <!-- doctest: illustrative reason="installs ASH and scanner tools from the network" -->
