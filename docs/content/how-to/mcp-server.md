@@ -11,7 +11,8 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
 
 - Scans run inside the server process, in local mode, with the scanner tools installed for
   the user that runs the server. Install them as that user with `ash dependencies install`.
-  Nothing runs in a container.
+  ASH does not start a container for a scan; if the server itself runs in a container, see
+  [Run the server in a container](#run-in-a-container).
 - A scan writes its output to `.ash/ash_output` inside the directory it scans, so the server
   needs write access there. When the scan starts, it moves the previous scan's results into
   `.ash/ash_output/.ash_previous_results`, and it deletes them once it has results of its own.
@@ -91,6 +92,40 @@ Clients start the server with this command and arguments:
 }
 ```
 
+### Start the server with uvx instead of an installed `ash`
+
+If you would rather not install ASH, let the client start the server with `uvx`. This is the
+same entry the generated agent plugins use (see
+[Install the ASH plugin for your agent](agent-plugins.md), which lists the config file of each
+of the 16 supported clients):
+
+<!-- doctest: config kind=mcp-client -->
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+`uvx` installs ASH from GitHub the first time the client starts the server and reuses that copy
+afterward, so the client's machine needs uv, git, and network access to GitHub on the first
+start. Desktop clients often do not see your shell's `PATH`; if the client cannot start the
+server, put the absolute path that `command -v uvx` prints in `command`. The scanner tools are
+not part of that install: install them once for your user with
+`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.1 ash dependencies install`,
+or accept `incomplete` scans as described in
+[Connect an AI agent to ASH](../getting-started/agents.md#1-install-ash). A server started this
+way runs scans exactly as an installed one does, and every setting on this page applies to it.
+The `env` block shown below works the same way.
+
 On stdio the server's standard output carries the protocol, so ASH writes every message and
 log line to standard error, and so do the scans and the tools they run. `--quiet` hides the
 startup messages. `--log-level`, `--verbose`, and `--debug` set the HTTP server's log level and
@@ -156,6 +191,18 @@ which config files a client can name with `config_path`: those are refused only 
 directories above. A file a client names counts as the client's, wherever it is, unless it is
 in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and no client delivered it (see
 [What a delivered config cannot set](#what-a-delivered-config-cannot-set)).
+
+### Run the server in a container {#run-in-a-container}
+
+ASH's container image already hosts the server for the AWS targets: AgentCore and Fargate
+run `ash mcp` over streamable HTTP, as described in [Deploy ASH on AWS](deploy-on-aws.md). That
+is the containerized route these docs cover. This page does not document a local
+`docker run ... ash mcp` over stdio that an agent or IDE could start, so use an installed `ash` or the `uvx` entry above for a client on your own
+machine. If you want the server in a container of your own, run it over
+[streamable HTTP](#run-over-streamable-http) with an auth header and publish the port only on
+the loopback interface or behind a proxy you control. Scans then run inside that container, in
+local mode, with the scanner tools the image holds, and `ASH_MCP_ALLOWED_ROOTS` names the
+paths the container can reach.
 
 ## Run over streamable HTTP
 
