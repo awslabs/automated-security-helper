@@ -358,6 +358,7 @@ class VersionTemplateManager:
         self.target_files = [
             "README.md",
             "docs/content/docs/advanced-usage.md",
+            "docs/content/getting-started/agents.md",
             "docs/content/getting-started/ci.md",
             "docs/content/getting-started/local.md",
             "docs/content/getting-started/platform-teams.md",
@@ -366,6 +367,7 @@ class VersionTemplateManager:
             "docs/content/how-to/ci/gitlab-ci.md",
             "docs/content/how-to/ci/other-ci.md",
             "docs/content/how-to/install.md",
+            "docs/content/how-to/mcp-server.md",
             "docs/content/how-to/pre-commit.md",
             "docs/content/how-to/run-in-a-container.md",
             "docs/content/how-to/scale-large-repos.md",

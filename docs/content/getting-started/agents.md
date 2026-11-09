@@ -75,6 +75,34 @@ Add this server to your agent's MCP configuration:
 }
 ```
 
+If you did not install ASH, or you would rather not, let the agent start the server with
+`uvx` instead. It needs uv and git on the `PATH` the agent uses, and network access to GitHub
+the first time the server starts:
+
+<!-- doctest: config kind=mcp-client -->
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+This is the entry the generated plugins use. The `@v3.7.1` tag pins the release and does not
+update itself; change it to the tag you want, as described in
+[Change the ASH version a plugin uses](../how-to/agent-plugins.md#change-the-ash-version-a-plugin-uses).
+The entry does not install the scanner tools; step 1
+still applies, and [Install the ASH plugin for your agent](../how-to/agent-plugins.md) shows how
+to run `ash dependencies install` through `uvx`. To run the server in a container or over HTTP
+instead, see [Run the MCP server](../how-to/mcp-server.md#run-in-a-container).
+
 Where the file lives depends on the agent. VS Code reads `.vscode/mcp.json` and uses the key
 `servers` instead of `mcpServers`. [Install the ASH plugin for your
 agent](../how-to/agent-plugins.md) shows the file each agent reads, and it also covers the
