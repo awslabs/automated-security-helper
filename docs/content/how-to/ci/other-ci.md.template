@@ -23,6 +23,28 @@ ash scan --mode local --no-progress \
 
 Run it from the root of the checkout. The reports land in `.ash/ash_output/reports/`.
 
+To use [uv](https://docs.astral.sh/uv/) instead of a virtual environment, replace the first
+three lines with a function that runs ASH through `uvx`, using the specification from
+[Run without installing: uvx](../install.md#run-without-installing-uvx). The rest of the
+recipe is unchanged, and every system section below can use either form:
+
+<!-- doctest: illustrative reason="installs ASH and scanner tools from the network" -->
+```bash
+ash() {
+  uvx --python 3.12 --from \
+    'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}' \
+    ash "$@"
+}
+(cd "$(mktemp -d)" && ash dependencies install \
+  --tool grype --tool syft --tool opengrep --tool cfn-nag \
+  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+ash scan --mode local --no-progress \
+  --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+```
+
+This needs `uv` on the build host's `PATH`. `uvx` builds the environment on the first call
+and reuses it for later calls.
+
 - Keep the virtual environment outside the checkout. ASH does not run tools it finds inside
   the directory it scans, and the virtual environment's `bin` holds the `uv` that ASH uses to
   install bandit, checkov, semgrep, cfn-lint, and zizmor during the scan; see
