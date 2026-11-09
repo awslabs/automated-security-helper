@@ -203,6 +203,10 @@ actionable findings.
 
 - [Run ASH in GitHub Actions](../how-to/ci/github-actions.md): every input of the reusable
   workflow, writing the steps yourself, caching, and changed-files scans.
+- [Run ASH in GitLab CI](../how-to/ci/gitlab-ci.md): the same scan as a `.gitlab-ci.yml` job
+  with a GitLab SAST report, with pip, uvx, and own-image variants.
+- [Run ASH in Jenkins, CodeBuild, Azure Pipelines, CircleCI, and other CI systems](../how-to/ci/other-ci.md):
+  the recipe as plain shell, with pip and uvx variants, and one section per system.
 - [Read scan results](../how-to/read-results.md): what each report file is for.
 - [Choose scanners](../how-to/choose-scanners.md): turn scanners on and off.
 - [Scale to large repositories](../how-to/scale-large-repos.md): split a scan across runners.
