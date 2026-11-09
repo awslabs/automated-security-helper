@@ -3,9 +3,10 @@
   ("code", "Code", "app.py", "code-braces", "Bandit", "Semgrep", "Shell command", "High"),
   ("infrastructure", "Infrastructure", "template.yaml", "cloud-outline", "Checkov", "CFN-Nag", "Public ingress", "High"),
   ("secrets", "Secrets", ".env", "key-outline", "detect-secrets", "", "Embedded credential", "High"),
-  ("dependencies", "Dependencies", "package-lock.json", "package-variant-closed", "npm audit", "Syft + Grype", "Package vulnerability", "Medium")
+  ("dependencies", "Dependencies", "package-lock.json", "package-variant-closed", "npm audit", "Syft + Grype", "Package vulnerability", "Medium"),
+  ("notebooks", "Notebook", "analysis.ipynb", "file-document-outline", "Bandit", "", "Hardcoded password", "High")
 ] %}
-<section class="ash-scan" aria-labelledby="scan-title" data-ash-scan data-step="3" data-category="all">
+<section class="ash-scan" aria-labelledby="scan-title" data-ash-scan data-step="4" data-category="all">
   <div class="ash-scan__header">
     <div><h2 id="scan-title">Scan example</h2><span class="ash-scan__state" data-scan-state>Reports ready</span></div>
     <div class="ash-scan__controls" data-scan-controls>
@@ -24,7 +25,7 @@
         {% for category, label, file, symbol, scanner, second, finding, severity in tracks %}
         <button class="ash-scan__file is-selected" type="button" data-scan-category="{{ category }}" data-scan-source="{{ category }}" aria-pressed="false" title="Trace {{ label | lower }}: {{ file }}" disabled>
           <span class="ash-scan__file-icon">{{ icon(symbol) }}</span>
-          <span><span class="ash-scan__file-label">{{ label }}</span><code>{{ file }}</code></span>
+          <span><span class="ash-scan__file-label">{{ label }}</span><code>{{ file }}</code>{% if category == "notebooks" %}<span class="ash-scan__converted" data-scan-converted>{{ icon("check-circle-outline") }}converted to analysis-converted.py</span>{% endif %}</span>
         </button>
         {% endfor %}
       </div>
@@ -62,8 +63,8 @@
   </div>
 
   <div class="ash-scan__steps" role="group" aria-label="Select scan example step" data-scan-controls>
-    {% for step, label in [(0, "Files"), (1, "Scanners"), (2, "Findings"), (3, "Reports")] %}
-    <button type="button" data-scan-step="{{ step }}" aria-pressed="{{ 'true' if step == 3 else 'false' }}"><span>0{{ step + 1 }}</span>{{ label }}</button>
+    {% for step, label in [(0, "Files"), (1, "Convert"), (2, "Scanners"), (3, "Findings"), (4, "Reports")] %}
+    <button type="button" data-scan-step="{{ step }}" aria-pressed="{{ 'true' if step == 4 else 'false' }}"><span>0{{ step + 1 }}</span>{{ label }}</button>
     {% endfor %}
   </div>
 
@@ -77,5 +78,6 @@
     </div>
   </div>
   <p class="ash-scan__caption" data-scan-caption>Example data · Scanner coverage depends on configuration.</p>
+  <p class="ash-scan__caption ash-scan__convert-note">Converters such as the jupyter nbconvert handler turn notebooks and archives into files scanners can read, so scanners audit the full tree.</p>
   <span class="ash-sr-only" role="status" aria-live="polite" aria-atomic="true" data-scan-announcement></span>
 </section>

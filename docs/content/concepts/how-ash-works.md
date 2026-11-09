@@ -17,9 +17,17 @@ flowchart LR
     merged --> report[Report phase<br/>final suppression pass, reporters]
     report --> out[reports/ash.*]
     report --> code[Exit code]
+    report -.-> inspect[Inspect phase, optional<br/>analysis/]
 ```
 
-In the convert phase, converters turn files that scanners cannot read into files they can. The archive converter extracts the scannable members of zip and tar archives (`.zip`, `.tar`, and `.gz`), and the jupyter converter turns notebooks into scripts with nbconvert. Their output goes to `converted/` in the output directory and becomes a second scan target, `converted`, next to the `source` target. A converter that crashes, or that cannot convert one of its inputs, makes the scan incomplete.
+The dotted arrow marks the optional inspect phase, which runs after the report phase only when you ask for it with `ash scan --inspect`. Naming `inspect` in `--phases` replaces the default phase list, so include the other phases there as well. It analyzes the SARIF fields of the finished scan and writes the result to `analysis/` in the output directory. It does not scan anything.
+
+In the convert phase, converters turn files that scanners cannot read into files they can. Two converters ship with ASH:
+
+- The archive converter (`archive`) extracts the scannable members of zip and tar archives (`.zip`, `.tar`, and `.gz`) into `converted/archive/`, within limits on member count and size, so the scanners see the files inside an archive and not only the archive.
+- The jupyter converter (`jupyter`) runs `jupyter-nbconvert` on each notebook and writes a Python script next to the others in `converted/jupyter/`, so the scanners read the notebook's code as code. It installs nbconvert with `uv tool install` on first use.
+
+Their output goes to `converted/` in the output directory and becomes a second scan target, `converted`, next to the `source` target. A converter that crashes, or that cannot convert one of its inputs, makes the scan incomplete.
 
 In the scan phase, each selected scanner runs its tool against each target and produces SARIF. ASH rewrites the paths in that SARIF relative to the source directory, maps each result to a severity, applies suppressions and ignore paths, and merges the result into the aggregated SARIF.
 

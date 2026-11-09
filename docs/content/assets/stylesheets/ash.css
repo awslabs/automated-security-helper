@@ -335,7 +335,7 @@ a { text-decoration: none; }
 .ash-scan__report-lines i { display: block; height: 2px; border-radius: 1px; background: var(--ash-accent); transform-origin: left; opacity: .5; }
 .ash-scan__report-lines i:nth-child(2) { width: 72%; }
 .ash-scan__report-lines i:nth-child(3) { width: 88%; }
-.ash-scan.is-ready .ash-scan__steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0 20px; padding: 4px; border: 1px solid var(--ash-line); border-radius: 8px; background: var(--ash-bg); }
+.ash-scan.is-ready .ash-scan__steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin: 0 20px; padding: 4px; border: 1px solid var(--ash-line); border-radius: 8px; background: var(--ash-bg); }
 .ash-scan__steps button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 8px 4px; border: 2px solid transparent; border-radius: 5px; background: transparent; color: var(--ash-muted); font-size: 12px; }
 .ash-scan__steps button > span { color: var(--ash-dim); font-variant-numeric: tabular-nums; }
 .ash-scan__steps button[aria-pressed="true"] { border-color: var(--ash-accent); color: var(--ash-accent); font-weight: 700; background: var(--ash-core); }
@@ -348,8 +348,12 @@ a { text-decoration: none; }
 .ash-home .ash-scan__caption { padding: 12px 20px 16px; color: var(--ash-dim); font-size: 12px; line-height: 18px; }
 .ash-scan:not(.is-ready) .ash-scan__file { cursor: default; }
 .ash-scan[data-step="0"] .ash-scan__column--files h3,
-.ash-scan[data-step="1"] .ash-scan__column--scanners h3,
-.ash-scan[data-step="2"] .ash-scan__column--findings h3 { color: var(--ash-accent); }
+.ash-scan[data-step="1"] .ash-scan__column--files h3,
+.ash-scan[data-step="2"] .ash-scan__column--scanners h3,
+.ash-scan[data-step="3"] .ash-scan__column--findings h3 { color: var(--ash-accent); }
+.ash-scan__converted { display: flex; align-items: center; gap: 4px; color: var(--ash-green); font-size: 12px; line-height: 16px; }
+.ash-scan__converted .ash-icon { width: 12px; height: 12px; flex-shrink: 0; }
+.ash-home .ash-scan__convert-note { padding-top: 0; }
 
 @media (max-width: 1180px) and (min-width: 961px) {
   .ash-hero__inner { grid-template-columns: minmax(0, .62fr) minmax(0, 1.38fr); gap: 24px; }
