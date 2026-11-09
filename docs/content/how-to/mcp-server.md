@@ -97,7 +97,9 @@ Clients start the server with this command and arguments:
 If you would rather not install ASH, let the client start the server with `uvx`. This is the
 same entry the generated agent plugins use (see
 [Install the ASH plugin for your agent](agent-plugins.md), which covers the 16 supported
-platforms; Aider and the generic skill ship no MCP server, so they cannot use this entry):
+platforms). Aider does not support MCP, so it cannot use this entry. The generic skill ships
+no server config, so add the entry yourself, as in
+[Connect an AI agent to ASH](../getting-started/agents.md#3-connect-the-agent):
 
 <!-- doctest: config kind=mcp-client -->
 ```json
