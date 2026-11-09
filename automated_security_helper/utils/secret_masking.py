@@ -452,10 +452,18 @@ _GUID_PATTERN = (
 #: variant digits the pattern requires.
 _SYNTHETIC_GUID = "-".join(("0" * 8, "0" * 4, "4" + "0" * 3, "8" + "0" * 3, "0" * 12))
 #: One value for each distinct pattern the SARIF models declare on a string: the
-#: GUID, ``dottedQuadFileVersion``, a language tag and a MIME type. A field whose
-#: text was masked to something its pattern refuses takes the first of these the
-#: pattern accepts, which keeps the report loadable without keeping the value.
-_SYNTHETIC_PATTERN_VALUES = (_SYNTHETIC_GUID, "0.0.0.0", "en", "x/x")  # nosec B104
+#: GUID, ``dottedQuadFileVersion``, a language tag and a MIME type; and the one the
+#: CycloneDX model declares on the BOM ``serialNumber``, the same GUID behind a
+#: ``urn:uuid:`` prefix. A field whose text was masked to something its pattern
+#: refuses takes the first of these the pattern accepts, which keeps the report
+#: loadable without keeping the value.
+_SYNTHETIC_PATTERN_VALUES = (
+    _SYNTHETIC_GUID,
+    "0.0.0.0",  # nosec B104
+    "en",
+    "x/x",
+    "urn:uuid:" + _SYNTHETIC_GUID,
+)
 #: The GUID fields of a report already reduced to plain JSON, which carries no
 #: declarations (``deprecatedGuids`` holds a list of GUID strings). ``guid`` and
 #: ``correlationGuid`` are skipped outright (``_SKIPPED_FIELDS``).
