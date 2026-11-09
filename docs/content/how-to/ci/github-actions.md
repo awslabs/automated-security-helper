@@ -262,23 +262,18 @@ jobs:
     with:
       ash-version: v3.7.1
       ash-mode: container
-      install-grype: false
-      install-syft: false
-      install-opengrep: false
-      install-cfn-nag: false
-      install-actionlint: false
-      install-cfn-guard: false
-      install-gitleaks: false
-      install-trivy: false
 ```
 
-The `install-*` inputs default to `true` and download tools the container already has, so
-turn them off as the example does. In local mode, turning one off while its scanner is on
-leaves that scanner MISSING; in container mode the scanners run inside the image.
+The `install-*` inputs only matter in local mode, where they download scanner tools onto
+the runner. In container mode the scanners run inside the image, so the example sets none
+of them. The inputs a workflow accepts depend on its version: the workflow at `v3.7.1`
+defines only `install-grype`, `install-syft`, and `install-opengrep`, all defaulting to
+`false`, and a caller that passes an input the referenced workflow does not define fails
+before any job starts. Check the workflow file at the tag you pin before adding one.
 
 `changed-files-only` does not work with container mode. ASH ignores
 `--changed-files-only` there and would report the findings in every file, so the job
-stops before the scan with exit code 5 instead. To report only a pull request's changes,
+stops before the scan with an error instead (a non-zero exit). To report only a pull request's changes,
 use the default `ash-mode: local`, as described in
 [Scan only the files a pull request changes](#changed-files).
 
