@@ -221,3 +221,41 @@ pre-commit run --hook-stage manual ash-full-scan --all-files
 ```
 
 [Run ASH in a container](run-in-a-container.md) covers container mode.
+
+## Run the hook in Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`. This recipe works with an
+    ASH installed from `main` or from a source checkout, not with a released `rev`.
+
+`.pre-commit-hooks.yaml` defines no Nix hook: `ash` and `ash-simple-scan` run precommit
+mode and `ash-full-scan` runs container mode, and ASH takes one `--mode` per run. To scan
+with the scanners that ASH's `flake.nix` supplies, add a `local` hook that calls
+`ash scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
+`ash-full-scan`:
+
+<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix, an ASH from main and the network" -->
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: ash-nix
+        name: ASH scan in Nix mode
+        entry: ash scan --mode nix --no-progress
+        language: system
+        pass_filenames: false
+        stages: [manual]
+```
+
+<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix, an ASH from main and the network" -->
+```bash
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main \
+  pre-commit run --hook-stage manual ash-nix --all-files
+```
+
+This is a different hook from `ash`: it runs the scanners of a normal scan, not the five
+of precommit mode, so it takes longer and belongs on `manual` or `pre-push`. It uses the
+installation on `PATH`, so install ASH with the `cdk` extra for cdk-nag. A `main` install
+cannot find a release tag that contains `flake.nix`, so set `ASH_NIX_FLAKE_REF` as above.
+[Install ASH](install.md#nix-mode) covers Nix mode's requirements.

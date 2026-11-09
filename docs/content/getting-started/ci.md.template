@@ -203,6 +203,10 @@ actionable findings.
 
 - [Run ASH in GitHub Actions](../how-to/ci/github-actions.md): every input of the reusable
   workflow, writing the steps yourself, caching, and changed-files scans.
+- [Run ASH in GitLab CI](../how-to/ci/gitlab-ci.md) and
+  [in Jenkins, CodeBuild, Azure Pipelines, and CircleCI](../how-to/ci/other-ci.md): the
+  same scan on other CI systems. Each has a Nix mode section; Nix mode is on `main` only,
+  not in any release.
 - [Read scan results](../how-to/read-results.md): what each report file is for.
 - [Choose scanners](../how-to/choose-scanners.md): turn scanners on and off.
 - [Scale to large repositories](../how-to/scale-large-repos.md): split a scan across runners.
