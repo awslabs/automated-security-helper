@@ -18399,6 +18399,8 @@ _PAGES_STEPS_THAT_RUN_A_TOOL = {
         "Install scanner tools",
         "Run ASH",
         "Run ASH",
+        "Install ASH",
+        "Scan in Nix mode",
     ],
     SCALE_LARGE_REPOS: [
         "Install ASH and the scanner tools",
