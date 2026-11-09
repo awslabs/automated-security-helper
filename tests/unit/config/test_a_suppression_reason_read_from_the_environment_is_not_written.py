@@ -400,7 +400,8 @@ def test_the_scan_ran_and_records_the_reason_as_its_reference(run):
     assert recorded
 
 
-#: The three starts ``platform`` makes to learn the Windows version (Python before 3.12).
+#: The three starts ``platform`` makes to learn the Windows version: always before
+#: Python 3.12, and on 3.12+ whenever its WMI query fails.
 _STDLIB_WINDOWS_VERSION_PROBE = ("ver", "command /c ver", "cmd /c ver")
 
 
@@ -427,10 +428,12 @@ def test_the_scan_starts_no_tool_but_the_version_probes(run):
     log = run["refused_starts"]
     lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else None
     assert lines is not None, "no start was recorded: the recorder did not run"
-    if sys.platform == "win32" and sys.version_info < (3, 12):
+    if sys.platform == "win32":
         # Before 3.12 the standard library learns the Windows version the first time
         # ``platform.system()`` is asked, by starting ``ver`` through ``cmd /c`` (it
-        # tries these three spellings in turn). That is the interpreter's own probe
+        # tries these three spellings in turn). Since 3.12 it asks WMI first and
+        # falls back to the same three spellings when the WMI query fails, which
+        # happens on busy CI runners. Either way that is the interpreter's own probe
         # of its host, not a program the scan chose to start, and the recorder sees
         # it in any process that asks. Exactly these lines are set aside; any other
         # start stays counted.
