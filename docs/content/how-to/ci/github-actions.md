@@ -239,6 +239,53 @@ comment and the check run and prints a notice. The scan, its exit code, the job 
 and the artifact are unchanged. On a push, the comment goes to the pull request that the
 pushed commit came from, if there is one.
 
+## Scan inside a container with ash-mode: container {#container-mode}
+
+Set `ash-mode: container` to build ASH's image on the runner and scan inside it. The image
+holds every scanner tool, so the runner needs none of them. ASH publishes no image, so each
+run builds one; see [Run ASH in a container](../run-in-a-container.md).
+
+<!-- doctest: config kind=github-actions -->
+```yaml
+name: ASH container scan
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ash:
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.1
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    with:
+      ash-version: v3.7.1
+      ash-mode: container
+      install-grype: false
+      install-syft: false
+      install-opengrep: false
+      install-cfn-nag: false
+      install-actionlint: false
+      install-cfn-guard: false
+      install-gitleaks: false
+      install-trivy: false
+```
+
+The `install-*` inputs default to `true` and download tools the container already has, so
+turn them off as the example does. In local mode, turning one off while its scanner is on
+leaves that scanner MISSING; in container mode the scanners run inside the image.
+
+`changed-files-only` does not work with container mode. ASH ignores
+`--changed-files-only` there and would report the findings in every file, so the job
+stops before the scan with exit code 5 instead. To report only a pull request's changes,
+use the default `ash-mode: local`, as described in
+[Scan only the files a pull request changes](#changed-files).
+
+`ash-args: --mode container` has the same effect as `ash-mode: container`, and an
+explicit `--mode` in `ash-args` wins over `ash-mode` if the two disagree, with no warning.
+Set one of them.
+
 ## Upload SARIF with upload-ash-sarif.yml {#sarif}
 
 `run-ash-security-scan.yml` does not declare `security-events: write`, and a called workflow
