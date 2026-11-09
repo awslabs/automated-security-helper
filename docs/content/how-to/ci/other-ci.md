@@ -92,6 +92,46 @@ build image, running `ash scan --mode local` inside it. Nothing is installed per
 [Run ASH in a container](../run-in-a-container.md) and
 [Roll out ASH across repositories](../../getting-started/platform-teams.md).
 
+## Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`. Install ASH from `main`, as
+    below, or from a source checkout. Pin a commit SHA instead of `main` when you need to
+    know which code ran.
+
+Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
+ASH's `flake.nix`, so the build host does not need the `ash dependencies install` step or
+the Ruby packages the [recipe](#recipe) uses for cfn-nag. The host needs:
+
+- Nix, on Linux or macOS. ASH passes `nix-command` and `flakes` on each invocation, so
+  you do not have to enable them in `nix.conf`.
+- ASH itself, installed with the `cdk` extra. Nix mode does not install ASH, and cdk-nag
+  runs on the Python environment ASH is installed in, not in the Nix shell.
+- Node.js is supplied by the flake. Network access is still needed for the scanners'
+  databases and rules.
+
+An install of `main` looks for `flake.nix` at the release tag that matches its version
+number, and no release has one, so set `ASH_NIX_FLAKE_REF` to a flake reference that does:
+
+<!-- doctest: illustrative reason="installs ASH from main and needs Nix and the network" -->
+```bash
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main
+ash_exit=0
+ash scan --mode nix --no-progress \
+  --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
+  || ash_exit=$?
+tar -czf ash-output.tar.gz .ash/ash_output
+exit "$ash_exit"
+```
+
+From a source checkout of ASH, leave `ASH_NIX_FLAKE_REF` unset: ASH uses that checkout's
+`flake.nix`. The exit codes and the output directory are the same as in local mode, so
+every gate and artifact step in the sections below applies unchanged. The Nix shell
+supplies the tools of every built-in scanner except cdk-nag; it does not supply
+ferret-scan or the Snyk CLI. [Install ASH](../install.md#nix-mode) has the full list of
+what Nix mode needs and which config file the scan reads.
+
 ## Use the exit code as the gate {#exit-codes}
 
 ASH exits 0 when nothing actionable was found or `fail_on_findings` is off, 1 when the scan
