@@ -95,8 +95,9 @@ the first time the server starts:
 }
 ```
 
-This is the entry the generated plugins use. The `@v3.7.1` tag pins the release and does not
-update itself; change it to the tag you want, as described in
+This is the entry the generated plugins use. The ref after `@` pins what is installed: a release
+tag does not move, while a branch like `main` resolves to its newest commit at install time. Change it
+to the ref you want, as described in
 [Change the ASH version a plugin uses](../how-to/agent-plugins.md#change-the-ash-version-a-plugin-uses).
 The entry does not install the scanner tools; step 1
 still applies, and [Install the ASH plugin for your agent](../how-to/agent-plugins.md) shows how

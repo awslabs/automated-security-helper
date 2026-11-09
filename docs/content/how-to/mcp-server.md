@@ -128,8 +128,9 @@ or accept `incomplete` scans as described in
 way runs scans exactly as an installed one does, and every setting on this page applies to it.
 The `env` block shown below works the same way.
 
-The `@v3.7.1` tag in these commands pins the release. It does not update itself, so change it
-to the tag you want to run, as described in
+The ref after `@` in these commands pins what is installed: a release tag does not move, while a
+branch like `main` resolves to its newest commit at install time. Change it
+to the ref you want to run, as described in
 [Change the ASH version a plugin uses](agent-plugins.md#change-the-ash-version-a-plugin-uses).
 
 On stdio the server's standard output carries the protocol, so ASH writes every message and
