@@ -317,7 +317,7 @@ class TestAgainstTheRecordedIndexes:
                 _drop(
                     f"deb.nodesource.com/node_22.x/dists/nodistro/main/binary-{arch}/Packages",
                     "nodejs",
-                    "22.23.3-1nodesource1",
+                    "22.23.4-1nodesource1",
                 )
             )
         results = _check(overrides)

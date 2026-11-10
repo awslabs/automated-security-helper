@@ -409,7 +409,7 @@ def test_github_actions_changed_files_scan_replaces_the_run_ash_step():
 def test_gitlab_merge_request_fragment_merges_into_the_first_pipeline():
     first, _own_image, merge_request = _page_blocks(
         "docs/content/how-to/ci/gitlab-ci.md", "gitlab-ci"
-    )
+    )[:3]
     saved = yaml.safe_load(first.body)
     fragment = yaml.safe_load(merge_request.body)
     merged, _ = _compose("gitlab-ci", first.body, merge_request.body)

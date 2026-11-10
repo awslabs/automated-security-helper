@@ -1481,10 +1481,10 @@ def recording_in_tree_refusals() -> Iterator[List[str]]:
 #: on its own before it is killed.
 INTERRUPT_GRACE_SECONDS = 5
 
-#: The slices that grace is waited out in, on both arms. On Windows Popen.wait
-#: is a single WaitForSingleObject, which a Ctrl-C does not end, so a second
-#: Ctrl-C would land only once the whole grace had passed; between two slices it
-#: lands at once. The POSIX wait slices for its own reason: each pass observes
+#: The slices that grace is waited out in, on both arms. On Windows the grace is
+#: a poll and a sleep per slice (see _wait_out), so a second Ctrl-C lands
+#: between two slices at once instead of after the whole grace; Popen.wait is
+#: not used there. The POSIX wait slices for its own reason: each pass observes
 #: the exit without reaping, so the die-now record is discarded before the reap.
 INTERRUPT_WAIT_SLICE_SECONDS = 0.25
 
@@ -1889,10 +1889,15 @@ def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
     Both arms wait the grace out in slices of INTERRUPT_WAIT_SLICE_SECONDS. On
     POSIX each pass OBSERVES the exit without reaping, so the die-now record is
     discarded before the reaping wait, and a signal interrupts the sleep, so a
-    second Ctrl-C lands within one slice. On Windows the wait is one
-    WaitForSingleObject, which a Ctrl-C does not end (CPython's
-    subprocess.Popen._wait), so the slices are what let a second Ctrl-C land
-    between two of them.
+    second Ctrl-C lands within one slice. On Windows a single
+    WaitForSingleObject is not ended by a Ctrl-C, so the wait is a poll and a
+    sleep per slice, and a Ctrl-C lands within one slice. It is not a
+    ``Popen.wait(timeout=slice)`` per slice: when a Ctrl-C arrives inside that
+    call, CPython's own handler for it waits up to the smaller of 0.25 s and the
+    time left in the slice, and once the slice's window is spent that time is
+    negative, which Windows hands to WaitForSingleObject as a huge unsigned
+    wait, so the process stays parked until the child exits on its own. A poll
+    is a zero-timeout wait with no such handler, and ``time.sleep`` has none.
     """
     if os.name != "nt":
         # Sliced like the Windows arm, but for a different reason: the exit
@@ -1911,14 +1916,91 @@ def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
             )
         process.wait(timeout=grace)
         return
-    slices = max(1, round(grace / INTERRUPT_WAIT_SLICE_SECONDS))
-    for _ in range(slices):
+    # No reap concern on Windows (no die-now record to keep ahead of one), and a
+    # poll there is a zero-timeout WaitForSingleObject.
+    deadline = _slice_clock() + grace
+    while process.poll() is None:
+        remaining = deadline - _slice_clock()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(
+                getattr(process, "args", "the child"), grace
+            )
+        _slice_sleep(min(INTERRUPT_WAIT_SLICE_SECONDS, remaining))
+
+
+#: The clock and the sleep of the Windows grace wait (_wait_out's Windows arm)
+#: and of the sliced communicate loop, names of their own so a test can drive
+#: them. The POSIX grace arm uses ``time`` directly.
+_slice_clock = time.monotonic
+_slice_sleep = time.sleep
+
+
+def _communicate_sliced(
+    process: "subprocess.Popen[Any]", input_data: Any, timeout: Optional[float]
+) -> Tuple[Any, Any]:
+    """``process.communicate(input_data, timeout=timeout)``, sliced on Windows.
+
+    A Ctrl-C held or pending while a scan child runs has to land before the
+    child's own deadline. On Windows, communicate() joins its reader threads and
+    waits on the process handle, and neither wait lets Python's SIGINT handler
+    run, so a Ctrl-C, the first or the second, pends until the child exits on
+    its own; there the wait is taken in slices (:func:`_communicate_in_slices`).
+    On POSIX communicate() is already interruptible by a signal, and slicing it
+    would shorten CPython's own wait for the child after a Ctrl-C
+    (min(0.25 s, the time left to the call's end), which a slice would cut to
+    the tail of the slice), so POSIX takes the one long call and keeps its
+    semantics untouched.
+    """
+    if os.name != "nt":
+        return process.communicate(input_data, timeout=timeout)
+    return _communicate_in_slices(process, input_data, timeout)
+
+
+def _communicate_in_slices(
+    process: "subprocess.Popen[Any]", input_data: Any, timeout: Optional[float]
+) -> Tuple[Any, Any]:
+    """The sliced wait itself: communicate() for at most one slice at a time.
+
+    Each pass waits at most INTERRUPT_WAIT_SLICE_SECONDS, and the catch and
+    retry between two passes is where a pending KeyboardInterrupt lands. The
+    input is handed over on the first pass only; a retry after TimeoutExpired
+    loses no output and keeps the input that was saved, and communicate()
+    refuses new input once it has started. When the real *timeout* is used up,
+    the exception raised is the FIRST TimeoutExpired communicate() raised, the
+    one a single long call would have raised and the one the callers and their
+    tests see communicate() raise, with the output and stderr the last slice
+    read and the caller's timeout in place of the slice. It runs on any platform
+    so that the loop can be tested everywhere.
+
+    Known limit of going through ``Popen.communicate``: it waits for the child
+    with ``Popen.wait(timeout=<the time left in the slice>)``, whose Ctrl-C
+    handler (see :func:`_wait_out`) waits for a time that is negative once the
+    slice's window has run out, and a negative time is an enormous wait on
+    Windows. The hazard remains after a first Ctrl-C too, since the time left
+    stays negative. It is one instant at the end of each slice, not the whole
+    child lifetime, and a guard around the call cannot close it. Closing it
+    means replacing ``communicate`` with the runner's own reader threads and a
+    poll-and-sleep wait (``_slice_clock`` and ``_slice_sleep``, as
+    :func:`_wait_out` does); that is future work, not done here.
+    """
+    end = None if timeout is None else _slice_clock() + timeout
+    pending = input_data
+    first: Optional[subprocess.TimeoutExpired] = None
+    while True:
+        wait = INTERRUPT_WAIT_SLICE_SECONDS
+        if end is not None:
+            wait = min(wait, max(0.0, end - _slice_clock()))
         try:
-            process.wait(timeout=INTERRUPT_WAIT_SLICE_SECONDS)
-            return
-        except subprocess.TimeoutExpired:
-            continue
-    raise subprocess.TimeoutExpired(getattr(process, "args", "the child"), grace)
+            return process.communicate(pending, timeout=wait)
+        except subprocess.TimeoutExpired as expired:
+            pending = None
+            if first is None:
+                first = expired
+            if end is not None and _slice_clock() >= end:
+                first.timeout = timeout
+                first.stdout = expired.stdout
+                first.stderr = expired.stderr
+                raise first from None
 
 
 def find_executable(command: str) -> Optional[str]:
@@ -3025,7 +3107,7 @@ def _run_plain(
                 # A Ctrl-C held while the child was started is raised here,
                 # after the start is noted, inside the try that stops it.
                 held.release()
-                stdout, stderr = process.communicate(input_data, timeout=timeout)
+                stdout, stderr = _communicate_sliced(process, input_data, timeout)
             except subprocess.TimeoutExpired as expired:
                 # SIGKILL at once, as subprocess.run kills its child at once: to
                 # the whole group where the child leads one, to the child alone
@@ -3279,7 +3361,7 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
                 # A Ctrl-C held while the child was started is raised here,
                 # after the start is noted, inside the try that stops it.
                 held.release()
-                stdout, stderr = process.communicate(input_data, timeout=timeout)
+                stdout, stderr = _communicate_sliced(process, input_data, timeout)
             except subprocess.TimeoutExpired as expired:
                 stdout, stderr = expired.output, expired.stderr
                 # The child was running at the timeout, and ASH stops it: the

@@ -43,6 +43,42 @@ def as_windows(monkeypatch: pytest.MonkeyPatch, *, console: bool) -> None:
     )
 
 
+class SliceClock:
+    """The clock and the sleep of subprocess_utils' sliced waits, driven by the test.
+
+    ``sleep`` records each slice and advances the clock by it, so a wait for a
+    grace of five seconds takes no time. ``interrupt_on`` is the 1-based sleep on
+    which a Ctrl-C arrives (a KeyboardInterrupt raised from the sleep, as a
+    signal ends ``time.sleep``).
+    """
+
+    def __init__(self, interrupt_on: int | None = None) -> None:
+        self.now = 1000.0
+        self.sleeps: list[float] = []
+        self.interrupt_on = interrupt_on
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        if self.interrupt_on == len(self.sleeps):
+            raise KeyboardInterrupt
+        self.now += seconds
+
+
+def with_a_slice_clock(
+    monkeypatch: pytest.MonkeyPatch, interrupt_on: int | None = None
+) -> SliceClock:
+    """Drive subprocess_utils' Windows wait slices with a fake clock and sleep."""
+    from automated_security_helper.utils import subprocess_utils
+
+    clock = SliceClock(interrupt_on)
+    monkeypatch.setattr(subprocess_utils, "_slice_clock", clock.monotonic)
+    monkeypatch.setattr(subprocess_utils, "_slice_sleep", clock.sleep)
+    return clock
+
+
 def windows_logging_kept_in_the_test(monkeypatch: pytest.MonkeyPatch) -> None:
     """Let ``configure_windows_safe_logging`` take its Windows branch, undone afterwards.
 

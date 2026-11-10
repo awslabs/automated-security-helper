@@ -14,7 +14,16 @@ writes the copy for the installed version without network access. `--from-github
 downloads it from GitHub instead, from `main` or from the branch or release tag
 `--branch` names.
 
-### Installation for AI Coding Tools
+## Set up your agent
+
+To connect an agent to ASH's MCP server and load instructions for it, use the generated
+plugin for your platform. [Install the ASH plugin for your agent](../how-to/agent-plugins.md)
+lists the platforms and what each one installs, and
+[Connect an AI agent to ASH](../getting-started/agents.md) covers adding the server by hand.
+Use this file when your agent has no plugin, or when you want to put the guide where the
+agent reads project context, for example a rules or steering directory of your editor. Save
+the copy there with `ash get-genai-guide --output <path>`, and run the command again after
+you update ASH to refresh it.
 
 The rest of this file is written for the agent.
 
@@ -69,106 +78,7 @@ scan. Once ASH has put the previous scan's results back in the output directory,
 
 The examples in this section call each tool as a function that takes the tool's arguments
 and returns its response, a dictionary. A response with `success` false has an `error`
-message instead of the keys below. Adapt the calls to your MCP client:
-
-#### Cline (VS Code Extension)
-
-**Option 1: Project-specific** (recommended):
-```bash
-# Create Cline directory
-mkdir -p .cline
-
-# Download the guide
-ash get-genai-guide -o .cline/ash-guide.md
-```
-
-**Option 2: VS Code workspace**:
-```bash
-# Add to VS Code settings
-mkdir -p .vscode
-ash get-genai-guide -o .vscode/ash-integration-guide.md
-```
-
-Then reference it in your Cline prompts: "Please read the ASH guide at .cline/ash-guide.md before analyzing scan results."
-
-#### Claude Desktop / MCP Clients
-
-**Dedicated documentation folder**:
-```bash
-# Create AI guides folder
-mkdir -p ~/Documents/ai-guides
-
-# Download the guide
-ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
-```
-
-**Usage**: In your prompts, reference the guide:
-```text
-Please read the ASH integration guide at ~/Documents/ai-guides/ash-integration.md 
-before processing these scan results.
-```
-
-#### Amazon Q CLI
-
-**Project documentation**:
-```bash
-# Add to project docs
-mkdir -p docs/ai-guides
-ash get-genai-guide -o docs/ai-guides/ash-integration.md
-```
-
-**Usage**: Reference in your Q CLI prompts or add to project documentation index.
-
-#### Cursor
-
-**Option 1: Cursor rules directory**:
-```bash
-# Create Cursor directory
-mkdir -p .cursor
-
-# Download the guide
-ash get-genai-guide -o .cursor/ash-guide.md
-```
-
-**Option 2: Project root** (for easy discovery):
-```bash
-# Download to project root with clear name
-ash get-genai-guide -o ash-integration-guide.md
-```
-
-**Usage**: Reference in `.cursorrules` or mention in prompts.
-
-#### Generic / Other Tools
-
-**Project root** (universal approach):
-```bash
-# Download with descriptive name
-ash get-genai-guide -o ash-genai-guide.md
-```
-
-Then reference it in your AI tool's context or prompts.
-
-### Updating the Guide
-
-When ASH is updated, refresh the guide:
-```bash
-# Create the directory if this is the first download
-mkdir -p ~/.kiro/steering
-
-# Re-download to the same location (overwrites existing)
-ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
-```
-
-### Verification
-
-After installation, verify the guide is accessible:
-```bash
-# Check file exists
-ls -lh ~/.kiro/steering/ash-integration.md
-
-# View first few lines
-head -n 20 ~/.kiro/steering/ash-integration.md
-```
+message instead of the keys below. Adapt the calls to your MCP client.
 
 ## Quick Reference
 

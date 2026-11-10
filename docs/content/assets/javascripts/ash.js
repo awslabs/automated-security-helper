@@ -315,50 +315,6 @@
   document.querySelectorAll("[data-ash-copy]").forEach((button) => {
     button.addEventListener("click", () => copy(button.dataset.ashCopy, button));
   });
-  document.querySelector("[data-ash-copy-scan]")?.addEventListener("click", (event) => {
-    copy(document.querySelector("[data-ash-scan-command]").textContent, event.currentTarget);
-  });
-
-  // ARIA tabs support both pointer and the standard arrow/Home/End keyboard controls.
-  const tabs = [...document.querySelectorAll("[data-ash-tab]")];
-  function selectTab(tab, focus = false) {
-    tabs.forEach((candidate) => {
-      const selected = candidate === tab;
-      candidate.setAttribute("aria-selected", String(selected));
-      candidate.tabIndex = selected ? 0 : -1;
-      document.getElementById(candidate.getAttribute("aria-controls")).hidden = !selected;
-    });
-    if (focus) tab.focus();
-  }
-  tabs.forEach((tab, index) => {
-    tab.addEventListener("click", () => selectTab(tab));
-    tab.addEventListener("keydown", (event) => {
-      let next;
-      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
-      if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
-      if (event.key === "Home") next = 0;
-      if (event.key === "End") next = tabs.length - 1;
-      if (next !== undefined) {
-        event.preventDefault();
-        selectTab(tabs[next], true);
-      }
-    });
-  });
-
-  const modeNotes = {
-    container: "Run enabled scanners in an isolated container. Requires an OCI-compatible runtime.",
-    local: "Run on your machine. Some scanners need additional tools installed locally.",
-    precommit: "A fast subset of scanners, designed for checks before you commit."
-  };
-  document.querySelectorAll("[data-ash-mode]").forEach((button) => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll("[data-ash-mode]").forEach((candidate) => {
-        candidate.setAttribute("aria-pressed", String(candidate === button));
-      });
-      document.querySelector("[data-ash-scan-command]").textContent = `ash --mode ${button.dataset.ashMode}`;
-      document.querySelector("[data-ash-mode-note]").textContent = modeNotes[button.dataset.ashMode];
-    });
-  });
 
   const scanners = [...document.querySelectorAll("[data-ash-category]")];
   document.querySelectorAll("[data-ash-filter]").forEach((button) => {

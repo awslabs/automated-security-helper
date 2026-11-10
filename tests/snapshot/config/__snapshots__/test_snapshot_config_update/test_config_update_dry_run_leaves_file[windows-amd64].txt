@@ -293,7 +293,7 @@ scanners:
       severity: []
       metrics: auto
       patterns: []
-      version: v1.30.2
+      version: v1.33.1
       sha256: {}
   semgrep:
     enabled: false

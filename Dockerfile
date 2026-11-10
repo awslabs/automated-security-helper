@@ -90,7 +90,7 @@ COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/inst
 COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
 COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
 RUN chmod +x /usr/local/bin/install-pinned-tool
-ARG UV_VERSION="0.13.4"
+ARG UV_VERSION="0.13.7"
 RUN ASH_PINS_DIR=/ash-pins with-retry 'install-pinned-tool uv -b /root/.local/bin'
 ENV PATH="/root/.local/bin:$PATH"
 RUN uv --version
@@ -307,7 +307,7 @@ RUN set -uex; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
-    apt-get -qy install --no-install-recommends nodejs=22.23.3-1nodesource1;
+    apt-get -qy install --no-install-recommends nodejs=22.23.4-1nodesource1;
 #
 # uv is installed in the core stage below, after the pinned-tool installer is copied
 # in, from the same verified release asset as the uv-reqs stage.
@@ -433,15 +433,15 @@ RUN chmod +x /usr/local/bin/install-pinned-tool
 ARG ASH_THIRD_PARTY_DIR="/usr/share/doc/ash/third-party"
 ENV ASH_PINS_DIR="/ash-pins"
 
-ARG UV_VERSION="0.13.4"
+ARG UV_VERSION="0.13.7"
 RUN with-retry 'install-pinned-tool uv -b /root/.local/bin'
 RUN uv --version
 
-ARG SYFT_VERSION="v1.54.1"
+ARG SYFT_VERSION="v1.57.1"
 RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'
 RUN syft --version
 
-ARG GRYPE_VERSION="v0.120.1"
+ARG GRYPE_VERSION="v0.121.3"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
@@ -540,7 +540,7 @@ RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
     echo "offline provisioning verified: grype db, semgrep and opengrep caches are all non-empty"; \
     fi
 
-ARG TRIVY_VERSION="v0.75.0"
+ARG TRIVY_VERSION="v0.76.2"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 

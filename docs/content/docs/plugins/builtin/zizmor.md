@@ -179,7 +179,7 @@ no packages, and a workflow has no functions or classes.
 ## Installation
 
 `ash dependencies install` installs zizmor with `uv tool install`, the newest
-release within `tool_version`, and the ASH container image ships zizmor 1.30.1. ASH also uses any `zizmor` already on `PATH` whose
+release within `tool_version`, and the ASH container image ships zizmor 1.32.0. ASH also uses any `zizmor` already on `PATH` whose
 `zizmor --version` satisfies `tool_version`, which covers the nix flake (nixpkgs
 supplies zizmor), Homebrew, and `cargo install`. Offline, ASH does not try to
 install zizmor; install it first.

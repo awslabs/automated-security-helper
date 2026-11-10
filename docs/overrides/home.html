@@ -1,11 +1,11 @@
 {% extends "main.html" %}
 {% from "partials/ash-icons.html" import icon, action %}
 {% set version = page.meta.ash_version %}
-{% set release_ref = "git+" ~ config.repo_url ~ ".git@v" ~ version %}
 
 {% block extrahead %}
   {{ super() }}
   <script type="module" src="{{ 'assets/javascripts/ash-scan.js' | url }}"></script>
+  <script defer src="{{ 'assets/javascripts/ash-snippet-builder.js' | url }}"></script>
 {% endblock %}
 
 {% block site_nav %}{% endblock %}
@@ -94,41 +94,16 @@
       <div data-ash-reveal>
         <h2 id="quickstart-title">Install and scan</h2>
         <div class="ash-steps">
-          <div><span>01</span><div><h3>Install ASH</h3><p>Use pipx, uvx, or pip with Python 3.10+.</p></div></div>
-          <div><span>02</span><div><h3>Select a mode</h3><p>Container, local, or pre-commit.</p></div></div>
+          <div><span>01</span><div><h3>Pick a workflow</h3><p>A local scan, pre-commit, CI, or an MCP server.</p></div></div>
+          <div><span>02</span><div><h3>Pick how you run ASH</h3><p>uv tool, uvx, pipx, pip, a container, Nix, or Homebrew. Python 3.10+.</p></div></div>
           <div><span>03</span><div><h3>Review results</h3><p>Open the HTML report or run <code>ash inspect findings</code>.</p></div></div>
         </div>
         <a class="ash-text-link" href="{{ 'docs/installation-guide/' | url }}">Full installation guide {{ icon("arrow-right") }}</a>
+        <a class="ash-text-link" href="{{ 'integrations/' | url }}">Integrations overview {{ icon("arrow-right") }}</a>
       </div>
       <div class="ash-terminal" data-ash-reveal>
-        <div class="ash-terminal__chrome"><span>Install ASH</span>{{ icon("console") }}</div>
-        <div class="ash-tabs" role="tablist" aria-label="Installation method">
-          <button type="button" role="tab" id="install-pipx" aria-controls="panel-pipx" aria-selected="true" tabindex="0" data-ash-tab="pipx">pipx <span>recommended</span></button>
-          <button type="button" role="tab" id="install-uvx" aria-controls="panel-uvx" aria-selected="false" tabindex="-1" data-ash-tab="uvx">uvx</button>
-          <button type="button" role="tab" id="install-pip" aria-controls="panel-pip" aria-selected="false" tabindex="-1" data-ash-tab="pip">pip</button>
-        </div>
-        {% set installs = [
-          ("pipx", "pipx install " ~ release_ref, "Install in an isolated environment."),
-          ("uvx", "uvx --from " ~ release_ref ~ " ash --help", "Run without a permanent install. Requires uv."),
-          ("pip", "pip install " ~ release_ref, "Install in your active Python environment.")
-        ] %}
-        {% for method, command, note in installs %}
-        <div class="ash-install-panel" role="tabpanel" id="panel-{{ method }}" aria-labelledby="install-{{ method }}" tabindex="0" {% if method != "pipx" %}hidden{% endif %}>
-          <noscript><strong>{{ method }}</strong></noscript>
-          <div class="ash-terminal__comment"># {{ note }}</div>
-          <div class="ash-terminal__command"><span aria-hidden="true">$</span><code>{{ command }}</code><button class="ash-copy" type="button" data-ash-copy="{{ command }}" aria-label="Copy {{ method }} installation command">{{ icon("content-copy") }}</button></div>
-        </div>
-        {% endfor %}
-        <div class="ash-terminal__scan">
-          <div class="ash-terminal__comment"># From your project directory</div>
-          <div class="ash-terminal__command"><span aria-hidden="true">$</span><code data-ash-scan-command>ash --mode container</code><button class="ash-copy" type="button" data-ash-copy-scan aria-label="Copy selected scan command">{{ icon("content-copy") }}</button></div>
-          <div class="ash-mode-picker" role="group" aria-label="Execution mode">
-            <button type="button" aria-pressed="true" data-ash-mode="container">{{ icon("cube-outline") }} Container</button>
-            <button type="button" aria-pressed="false" data-ash-mode="local">{{ icon("laptop") }} Local</button>
-            <button type="button" aria-pressed="false" data-ash-mode="precommit">{{ icon("source-commit") }} Pre-commit</button>
-          </div>
-          <p class="ash-mode-note" data-ash-mode-note>Run enabled scanners in an isolated container. Requires an OCI-compatible runtime.</p>
-        </div>
+        <div class="ash-terminal__chrome"><span>Build a command</span>{{ icon("console") }}</div>
+        {% include "partials/ash-snippet-builder.html" %}
         <div class="ash-demo">
           <div class="ash-demo__heading"><span>Example output</span><button type="button" data-ash-run aria-label="Replay example scan">{{ icon("play-circle-outline") }} Replay</button></div>
           <div class="ash-demo__lines" data-ash-demo aria-label="Example scan output">

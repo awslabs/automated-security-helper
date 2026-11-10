@@ -1007,10 +1007,38 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
             # registered waited children are stopped here as well, one syscall
             # each as the die-now kills are, so the documented kill-at-once
             # does not depend on where the chained interrupt lands; the armed
-            # arm in stop_after_interrupt stays and reaps.
+            # arm in stop_after_interrupt stays and reaps. On POSIX the kill is
+            # reap-free: Popen.kill polls first, which reaps a child that has
+            # already exited, and a reaped pid whose die-now record is still
+            # recorded can be reused and then killed by a later sweep. So the
+            # child is checked with waitid, which leaves it reapable, and
+            # signaled by pid only while it still runs. A child this process
+            # has already reaped (returncode set) is skipped first: its pid may
+            # have been reused by another child. Windows has no die-now
+            # record to protect and no waitid, so it keeps Popen.kill. macOS has
+            # no waitid either; there a child Popen has not yet seen exit is
+            # signaled by pid, which reaps nothing (a child that exited and is
+            # not reaped yet is only a zombie, and the signal does nothing).
             for waited in _INTERRUPT_STOP_PROCESSES:
                 try:
-                    waited.kill()
+                    if os.name == "nt":
+                        waited.kill()
+                    elif waited.returncode is not None:
+                        # Already reaped by this process: the pid is free and
+                        # may name a different child now, so nothing is sent.
+                        continue
+                    elif hasattr(os, "waitid"):
+                        if (
+                            os.waitid(
+                                os.P_PID,
+                                waited.pid,
+                                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                            )
+                            is None
+                        ):
+                            os.kill(waited.pid, signal.SIGKILL)
+                    else:
+                        os.kill(waited.pid, signal.SIGKILL)
                 except OSError:
                     pass
             previous = _PREVIOUS_SIGINT

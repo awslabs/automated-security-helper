@@ -61,3 +61,39 @@ def _downloads_open_through_urlopen(monkeypatch):
             "_open_url",
             lambda url, timeout: urllib.request.urlopen(url, timeout=timeout),  # nosec B310
         )
+
+
+#: Masking suites that run twice, once as they are and once with the lookup plan
+#: forced (see ``_mask_plan``). With a few values the index keeps one regex
+#: alternation (``_ALTERNATION_MAX_BRANCHES``), so most masking tests never reach
+#: the lookups that a report with many secrets uses.
+_BOTH_MASK_PLANS = frozenset(
+    {
+        "test_secret_masking_across_results",
+        "test_secret_masking_shape_tokens",
+        "test_secret_masking_shapes_in_text",
+        "test_secret_masking_more_text_forms",
+        "test_secret_masking_regression",
+        "test_secret_masking_json_forms",
+    }
+)
+
+
+def pytest_generate_tests(metafunc):
+    if metafunc.module.__name__.rsplit(".", 1)[-1] in _BOTH_MASK_PLANS:
+        metafunc.parametrize(
+            "_mask_plan",
+            [None, 0],
+            ids=["default-plan", "lookup-plan"],
+            indirect=True,
+        )
+
+
+@pytest.fixture(autouse=True)
+def _mask_plan(request, monkeypatch):
+    """Force the lookup plan for the second run of a suite in ``_BOTH_MASK_PLANS``."""
+    threshold = getattr(request, "param", None)
+    if threshold is not None:
+        from automated_security_helper.utils import secret_masking
+
+        monkeypatch.setattr(secret_masking, "_ALTERNATION_MAX_BRANCHES", threshold)

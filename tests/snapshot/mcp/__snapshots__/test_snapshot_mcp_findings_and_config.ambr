@@ -1156,7 +1156,7 @@
             'severity_threshold': None,
             'sha256': dict({
             }),
-            'version': 'v1.30.2',
+            'version': 'v1.33.1',
           }),
         }),
         'semgrep': dict({
@@ -1762,7 +1762,7 @@
             'severity_threshold': None,
             'sha256': dict({
             }),
-            'version': 'v1.30.2',
+            'version': 'v1.33.1',
           }),
         }),
         'semgrep': dict({
