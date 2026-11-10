@@ -423,7 +423,7 @@ class TestABareExecutableAsset:
         pins = _pins_dir(
             tmp_path,
             {
-                "a66aa3278457f02b287b985a45b6762aebcaba5000f2689245fd1ed86d1456c7": hashlib.sha256(  # pragma: allowlist secret
+                "46e8133cc490f9f50518061590ce2f6be5a08afaeda034471c0ceda4b3899808": hashlib.sha256(  # pragma: allowlist secret
                     payload
                 ).hexdigest()
             },
