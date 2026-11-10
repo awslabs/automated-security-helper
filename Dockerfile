@@ -307,7 +307,7 @@ RUN set -uex; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
-    apt-get -qy install --no-install-recommends nodejs=22.23.3-1nodesource1;
+    apt-get -qy install --no-install-recommends nodejs=22.23.4-1nodesource1;
 #
 # uv is installed in the core stage below, after the pinned-tool installer is copied
 # in, from the same verified release asset as the uv-reqs stage.
