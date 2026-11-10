@@ -65,11 +65,11 @@ The following ferret-scan CLI options are **NOT supported** and will raise an er
 
 This plugin is tested and compatible with specific ferret-scan versions. Using versions outside the supported range may result in unexpected behavior.
 
-**Supported Versions:** 2.4.5 to 2.6.0 (exclusive)
+**Supported Versions:** 2.4.5 to 2.7.0 (exclusive)
 
 | Plugin Version | ferret-scan Version | Notes |
 |---------------|---------------------|-------|
-| Current | 2.4.5 - 2.6.0 (exclusive) | 2.4.5 and 2.5.2 verified end to end; 2.5.2 is the recommended version |
+| Current | 2.4.5 - 2.7.0 (exclusive) | 2.4.5 and 2.5.2 verified end to end; 2.5.3 is the recommended version. 2.6.0 is verified on the plugin's invocation surface; its new detectors (NHS/CHI numbers, GB/Ontario/Quebec licences, ITINs, card track data) can surface new findings in previously clean scans |
 
 ### Install Ferret Scan
 
@@ -90,7 +90,7 @@ how a release published partway through a CI run once failed every open pull
 request without a source change.
 <!-- doctest: illustrative reason="installs a tool over the network" -->
 ```bash
-pip install 'ferret-scan>=2.4.5,<2.6.0'
+pip install 'ferret-scan>=2.4.5,<2.7.0'
 ```
 
 **Build from Source**:
@@ -229,7 +229,7 @@ scanners:
 | `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`ferret-scan --max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
 | `ferret_debug` | bool | `false` | Enable ferret-scan's own debug logging (preprocessing/validation flow) |
 | `ferret_verbose` | bool | `false` | Enable ferret-scan's own verbose output (detailed finding info) |
-| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.6.0`, `==2.5.2`) |
+| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.7.0`, `==2.5.2`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 
 ### Options NOT Supported (Will Raise Error)
@@ -324,6 +324,32 @@ global_settings:
 
 or the plugin's `exclude_patterns`, or scoping the `checks` option to omit `SECRETS`.
 
+A suppression can be narrowed to a confidence band or detector with an
+engine-scoped block, so only the weak hits are suppressed and a HIGH-confidence
+finding on the same path still reports:
+
+```yaml
+global_settings:
+  suppressions:
+    - path: "tests/**"
+      rule_id: API_KEY_OR_SECRET
+      reason: "Fixture keys trip the keyword heuristic at low confidence"
+      scope:
+        engines:
+          ferret-scan:
+            confidence_level: [low, medium]
+```
+
+The block also takes `validator` (exact detector name, case-insensitive). Both
+keys fail closed: a finding that does not carry the property never matches. See
+[Suppressions](../../../concepts/suppressions.md) for the scope rules.
+
+**Findings in documents and binaries (PDF, DOCX, images):** the reported line
+number indexes ferret-scan's extracted text, not the file's bytes. Never pin
+`line_start`/`line_end` for such a finding, and note inline `ash-ignore`
+comments are impossible there; suppress by the exact file path + `rule_id`,
+narrowed with the engine scope above when needed.
+
 ### Advanced Configuration
 
 ```yaml
@@ -371,7 +397,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: ">=2.4.5,<2.6.0"  # Compatible range
+      tool_version: ">=2.4.5,<2.7.0"  # Compatible range
 ```
 
 To bypass version checks (not recommended for production):
