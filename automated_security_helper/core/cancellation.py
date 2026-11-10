@@ -1013,17 +1013,25 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
             # recorded can be reused and then killed by a later sweep. So the
             # child is checked with waitid, which leaves it reapable, and
             # signaled by pid only while it still runs. Windows has no die-now
-            # record to protect and no waitid, so it keeps Popen.kill.
+            # record to protect and no waitid, so it keeps Popen.kill. macOS has
+            # no waitid either; there a child Popen has not yet seen exit is
+            # signaled by pid, which reaps nothing (a child that exited and is
+            # not reaped yet is only a zombie, and the signal does nothing).
             for waited in _INTERRUPT_STOP_PROCESSES:
                 try:
                     if os.name == "nt":
                         waited.kill()
-                    elif (
-                        os.waitid(
-                            os.P_PID, waited.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
-                        )
-                        is None
-                    ):
+                    elif hasattr(os, "waitid"):
+                        if (
+                            os.waitid(
+                                os.P_PID,
+                                waited.pid,
+                                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                            )
+                            is None
+                        ):
+                            os.kill(waited.pid, signal.SIGKILL)
+                    elif waited.returncode is None:
                         os.kill(waited.pid, signal.SIGKILL)
                 except OSError:
                     pass

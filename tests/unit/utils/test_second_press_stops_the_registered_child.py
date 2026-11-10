@@ -69,6 +69,28 @@ def test_the_second_press_kills_the_registered_child(
     assert cancellation._INTERRUPT_STOP_PROCESSES == ()
 
 
+class _OsWithoutWaitid:
+    """``os`` as macOS has it: everything but ``waitid``."""
+
+    def __getattr__(self, name: str) -> object:
+        if name == "waitid":
+            raise AttributeError(name)
+        return getattr(os, name)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the pid signal is POSIX's path")
+def test_the_second_press_kills_the_child_where_os_has_no_waitid(
+    sleeper: "subprocess.Popen[bytes]", second_press: List[object], monkeypatch
+) -> None:
+    """macOS has no os.waitid; the handler must still stop the child, not raise."""
+    monkeypatch.setattr(cancellation, "os", _OsWithoutWaitid())
+
+    with cancellation.interrupt_stop_in_progress(sleeper):
+        cancellation._handle_sigint(signal.SIGINT, None)
+        assert sleeper.wait(timeout=30) != 0
+    assert second_press == [signal.SIGINT]
+
+
 @pytest.mark.skipif(
     not hasattr(os, "waitid"), reason="the reap-free check needs os.waitid"
 )

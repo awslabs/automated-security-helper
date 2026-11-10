@@ -1956,12 +1956,15 @@ def _communicate_in_slices(
     input is handed over on the first pass only; a retry after TimeoutExpired
     loses no output and keeps the input that was saved, and communicate()
     refuses new input once it has started. When the real *timeout* is used up,
-    the last TimeoutExpired is raised with the caller's timeout in place of the
-    slice, so the callers' timeout arms and messages read it as they always
-    did. It runs on any platform so that the loop can be tested everywhere.
+    the exception raised is the FIRST TimeoutExpired communicate() raised, the
+    one a single long call would have raised and the one the callers and their
+    tests see communicate() raise, with the output and stderr the last slice
+    read and the caller's timeout in place of the slice. It runs on any platform
+    so that the loop can be tested everywhere.
     """
     end = None if timeout is None else _slice_clock() + timeout
     pending = input_data
+    first: Optional[subprocess.TimeoutExpired] = None
     while True:
         wait = INTERRUPT_WAIT_SLICE_SECONDS
         if end is not None:
@@ -1970,9 +1973,13 @@ def _communicate_in_slices(
             return process.communicate(pending, timeout=wait)
         except subprocess.TimeoutExpired as expired:
             pending = None
+            if first is None:
+                first = expired
             if end is not None and _slice_clock() >= end:
-                expired.timeout = timeout
-                raise
+                first.timeout = timeout
+                first.stdout = expired.stdout
+                first.stderr = expired.stderr
+                raise first
 
 
 def find_executable(command: str) -> Optional[str]:

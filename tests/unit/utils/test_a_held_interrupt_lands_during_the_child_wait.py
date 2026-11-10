@@ -70,6 +70,7 @@ class _SlowProcess:
         self.interrupt_on = interrupt_on
         self.clock = clock
         self.calls: List[Any] = []
+        self.raised: List[subprocess.TimeoutExpired] = []
 
     def communicate(self, input_data: Any = None, timeout: Optional[float] = None):
         self.calls.append((input_data, timeout))
@@ -78,7 +79,15 @@ class _SlowProcess:
         if len(self.calls) <= self.misses:
             if self.clock is not None and timeout is not None:
                 self.clock.now += timeout
-            raise subprocess.TimeoutExpired(self.args, timeout)
+            # What a slice has read so far grows with each call.
+            expired = subprocess.TimeoutExpired(
+                self.args,
+                timeout,
+                output=b"o" * len(self.calls),
+                stderr=b"e" * len(self.calls),
+            )
+            self.raised.append(expired)
+            raise expired
         return b"out", b"err"
 
 
@@ -110,6 +119,12 @@ def test_the_last_timeout_carries_the_callers_timeout(monkeypatch) -> None:
         _communicate_in_slices(process, None, 1.0)  # type: ignore[arg-type]
 
     assert raised.value.timeout == 1.0
+    # The exception is the first one communicate() raised, as a single long call
+    # raises it, carrying what the last slice had read.
+    assert raised.value is process.raised[0]
+    assert len(process.raised) > 1
+    assert raised.value.stdout == process.raised[-1].stdout
+    assert raised.value.stderr == process.raised[-1].stderr
     waits = [call[1] for call in process.calls]
     assert all(wait <= INTERRUPT_WAIT_SLICE_SECONDS for wait in waits)
     assert sum(waits) == pytest.approx(1.0)
