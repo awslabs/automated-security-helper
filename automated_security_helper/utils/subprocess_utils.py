@@ -1921,6 +1921,42 @@ def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
     raise subprocess.TimeoutExpired(getattr(process, "args", "the child"), grace)
 
 
+def _communicate_sliced(
+    process: "subprocess.Popen[Any]", input_data: Any, timeout: Optional[float]
+) -> Tuple[Any, Any]:
+    """``process.communicate(input_data, timeout=timeout)``, in slices.
+
+    A Ctrl-C held or pending while a scan child runs has to land before the
+    child's own deadline. On Windows, communicate() joins its reader threads and
+    waits on the process handle, and neither wait lets Python's SIGINT handler
+    run, so a Ctrl-C, the first or the second, pends until the child exits on
+    its own. Each pass here waits at most INTERRUPT_WAIT_SLICE_SECONDS, and the
+    catch and retry between two passes is where a pending KeyboardInterrupt
+    lands. The slicing is the same on POSIX: the output accumulated, the final
+    exception and its fields are the same as one long communicate().
+
+    The input is handed over on the first pass only; a retry after
+    TimeoutExpired loses no output and keeps the input that was saved, and
+    communicate() refuses new input once it has started. When the real
+    *timeout* is used up, the last TimeoutExpired is raised with the caller's
+    timeout in place of the slice, so the callers' timeout arms and messages
+    read it as they always did.
+    """
+    end = None if timeout is None else time.monotonic() + timeout
+    pending = input_data
+    while True:
+        wait = INTERRUPT_WAIT_SLICE_SECONDS
+        if end is not None:
+            wait = min(wait, max(0.0, end - time.monotonic()))
+        try:
+            return process.communicate(pending, timeout=wait)
+        except subprocess.TimeoutExpired as expired:
+            pending = None
+            if end is not None and time.monotonic() >= end:
+                expired.timeout = timeout
+                raise
+
+
 def find_executable(command: str) -> Optional[str]:
     """Find the full path to an executable.
 
@@ -3025,7 +3061,7 @@ def _run_plain(
                 # A Ctrl-C held while the child was started is raised here,
                 # after the start is noted, inside the try that stops it.
                 held.release()
-                stdout, stderr = process.communicate(input_data, timeout=timeout)
+                stdout, stderr = _communicate_sliced(process, input_data, timeout)
             except subprocess.TimeoutExpired as expired:
                 # SIGKILL at once, as subprocess.run kills its child at once: to
                 # the whole group where the child leads one, to the child alone
@@ -3279,7 +3315,7 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
                 # A Ctrl-C held while the child was started is raised here,
                 # after the start is noted, inside the try that stops it.
                 held.release()
-                stdout, stderr = process.communicate(input_data, timeout=timeout)
+                stdout, stderr = _communicate_sliced(process, input_data, timeout)
             except subprocess.TimeoutExpired as expired:
                 stdout, stderr = expired.output, expired.stderr
                 # The child was running at the timeout, and ASH stops it: the
