@@ -123,7 +123,7 @@ import signal
 import threading
 import time
 from types import FrameType
-from typing import Iterator, Optional, Tuple, cast
+from typing import Any, Iterator, Optional, Tuple, cast
 
 
 class ScanCancelled(BaseException):
@@ -811,11 +811,19 @@ def stop_grace_in_progress() -> Iterator[None]:
 #: and exits 130 at the command's own arm.
 _INTERRUPT_STOP_WAITS = 0
 _INTERRUPT_STOP_WAITS_WRITE_LOCK = threading.Lock()
+#: The child processes those waits are waiting out, as a snapshot tuple. A
+#: writer replaces the whole tuple under the same lock; the SIGINT handler
+#: reads the name once and never takes the lock, as it does for the counter.
+_INTERRUPT_STOP_PROCESSES: tuple[Any, ...] = ()
 
 
 @contextlib.contextmanager
-def interrupt_stop_in_progress() -> Iterator[None]:
+def interrupt_stop_in_progress(process: Optional[Any] = None) -> Iterator[None]:
     """While inside, a second Ctrl-C stays an interrupt instead of dying now.
+
+    With a *process*, the registration has a second role: it hands the
+    dispatcher the child being waited out, so the second Ctrl-C stops it from
+    the handler itself, whichever frame the chained interrupt then lands in.
 
     For the subprocess layer's interrupt stop
     (``utils/subprocess_utils.stop_after_interrupt``): the first Ctrl-C has
@@ -829,10 +837,12 @@ def interrupt_stop_in_progress() -> Iterator[None]:
     same raise-inside-the-try shape, with the same one-boundary window, as
     :func:`stop_grace_in_progress`.
     """
-    global _INTERRUPT_STOP_WAITS
+    global _INTERRUPT_STOP_WAITS, _INTERRUPT_STOP_PROCESSES
     entered = False
     try:
         with _INTERRUPT_STOP_WAITS_WRITE_LOCK:
+            if process is not None:
+                _INTERRUPT_STOP_PROCESSES = (*_INTERRUPT_STOP_PROCESSES, process)
             _INTERRUPT_STOP_WAITS += 1
             entered = True
         yield
@@ -840,6 +850,13 @@ def interrupt_stop_in_progress() -> Iterator[None]:
         if entered:
             with _INTERRUPT_STOP_WAITS_WRITE_LOCK:
                 _INTERRUPT_STOP_WAITS -= 1
+                if process is not None:
+                    remaining = list(_INTERRUPT_STOP_PROCESSES)
+                    for index, registered in enumerate(remaining):
+                        if registered is process:
+                            del remaining[index]
+                            break
+                    _INTERRUPT_STOP_PROCESSES = tuple(remaining)
 
 
 def shutdown_requested() -> bool:
@@ -986,7 +1003,44 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
             # command's interrupt arm prints the interrupted-scan message and
             # exits 130 (exit-codes.md, the Ctrl-C rows). The die-now kills
             # below would interrupt the child once more and leave one that
-            # ignores it running, so the interrupt is chained instead.
+            # ignores it running, so the interrupt is chained instead. The
+            # registered waited children are stopped here as well, one syscall
+            # each as the die-now kills are, so the documented kill-at-once
+            # does not depend on where the chained interrupt lands; the armed
+            # arm in stop_after_interrupt stays and reaps. On POSIX the kill is
+            # reap-free: Popen.kill polls first, which reaps a child that has
+            # already exited, and a reaped pid whose die-now record is still
+            # recorded can be reused and then killed by a later sweep. So the
+            # child is checked with waitid, which leaves it reapable, and
+            # signaled by pid only while it still runs. A child this process
+            # has already reaped (returncode set) is skipped first: its pid may
+            # have been reused by another child. Windows has no die-now
+            # record to protect and no waitid, so it keeps Popen.kill. macOS has
+            # no waitid either; there a child Popen has not yet seen exit is
+            # signaled by pid, which reaps nothing (a child that exited and is
+            # not reaped yet is only a zombie, and the signal does nothing).
+            for waited in _INTERRUPT_STOP_PROCESSES:
+                try:
+                    if os.name == "nt":
+                        waited.kill()
+                    elif waited.returncode is not None:
+                        # Already reaped by this process: the pid is free and
+                        # may name a different child now, so nothing is sent.
+                        continue
+                    elif hasattr(os, "waitid"):
+                        if (
+                            os.waitid(
+                                os.P_PID,
+                                waited.pid,
+                                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                            )
+                            is None
+                        ):
+                            os.kill(waited.pid, signal.SIGKILL)
+                    else:
+                        os.kill(waited.pid, signal.SIGKILL)
+                except OSError:
+                    pass
             previous = _PREVIOUS_SIGINT
             if not callable(previous):
                 previous = signal.default_int_handler

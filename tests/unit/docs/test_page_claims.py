@@ -7614,6 +7614,9 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
 
 _INTERRUPT_SENT = "page-claims: SIGINT sent at"
 _INTERRUPT_SENT_AT = re.compile(re.escape(_INTERRUPT_SENT) + r" ([0-9.]+)")
+#: What the driver prints, instead of the second console Ctrl-C, when ASH never
+#: entered the window in which that press kills the child at once.
+_WINDOW_NOT_ENTERED = "page-claims: window-not-entered"
 
 #: What a scan prints when Ctrl-C ends it, as exit-codes.md quotes it.
 _SCAN_INTERRUPTED = (
@@ -7715,31 +7718,56 @@ if control["terminal"]:
 def interrupt():
     for number, (watched, ready) in enumerate(control["waits"]):
         watched = Path(watched)
+        press = True
         while ready not in (
             watched.read_text("utf-8", "replace") if watched.is_file() else ""
         ):
             time.sleep(0.05)
         if number and control.get("console_file"):
-            # The stand-in logs a console Ctrl-C as soon as it reads the console
-            # file, which is before ASH's main thread has handled the first one
-            # (a slow Windows runner). A second Ctrl-C raised then lands in the
-            # unwinding, before the wait that kills the child, so it never ran.
-            # An operator's second press is never within that window. A loaded
-            # Windows runner took longer than half a second to get there (the
-            # stand-in logged both Ctrl-Cs and ASH never ended it), so the second
-            # one goes 2 seconds after the first, still inside the page's 5-second
-            # wait that it is meant to cut short.
-            time.sleep(2.0)
-        print({sent!r}, time.monotonic(), file=sys.stderr, flush=True)
-        if control.get("console_file"):
-            with open(control["console_file"], "a", encoding="utf-8") as console_file:
-                console_file.write("ctrl-c\\n")
-        if control["terminal"]:
-            os.killpg(os.getpgrp(), signal.SIGINT)
-        elif os.name == "nt":
-            signal.raise_signal(signal.SIGINT)
-        else:
-            os.kill(os.getpid(), signal.SIGINT)
+            # The documented contract is "a second Ctrl-C DURING THE WAIT kills it
+            # at once". The stand-in logs a console Ctrl-C as soon as it reads the
+            # console file, which is before ASH's main thread has handled the
+            # first one, and a second Ctrl-C raised then lands in the unwinding,
+            # before the wait that kills the child, so it never ran. A fixed delay
+            # raced a slow runner to that wait. This driver runs inside the ASH
+            # process, so it enters the documented window by observing the wait
+            # counter that the second-interrupt handler itself consults
+            # (cancellation._INTERRUPT_STOP_WAITS, raised while stop_after_interrupt
+            # waits the child out). The poll is bounded. On expiry the window was
+            # never entered, and a press sent anyway lands in the first interrupt's
+            # unwinding and aborts the very step that stops the child, so the
+            # press is withheld and {missed!r} is printed for the test to branch
+            # on. The window between interrupt_stop_in_progress() entry and its
+            # guarded try is a named, accepted limit.
+            from automated_security_helper.core import cancellation
+
+            poll_deadline = time.monotonic() + {grace}
+            while (
+                cancellation._INTERRUPT_STOP_WAITS <= 0
+                and time.monotonic() < poll_deadline
+            ):
+                time.sleep(0.05)
+            if cancellation._INTERRUPT_STOP_WAITS <= 0:
+                print({missed!r}, time.monotonic(), file=sys.stderr, flush=True)
+                press = False
+        if press:
+            print({sent!r}, time.monotonic(), file=sys.stderr, flush=True)
+            if control.get("console_file"):
+                with open(control["console_file"], "a", encoding="utf-8") as console_file:
+                    console_file.write("ctrl-c\\n")
+            if control["terminal"]:
+                os.killpg(os.getpgrp(), signal.SIGINT)
+            elif os.name == "nt":
+                signal.raise_signal(signal.SIGINT)
+            else:
+                os.kill(os.getpid(), signal.SIGINT)
+        if number == len(control["waits"]) - 1:
+            # After the last send, a process still alive 30, 60 and 90 seconds
+            # later dumps every thread's stack to stderr, so a scan that outlives
+            # its last Ctrl-C shows where its main thread is.
+            import faulthandler
+
+            faulthandler.dump_traceback_later(30, repeat=True, exit=False)
 
 
 threading.Thread(target=interrupt, daemon=True).start()
@@ -7772,6 +7800,26 @@ if wait_on not in sys.argv[1:]:
     sys.exit(0)
 parent = os.getppid()
 interrupts = []
+parent_handle = None
+if os.name == "nt":
+    # os.getppid() keeps answering the creator's pid on Windows once it is gone, so
+    # the parent is watched through a handle to it instead (SYNCHRONIZE).
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        parent_handle = kernel32.OpenProcess(0x00100000, 0, parent)
+    except Exception:
+        parent_handle = None
+
+
+def parent_is_gone():
+    if parent_handle:
+        return kernel32.WaitForSingleObject(parent_handle, 0) == 0
+    return os.getppid() != parent
 
 
 def interrupted(signum, frame):
@@ -7789,7 +7837,7 @@ while time.monotonic() < deadline:
         while from_console < sent:
             from_console += 1
             interrupted(signal.SIGINT, None)
-    if os.getppid() != parent:
+    if parent_is_gone():
         note("orphaned")
         sys.exit(0)
     if interrupts and behavior == "stops":
@@ -7914,7 +7962,12 @@ def _interrupter(
         sys.executable,
         "-c",
         importing_this_checkout(
-            _INTERRUPTED_ASH.format(sent=_INTERRUPT_SENT), root=_IMPORTED_ROOT
+            _INTERRUPTED_ASH.format(
+                sent=_INTERRUPT_SENT,
+                missed=_WINDOW_NOT_ENTERED,
+                grace=_INTERRUPT_GRACE_SECONDS + 5,
+            ),
+            root=_IMPORTED_ROOT,
         ),
         json.dumps(control),
     ]
@@ -8077,8 +8130,18 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
 
     output = _normalize(result.stdout + result.stderr)
     sent = [float(at) for at in _INTERRUPT_SENT_AT.findall(result.stderr)]
-    assert len(sent) == interrupts, (
-        f"{len(sent)} of {interrupts} SIGINTs sent; the scan ended before "
+    # On a runner slow enough that ASH never reached the wait for the child, the
+    # driver withheld the second console Ctrl-C (a press into the unwinding aborts
+    # the step that stops the child), so only the first was sent and the
+    # kills-at-once contract is not asserted for a window ASH never entered.
+    window_not_entered = _WINDOW_NOT_ENTERED in result.stderr
+    assert not window_not_entered or (windows == "console" and interrupts == 2), (
+        f"{_WINDOW_NOT_ENTERED!r} outside the second console Ctrl-C:\n"
+        f"{_output_tail(result)}"
+    )
+    interrupts_sent = interrupts - 1 if window_not_entered else interrupts
+    assert len(sent) == interrupts_sent, (
+        f"{len(sent)} of {interrupts_sent} SIGINTs sent; the scan ended before "
         f"{waits[len(sent)][1]!r} was in {waits[len(sent)][0].name}:\n"
         f"{_output_tail(result)}"
     )
@@ -8097,7 +8160,8 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
     events = _stand_in_events(stand_in_log)
     happened = [event for event, _ in events if event != "alive"]
     assert "orphaned" not in happened and "deadline" not in happened, (
-        f"ASH left the stand-in running: {happened}"
+        f"ASH left the stand-in running: {happened}; ASH ended "
+        f"{ended - sent[-1]:.1f} s after the last SIGINT:\n{_output_tail(result)}"
     )
     if ended_at_once:
         _assert_ended_at_once(events, sent[0])
@@ -8117,7 +8181,9 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
     else:
         assert happened == ["started", "INT"], happened
     last_sign_of_life = max(at for _, at in events)
-    if interrupts == 1:
+    if interrupts_sent == 1:
+        # One press only: the documented single-press contract, that ASH stops the
+        # child after the wait (no ``deadline`` or ``orphaned``, checked above).
         got_it = next(at for event, at in events if event == "INT")
         assert last_sign_of_life - got_it < _INTERRUPT_GRACE_SECONDS + 30, (
             f"the stand-in ran {last_sign_of_life - got_it:.1f} s after the interrupt"

@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -97,7 +98,12 @@ def _rules(tmp_path: Path, content: str) -> Path:
     rules = tmp_path / "rule-cache"
     rules.mkdir()
     (rules / "rules.yml").write_text(content)
-    (rules / ".ash-rules-fetched-at").write_text("2026-10-10T00:00:00Z\n")
+    # The download time is derived from the run's clock: an absolute date ages past the
+    # content database's staleness bound and the scan then refuses before it scans.
+    fetched = datetime.now(timezone.utc) - timedelta(hours=1)
+    (rules / ".ash-rules-fetched-at").write_text(
+        fetched.strftime("%Y-%m-%dT%H:%M:%SZ") + "\n"
+    )
     return rules
 
 

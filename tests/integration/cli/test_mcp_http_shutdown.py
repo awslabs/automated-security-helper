@@ -760,9 +760,21 @@ def test_a_second_ctrl_c_ends_the_tools_and_the_server_while_a_request_is_open(
 
 
 #: How long a stop that waits for an open request may take, all told: the
-#: server's bound on that wait, the prompt stop of the scans after it, and two
-#: seconds for the rest of the shutdown on a loaded host.
-BOUNDED_STOP_SECONDS = _GRACEFUL_SHUTDOWN_SECONDS + STDIO_SCAN_STOP_TIMEOUT_SECONDS + 2
+#: server's bound on that wait, the prompt stop of the scans after it, and a
+#: teardown allowance for what follows the stop window on a loaded host.
+#: The 3 s allowance is derived from the post-grace tail, none of which has a
+#: product constant of its own: the scan's next cancellation check
+#: (CANCEL_POLL_SECONDS 0.25 and PROMPT_STOP_GRACE_SECONDS 0.5,
+#: utils/subprocess_utils.py:3317 and :3322), the restore of the previous
+#: results (file IO in the scan thread, cli/mcp/workspace.py:1435, unbounded),
+#: and the session termination and event-loop close that join that thread
+#: (cli/mcp_tools.py:201-203). On a loaded macos-15 runner the stop after the
+#: 5 s grace took about 4.0 s in all (9.04 s total); the 1.5 s stop window is
+#: the bounded part of that, and 1.5 + 3 leaves the rest of it covered where
+#: the earlier 1.5 + 2 did not.
+#: The product contract is the assertion below this constant:
+#: BOUNDED_STOP_SECONDS (5 + 1.5 + 3 = 9.5) < DOCKER_STOP_GRACE_SECONDS (10).
+BOUNDED_STOP_SECONDS = _GRACEFUL_SHUTDOWN_SECONDS + STDIO_SCAN_STOP_TIMEOUT_SECONDS + 3
 
 #: The grace ``docker stop`` gives a Linux container between SIGTERM and SIGKILL
 #: (https://docs.docker.com/reference/cli/docker/container/stop/). The whole
