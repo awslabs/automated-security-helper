@@ -149,7 +149,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "grype": "v0.121.3",
     "opengrep": "v1.30.2",
     "syft": "v1.57.1",
-    "trivy": "v0.75.0",
+    "trivy": "v0.76.2",
     # Tagged without a leading "v" upstream, so the release URL has none either.
     "uv": "0.13.4",
 }
@@ -241,11 +241,11 @@ _UV_ASSETS: dict[PlatformArch, str] = {
 }
 
 _TRIVY_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "trivy_0.75.0_Linux-64bit.tar.gz",
-    ("linux", "arm64"): "trivy_0.75.0_Linux-ARM64.tar.gz",
-    ("darwin", "amd64"): "trivy_0.75.0_macOS-64bit.tar.gz",
-    ("darwin", "arm64"): "trivy_0.75.0_macOS-ARM64.tar.gz",
-    ("windows", "amd64"): "trivy_0.75.0_windows-64bit.zip",
+    ("linux", "amd64"): "trivy_0.76.2_Linux-64bit.tar.gz",
+    ("linux", "arm64"): "trivy_0.76.2_Linux-ARM64.tar.gz",
+    ("darwin", "amd64"): "trivy_0.76.2_macOS-64bit.tar.gz",
+    ("darwin", "arm64"): "trivy_0.76.2_macOS-ARM64.tar.gz",
+    ("windows", "amd64"): "trivy_0.76.2_windows-64bit.zip",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
@@ -259,7 +259,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
 #   https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_checksums.txt
 #   https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_checksums.txt
-#   https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_checksums.txt
+#   https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_checksums.txt
 #
 # Two entries have no upstream checksums file to transcribe from, so their digests
 # were obtained differently and are stated here so a reviewer can redo it:
@@ -368,12 +368,12 @@ _DIGESTS: dict[str, str] = {
     "syft_1.57.1_darwin_arm64.tar.gz": "e0a74a5d2688d1254b4e17b71f068a83215e3625f846265bf6614c7ba06f3a96",  # pragma: allowlist secret
     "syft_1.57.1_windows_amd64.zip": "3a01fe865076bb548352195b77e88fa4649277861ea458efe165c3a810b6dcc7",  # pragma: allowlist secret
     "syft_1.57.1_windows_arm64.zip": "8cdd580b5f7160d12b66c7c5191100a6cf792e130d8a28deeae5ea45e0030e00",  # pragma: allowlist secret
-    # trivy v0.75.0
-    "trivy_0.75.0_Linux-64bit.tar.gz": "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f",  # pragma: allowlist secret
-    "trivy_0.75.0_Linux-ARM64.tar.gz": "a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-64bit.tar.gz": "291edaa9778acbe4693d067b5ad60ee11570e5ac68296e85595417528ca641e4",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-ARM64.tar.gz": "4a77108cccf8e55c8d6823e1e759939a622277e66cd0daa3c1fc621ed69e4568",  # pragma: allowlist secret
-    "trivy_0.75.0_windows-64bit.zip": "4e43bd71a30f51aee39525f60f2b47043af77eb8df8fe082aae4372b69c6660f",  # pragma: allowlist secret
+    # trivy v0.76.2
+    "trivy_0.76.2_Linux-64bit.tar.gz": "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf",  # pragma: allowlist secret
+    "trivy_0.76.2_Linux-ARM64.tar.gz": "ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-64bit.tar.gz": "e08bb9ea449ecf66c6bfb03cbb8697c503ff33d35fc585c9747e3eaeb7ed4c7b",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-ARM64.tar.gz": "ae7ea358326960406b703c77b2ac490190797d80b306b5b50c2a27221da0a5b8",  # pragma: allowlist secret
+    "trivy_0.76.2_windows-64bit.zip": "691f737a7e5566a673c3a74dab9160552ec32101e953b659e5c77443d16dddb6",  # pragma: allowlist secret
     # opengrep v1.30.2
     "opengrep_manylinux_x86": "a66aa3278457f02b287b985a45b6762aebcaba5000f2689245fd1ed86d1456c7",  # pragma: allowlist secret
     "opengrep_manylinux_aarch64": "90acea5df4b733083f388d4feeb250ca802f671b33d1f222653d1e571dd2b0d8",  # pragma: allowlist secret
@@ -421,12 +421,12 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "syft_1.57.1_darwin_arm64.tar.gz": "d991548e2410d494c2a0da0bf0ac433111fe842f3475f59aee1904484a3aa549",  # pragma: allowlist secret
     "syft_1.57.1_windows_amd64.zip": "42deb23bff7852997bf0316a540d3dcb364953273152749205e47881dd270c53",  # pragma: allowlist secret
     "syft_1.57.1_windows_arm64.zip": "fe858f3fe4d5e55d54a48bb6e93a1ceb4cf78225f54c7afe99edde86d05d6688",  # pragma: allowlist secret
-    # trivy v0.75.0
-    "trivy_0.75.0_Linux-64bit.tar.gz": "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e",  # pragma: allowlist secret
-    "trivy_0.75.0_Linux-ARM64.tar.gz": "869e310e208f0f2e3e90e4f842cc6adaa2b2c046fecbaade481e6b23fcc8f2a9",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-64bit.tar.gz": "484287e06ab2e4038c42ba396da8637aaaca0967e3e65840563706a0284169b4",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-ARM64.tar.gz": "32b84c068e11e5381fc85d3fe2e8ac238659ab22524ce1b2b9dfcbd0b1f7331a",  # pragma: allowlist secret
-    "trivy_0.75.0_windows-64bit.zip": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6",  # pragma: allowlist secret
+    # trivy v0.76.2
+    "trivy_0.76.2_Linux-64bit.tar.gz": "6a972c69606c7b3ea4c6bdcc6fc9332ea9ad38381624310c1e85cc77345909f3",  # pragma: allowlist secret
+    "trivy_0.76.2_Linux-ARM64.tar.gz": "7844c3851b28470b6d7f0975fa0b3262c5b2272c9a54a91f522801bb8926f51f",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-64bit.tar.gz": "d92df6dbfad2bc30e05e10508d43cdbc43f1e8553285f9d04473a10545f2e928",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-ARM64.tar.gz": "7a15c426f963473a485a4f315e21f8e2c881269d500bf0de35da13a4421fa108",  # pragma: allowlist secret
+    "trivy_0.76.2_windows-64bit.zip": "dd07adf881a72b54d1a922191d62fa939938df2155be85a727da93b67b24e617",  # pragma: allowlist secret
     # uv 0.13.4
     "uv-x86_64-unknown-linux-gnu.tar.gz": "5b2a2df4ef04c5d778d50702d6e1d1ff22909fc883086b4ef406a4f115e3c4fb",  # pragma: allowlist secret
     "uv-aarch64-unknown-linux-gnu.tar.gz": "7ecaf349a12fb60c605c1848e8e1bbd313bbf9a362a6c3043c8f786ec570c491",  # pragma: allowlist secret
@@ -924,7 +924,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "a0c0d3890a9d79421c403e8fcadec50a2e55bf21",  # pragma: allowlist secret
-    "trivy commit": "591e9799316a602e703f0b484f6c6d7b234ec8f3",  # pragma: allowlist secret
+    "trivy commit": "3f6334d223b52188324af3b9923b4249cd206652",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
     "uv commit": "7456b60bc6bc348e13e06e3691bf08e78d3aef54",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
@@ -1105,7 +1105,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "trivy": ThirdPartyLicense(
         tool="trivy",
-        version="v0.75.0",
+        version="v0.76.2",
         license="Apache-2.0",
         repository="https://github.com/aquasecurity/trivy",
         commit=_THIRD_PARTY_HASHES["trivy commit"],

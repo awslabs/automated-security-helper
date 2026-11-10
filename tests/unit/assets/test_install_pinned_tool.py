@@ -715,8 +715,8 @@ from automated_security_helper.utils.tool_downloads import (  # noqa: E402
 )
 
 _SYFT_ARCHIVE_DIGEST = "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c"  # pragma: allowlist secret
-_TRIVY_ARCHIVE_DIGEST = "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"  # pragma: allowlist secret
-_TRIVY_LINUX_AMD64_EXECUTABLE = "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e"  # pragma: allowlist secret
+_TRIVY_ARCHIVE_DIGEST = "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf"  # pragma: allowlist secret
+_TRIVY_LINUX_AMD64_EXECUTABLE = "6a972c69606c7b3ea4c6bdcc6fc9332ea9ad38381624310c1e85cc77345909f3"  # pragma: allowlist secret
 
 # The fixture archives below hold a shell script, not the real syft or trivy, and the
 # installer checks the extracted member against its own executable pin. Re-pinning

@@ -10,7 +10,7 @@ trivy is a native binary, so `--python-only` does not run it.
 
 ## Installing trivy
 
-- Container image: included. The image installs the pinned release (currently v0.75.0).
+- Container image: included. The image installs the pinned release (currently v0.76.2).
 - Local mode: `ash dependencies install` downloads the pinned release asset from GitHub and checks it against the SHA256 recorded in `automated_security_helper/utils/tool_downloads.py` before installing it. trivy publishes no Windows arm64 asset, so there it has to be installed another way.
 - Nix mode: the flake supplies nixpkgs' `trivy`, and the nix shell keeps its vulnerability database in `TRIVY_CACHE_DIR` (default `~/.cache/ash/trivy`), updating it on every entry; trivy returns at once when the database is current. Nix mode scans offline, so when the shell had no network and nothing is cached, trivy is reported `MISSING` with the reason; see [Offline and air-gapped use](#offline-and-air-gapped-use).
 - A `trivy` already on `PATH` is used as is. ASH is tested against the pinned version.

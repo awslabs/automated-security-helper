@@ -33,7 +33,7 @@ hand in two places drifts. Everything that needs a database's age bound reads it
 The inventory, and what each entry's bound is
 ---------------------------------------------
 Read from each tool's source at the version ASH pins. The Dockerfile's ``GRYPE_VERSION`` is
-v0.121.3 and its ``TRIVY_VERSION`` is v0.75.0. Each entry also says, in ``bound_source``,
+v0.121.3 and its ``TRIVY_VERSION`` is v0.76.2. Each entry also says, in ``bound_source``,
 where its number comes from, and ``bound_is_tool_default`` separates a number the tool itself
 enforces from one ASH chose.
 

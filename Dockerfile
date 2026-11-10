@@ -540,7 +540,7 @@ RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
     echo "offline provisioning verified: grype db, semgrep and opengrep caches are all non-empty"; \
     fi
 
-ARG TRIVY_VERSION="v0.75.0"
+ARG TRIVY_VERSION="v0.76.2"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
