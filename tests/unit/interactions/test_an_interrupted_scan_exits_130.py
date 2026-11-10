@@ -597,8 +597,9 @@ def test_on_windows_with_a_console_the_runtime_gets_its_grace(
     from automated_security_helper.interactions import run_ash_container
     from automated_security_helper.utils import subprocess_utils
 
-    from tests.utils.windows_console import as_windows
+    from tests.utils.windows_console import as_windows, with_a_slice_clock
 
+    clock = with_a_slice_clock(monkeypatch)
     runtime = _InterruptedRuntime()
     monkeypatch.setattr(
         subprocess_utils, "create_process_with_pipes", lambda **kwargs: runtime
@@ -612,12 +613,15 @@ def test_on_windows_with_a_console_the_runtime_gets_its_grace(
 
     assert result.exit_code == 130, result.output
     assert "interrupted before it finished" in result.stderr, result.stderr
-    # The grace in slices, so a second Ctrl-C lands between them; then the kill.
+    # The grace in slices of a poll and a sleep, so a second Ctrl-C lands between
+    # them (and no timed Popen.wait runs, whose own Ctrl-C handler can park the
+    # process); then the kill.
     slice_seconds = subprocess_utils.INTERRUPT_WAIT_SLICE_SECONDS
     slices = round(subprocess_utils.INTERRUPT_GRACE_SECONDS / slice_seconds)
+    assert clock.sleeps == [slice_seconds] * slices, clock.sleeps
     # The reap after the kill is bounded (subprocess_utils._wait_after_kill): a child
     # SIGKILL did not end is not waited for without end.
-    assert runtime.calls == [f"wait({slice_seconds})"] * slices + [
+    assert runtime.calls == [
         "kill",
         f"wait({subprocess_utils._REAP_SECONDS})",
     ], runtime.calls

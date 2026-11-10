@@ -74,7 +74,7 @@ from automated_security_helper.utils.subprocess_utils import (
     INTERRUPT_WAIT_SLICE_SECONDS,
     create_completed_process,
 )
-from tests.utils.windows_console import as_windows
+from tests.utils.windows_console import as_windows, with_a_slice_clock
 
 
 # ---------------------------------------------------------------------------
@@ -565,17 +565,35 @@ class TestRunCmdDirectInterruption:
         assert process.wait_timeouts == [5]
 
 
-class _StillRunning(_StubProcess):
-    """A runtime that outlives every timed wait, as Popen.wait reports it."""
+class _WindowsRuntime(_StubProcess):
+    """A runtime for the Windows grace wait: one Ctrl-C, then polls and sleeps.
+
+    The Ctrl-C ``poll_raises`` holds lands at the first poll only, as one
+    keypress does; later polls answer ``returncode``. The grace is polled and
+    slept out, so a timed ``wait`` other than the bounded reap after a kill
+    (which ``Popen.wait``'s own Ctrl-C handler could turn into an endless wait)
+    fails the test.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._interrupted = False
+
+    def poll(self):
+        if self._poll_raises is not None and not self._interrupted:
+            self._interrupted = True
+            raise self._poll_raises
+        return self.returncode
 
     def wait(self, timeout=None):
         self.wait_timeouts.append(timeout)
-        if timeout is not None:
-            raise TimeoutExpired("runtime", timeout)
+        assert timeout in (None, subprocess_utils._REAP_SECONDS), (
+            f"Popen.wait(timeout={timeout}) on the Windows grace path"
+        )
         return self.returncode
 
 
-#: The waits on Windows: the grace in slices, so a second Ctrl-C lands between them.
+#: The sleeps on Windows: the grace in slices, so a second Ctrl-C lands between them.
 _SLICES = [INTERRUPT_WAIT_SLICE_SECONDS] * round(
     INTERRUPT_GRACE_SECONDS / INTERRUPT_WAIT_SLICE_SECONDS
 )
@@ -607,8 +625,9 @@ class TestRunCmdDirectInterruptionOnWindows:
     ):
         """terminate() at once cut short the runtime's own handling of the Ctrl-C."""
         as_windows(monkeypatch, console=True)
+        clock = with_a_slice_clock(monkeypatch)
         process = stub_process(
-            _StillRunning(returncode=None, poll_raises=KeyboardInterrupt())
+            _WindowsRuntime(returncode=None, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -616,15 +635,17 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.signals == []
-        assert process.wait_timeouts == _SLICES + [_REAP]
+        assert clock.sleeps == _SLICES
+        assert process.wait_timeouts == [_REAP]
         assert process.killed is True, "a runtime still running after the grace"
 
     def test_with_a_console_a_runtime_that_stops_in_the_grace_is_not_killed(
         self, stub_process, monkeypatch
     ):
         as_windows(monkeypatch, console=True)
+        clock = with_a_slice_clock(monkeypatch)
         process = stub_process(
-            _StubProcess(returncode=130, poll_raises=KeyboardInterrupt())
+            _WindowsRuntime(returncode=130, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -632,18 +653,16 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.killed is False
-        assert process.wait_timeouts == _SLICES[:1]
+        assert clock.sleeps == []
+        assert process.wait_timeouts == []
 
     def test_with_a_console_a_second_ctrl_c_kills_at_once(
         self, stub_process, monkeypatch
     ):
         as_windows(monkeypatch, console=True)
+        clock = with_a_slice_clock(monkeypatch, interrupt_on=1)
         process = stub_process(
-            _StubProcess(
-                returncode=None,
-                poll_raises=KeyboardInterrupt(),
-                wait_raises=KeyboardInterrupt(),
-            )
+            _WindowsRuntime(returncode=None, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -651,15 +670,17 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.killed is True
-        assert process.wait_timeouts == _SLICES[:1] + [_REAP]
+        assert clock.sleeps == _SLICES[:1]
+        assert process.wait_timeouts == [_REAP]
 
     def test_without_a_console_the_runtime_is_terminated(
         self, stub_process, monkeypatch
     ):
         """Nothing passed the Ctrl-C to the runtime, so ASH stops it."""
         as_windows(monkeypatch, console=False)
+        with_a_slice_clock(monkeypatch)
         process = stub_process(
-            _StubProcess(returncode=1, poll_raises=KeyboardInterrupt())
+            _WindowsRuntime(returncode=1, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -667,7 +688,7 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is True
         assert process.signals == []
-        assert process.wait_timeouts == _SLICES[:1]
+        assert process.wait_timeouts == []
 
 
 @pytest.mark.unit

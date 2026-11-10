@@ -1889,10 +1889,15 @@ def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
     Both arms wait the grace out in slices of INTERRUPT_WAIT_SLICE_SECONDS. On
     POSIX each pass OBSERVES the exit without reaping, so the die-now record is
     discarded before the reaping wait, and a signal interrupts the sleep, so a
-    second Ctrl-C lands within one slice. On Windows the wait is one
-    WaitForSingleObject, which a Ctrl-C does not end (CPython's
-    subprocess.Popen._wait), so the slices are what let a second Ctrl-C land
-    between two of them.
+    second Ctrl-C lands within one slice. On Windows a single
+    WaitForSingleObject is not ended by a Ctrl-C, so the wait is a poll and a
+    sleep per slice, and a Ctrl-C lands within one slice. It is not a
+    ``Popen.wait(timeout=slice)`` per slice: when a Ctrl-C arrives inside that
+    call, CPython's own handler for it waits up to the smaller of 0.25 s and the
+    time left in the slice, and once the slice's window is spent that time is
+    negative, which Windows hands to WaitForSingleObject as a huge unsigned
+    wait, so the process stays parked until the child exits on its own. A poll
+    is a zero-timeout wait with no such handler, and ``time.sleep`` has none.
     """
     if os.name != "nt":
         # Sliced like the Windows arm, but for a different reason: the exit
@@ -1911,18 +1916,22 @@ def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
             )
         process.wait(timeout=grace)
         return
-    slices = max(1, round(grace / INTERRUPT_WAIT_SLICE_SECONDS))
-    for _ in range(slices):
-        try:
-            process.wait(timeout=INTERRUPT_WAIT_SLICE_SECONDS)
-            return
-        except subprocess.TimeoutExpired:
-            continue
-    raise subprocess.TimeoutExpired(getattr(process, "args", "the child"), grace)
+    # No reap concern on Windows (no die-now record to keep ahead of one), and a
+    # poll there is a zero-timeout WaitForSingleObject.
+    deadline = _slice_clock() + grace
+    while process.poll() is None:
+        remaining = deadline - _slice_clock()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(
+                getattr(process, "args", "the child"), grace
+            )
+        _slice_sleep(min(INTERRUPT_WAIT_SLICE_SECONDS, remaining))
 
 
-#: The clock the sliced wait reads, a name of its own so a test can drive it.
+#: The clock and the sleep the sliced waits use, names of their own so a test
+#: can drive them.
 _slice_clock = time.monotonic
+_slice_sleep = time.sleep
 
 
 def _communicate_sliced(
@@ -1961,6 +1970,13 @@ def _communicate_in_slices(
     tests see communicate() raise, with the output and stderr the last slice
     read and the caller's timeout in place of the slice. It runs on any platform
     so that the loop can be tested everywhere.
+
+    Named limit: communicate() itself waits for the child with
+    ``Popen.wait(timeout=<the time left in the slice>)``, whose Ctrl-C handler
+    (see :func:`_wait_out`) can wait with a negative time if the Ctrl-C arrives
+    after the slice's window has run out. That is one instant at the end of each
+    slice, not the whole child lifetime, and no guard can close it, since a
+    Ctrl-C can arrive at any instant.
     """
     end = None if timeout is None else _slice_clock() + timeout
     pending = input_data
