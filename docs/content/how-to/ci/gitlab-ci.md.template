@@ -93,37 +93,6 @@ config can still raise thresholds, add suppressions, and turn scanners off; to k
 yours, pass `--config` with a file outside the checkout. See
 [Who can change the gate](../set-the-gate.md#who).
 
-## Run ASH with uvx instead of pip {#uvx}
-
-If you would rather not keep a virtual environment, run ASH with `uvx`, as the reusable
-GitHub Actions workflow does. Replace the pip lines of the `before_script` with a `uv`
-install and a shell function that wraps the `uvx --from` specification from
-[Run without installing: uvx](../install.md#run-without-installing-uvx). The apt-get line,
-the `ash dependencies install` line, the `script`, the artifacts, and the `ash-gate` job stay
-as above, and the function stands in for `ash` in both:
-
-<!-- doctest: config kind=other reason="a sketch of the ash-scan job's before_script with the script and artifacts left out, not a pipeline on its own" -->
-```yaml
-ash-scan:
-  stage: test
-  image: python:3.12
-  variables:
-    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
-    - pip install --quiet uv
-    - ash() { uvx --python 3.12 --from "$INSTALL_SPEC" ash "$@"; }
-    - >-
-      (cd "$(mktemp -d)" && ash dependencies install
-      --tool grype --tool syft --tool opengrep --tool cfn-nag
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
-  # script, artifacts: same as above
-```
-
-`uvx` builds the environment on the first call and reuses it for later calls. The function
-lives in the job's shell, so it covers every `ash` call in `before_script` and `script`. Use
-the pip recipe when you want a plain `ash` executable on `PATH`.
-
 ## The report files
 
 | File in `.ash/ash_output/reports/` | GitLab keyword | What GitLab does with it |
@@ -261,6 +230,53 @@ python3 -c "import json; report = json.load(open('.ash/ash_output/reports/ash.gl
 ```
 
 [Scale to large repositories](../scale-large-repos.md#changed-files) has the details.
+
+## Run ASH with uvx instead of pip {#uvx}
+
+If you would rather not keep a virtual environment, run ASH with `uvx`, as the reusable
+GitHub Actions workflow does. This job replaces the pip lines of the `ash-scan` job's
+`before_script` from [Add the jobs](#add-the-jobs) with a `uv` install and a shell
+function that wraps the `uvx --from` specification from
+[Run without installing: uvx](../install.md#run-without-installing-uvx). The function
+stands in for `ash` in both `before_script` and `script`. The `ash-gate` job stays as
+above; set its `needs` to `ash-scan-uvx` when this job replaces `ash-scan`.
+
+<!-- doctest: config kind=gitlab-ci runner=none reason="installs uv and runs ASH through uvx from a git specification, which the runner cannot swap for the pull request's wheel" -->
+```yaml
+ash-scan-uvx:
+  stage: test
+  image: python:3.12
+  variables:
+    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
+    - pip install --quiet uv
+    - ash() { uvx --python 3.12 --from "$INSTALL_SPEC" ash "$@"; }
+    - >-
+      (cd "$(mktemp -d)" && ash dependencies install
+      --tool grype --tool syft --tool opengrep --tool cfn-nag
+      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  script:
+    - ash_exit=0
+    - >-
+      ash scan --mode local --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+  artifacts:
+    when: always
+    paths:
+      - .ash/ash_output/reports/
+      - .ash/ash_output/ash_aggregated_results.json
+      - ash-exit-code.txt
+    reports:
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+      junit: .ash/ash_output/reports/ash.junit.xml
+```
+
+`uvx` builds the environment on the first call and reuses it for later calls. The function
+lives in the job's shell, so it covers every `ash` call in `before_script` and `script`. Use
+the pip recipe when you want a plain `ash` executable on `PATH`.
 
 ## Run in Nix mode {#nix}
 
