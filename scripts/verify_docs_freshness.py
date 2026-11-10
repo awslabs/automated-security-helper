@@ -626,6 +626,109 @@ def check_scanners() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check 2b: the plugin data behind the home page graphics, and the counts in prose
+# ---------------------------------------------------------------------------
+
+PLUGIN_DATA_PARTIAL = (
+    DOCS_DIR / "overrides" / "partials" / "generated" / "plugin-data.html"
+)
+HOW_ASH_WORKS_MD = DOCS_DIR / "content" / "concepts" / "how-ash-works.md"
+CHOOSE_SCANNERS_MD = DOCS_DIR / "content" / "how-to" / "choose-scanners.md"
+
+
+def _partial_block(text: str, key: str) -> str | None:
+    """The text of the list ``"key": [ ... ]`` in the plugin data partial, or None."""
+    match = re.search(rf'"{re.escape(key)}": \[(.*?)\]', text, re.DOTALL)
+    return match.group(1) if match else None
+
+
+def check_plugin_data() -> list[str]:
+    """scripts/generate_plugin_data_partial.py wrote the registry's names, and prose agrees.
+
+    The partial is held against a second source here (the config segments, which
+    are what ``scanner_names`` reads), the way the reference pages are, so a
+    generator that dropped or invented a name is caught even though its own
+    ``--check`` compares only against itself. The prose counts that used to be
+    typed by hand ("16 built-in scanners", the converters in the phases diagram)
+    are compared with the same registry. Every link the partial gives into the
+    scanner and reporter references must name a heading that exists there.
+    """
+    from automated_security_helper.config.ash_config import (
+        ConverterConfigSegment,
+        ScannerConfigSegment,
+    )
+
+    failures: list[str] = []
+    where = "docs/overrides/partials/generated/plugin-data.html"
+    text = read_text(PLUGIN_DATA_PARTIAL)
+    builtin = set(_segment_names(ScannerConfigSegment))
+    expected_lists = {
+        "builtin": builtin,
+        "all": set(scanner_names()),
+    }
+    for key, expected in expected_lists.items():
+        block = _partial_block(text, key)
+        listed = set(re.findall(r'"([^"]+)"', block)) if block is not None else set()
+        if block is None:
+            failures.append(f"{where}: no {key!r} list of scanner names")
+        elif listed != expected:
+            failures.append(
+                f"{where}: {key!r} scanners differ from the registry: "
+                f"missing {sorted(expected - listed)}, extra {sorted(listed - expected)}"
+            )
+
+    converters = set(_segment_names(ConverterConfigSegment))
+    block = _partial_block(text, "converters")
+    listed = (
+        set(re.findall(r'"name": "([^"]+)"', block)) if block is not None else set()
+    )
+    if listed != converters:
+        failures.append(
+            f"{where}: converters {sorted(listed)} differ from the registry "
+            f"{sorted(converters)}"
+        )
+
+    for page, heading_page in (
+        ("reference/scanners/", SCANNERS_REFERENCE_MD),
+        ("reference/reporters/", REPORTERS_REFERENCE_MD),
+    ):
+        headings = set(
+            re.findall(r"^## `([^`]+)`$", read_text(heading_page), re.MULTILINE)
+        )
+        for anchor in re.findall(rf'"href": "{re.escape(page)}#([^"]+)"', text):
+            if anchor not in headings:
+                failures.append(
+                    f"{where}: links to {page}#{anchor}, which is not a heading there"
+                )
+
+    prose = (
+        (HOW_ASH_WORKS_MD, r"ASH ships (\d+) built-in scanners", len(builtin)),
+        (CHOOSE_SCANNERS_MD, r"all (\d+) built-in scanners", len(builtin)),
+    )
+    for page, pattern, count in prose:
+        rel = page.relative_to(REPO_ROOT).as_posix()
+        match = re.search(pattern, read_text(page))
+        if match is None:
+            failures.append(f"{rel}: no sentence matching {pattern!r}")
+        elif int(match.group(1)) != count:
+            failures.append(
+                f"{rel}: says {match.group(1)} built-in scanners, the registry has {count}"
+            )
+
+    diagram = re.search(r"Convert phase<br/>([^\]]+)\]", read_text(HOW_ASH_WORKS_MD))
+    if diagram is None:
+        failures.append("docs/content/concepts/how-ash-works.md: no Convert phase node")
+    else:
+        named = {n.strip() for n in diagram.group(1).split(",")}
+        if named != converters:
+            failures.append(
+                "docs/content/concepts/how-ash-works.md: the Convert phase node names "
+                f"{sorted(named)}, the registry has {sorted(converters)}"
+            )
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Check 3: MCP tool names in docs match code
 # ---------------------------------------------------------------------------
 
@@ -1408,6 +1511,9 @@ _DOCS_PATHS = (
     "REPORTERS_REFERENCE_MD",
     "MCP_TOOLS_REFERENCE_MD",
     "INSTALL_MD",
+    "PLUGIN_DATA_PARTIAL",
+    "HOW_ASH_WORKS_MD",
+    "CHOOSE_SCANNERS_MD",
 )
 #: Code files, by their path inside the package, so a rebase never depends on where
 #: the previous one put them.
@@ -1461,6 +1567,10 @@ def main(argv: list[str] | None = None) -> int:
     checks = [
         ("Reporter list in docs matches code", check_reporters),
         ("Scanner list in docs matches code", check_scanners),
+        (
+            "Plugin data behind the home page graphics matches code",
+            check_plugin_data,
+        ),
         ("MCP tool names in docs match code", check_mcp_tools),
         ("Version consistency", check_version_consistency),
         ("Config file path consistency", check_config_path),
