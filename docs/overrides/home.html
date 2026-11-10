@@ -1,5 +1,6 @@
 {% extends "main.html" %}
 {% from "partials/ash-icons.html" import icon, action %}
+{% from "partials/generated/plugin-data.html" import plugin_data %}
 {% set version = page.meta.ash_version %}
 
 {% block extrahead %}
@@ -41,12 +42,9 @@
     <div class="ash-wrap">
       <p>Built-in scanners</p>
       <div class="ash-scanner-strip__names">
-        <a href="{{ 'docs/plugins/builtin/scanners/#bandit' | url }}">Bandit</a>
-        <a href="{{ 'docs/plugins/builtin/scanners/#semgrep' | url }}">Semgrep</a>
-        <a href="{{ 'docs/plugins/builtin/scanners/#checkov' | url }}">{{ icon("check-decagram-outline") }}Checkov</a>
-        <a href="{{ 'docs/plugins/builtin/scanners/#detect-secrets' | url }}">{{ icon("fingerprint") }}detect-secrets</a>
-        <a href="{{ 'docs/plugins/builtin/scanners/#grype' | url }}">{{ icon("cube-scan") }}Grype</a>
-        <a href="{{ 'docs/plugins/builtin/scanners/#syft' | url }}">{{ icon("layers-outline") }}Syft</a>
+        {% for s in plugin_data.scanners.home if s.strip %}
+        <a href="{{ s.href | url }}">{% if s.strip == "icon" %}{{ icon(s.icon) }}{% endif %}{{ s.display }}</a>
+        {% endfor %}
         <a href="#scanners" class="ash-scanner-strip__more">All scanners {{ icon("arrow-right") }}</a>
       </div>
     </div>
@@ -58,7 +56,7 @@
         <div><h2 id="workflow-title">Scan workflow</h2></div>
       </div>
       <div class="ash-feature-grid">
-        <a class="ash-feature ash-feature--wide" href="{{ 'docs/plugins/builtin/scanners/' | url }}" data-ash-reveal>
+        <a class="ash-feature ash-feature--wide" href="{{ plugin_data.scanners.reference_href | url }}" data-ash-reveal>
           <div class="ash-feature__inner">
           <span class="ash-feature__icon">{{ icon("radar") }}</span>
           <span class="ash-feature__topline">Scanning {{ icon("arrow-top-right") }}</span>
@@ -121,36 +119,23 @@
     <div class="ash-wrap">
       <div class="ash-section-heading" data-ash-reveal>
         <div><h2 id="scanners-title">Scanners</h2></div>
-        <a class="ash-text-link" href="{{ 'docs/plugins/builtin/scanners/' | url }}">Scanner reference {{ icon("arrow-right") }}</a>
+        <a class="ash-text-link" href="{{ plugin_data.scanners.reference_href | url }}">Scanner reference {{ icon("arrow-right") }}</a>
       </div>
       <div class="ash-filter" role="group" aria-label="Filter scanners by category">
-        <button type="button" aria-pressed="true" data-ash-filter="all">All tools <span>10</span></button>
-        <button type="button" aria-pressed="false" data-ash-filter="code">Code</button>
-        <button type="button" aria-pressed="false" data-ash-filter="infrastructure">Infrastructure</button>
-        <button type="button" aria-pressed="false" data-ash-filter="secrets">Secrets</button>
-        <button type="button" aria-pressed="false" data-ash-filter="dependencies">Dependencies</button>
+        <button type="button" aria-pressed="true" data-ash-filter="all">All tools <span>{{ plugin_data.scanners.home_count }}</span></button>
+        {% for c in plugin_data.scanners.categories %}
+        <button type="button" aria-pressed="false" data-ash-filter="{{ c.slug }}">{{ c.label }}</button>
+        {% endfor %}
       </div>
       <div class="ash-scanner-grid">
-        {% set scanners = [
-          ("Bandit", "bandit", "code", "language-python", "Python security checks", "Python", "SAST"),
-          ("Semgrep", "semgrep", "code", "code-braces", "Pattern-based code checks", "Multiple languages", "SAST"),
-          ("Opengrep", "opengrep", "code", "code-tags-check", "Pattern-based code checks", "Multiple languages", "SAST"),
-          ("Checkov", "checkov", "infrastructure", "check-decagram-outline", "Infrastructure policy checks", "Terraform, Kubernetes, CloudFormation", "IaC"),
-          ("CDK-Nag", "cdk-nag", "infrastructure", "cloud-check-outline", "NagPack policy checks", "CloudFormation", "IaC"),
-          ("CFN-Nag", "cfn-nag", "infrastructure", "cloud-outline", "Template security checks", "CloudFormation", "IaC"),
-          ("detect-secrets", "detect-secrets", "secrets", "fingerprint", "Secret detection", "Text files", "Secrets"),
-          ("Grype", "grype", "dependencies", "cube-scan", "Vulnerability matching", "Packages and container images", "SCA"),
-          ("npm audit", "npm-audit", "dependencies", "package-variant-closed", "Dependency vulnerability checks", "Node.js", "SCA"),
-          ("Syft", "syft", "dependencies", "layers-outline", "Software inventory", "SBOM generation", "SBOM")
-        ] %}
-        {% for name, anchor, category, symbol, tagline, description, tag in scanners %}
-        <a class="ash-scanner" href="{{ ('docs/plugins/builtin/scanners/#' ~ anchor) | url }}" data-ash-category="{{ category }}">
-          <div class="ash-scanner__top">{{ icon(symbol) }}<span>{{ tag }}</span>{{ icon("arrow-top-right", "ash-scanner__arrow") }}</div>
-          <h3>{{ name }}</h3><p>{{ tagline }}</p><span class="ash-scanner__detail">{{ description }}</span>
+        {% for s in plugin_data.scanners.home %}
+        <a class="ash-scanner" href="{{ s.href | url }}" data-ash-category="{{ s.category }}">
+          <div class="ash-scanner__top">{{ icon(s.icon) }}<span>{{ s.tag }}</span>{{ icon("arrow-top-right", "ash-scanner__arrow") }}</div>
+          <h3>{{ s.display }}</h3><p>{{ s.tagline }}</p><span class="ash-scanner__detail">{{ s.covers }}</span>
         </a>
         {% endfor %}
       </div>
-      <p class="ash-filter-status ash-sr-only" role="status" data-ash-filter-status>Showing all 10 scanners.</p>
+      <p class="ash-filter-status ash-sr-only" role="status" data-ash-filter-status>Showing all {{ plugin_data.scanners.home_count }} scanners.</p>
       <div class="ash-ecosystem__foot"><a class="ash-text-link" href="{{ 'docs/plugins/development-guide/' | url }}">Add a scanner plugin {{ icon("arrow-right") }}</a></div>
     </div>
   </section>

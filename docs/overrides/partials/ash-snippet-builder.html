@@ -17,6 +17,9 @@
   families that do not answer the default pick.
 -#}
 {% from "partials/ash-icons.html" import icon %}
+{% from "partials/generated/plugin-data.html" import plugin_data %}
+{#- The tools `ash dependencies install` installs for the CI snippets, from the plugin registry. #}
+{% set tool_args = "--tool " ~ (plugin_data.managed_tools | join(" --tool ")) %}
 {% set ref = config.extra.install_ref or ("v" ~ page.meta.ash_version) %}
 {% set repo = config.repo_url %}
 {% set spec = "automated-security-helper[cdk] @ git+" ~ repo ~ ".git@" ~ ref %}
@@ -143,8 +146,7 @@ ash-scan:
     - export PATH="/opt/ash/bin:$PATH"
     - >-
       (cd "$(mktemp -d)" && ash dependencies install
-      --tool grype --tool syft --tool opengrep --tool cfn-nag
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+      {{ tool_args }})
   script:
     - ash_exit=0
     - >-
@@ -181,8 +183,7 @@ ash-scan:
     - ash() { uvx --python 3.12 --from "$INSTALL_SPEC" ash "$@"; }
     - >-
       (cd "$(mktemp -d)" && ash dependencies install
-      --tool grype --tool syft --tool opengrep --tool cfn-nag
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+      {{ tool_args }})
   script:
     - ash_exit=0
     - >-
@@ -242,8 +243,7 @@ python3 -m venv "$HOME/ash-venv"
   "{{ spec }}"
 export PATH="$HOME/ash-venv/bin:$PATH"
 (cd "$(mktemp -d)" && ash dependencies install \
-  --tool grype --tool syft --tool opengrep --tool cfn-nag \
-  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  {{ tool_args }})
 ash scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 {%- endset %}
@@ -254,8 +254,7 @@ ash() {
     ash "$@"
 }
 (cd "$(mktemp -d)" && ash dependencies install \
-  --tool grype --tool syft --tool opengrep --tool cfn-nag \
-  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  {{ tool_args }})
 ash scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 {%- endset %}

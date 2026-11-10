@@ -131,7 +131,18 @@ test("scanner filters announce results and FAQ answers expand", async ({ page })
   await expect(page.locator("[data-ash-category]:visible")).toHaveCount(1);
   await expect(page.locator("[data-ash-filter-status]")).toContainText("1 secrets scanner");
   await page.getByRole("button", { name: "All tools" }).click();
-  await expect(page.locator("[data-ash-category]:visible")).toHaveCount(10);
+  // The count on the button and the cards both come from the generated plugin data
+  // (docs/overrides/partials/generated/plugin-data.html); a template that stopped
+  // reading it would leave them disagreeing, or both at zero.
+  const advertised = Number(await page.locator("[data-ash-filter='all'] span").innerText());
+  expect(advertised).toBeGreaterThan(0);
+  await expect(page.locator("[data-ash-category]:visible")).toHaveCount(advertised);
+  const cards = page.locator("a.ash-scanner");
+  await expect(cards).toHaveCount(advertised);
+  for (const href of await cards.evaluateAll(links => links.map(link => link.getAttribute("href")))) {
+    expect(href).toContain("reference/scanners/#");
+  }
+  await expect(page.locator("[data-ash-filter-status]")).toContainText(`${advertised} scanners`);
   await page.getByText("Do I need an AWS account?", { exact: true }).click();
   await expect(page.getByText("Core ASH scanning runs locally", { exact: false })).toBeVisible();
 });
