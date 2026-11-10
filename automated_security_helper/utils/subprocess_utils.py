@@ -1481,10 +1481,10 @@ def recording_in_tree_refusals() -> Iterator[List[str]]:
 #: on its own before it is killed.
 INTERRUPT_GRACE_SECONDS = 5
 
-#: The slices that grace is waited out in, on both arms. On Windows Popen.wait
-#: is a single WaitForSingleObject, which a Ctrl-C does not end, so a second
-#: Ctrl-C would land only once the whole grace had passed; between two slices it
-#: lands at once. The POSIX wait slices for its own reason: each pass observes
+#: The slices that grace is waited out in, on both arms. On Windows the grace is
+#: a poll and a sleep per slice (see _wait_out), so a second Ctrl-C lands
+#: between two slices at once instead of after the whole grace; Popen.wait is
+#: not used there. The POSIX wait slices for its own reason: each pass observes
 #: the exit without reaping, so the die-now record is discarded before the reap.
 INTERRUPT_WAIT_SLICE_SECONDS = 0.25
 
@@ -1928,8 +1928,9 @@ def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
         _slice_sleep(min(INTERRUPT_WAIT_SLICE_SECONDS, remaining))
 
 
-#: The clock and the sleep the sliced waits use, names of their own so a test
-#: can drive them.
+#: The clock and the sleep of the Windows grace wait (_wait_out's Windows arm)
+#: and of the sliced communicate loop, names of their own so a test can drive
+#: them. The POSIX grace arm uses ``time`` directly.
 _slice_clock = time.monotonic
 _slice_sleep = time.sleep
 
@@ -1971,12 +1972,16 @@ def _communicate_in_slices(
     read and the caller's timeout in place of the slice. It runs on any platform
     so that the loop can be tested everywhere.
 
-    Named limit: communicate() itself waits for the child with
-    ``Popen.wait(timeout=<the time left in the slice>)``, whose Ctrl-C handler
-    (see :func:`_wait_out`) can wait with a negative time if the Ctrl-C arrives
-    after the slice's window has run out. That is one instant at the end of each
-    slice, not the whole child lifetime, and no guard can close it, since a
-    Ctrl-C can arrive at any instant.
+    Known limit of going through ``Popen.communicate``: it waits for the child
+    with ``Popen.wait(timeout=<the time left in the slice>)``, whose Ctrl-C
+    handler (see :func:`_wait_out`) waits for a time that is negative once the
+    slice's window has run out, and a negative time is an enormous wait on
+    Windows. The hazard remains after a first Ctrl-C too, since the time left
+    stays negative. It is one instant at the end of each slice, not the whole
+    child lifetime, and a guard around the call cannot close it. Closing it
+    means replacing ``communicate`` with the runner's own reader threads and a
+    poll-and-sleep wait (``_slice_clock`` and ``_slice_sleep``, as
+    :func:`_wait_out` does); that is future work, not done here.
     """
     end = None if timeout is None else _slice_clock() + timeout
     pending = input_data
@@ -1995,7 +2000,7 @@ def _communicate_in_slices(
                 first.timeout = timeout
                 first.stdout = expired.stdout
                 first.stderr = expired.stderr
-                raise first
+                raise first from None
 
 
 def find_executable(command: str) -> Optional[str]:

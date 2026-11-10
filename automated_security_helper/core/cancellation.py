@@ -1012,7 +1012,9 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
             # already exited, and a reaped pid whose die-now record is still
             # recorded can be reused and then killed by a later sweep. So the
             # child is checked with waitid, which leaves it reapable, and
-            # signaled by pid only while it still runs. Windows has no die-now
+            # signaled by pid only while it still runs. A child this process
+            # has already reaped (returncode set) is skipped first: its pid may
+            # have been reused by another child. Windows has no die-now
             # record to protect and no waitid, so it keeps Popen.kill. macOS has
             # no waitid either; there a child Popen has not yet seen exit is
             # signaled by pid, which reaps nothing (a child that exited and is
@@ -1021,6 +1023,10 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
                 try:
                     if os.name == "nt":
                         waited.kill()
+                    elif waited.returncode is not None:
+                        # Already reaped by this process: the pid is free and
+                        # may name a different child now, so nothing is sent.
+                        continue
                     elif hasattr(os, "waitid"):
                         if (
                             os.waitid(
@@ -1031,7 +1037,7 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
                             is None
                         ):
                             os.kill(waited.pid, signal.SIGKILL)
-                    elif waited.returncode is None:
+                    else:
                         os.kill(waited.pid, signal.SIGKILL)
                 except OSError:
                     pass

@@ -116,6 +116,48 @@ def test_the_second_press_does_not_reap_a_child_that_has_exited(
         assert child.wait(timeout=30) == 0
 
 
+class _OsWherePidIsReused:
+    """``os`` where waitid finds a live child under the pid and kill is recorded.
+
+    That is what a reused pid looks like to the handler: the child it was given
+    has been reaped, and another child of this process now has the same pid.
+    """
+
+    def __init__(self) -> None:
+        self.killed: List[tuple] = []
+
+    def waitid(self, *args: object) -> None:
+        return None
+
+    def kill(self, pid: int, signum: int) -> None:
+        self.killed.append((pid, signum))
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(os, name)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the pid signal is POSIX's path")
+def test_the_second_press_signals_no_pid_of_a_child_already_reaped(
+    second_press: List[object], monkeypatch
+) -> None:
+    """A registered child this process has reaped is skipped before any check.
+
+    The stop's own waits reap the child while it is still registered; a Ctrl-C
+    between that reap and the registration ending must not signal a pid that
+    another child may hold by now (waitid on the bare pid cannot tell).
+    """
+    child = subprocess.Popen([sys.executable, "-c", "pass"])  # nosec B603
+    assert child.wait(timeout=30) == 0
+    spy = _OsWherePidIsReused()
+    monkeypatch.setattr(cancellation, "os", spy)
+
+    with cancellation.interrupt_stop_in_progress(child):
+        cancellation._handle_sigint(signal.SIGINT, None)
+
+    assert spy.killed == []
+    assert second_press == [signal.SIGINT]
+
+
 def test_a_wait_with_no_child_registered_only_chains(
     sleeper: "subprocess.Popen[bytes]", second_press: List[object]
 ) -> None:
