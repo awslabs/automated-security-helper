@@ -391,13 +391,22 @@ def managed_problems(declares: dict[str, bool | None]) -> list[str]:
     return problems
 
 
-def converter_problems(commands: dict[str, str | None]) -> list[str]:
+def converter_problems(
+    commands: dict[str, str | None], unbuilt: frozenset[str] = frozenset()
+) -> list[str]:
     """What is wrong with ``CONVERTER_DOCS`` against the registered converters.
 
     ``commands`` maps each registered converter to its command (None when it runs in
-    the ASH process).
+    the ASH process). ``unbuilt`` names the converters whose instance could not be
+    built here: their command is unknown, not absent, so the run stops rather than
+    publish what this machine happens to see.
     """
     problems: list[str] = []
+    for name in sorted(unbuilt):
+        problems.append(
+            f"converter {name!r} could not be built, so its command is unknown on "
+            "this machine; the partial would differ from one built elsewhere"
+        )
     for name in CONVERTER_DOCS:
         if name not in commands:
             problems.append(
@@ -407,7 +416,7 @@ def converter_problems(commands: dict[str, str | None]) -> list[str]:
         text = CONVERTER_DOCS.get(name)
         if text is None:
             problems.append(f"converter {name!r} has no entry in CONVERTER_DOCS")
-        elif "{command}" in text and not command:
+        elif "{command}" in text and not command and name not in unbuilt:
             problems.append(
                 f"CONVERTER_DOCS[{name!r}] uses {{command}}, but the converter has none"
             )
@@ -575,7 +584,8 @@ def collect() -> tuple[dict[str, Any], list[str]]:
         plugin.name: getattr(plugin.instance, "command", None) or None
         for plugin in converter_plugins
     }
-    problems += converter_problems(commands)
+    unbuilt = frozenset(p.name for p in converter_plugins if p.instance is None)
+    problems += converter_problems(commands, unbuilt)
     converters = []
     for name, command in sorted(commands.items()):
         text = CONVERTER_DOCS.get(name, "")

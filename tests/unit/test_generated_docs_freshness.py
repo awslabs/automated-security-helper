@@ -2317,6 +2317,14 @@ def test_plugin_data_converter_docs_are_complete() -> None:
         "{command}" in p
         for p in module.converter_problems({**commands, "jupyter": None})
     )
+    # A converter that could not be built is its own error, whether or not its text
+    # uses {command}, and it does not also read as a missing command.
+    for name in ("archive", "jupyter"):
+        problems = module.converter_problems(
+            {**commands, name: None}, frozenset({name})
+        )
+        assert any(name in p and "could not be built" in p for p in problems), problems
+        assert not any("{command}" in p for p in problems), problems
 
 
 @pytest.mark.integration

@@ -560,10 +560,12 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
     for name in guide_names:
         text = (real_guides / name).read_text(encoding="utf-8")
         stale = text.replace("--tool cfn-nag --tool gitleaks", "--tool gitleaks", 1)
-        if stale == text:  # the install line is wrapped between the two options
-            stale = text.replace("--tool cfn-nag", "--tool zizmor", 1)
-        assert stale != text, name
+        assert stale != text, (
+            f"{name}: cfn-nag and gitleaks are no longer adjacent on one line; "
+            "update this row to the new wrapping"
+        )
         failures = check(guides={name: stale})
+        assert any("alphabetical order" in f for f in failures), failures
         assert any(name in f and "install line" in f for f in failures), (
             name,
             failures,

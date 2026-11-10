@@ -801,8 +801,8 @@ def _managed_tool_failures(partial_text: str, where: str) -> list[str]:
             for run in runs:
                 if run != managed:
                     failures.append(
-                        f"{rel}: an install line names {run}, the managed tools are "
-                        f"{managed}"
+                        f"{rel}: an install line names {run}; expected the "
+                        f"registry's alphabetical order: {managed}"
                     )
     return failures
 
