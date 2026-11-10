@@ -4,6 +4,7 @@ import html
 import json
 import math
 import re
+from bisect import bisect_left, bisect_right
 from enum import Enum
 from typing import (
     AbstractSet,
@@ -1227,14 +1228,14 @@ class _SecretIndex:
         #: its id cannot be freed and reused while the map holds it; the map is
         #: keyed by id because the models are not hashable by identity.
         self.resolved_uris: Dict[int, Tuple[Any, str]] = {}
-        self._pattern: Optional[re.Pattern[str]] = None
+        self._plan: Optional["_MaskPlan | _AlternationPlan"] = None
 
     def add_values(self, values: Iterable[str]) -> None:
         """Add the values that are masked wherever they occur (``_propagates``)."""
         for value in values:
             if isinstance(value, str) and _propagates(value):
                 self.values.add(value)
-                self._pattern = None
+                self._plan = None
 
     def add_shapes(self, shapes: Iterable[Any]) -> None:
         """Add shapes of values whose tokens are masked wherever they occur.
@@ -1262,7 +1263,7 @@ class _SecretIndex:
             ):
                 continue
             self.shapes.add(shape)
-            self._pattern = None
+            self._plan = None
 
     def add_local_values(
         self, uri: str, start: Optional[int], end: Optional[int], values: Set[str]
@@ -1331,34 +1332,397 @@ class _SecretIndex:
         and ``provided`` as readily as the credential, and masking them rewrote
         every message that held such a word, bandit's own label among them.
 
-        The longest alternative is tried first, values and shapes together: a
+        The longest match at a position is taken, values and shapes together: a
         value that is the punctuation-delimited head of a longer shape token
         (``abc!1234`` in ``abc!1234$efgh5678``) masked its own part and left the
         rest of the token readable, since the shape could no longer match it.
+
+        The matches are found in one pass over ``text`` (``_MaskPlan``). They
+        were found by one regex alternation with a branch per value and per
+        shape, which the engine tries one after the other at every position:
+        the cost of a text grew with the number of values times its length, and
+        a report that held a thousand secrets took minutes to mask. The cost of
+        a text is now its length times a bound at each place a value or shape
+        can start. The bound is not a count of all the values: at a word run it
+        is the values that share their anchor run (the run of a value that the
+        fewest values contain) with it, so a family that shares a long run and
+        differs in another costs one comparison per occurrence; at a place a
+        shape can start it is the number of different lengths among the shapes
+        with that first character (at most ``MAX_PROPAGATED_VALUE_LENGTH``);
+        and the few values with no word character and shapes that may span
+        whitespace are tried only where their first character is. An index of
+        a few values keeps one alternation (``_AlternationPlan``): the engine
+        runs it at C speed and it is faster than the lookups until it has about
+        ten branches.
         """
         if not self.values and not self.shapes:
             return text
-        if self._pattern is None:
-            alternatives: List[Tuple[int, int, str]] = [
-                (len(value), 1, _token_pattern(re.escape(value), value[0], value[-1]))
-                for value in self.values
-            ]
-            alternatives.extend(
-                (shape.length, 0, _shape_pattern(shape)) for shape in self.shapes
-            )
-            alternatives.sort(reverse=True)
-            self._pattern = re.compile(
-                "|".join(pattern for _, _, pattern in alternatives)
-            )
-        return self._pattern.sub(self._mask_token, text)
+        plan = self._plan
+        if (
+            plan is None
+            or plan.values is not self.values
+            or plan.shapes is not self.shapes
+            or plan.sizes != (len(self.values), len(self.shapes))
+        ):
+            plan = self._plan = _plan_for(self.values, self.shapes)
+        spans = plan.spans(text)
+        if not spans:
+            return text
+        pieces: List[str] = []
+        cursor = 0
+        for start, end in spans:
+            pieces.append(text[cursor:start])
+            pieces.append(self._mask_token(text[start:end]))
+            cursor = end
+        pieces.append(text[cursor:])
+        return "".join(pieces)
 
-    def _mask_token(self, match: "re.Match[str]") -> str:
+    def _mask_token(self, token: str) -> str:
         """The masked form of a matched value, or the token itself for a shape
         token that is not a value (see ``mask_values``)."""
-        token = match.group(0)
         if token in self.values or _looks_like_a_secret(token):
             return _mask_secret_value(token)
         return token
+
+
+_WORD_RUN = re.compile(r"\w+")
+_ANY_WHITESPACE = re.compile(r"\s")
+
+#: Up to this many values and shapes together, ``mask_values`` uses one regex
+#: alternation. Measured on 2 MB of ordinary text, the alternation takes about
+#: 0.03 s per branch and ``_MaskPlan`` about 0.3 s whatever the number of
+#: branches, so the two cross at about ten branches (an index of four values
+#: and their four shapes is eight).
+_ALTERNATION_MAX_BRANCHES = 8
+
+
+class _AlternationPlan:
+    """The matches of a few values and shapes, found by one regex alternation.
+
+    The longest alternative is tried first, values and shapes together, so the
+    longest match at a position wins.
+    """
+
+    def __init__(self, values: Set[str], shapes: Set[SecretValueShape]) -> None:
+        self.values = values
+        self.shapes = shapes
+        self.sizes = (len(values), len(shapes))
+        alternatives: List[Tuple[int, int, str]] = [
+            (len(value), 1, _token_pattern(re.escape(value), value[0], value[-1]))
+            for value in values
+            if value
+        ]
+        alternatives.extend(
+            (shape.length, 0, _shape_pattern(shape)) for shape in shapes
+        )
+        alternatives.sort(reverse=True)
+        self.fallback_branches = len(alternatives)
+        self._pattern = (
+            re.compile("|".join(pattern for _, _, pattern in alternatives))
+            if alternatives
+            else None
+        )
+
+    def spans(self, text: str) -> List[Tuple[int, int]]:
+        """The (start, end) of each match in ``text``, left to right."""
+        if self._pattern is None:
+            return []
+        return [(found.start(), found.end()) for found in self._pattern.finditer(text)]
+
+
+def _plan_for(
+    values: Set[str], shapes: Set[SecretValueShape]
+) -> "_MaskPlan | _AlternationPlan":
+    if len(values) + len(shapes) <= _ALTERNATION_MAX_BRANCHES:
+        return _AlternationPlan(values, shapes)
+    return _MaskPlan(values, shapes)
+
+
+def _is_word(character: str) -> bool:
+    """Whether the regex class ``\\w`` matches ``character``."""
+    return character.isalnum() or character == "_"
+
+
+class _MaskPlan:
+    """Where the values and the shape tokens of a ``_SecretIndex`` are in a text.
+
+    A match is a value, or a token of a shape: its prefix, hidden characters
+    and suffix, with a word boundary on a side only where that side's own
+    character is a word character (``_token_pattern``). At each position the
+    longest match is taken and the next one is looked for after it. The
+    matches are found without trying each value or shape at each position:
+
+    * A value is looked up by one of its runs of word characters, its anchor.
+      Every run of word characters of a value is a whole run in any text the
+      value matches in: inside the value a run has a character that is not a
+      word character on each side, and a run at the start or end of the value
+      gets its boundary from the assertion ``_token_pattern`` makes there. So
+      each run of the text is one dictionary lookup, then the values that
+      share that anchor are compared, each checked for the boundary at its own
+      start and end, which the anchor does not give when it is not there. The
+      anchor is the run that the fewest values contain, the longest of those:
+      real secrets of a family share runs (``sk``, ``proj``, the whole header
+      of a JWT, ``https``) and differ in another, which is the one rarest in
+      the index.
+    * A shape whose prefix and suffix are word characters starts at the start
+      of a run of word characters of a run of non-whitespace characters, and
+      ends at the end of one: the pairs of those are looked up by their first
+      and last character and their distance, trying at most as many distances
+      as there are different shape lengths. The other shapes (a prefix or
+      suffix that is punctuation) are looked up at each position of a run of
+      non-whitespace characters by their first character, then by each shape
+      length, then by their last character.
+    * What does not fit those, a value with no word character in it and a
+      shape that may span whitespace, is left to regex alternations, one for
+      each first character, tried only where that character is. There are few
+      of them.
+
+    ``checks`` counts the candidates compared, for the tests.
+    """
+
+    def __init__(self, values: Set[str], shapes: Set[SecretValueShape]) -> None:
+        #: The sets this plan was built from, and their sizes then: the index
+        #: builds a new plan when either is a different set or has grown.
+        self.values = values
+        self.shapes = shapes
+        self.sizes = (len(values), len(shapes))
+        #: Candidates compared so far (a value tried at a word run, a shape
+        #: length tried at a position, an alternation tried at a position).
+        self.checks = 0
+        #: Anchor run of a value -> (where that run is in the value, the
+        #: value, whether its first and its last character are word
+        #: characters).
+        self._by_anchor: Dict[str, List[Tuple[int, str, bool, bool]]] = {}
+        #: (first, last character, length) of a shape with a word character at
+        #: both ends -> the second character of its prefix, "" if it has one.
+        self._pairs: Dict[Tuple[str, str, int], List[str]] = {}
+        self._pair_lengths: List[int] = []
+        #: First character of any other shape that cannot span whitespace ->
+        #: its lengths, longest first, and the same negated for bisect.
+        self._loose_lengths: Dict[str, Tuple[List[int], List[int]]] = {}
+        #: (first character, length, last character) of such a shape -> (rest
+        #: of its prefix, whether the left and the right side have a boundary).
+        self._loose: Dict[Tuple[str, int, str], List[Tuple[str, bool, bool]]] = {}
+        #: First character -> the alternation of what the lookups above cannot
+        #: find and that starts with it; and the one of what may start with
+        #: any character.
+        self._fallback: Dict[str, "re.Pattern[str]"] = {}
+        self._fallback_any: Optional["re.Pattern[str]"] = None
+        self._fallback_starts: Optional["re.Pattern[str]"] = None
+        #: Branches of the alternations.
+        self.fallback_branches = 0
+
+        members: Dict[str, List[Tuple[int, int, str]]] = {}
+        anywhere: List[Tuple[int, int, str]] = []
+        runs_of: Dict[str, Dict[str, int]] = {}
+        held_by: Dict[str, int] = {}
+        for value in values:
+            if not value:
+                continue
+            runs: Dict[str, int] = {}
+            for located in _WORD_RUN.finditer(value):
+                runs.setdefault(located.group(), located.start())
+            if not runs:
+                members.setdefault(value[0], []).append(
+                    (
+                        len(value),
+                        1,
+                        _token_pattern(re.escape(value), value[0], value[-1]),
+                    )
+                )
+                continue
+            runs_of[value] = runs
+            for run in runs:
+                held_by[run] = held_by.get(run, 0) + 1
+        for value, runs in runs_of.items():
+            anchor = min(runs, key=lambda run: (held_by[run], -len(run), runs[run]))
+            self._by_anchor.setdefault(anchor, []).append(
+                (runs[anchor], value, _is_word(value[0]), _is_word(value[-1]))
+            )
+        lengths: Dict[str, Set[int]] = {}
+        for shape in shapes:
+            prefix, suffix = shape.prefix, shape.suffix
+            if (
+                shape.spans_whitespace
+                or len(prefix) not in (1, 2)
+                or len(suffix) != 1
+                or _ANY_WHITESPACE.search(prefix + suffix)
+            ):
+                member = (shape.length, 0, _shape_pattern(shape))
+                if prefix:
+                    members.setdefault(prefix[0], []).append(member)
+                else:
+                    anywhere.append(member)
+                continue
+            left, right = _is_word(prefix[0]), _is_word(suffix)
+            if left and right:
+                self._pairs.setdefault((prefix[0], suffix, shape.length), []).append(
+                    prefix[1:]
+                )
+            else:
+                self._loose.setdefault((prefix[0], shape.length, suffix), []).append(
+                    (prefix[1:], left, right)
+                )
+                lengths.setdefault(prefix[0], set()).add(shape.length)
+        self._pair_lengths = sorted({length for _, _, length in self._pairs})
+        for first, found in lengths.items():
+            longest_first = sorted(found, reverse=True)
+            self._loose_lengths[first] = (longest_first, [-n for n in longest_first])
+        if anywhere:
+            self._fallback_any = self._alternation(anywhere)
+        for first, branches in members.items():
+            self._fallback[first] = self._alternation(branches + anywhere)
+        self.fallback_branches = len(anywhere) + sum(
+            len(branches) for branches in members.values()
+        )
+        if members and not anywhere:
+            self._fallback_starts = re.compile(
+                "[" + "".join(re.escape(first) for first in members) + "]"
+            )
+
+    @staticmethod
+    def _alternation(branches: List[Tuple[int, int, str]]) -> "re.Pattern[str]":
+        """The branches as one alternation, the longest first."""
+        return re.compile(
+            "|".join(pattern for _, _, pattern in sorted(branches, reverse=True))
+        )
+
+    def spans(self, text: str) -> List[Tuple[int, int]]:
+        """The (start, end) of each match in ``text``, left to right, none
+        overlapping an earlier one."""
+        found: List[Tuple[int, int]] = []
+        if self._by_anchor:
+            self._value_spans(text, found)
+        if self._pairs or self._loose:
+            self._shape_spans(text, found)
+        if self._fallback or self._fallback_any is not None:
+            self._fallback_spans(text, found)
+        if not found:
+            return found
+        found.sort(key=lambda span: (span[0], -span[1]))
+        chosen: List[Tuple[int, int]] = []
+        cursor = 0
+        for start, end in found:
+            if start >= cursor:
+                chosen.append((start, end))
+                cursor = end
+        return chosen
+
+    def _value_spans(self, text: str, found: List[Tuple[int, int]]) -> None:
+        size = len(text)
+        checks = 0
+        for run in _WORD_RUN.finditer(text):
+            entries = self._by_anchor.get(run.group())
+            if entries is None:
+                continue
+            checks += len(entries)
+            for offset, value, left, right in entries:
+                start = run.start() - offset
+                if start < 0 or not text.startswith(value, start):
+                    continue
+                if left and start and _is_word(text[start - 1]):
+                    continue
+                end = start + len(value)
+                if right and end < size and _is_word(text[end]):
+                    continue
+                found.append((start, end))
+        self.checks += checks
+
+    def _shape_spans(self, text: str, found: List[Tuple[int, int]]) -> None:
+        # A token of a shape that cannot span whitespace lies inside one run of
+        # non-whitespace characters, and is at least as long as the shortest
+        # shape.
+        for located in _SHAPE_RUN.finditer(text):
+            run = located.group()
+            base = located.start()
+            if self._pairs:
+                self._pair_spans(run, base, found)
+            if self._loose_lengths:
+                self._loose_spans(run, base, found)
+
+    def _loose_spans(self, run: str, base: int, found: List[Tuple[int, int]]) -> None:
+        size = len(run)
+        checks = 0
+        for start in range(size - MIN_PROPAGATED_VALUE_LENGTH + 1):
+            first = run[start]
+            group = self._loose_lengths.get(first)
+            if group is None:
+                continue
+            lengths, negated = group
+            for position in range(bisect_left(negated, start - size), len(lengths)):
+                length = lengths[position]
+                checks += 1
+                end = start + length
+                entries = self._loose.get((first, length, run[end - 1]))
+                if entries is None:
+                    continue
+                for second, left, right in entries:
+                    if second and run[start + 1] != second:
+                        continue
+                    if left and start and _is_word(run[start - 1]):
+                        continue
+                    if right and end < size and _is_word(run[end]):
+                        continue
+                    found.append((base + start, base + end))
+                    break
+                else:
+                    continue
+                break
+        self.checks += checks
+
+    def _pair_spans(self, run: str, base: int, found: List[Tuple[int, int]]) -> None:
+        pieces = [(piece.start(), piece.end()) for piece in _WORD_RUN.finditer(run)]
+        if not pieces:
+            return
+        ends = [end for _, end in pieces]
+        end_set = set(ends)
+        lengths = self._pair_lengths
+        shortest, longest = lengths[0], lengths[-1]
+        checks = 0
+        for start, _ in pieces:
+            low = bisect_left(ends, start + shortest)
+            high = bisect_right(ends, start + longest)
+            if high - low <= len(lengths):
+                reachable: Iterable[int] = ends[low:high]
+            else:
+                reachable = [
+                    start + length for length in lengths if start + length in end_set
+                ]
+            first = run[start]
+            best = 0
+            for end in reachable:
+                checks += 1
+                seconds = self._pairs.get((first, run[end - 1], end - start))
+                if seconds is None or end - start <= best:
+                    continue
+                for second in seconds:
+                    if not second or run[start + 1] == second:
+                        best = end - start
+                        break
+            if best:
+                found.append((base + start, base + start + best))
+        self.checks += checks
+
+    def _fallback_spans(self, text: str, found: List[Tuple[int, int]]) -> None:
+        if self._fallback_starts is None:
+            positions: Iterable[int] = range(len(text))
+        else:
+            positions = (
+                located.start() for located in self._fallback_starts.finditer(text)
+            )
+        checks = 0
+        for position in positions:
+            pattern = self._fallback.get(text[position], self._fallback_any)
+            if pattern is None:
+                continue
+            checks += 1
+            matched = pattern.match(text, position)
+            if matched is not None:
+                found.append((position, matched.end()))
+        self.checks += checks
+
+
+_SHAPE_RUN = re.compile(r"\S{%d,}" % MIN_PROPAGATED_VALUE_LENGTH)
 
 
 def _token_pattern(body: str, first: Optional[str], last: Optional[str]) -> str:
