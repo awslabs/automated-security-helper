@@ -11,8 +11,9 @@ secret findings spent minutes in it.
 These tests pin two things. The result is what the alternation gave: a value or
 shape token is found where the alternation found it (inside a longer token, next
 to punctuation, longest first), through a reference written the old way. And the
-cost of a text does not grow with the number of values: the same text takes about
-as long with two values as with two thousand. The values here are derived at
+cost of a text does not grow with the number of values, counted in candidates
+compared (``_MaskPlan.checks``) so that it does not depend on the machine. The
+wall-clock version of that pin is in tests/integration. The values here are derived at
 import time or at run time; none is a credential.
 """
 
@@ -22,7 +23,6 @@ import random
 import re
 import string
 import sys
-import time
 from typing import Iterable, List, Set
 
 import pytest
@@ -38,6 +38,14 @@ from automated_security_helper.utils.secret_masking import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _always_the_lookup_plan(monkeypatch):
+    # A few values would use one alternation, which is the reference itself; the
+    # tests are of the lookups.
+    monkeypatch.setattr(secret_masking, "_ALTERNATION_MAX_BRANCHES", 0, raising=False)
+
 
 _ALPHABET = string.ascii_lowercase + string.digits
 
@@ -361,57 +369,119 @@ def test_random_texts_are_masked_like_the_alternation(seed):
 # ---------------------------------------------------------------------------
 
 
-def _prose(seed: int, size: int) -> str:
-    """Ordinary words and word-like identifiers: nothing in it is a secret."""
+def _words(seed: int, count: int) -> List[str]:
     rng = random.Random(seed)
-    words = [
-        "".join(rng.choices(string.ascii_lowercase, k=rng.randint(2, 9)))
-        for _ in range(400)
+    return [
+        "".join(rng.choices(string.ascii_lowercase, k=rng.randint(3, 9)))
+        for _ in range(count)
     ]
-    parts: List[str] = []
-    total = 0
-    while total < size:
-        if rng.random() < 0.4:
-            token = rng.choice("._-").join(rng.choices(words, k=rng.randint(2, 4)))
-        else:
-            token = rng.choice(words)
-        parts.append(token)
-        total += len(token) + 1
-    return " ".join(parts)
 
 
-def _index_of(count: int) -> _SecretIndex:
+def _checks(index: _SecretIndex, text: str) -> int:
+    """How many candidates the plan compared to mask ``text``."""
+    index.mask_values("a warm up text")
+    plan = index._plan
+    assert plan is not None
+    before = plan.checks
+    index.mask_values(text)
+    return plan.checks - before
+
+
+def test_values_that_share_their_first_word_run_cost_no_more_checks():
+    # Real secrets of one family start alike (an API key prefix, a token
+    # header); they differ in their longest word run. Looking a value up by its
+    # first run made every occurrence of the shared run compare every value.
+    def values_of(count: int) -> List[str]:
+        return [
+            f"sk-proj-{_derived(f'family-{number}', 20 + number % 3)}"
+            for number in range(count)
+        ]
+
+    few_values, many_values = values_of(2), values_of(2_000)
+    words = _words(3, 300)
+    text = " ".join(f"sk-proj-{word}" for word in words)
+    text += f" and {few_values[0]} and ({few_values[1]})"
+    few = _checks(_index(few_values), text)
+    many_index = _index(many_values)
+    many = _checks(many_index, text)
+    assert many_index.mask_values(text) == _reference(many_index, text)
+    assert many <= few + 2, (few, many)
+
+
+def test_a_few_values_use_one_alternation_and_more_use_the_lookups(monkeypatch):
+    monkeypatch.setattr(secret_masking, "_ALTERNATION_MAX_BRANCHES", 8)
+
+    def index_of(count):
+        values = [_derived(f"switch-{number}", 14) for number in range(count)]
+        return _index(values, shape_values=values)
+
+    text = " ".join(f"x {_derived(f'switch-{n}', 14)}." for n in range(6)) + " tail"
+    for count, plan_type in (
+        (1, secret_masking._AlternationPlan),
+        (4, secret_masking._AlternationPlan),
+        (5, secret_masking._MaskPlan),
+        (6, secret_masking._MaskPlan),
+    ):
+        index = index_of(count)
+        masked = _same_as_the_alternation(index, text)
+        assert type(index._plan) is plan_type, count
+        assert masked != text, count
+
+
+def test_a_value_whose_longest_run_is_inside_keeps_its_edge_boundaries():
+    value = "3a\th#" + _derived("inside-edge", 12) + "!"
+    index = _index([value])
+    assert index.values == {value}
+    masked = _mask_secret_value(value)
+    assert _same_as_the_alternation(index, f"({value})") == f"({masked})"
+    assert _same_as_the_alternation(index, f"é{value}") == f"é{value}"
+    assert _same_as_the_alternation(index, f"_{value}") == f"_{value}"
+    assert _same_as_the_alternation(index, f"{value}x") == f"{masked}x"
+
+
+def test_values_that_share_a_run_in_the_middle_are_still_found():
+    shared = _derived("middle-run", 16)
     values = [
-        _derived(f"scale-{number}", 11 + number % 28) + str(number % 10)
-        for number in range(count)
+        f"{_derived(f'edge-{n}', 5)}-{shared}-{_derived(f'tail-{n}', 6)}"
+        for n in range(30)
     ]
-    index = _index(values, shape_values=values)
-    assert len(index.values) == count
-    return index
+    index = _index(values)
+    assert len(index.values) == 30
+    for value in values[::7]:
+        _same_as_the_alternation(index, f"x [{value}] y")
+    _same_as_the_alternation(index, " ".join(values))
 
 
-def _best_of(index: _SecretIndex, text: str, repeats: int) -> float:
-    index.mask_values("a warm up text with 0123456789 in it")
-    best = float("inf")
-    for _ in range(repeats):
-        started = time.perf_counter()
-        index.mask_values(text)
-        best = min(best, time.perf_counter() - started)
-    return best
+def test_loose_shapes_cost_checks_that_do_not_grow_with_their_number():
+    # A secret that ends in punctuation (base64 padding) makes a shape that
+    # is looked up by its first character, then by length. The checks at a
+    # position are bounded by the different lengths, here three, and not by the
+    # number of shapes with that first character.
+    def values_of(count: int) -> List[str]:
+        return [
+            _derived(f"loose-{number}", (12, 16, 20)[number % 3]) + "=="
+            for number in range(count)
+        ]
 
-
-_RATIO_BOUND = 3.0
-
-
-def test_two_thousand_values_cost_about_what_two_cost():
-    text = _prose(7, 200_000)
-    few = _best_of(_index_of(2), text, repeats=5)
-    many = _best_of(_index_of(2_000), text, repeats=3)
-    assert many <= _RATIO_BOUND * few, (few, many, many / few)
+    text = " ".join(
+        "".join(random.Random(number).choices(_ALPHABET, k=14 + number % 17))
+        for number in range(400)
+    )
+    positions = sum(len(found.group()) - 7 for found in re.finditer(r"\S{8,}", text))
+    for count in (6, 60, 2_000):
+        index = _index(values_of(count), shape_values=values_of(count))
+        assert index._plan is None
+        assert _checks(index, text) <= 3 * positions, count
+        assert index.mask_values(text) == _reference(index, text)
 
 
 def test_the_plan_for_many_values_holds_no_alternation_over_them():
-    index = _index_of(2_000)
+    values = [
+        _derived(f"scale-{number}", 11 + number % 28) + str(number % 10)
+        for number in range(2_000)
+    ]
+    index = _index(values, shape_values=values)
+    assert len(index.values) == 2_000
     assert index.mask_values("warm up") == "warm up"
     plan = index._plan
     assert plan is not None
