@@ -1007,10 +1007,24 @@ def _handle_sigint(signum: int, frame: FrameType | None) -> None:
             # registered waited children are stopped here as well, one syscall
             # each as the die-now kills are, so the documented kill-at-once
             # does not depend on where the chained interrupt lands; the armed
-            # arm in stop_after_interrupt stays and reaps.
+            # arm in stop_after_interrupt stays and reaps. On POSIX the kill is
+            # reap-free: Popen.kill polls first, which reaps a child that has
+            # already exited, and a reaped pid whose die-now record is still
+            # recorded can be reused and then killed by a later sweep. So the
+            # child is checked with waitid, which leaves it reapable, and
+            # signaled by pid only while it still runs. Windows has no die-now
+            # record to protect and no waitid, so it keeps Popen.kill.
             for waited in _INTERRUPT_STOP_PROCESSES:
                 try:
-                    waited.kill()
+                    if os.name == "nt":
+                        waited.kill()
+                    elif (
+                        os.waitid(
+                            os.P_PID, waited.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+                        )
+                        is None
+                    ):
+                        os.kill(waited.pid, signal.SIGKILL)
                 except OSError:
                     pass
             previous = _PREVIOUS_SIGINT

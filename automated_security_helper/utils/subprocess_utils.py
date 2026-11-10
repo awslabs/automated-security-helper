@@ -1921,38 +1921,56 @@ def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
     raise subprocess.TimeoutExpired(getattr(process, "args", "the child"), grace)
 
 
+#: The clock the sliced wait reads, a name of its own so a test can drive it.
+_slice_clock = time.monotonic
+
+
 def _communicate_sliced(
     process: "subprocess.Popen[Any]", input_data: Any, timeout: Optional[float]
 ) -> Tuple[Any, Any]:
-    """``process.communicate(input_data, timeout=timeout)``, in slices.
+    """``process.communicate(input_data, timeout=timeout)``, sliced on Windows.
 
     A Ctrl-C held or pending while a scan child runs has to land before the
     child's own deadline. On Windows, communicate() joins its reader threads and
     waits on the process handle, and neither wait lets Python's SIGINT handler
     run, so a Ctrl-C, the first or the second, pends until the child exits on
-    its own. Each pass here waits at most INTERRUPT_WAIT_SLICE_SECONDS, and the
-    catch and retry between two passes is where a pending KeyboardInterrupt
-    lands. The slicing is the same on POSIX: the output accumulated, the final
-    exception and its fields are the same as one long communicate().
-
-    The input is handed over on the first pass only; a retry after
-    TimeoutExpired loses no output and keeps the input that was saved, and
-    communicate() refuses new input once it has started. When the real
-    *timeout* is used up, the last TimeoutExpired is raised with the caller's
-    timeout in place of the slice, so the callers' timeout arms and messages
-    read it as they always did.
+    its own; there the wait is taken in slices (:func:`_communicate_in_slices`).
+    On POSIX communicate() is already interruptible by a signal, and slicing it
+    would shorten CPython's own wait for the child after a Ctrl-C
+    (min(0.25 s, the time left to the call's end), which a slice would cut to
+    the tail of the slice), so POSIX takes the one long call and keeps its
+    semantics untouched.
     """
-    end = None if timeout is None else time.monotonic() + timeout
+    if os.name != "nt":
+        return process.communicate(input_data, timeout=timeout)
+    return _communicate_in_slices(process, input_data, timeout)
+
+
+def _communicate_in_slices(
+    process: "subprocess.Popen[Any]", input_data: Any, timeout: Optional[float]
+) -> Tuple[Any, Any]:
+    """The sliced wait itself: communicate() for at most one slice at a time.
+
+    Each pass waits at most INTERRUPT_WAIT_SLICE_SECONDS, and the catch and
+    retry between two passes is where a pending KeyboardInterrupt lands. The
+    input is handed over on the first pass only; a retry after TimeoutExpired
+    loses no output and keeps the input that was saved, and communicate()
+    refuses new input once it has started. When the real *timeout* is used up,
+    the last TimeoutExpired is raised with the caller's timeout in place of the
+    slice, so the callers' timeout arms and messages read it as they always
+    did. It runs on any platform so that the loop can be tested everywhere.
+    """
+    end = None if timeout is None else _slice_clock() + timeout
     pending = input_data
     while True:
         wait = INTERRUPT_WAIT_SLICE_SECONDS
         if end is not None:
-            wait = min(wait, max(0.0, end - time.monotonic()))
+            wait = min(wait, max(0.0, end - _slice_clock()))
         try:
             return process.communicate(pending, timeout=wait)
         except subprocess.TimeoutExpired as expired:
             pending = None
-            if end is not None and time.monotonic() >= end:
+            if end is not None and _slice_clock() >= end:
                 expired.timeout = timeout
                 raise
 

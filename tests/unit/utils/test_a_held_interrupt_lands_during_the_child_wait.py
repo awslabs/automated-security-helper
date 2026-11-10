@@ -7,13 +7,17 @@ On Windows, ``Popen.communicate`` joins its reader threads and waits on the
 process handle, and neither wait lets Python's SIGINT handler run. A Ctrl-C, the
 first or the second, then pended until the child exited on its own, which for a
 child that ignores the interrupt was its own deadline. The two runners wait for
-the child through ``_communicate_sliced``, which asks ``communicate`` for at most
-``INTERRUPT_WAIT_SLICE_SECONDS`` at a time, so the retry between two slices is
-where a pending KeyboardInterrupt lands.
+the child through ``_communicate_sliced``. On Windows that asks ``communicate``
+for at most ``INTERRUPT_WAIT_SLICE_SECONDS`` at a time (``_communicate_in_slices``),
+so the retry between two slices is where a pending KeyboardInterrupt lands. On
+POSIX, ``communicate`` can be interrupted by a signal already, and slicing it
+would shorten CPython's own wait for the child after a Ctrl-C, so the one long
+call stays.
 
-Real Windows does not run here. The slice bound and the retry rules are pinned
-with a stand-in process, the output and timeout contract with real children, and
-the two call sites by reading their source.
+Real Windows does not run here. The loop is exercised directly on every platform
+with a stand-in process and a fake clock, the platform choice with a stand-in for
+``os.name``, the output and timeout contract with real children, and the two call
+sites by reading their source.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ import os
 import re
 import subprocess  # nosec B404 - spawns the running interpreter, fixed argv
 import sys
+from types import SimpleNamespace
 from typing import Any, List, Optional
 
 import pytest
@@ -30,20 +35,40 @@ import pytest
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import (
     INTERRUPT_WAIT_SLICE_SECONDS,
+    _communicate_in_slices,
     _communicate_sliced,
 )
 
 pytestmark = pytest.mark.unit
 
 
+class _Clock:
+    """A clock the stand-in advances, so no test waits on the real one."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 class _SlowProcess:
-    """A process whose communicate() times out ``misses`` times, then answers."""
+    """A process whose communicate() times out ``misses`` times, then answers.
+
+    Each call that times out uses up the whole time it was given on ``clock``.
+    """
 
     args = ["stand-in"]
 
-    def __init__(self, misses: int, interrupt_on: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        misses: int,
+        interrupt_on: Optional[int] = None,
+        clock: Optional[_Clock] = None,
+    ) -> None:
         self.misses = misses
         self.interrupt_on = interrupt_on
+        self.clock = clock
         self.calls: List[Any] = []
 
     def communicate(self, input_data: Any = None, timeout: Optional[float] = None):
@@ -51,6 +76,8 @@ class _SlowProcess:
         if self.interrupt_on == len(self.calls):
             raise KeyboardInterrupt
         if len(self.calls) <= self.misses:
+            if self.clock is not None and timeout is not None:
+                self.clock.now += timeout
             raise subprocess.TimeoutExpired(self.args, timeout)
         return b"out", b"err"
 
@@ -58,7 +85,7 @@ class _SlowProcess:
 def test_every_pass_waits_at_most_one_slice_and_the_input_goes_once() -> None:
     process = _SlowProcess(misses=3)
 
-    result = _communicate_sliced(process, b"input", None)  # type: ignore[arg-type]
+    result = _communicate_in_slices(process, b"input", None)  # type: ignore[arg-type]
 
     assert result == (b"out", b"err")
     assert [call[0] for call in process.calls] == [b"input", None, None, None]
@@ -69,19 +96,43 @@ def test_an_interrupt_between_slices_ends_the_wait_at_once() -> None:
     process = _SlowProcess(misses=100, interrupt_on=3)
 
     with pytest.raises(KeyboardInterrupt):
-        _communicate_sliced(process, None, 3600)  # type: ignore[arg-type]
+        _communicate_in_slices(process, None, 3600)  # type: ignore[arg-type]
 
     assert len(process.calls) == 3
 
 
-def test_the_last_timeout_carries_the_callers_timeout() -> None:
-    process = _SlowProcess(misses=10**6)
+def test_the_last_timeout_carries_the_callers_timeout(monkeypatch) -> None:
+    clock = _Clock()
+    monkeypatch.setattr(subprocess_utils, "_slice_clock", clock)
+    process = _SlowProcess(misses=10**6, clock=clock)
 
     with pytest.raises(subprocess.TimeoutExpired) as raised:
-        _communicate_sliced(process, None, 0.3)  # type: ignore[arg-type]
+        _communicate_in_slices(process, None, 1.0)  # type: ignore[arg-type]
 
-    assert raised.value.timeout == 0.3
+    assert raised.value.timeout == 1.0
+    waits = [call[1] for call in process.calls]
+    assert all(wait <= INTERRUPT_WAIT_SLICE_SECONDS for wait in waits)
+    assert sum(waits) == pytest.approx(1.0)
+    assert len(waits) == round(1.0 / INTERRUPT_WAIT_SLICE_SECONDS)
+
+
+def test_windows_waits_in_slices(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess_utils, "os", SimpleNamespace(name="nt"))
+    process = _SlowProcess(misses=2)
+
+    assert _communicate_sliced(process, b"in", 30) == (b"out", b"err")  # type: ignore[arg-type]
+
+    assert len(process.calls) == 3
     assert all(call[1] <= INTERRUPT_WAIT_SLICE_SECONDS for call in process.calls)
+
+
+def test_posix_takes_the_one_long_call(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess_utils, "os", SimpleNamespace(name="posix"))
+    process = _SlowProcess(misses=0)
+
+    assert _communicate_sliced(process, b"in", 30) == (b"out", b"err")  # type: ignore[arg-type]
+
+    assert process.calls == [(b"in", 30)]
 
 
 _PRINTS = "import sys; print('out'); sys.stderr.write('err')"
@@ -106,13 +157,13 @@ def test_the_output_is_what_one_long_communicate_returns() -> None:
     sliced = _child(_PRINTS)
     plain = _child(_PRINTS)
 
-    assert _communicate_sliced(sliced, None, None) == plain.communicate()
+    assert _communicate_in_slices(sliced, None, None) == plain.communicate()
 
 
 def test_input_given_once_survives_more_than_one_slice() -> None:
     child = _child(_ECHOES_AFTER_A_PAUSE)
 
-    stdout, _ = _communicate_sliced(child, b"hello", 30)
+    stdout, _ = _communicate_in_slices(child, b"hello", 30)
 
     assert stdout == b"hello"
 
@@ -121,7 +172,7 @@ def test_a_timeout_keeps_the_output_read_so_far() -> None:
     child = _child(_PARTIAL_THEN_SLEEPS)
     try:
         with pytest.raises(subprocess.TimeoutExpired) as raised:
-            _communicate_sliced(child, None, 1.0)
+            _communicate_in_slices(child, None, 1.0)
         assert raised.value.timeout == 1.0
         if os.name != "nt":
             # Windows reads in threads that deliver at EOF; there the output is
@@ -141,7 +192,7 @@ def test_both_runners_wait_through_the_sliced_helper(runner: str) -> None:
     assert not re.search(r"process\.communicate\(\s*input_data\s*,\s*timeout", source)
 
 
-def test_the_helper_slices_by_the_interrupt_wait_slice() -> None:
-    source = inspect.getsource(_communicate_sliced)
+def test_the_loop_slices_by_the_interrupt_wait_slice() -> None:
+    source = inspect.getsource(_communicate_in_slices)
 
     assert "INTERRUPT_WAIT_SLICE_SECONDS" in source
