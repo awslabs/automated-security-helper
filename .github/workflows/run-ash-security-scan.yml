@@ -48,6 +48,15 @@ on:
         required: false
         default: "local"
         type: string
+      scan-timeout-minutes:
+        description: >-
+          Minutes the scan job may run before it is cancelled. The default matches
+          the bound the gating scan has always had; the informational head scan,
+          which runs verbose and renders every suppressed finding in its report
+          phase, passes a higher bound.
+        type: number
+        required: false
+        default: 30
       config:
         description: "Path to the ASH config file, if any"
         required: false
@@ -324,7 +333,7 @@ jobs:
   ash:
     name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ fromJSON(inputs.scan-timeout-minutes) }}
     outputs:
       # Empty when nothing was uploaded; the report job and the caller's SARIF job
       # start only when it is set.

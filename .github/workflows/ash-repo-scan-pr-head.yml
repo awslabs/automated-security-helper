@@ -66,6 +66,12 @@ jobs:
       collect-junit-xml-report: false
       post-pr-comment: false
       verbose: true
+      # The head scan runs the pull request's own ASH verbose and its report phase
+      # renders every suppressed finding, which outgrew the shared 30-minute bound
+      # (three runs across two pull requests cancelled at it on 2026-11-09, one of
+      # them docs-only, so the growth is repo-wide, not a pull request's change).
+      # The gating base-ASH scan keeps the 30-minute default.
+      scan-timeout-minutes: 50
       install-grype: true
       install-syft: true
       install-opengrep: true
