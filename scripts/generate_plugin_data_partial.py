@@ -85,7 +85,7 @@ REPORTERS_URL = "reference/reporters/"
 TOOL_TYPE_CATEGORY = {
     "SAST": "code",
     "IAC": "infrastructure",
-    "SECRETS": "secrets",
+    "SECRETS": "secrets",  # pragma: allowlist secret - a category name, not a secret
     "SCA": "dependencies",
     "SBOM": "dependencies",
 }
@@ -93,7 +93,7 @@ TOOL_TYPE_CATEGORY = {
 TOOL_TYPE_TAG = {
     "SAST": "SAST",
     "IAC": "IaC",
-    "SECRETS": "Secrets",
+    "SECRETS": "Secrets",  # pragma: allowlist secret - a type tag, not a secret
     "SCA": "SCA",
     "SBOM": "SBOM",
 }

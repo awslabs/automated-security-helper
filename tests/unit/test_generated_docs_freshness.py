@@ -2209,7 +2209,7 @@ def _registry_matching_the_maps(module) -> tuple[dict, set, set]:
         "checkov": "IAC",
         "cdk-nag": "IAC",
         "cfn-nag": "IAC",
-        "detect-secrets": "SECRETS",
+        "detect-secrets": "SECRETS",  # pragma: allowlist secret - a tool type name
         "grype": "SCA",
         "npm-audit": "SCA",
         "syft": "SBOM",
@@ -2357,7 +2357,7 @@ def test_plugin_data_render_is_readable_by_jinja() -> None:
             "includes.html": '{% include "partials/generated/plugin-data.html" %}[{{ plugin_data }}]',
         }
     )
-    env = jinja2.Environment(loader=loader)
+    env = jinja2.Environment(loader=loader)  # nosec B701 -- renders plain text, not HTML
     assert env.get_template("imports.html").render() == (
         '2|True|True|quote " and \\ and ' + chr(233)
     )
