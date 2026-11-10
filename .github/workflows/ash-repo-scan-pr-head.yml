@@ -70,8 +70,14 @@ jobs:
       # renders every suppressed finding, which outgrew the shared 30-minute bound
       # (three runs across two pull requests cancelled at it on 2026-11-09, one of
       # them docs-only, so the growth is repo-wide, not a pull request's change).
-      # The gating base-ASH scan keeps the 30-minute default.
+      # The gating base-ASH scan keeps the 30-minute default. The head scan also ran
+      # bandit without .ash/bandit.yaml, which added about ninety thousand
+      # assert-usage results from the test suite to the report phase; the ash-args
+      # below give it the same scanner config files the gating scan passes.
       scan-timeout-minutes: 50
+      ash-args: >-
+        --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml
+        --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
       install-grype: true
       install-syft: true
       install-opengrep: true
