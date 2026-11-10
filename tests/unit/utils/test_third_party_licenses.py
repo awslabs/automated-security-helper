@@ -581,6 +581,6 @@ def test_an_entry_without_a_source_note_is_unchanged():
 
 
 def test_the_release_tag_defaults_to_the_version_as_upstream_spells_it():
-    assert "Release tag:         v1.30.2" in (
+    assert "Release tag:         v1.33.1" in (
         THIRD_PARTY_LICENSES["opengrep"].source_notice()
     )
