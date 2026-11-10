@@ -147,7 +147,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "cfn-guard": "3.2.1",
     "gitleaks": "v8.30.1",
     "grype": "v0.121.3",
-    "opengrep": "v1.30.2",
+    "opengrep": "v1.33.1",
     "syft": "v1.57.1",
     "trivy": "v0.76.2",
     # Tagged without a leading "v" upstream, so the release URL has none either.
@@ -276,12 +276,12 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #   as downloaded on 2026-10-06.
 #
 # opengrep publishes no checksums file. Its five digests were obtained two ways on
-# 2026-10-07 and both agreed byte for byte: the `digest` field GitHub reports for
-# each asset of the v1.30.2 release (`gh api repos/opengrep/opengrep/releases/tags/
-# v1.30.2`) and sha256sum over each asset downloaded once. Each asset's `.sig` was
-# also checked against the public key in its `.cert`, whose identity is opengrep's
-# rolling-release.yml workflow at release-v1.30.2; that check is not repeated at
-# install time (see the module docstring). tests/unit/utils/test_pinned_tool_downloads.py
+# 2026-11-10 and both agreed byte for byte: the `digest` field GitHub reports for
+# each asset of the v1.33.1 release (`gh api repos/opengrep/opengrep/releases/tags/
+# v1.33.1`) and sha256sum over each asset downloaded once. For v1.30.2 each asset's
+# `.sig` was also checked against the public key in its `.cert`; that check was not
+# repeated for v1.33.1 and is not made at install time (see the module docstring).
+# tests/unit/utils/test_pinned_tool_downloads.py
 # keeps nix/opengrep.nix's SRI copy of the four non-Windows digests equal to this one.
 #
 # uv publishes a `<asset>.sha256` beside each asset. Those two files were downloaded
@@ -374,12 +374,12 @@ _DIGESTS: dict[str, str] = {
     "trivy_0.76.2_macOS-64bit.tar.gz": "e08bb9ea449ecf66c6bfb03cbb8697c503ff33d35fc585c9747e3eaeb7ed4c7b",  # pragma: allowlist secret
     "trivy_0.76.2_macOS-ARM64.tar.gz": "ae7ea358326960406b703c77b2ac490190797d80b306b5b50c2a27221da0a5b8",  # pragma: allowlist secret
     "trivy_0.76.2_windows-64bit.zip": "691f737a7e5566a673c3a74dab9160552ec32101e953b659e5c77443d16dddb6",  # pragma: allowlist secret
-    # opengrep v1.30.2
-    "opengrep_manylinux_x86": "a66aa3278457f02b287b985a45b6762aebcaba5000f2689245fd1ed86d1456c7",  # pragma: allowlist secret
-    "opengrep_manylinux_aarch64": "90acea5df4b733083f388d4feeb250ca802f671b33d1f222653d1e571dd2b0d8",  # pragma: allowlist secret
-    "opengrep_osx_x86": "fcf47da30d5c3a11119f2ec4e0d1ee55e3c3822e8f90d909bf9f33dfce99044a",  # pragma: allowlist secret
-    "opengrep_osx_arm64": "f1aaa30b88959cb82522c4e1475816278a1f161f994509a518453c0455f9d24b",  # pragma: allowlist secret
-    "opengrep_windows_x86.exe": "523b1074a81006436fec457e2daccf7cf7cacc04000d4482f1072a1b19bc6372",  # pragma: allowlist secret
+    # opengrep v1.33.1
+    "opengrep_manylinux_x86": "46e8133cc490f9f50518061590ce2f6be5a08afaeda034471c0ceda4b3899808",  # pragma: allowlist secret
+    "opengrep_manylinux_aarch64": "d1433f63a90b8bc0b6ad4b498a13b372b856ce9a754a43484ba4920fe2d76dcf",  # pragma: allowlist secret
+    "opengrep_osx_x86": "c3bd18e0d898d44e28419d95dad57c8928bb46ab32889a0ee1f72a87ad9627af",  # pragma: allowlist secret
+    "opengrep_osx_arm64": "a17c1881bb40e3214266a7a291cf4f2ae3bc56c1715628b5712d2ec816bc3e2d",  # pragma: allowlist secret
+    "opengrep_windows_x86.exe": "132e606e071bdd3928286fddc893198a6106a90820d46e21197e0ace1a23e0c1",  # pragma: allowlist secret
     # uv 0.13.7
     "uv-x86_64-unknown-linux-gnu.tar.gz": "c5221ff41b7892bfc223543883600125f6a47fe845093e0f5bdff4f359196d83",  # pragma: allowlist secret
     "uv-aarch64-unknown-linux-gnu.tar.gz": "71279f8d3c67241e807b9d8db872d1bf541579fb9f08b7d1eb1682196d1e57dc",  # pragma: allowlist secret
@@ -450,7 +450,7 @@ _BUNDLE_CONTENTS_DIGESTS: dict[str, str] = {
 # edit. Recording the version here turns it into the same refusal by name instead.
 _DIGESTS_TAKEN_AT: dict[str, str] = {
     "cfn-guard": "3.2.1",
-    "opengrep": "v1.30.2",
+    "opengrep": "v1.33.1",
     "uv": "0.13.7",
 }
 
@@ -917,7 +917,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "grype commit": "cd1f23eb50dfb52647090158f453c7359172591f",  # pragma: allowlist secret
-    "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
+    "opengrep commit": "092c80faa0817840228349f93eff12a50fb9cf6b",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "semgrep commit": "9240f708f8d7e2fbd38b67aa6cd17704b1f81e14",  # pragma: allowlist secret
@@ -1066,7 +1066,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
         tool="opengrep",
-        version="v1.30.2",
+        version="v1.33.1",
         # COPYRIGHT: "GNU Lesser General Public License (LGPL) version 2.1", with
         # no "or later".
         license="LGPL-2.1-only",

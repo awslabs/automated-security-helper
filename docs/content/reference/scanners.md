@@ -360,7 +360,7 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 | <a id="scanners.opengrep.options.severity"></a>`severity` | list of one of `INFO`, `WARNING`, `ERROR` | `[]` | Report findings only from rules matching the supplied severity level. |
 | <a id="scanners.opengrep.options.metrics"></a>`metrics` | one of `auto`, `on`, `off` | `auto` | Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is &gt;= 1.7.0. |
 | <a id="scanners.opengrep.options.patterns"></a>`patterns` | list of string | `[]` | Patterns to search for with OpenGrep. |
-| <a id="scanners.opengrep.options.version"></a>`version` | string | `v1.30.2` | Version of OpenGrep to use. |
+| <a id="scanners.opengrep.options.version"></a>`version` | string | `v1.33.1` | Version of OpenGrep to use. |
 | <a id="scanners.opengrep.options.sha256"></a>`sha256` | mapping of one of `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64` to string | `{}` | SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset. |
 
 ## `semgrep`
