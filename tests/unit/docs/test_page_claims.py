@@ -18465,6 +18465,8 @@ _PAGES_STEPS_THAT_RUN_A_TOOL = {
         "Install scanner tools",
         "Run ASH",
         "Run ASH",
+        "Install ASH",
+        "Scan in Nix mode",
     ],
     SCALE_LARGE_REPOS: [
         "Install ASH and the scanner tools",
@@ -18850,7 +18852,8 @@ def test_the_pages_setup_uv_steps_pin_the_uv_version_the_scan_workflow_pins() ->
     ``version`` to what the scan workflow's setup-uv step sets, so a
     ``required-version`` in the scanned repository's uv.toml or pyproject.toml does not
     choose the uv the job installs ASH with. The workflow's step must set one, and the
-    pages hold three such steps: the plain job's, and the shard and merge jobs'.
+    pages hold four such steps: the plain job's, the Nix job's, and the shard and
+    merge jobs'.
     """
     import yaml
 
@@ -18870,6 +18873,7 @@ def test_the_pages_setup_uv_steps_pin_the_uv_version_the_scan_workflow_pins() ->
             for step in _steps_using(yaml.safe_load(body), "astral-sh/setup-uv"):
                 found.append((page, (step.get("with") or {}).get("version")))
     assert found == [
+        (GITHUB_ACTIONS, version),
         (GITHUB_ACTIONS, version),
         (SCALE_LARGE_REPOS, version),
         (SCALE_LARGE_REPOS, version),

@@ -1,0 +1,430 @@
+{#-
+  Snippet builder for the home page: pick what to do and how you run ASH, get the
+  command or config the docs teach for that pair.
+
+  Every snippet below is copied from a docs page named in its family's `links`, with
+  the version pin replaced by `ref`. That is config.extra.install_ref when
+  docs/hooks/install_refs.py set it (`main`, or `v` and the release number), and
+  otherwise `v` and page.meta.ash_version, the pin the committed pages carry. No
+  release number is written in this file. A pair the docs do not teach renders as a
+  "Not offered" family with a link, never an invented command. When a backend or a
+  CI system changes, change its entry in `backends`, `picks` or `families` in the
+  same PR as the integrations page's Backends and CI tables, which this mirrors.
+
+  Every family is rendered visible, so a page whose script is blocked or fails to load
+  still shows all of them, stacked, each under its own title. The pickers carry
+  `hidden` until ash-snippet-builder.js reveals them, and its first render hides the
+  families that do not answer the default pick.
+-#}
+{% from "partials/ash-icons.html" import icon %}
+{% set ref = config.extra.install_ref or ("v" ~ page.meta.ash_version) %}
+{% set repo = config.repo_url %}
+{% set spec = "automated-security-helper[cdk] @ git+" ~ repo ~ ".git@" ~ ref %}
+{% set nix_caveat = "Nix mode is not in any release: it works from main or a source checkout only." %}
+
+{% set backends = [
+  ("uvtool", "uv tool", "recommended"),
+  ("uvx", "uvx", ""),
+  ("pipx", "pipx", ""),
+  ("pip", "pip", ""),
+  ("container", "Container", "build it yourself"),
+  ("nix", "Nix", "main only"),
+  ("brew", "Homebrew", "")
+] %}
+{% set picks = [
+  ("local", "Local scan", "laptop"),
+  ("precommit", "pre-commit", "source-commit"),
+  ("gha", "GitHub Actions", "source-branch"),
+  ("gitlab", "GitLab CI", "source-branch"),
+  ("otherci", "Other CI", "source-branch"),
+  ("mcp", "MCP server", "console")
+] %}
+
+{#- Snippet texts. Source page and anchor for each is in the family's links. -#}
+{% set t_local_uvtool -%}
+uv tool install --python 3.12 '{{ spec }}'
+ash dependencies install
+ash scan --mode local
+{%- endset %}
+{% set t_local_uvx -%}
+alias ash="uvx --python 3.12 --from '{{ spec }}' ash"
+ash dependencies install
+ash scan --mode local
+{%- endset %}
+{% set t_local_pipx -%}
+pipx install --python python3.12 '{{ spec }}'
+ash dependencies install
+ash scan --mode local
+{%- endset %}
+{% set t_local_pip -%}
+python3.12 -m venv ~/.venvs/ash
+. ~/.venvs/ash/bin/activate
+pip install '{{ spec }}'
+ash dependencies install
+ash scan --mode local
+{%- endset %}
+{% set t_local_brew -%}
+brew tap awslabs/automated-security-helper {{ repo }}.git
+brew install awslabs/automated-security-helper/ash
+ash dependencies install
+ash scan --mode local
+{%- endset %}
+{% set t_local_container -%}
+ash scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
+{%- endset %}
+{% set t_local_nix -%}
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+{{ repo }}.git@main'
+export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main
+ash scan --mode nix
+{%- endset %}
+
+{% set t_pc_hook -%}
+repos:
+  - repo: {{ repo }}
+    rev: {{ ref }}
+    hooks:
+      - id: ash
+{%- endset %}
+{% set t_pc_hook_run -%}
+pre-commit install
+pre-commit run ash --all-files
+{%- endset %}
+{% set t_pc_full -%}
+repos:
+  - repo: {{ repo }}
+    rev: {{ ref }}
+    hooks:
+      - id: ash-full-scan
+        stages: [manual]
+{%- endset %}
+{% set t_pc_full_run -%}
+pre-commit run --hook-stage manual ash-full-scan --all-files
+{%- endset %}
+
+{% set t_gha -%}
+name: ASH
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  ash:
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@{{ ref }}
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    with:
+      ash-version: {{ ref }}
+      ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
+      collect-sarif-report: false
+  sarif:
+    needs: ash
+    if: {% raw %}${{ !cancelled() && needs.ash.outputs.artifact-id != '' }}{% endraw %}
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@{{ ref }}
+    permissions:
+      contents: read
+      security-events: write
+{%- endset %}
+{% set t_gha_container = t_gha | replace("    with:\n", "    with:\n      ash-mode: container\n") %}
+
+{% set t_gl_pip -%}
+ash-scan:
+  stage: test
+  image: python:3.12
+  variables:
+    INSTALL_SPEC: "{{ spec }}"
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
+    - python -m venv /opt/ash
+    - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
+    - export PATH="/opt/ash/bin:$PATH"
+    - >-
+      (cd "$(mktemp -d)" && ash dependencies install
+      --tool grype --tool syft --tool opengrep --tool cfn-nag
+      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  script:
+    - ash_exit=0
+    - >-
+      ash scan --mode local --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+  artifacts:
+    when: always
+    paths:
+      - .ash/ash_output/reports/
+      - .ash/ash_output/ash_aggregated_results.json
+      - ash-exit-code.txt
+    reports:
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+      junit: .ash/ash_output/reports/ash.junit.xml
+
+ash-gate:
+  stage: test
+  image: python:3.12
+  needs: [ash-scan]
+  script:
+    - exit "$(cat ash-exit-code.txt)"
+{%- endset %}
+{% set t_gl_uvx -%}
+ash-scan:
+  stage: test
+  image: python:3.12
+  variables:
+    INSTALL_SPEC: "{{ spec }}"
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
+    - pip install --quiet uv
+    - ash() { uvx --python 3.12 --from "$INSTALL_SPEC" ash "$@"; }
+    - >-
+      (cd "$(mktemp -d)" && ash dependencies install
+      --tool grype --tool syft --tool opengrep --tool cfn-nag
+      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  script:
+    - ash_exit=0
+    - >-
+      ash scan --mode local --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+  artifacts:
+    when: always
+    paths:
+      - .ash/ash_output/reports/
+      - .ash/ash_output/ash_aggregated_results.json
+      - ash-exit-code.txt
+    reports:
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+      junit: .ash/ash_output/reports/ash.junit.xml
+
+ash-gate:
+  stage: test
+  image: python:3.12
+  needs: [ash-scan]
+  script:
+    - exit "$(cat ash-exit-code.txt)"
+{%- endset %}
+{% set t_gl_image -%}
+ash-scan:
+  stage: test
+  image: registry.example.com/security/automated-security-helper:ci
+  script:
+    - ash_exit=0
+    - >-
+      ash scan --mode local --no-progress
+      --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      || ash_exit=$?
+    - echo "$ash_exit" > ash-exit-code.txt
+  artifacts:
+    when: always
+    paths:
+      - .ash/ash_output/reports/
+      - .ash/ash_output/ash_aggregated_results.json
+      - ash-exit-code.txt
+    reports:
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+      junit: .ash/ash_output/reports/ash.junit.xml
+
+ash-gate:
+  stage: test
+  image: registry.example.com/security/automated-security-helper:ci
+  needs: [ash-scan]
+  script:
+    - exit "$(cat ash-exit-code.txt)"
+{%- endset %}
+
+{% set t_ci_pip -%}
+python3 -m venv "$HOME/ash-venv"
+"$HOME/ash-venv/bin/pip" install --quiet \
+  "{{ spec }}"
+export PATH="$HOME/ash-venv/bin:$PATH"
+(cd "$(mktemp -d)" && ash dependencies install \
+  --tool grype --tool syft --tool opengrep --tool cfn-nag \
+  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+ash scan --mode local --no-progress \
+  --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+{%- endset %}
+{% set t_ci_uvx -%}
+ash() {
+  uvx --python 3.12 --from \
+    '{{ spec }}' \
+    ash "$@"
+}
+(cd "$(mktemp -d)" && ash dependencies install \
+  --tool grype --tool syft --tool opengrep --tool cfn-nag \
+  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+ash scan --mode local --no-progress \
+  --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+{%- endset %}
+
+{% set t_mcp_installed -%}
+{
+  "mcpServers": {
+    "ash": {
+      "command": "ash",
+      "args": ["mcp"]
+    }
+  }
+}
+{%- endset %}
+{% set t_mcp_uvx -%}
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+{{ repo }}@{{ ref }}",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+{%- endset %}
+
+{#-
+  Families. Each is (id, pick, backends it answers, title, note, caveat, blocks, links);
+  blocks are (label, text) and links are (label, docs path). Every (pick, backend) pair
+  is answered by exactly one family.
+-#}
+{% set families = [
+  ("local-uvtool", "local", "uvtool", "Local scan with uv tool",
+   "Installs ASH, then the scanner tools it can install for you, then runs a local-mode scan.", "",
+   [("Shell", t_local_uvtool)],
+   [("Install with uv", "how-to/install/#install-with-uv"), ("Run ASH locally", "getting-started/local/")]),
+  ("local-uvx", "local", "uvx", "Local scan with uvx",
+   "The alias runs ASH through uvx without installing it. Every call uses the full specification.", "",
+   [("Shell", t_local_uvx)],
+   [("Run without installing: uvx", "how-to/install/#run-without-installing-uvx"), ("Run ASH locally", "getting-started/local/")]),
+  ("local-pipx", "local", "pipx", "Local scan with pipx",
+   "Installs ASH in an isolated pipx environment, then the scanner tools, then runs a local-mode scan.", "",
+   [("Shell", t_local_pipx)],
+   [("Install with pipx", "how-to/install/#install-with-pipx"), ("Run ASH locally", "getting-started/local/")]),
+  ("local-pip", "local", "pip", "Local scan with pip",
+   "Linux and macOS. Keep the virtual environment outside the projects you scan. The install guide has the Windows form.", "",
+   [("Shell", t_local_pip)],
+   [("Install with pip", "how-to/install/#install-with-pip"), ("Run ASH locally", "getting-started/local/")]),
+  ("local-container", "local", "container", "Local scan in a container",
+   "Needs ASH installed by any method on the install page, and finch, docker, nerdctl, or podman. No ASH image is published: the first run builds one on your machine. Run it from a directory that is not the repository you scan.", "",
+   [("Shell", t_local_container)],
+   [("Run ASH in a container", "how-to/run-in-a-container/"), ("Container image", "how-to/install/#container-image")]),
+  ("local-nix", "local", "nix", "Local scan in Nix mode",
+   "Installs ASH from main, then scans inside a Nix shell. Needs Nix with flakes enabled.", nix_caveat,
+   [("Shell", t_local_nix)],
+   [("Nix mode", "how-to/install/#nix-mode"), ("Install from main", "how-to/install/#install-from-main")]),
+  ("local-brew", "local", "brew", "Local scan with Homebrew",
+   "The formula installs the latest release; it cannot install main.", "",
+   [("Shell", t_local_brew)],
+   [("Homebrew", "how-to/install/#homebrew"), ("Run ASH locally", "getting-started/local/")]),
+
+  ("pc-hook", "precommit", "uvtool uvx pipx pip brew", "pre-commit hook",
+   "pre-commit builds the hook's environment, so the way you installed ASH does not change this block. The hook runs a fixed set of five scanners.", "",
+   [(".pre-commit-config.yaml", t_pc_hook), ("Shell", t_pc_hook_run)],
+   [("Run ASH with pre-commit", "how-to/pre-commit/#add"), ("What the hook runs", "how-to/pre-commit/#behavior")]),
+  ("pc-full", "precommit", "container", "pre-commit full-scan hook",
+   "Builds ASH's container image on first use, which takes several minutes, and needs a container runtime. Run it before a push or by hand.", "",
+   [(".pre-commit-config.yaml", t_pc_full), ("Shell", t_pc_full_run)],
+   [("The ash-full-scan hook", "how-to/pre-commit/#full-scan")]),
+  ("pc-na", "precommit", "nix", "pre-commit: not offered for Nix",
+   "There is no pre-commit snippet for this backend. The pre-commit guide has a Nix recipe for main, and a hook that runs an ASH you already installed.", nix_caveat,
+   [],
+   [("Run ASH with pre-commit", "how-to/pre-commit/"), ("Run the hook in Nix mode", "how-to/pre-commit/#nix"), ("Integrations overview", "integrations/")]),
+
+  ("gha-local", "gha", "uvtool uvx pipx pip brew", "GitHub Actions: reusable workflows",
+   "The workflow installs ASH itself, so the way you installed ASH does not change it. ash-version matches the uses ref, so the workflow runs the ASH it was written for.", "",
+   [("GitHub Actions workflow", t_gha)],
+   [("Run ASH in GitHub Actions", "how-to/ci/github-actions/#reusable"), ("Quickstart", "getting-started/ci/")]),
+  ("gha-container", "gha", "container", "GitHub Actions: container mode",
+   "ash-mode: container builds ASH's image on the runner and scans inside it. changed-files-only is not supported in container mode.", "",
+   [("GitHub Actions workflow", t_gha_container)],
+   [("Run ASH in GitHub Actions", "how-to/ci/github-actions/#reusable"), ("Run ASH in a container", "how-to/run-in-a-container/")]),
+  ("gha-na", "gha", "nix", "GitHub Actions: not offered for Nix",
+   "The reusable workflow takes local or container for ash-mode and installs ASH on the runner. The GitHub Actions guide has a Nix recipe for main.", nix_caveat,
+   [],
+   [("Run in Nix mode", "how-to/ci/github-actions/#nix"), ("Other CI systems", "how-to/ci/other-ci/"), ("Integrations overview", "integrations/")]),
+
+  ("gl-pip", "gitlab", "uvtool pipx pip", "GitLab CI: pip virtual environment",
+   "The CI guide documents the pip virtual environment form, so it stands in for uv tool and pipx. Needs a Docker-executor runner, or a Debian or Ubuntu job image that runs as root. Two jobs, because GitLab ingests a security report only from a job that succeeds.", "",
+   [(".gitlab-ci.yml", t_gl_pip)],
+   [("Run ASH in GitLab CI", "how-to/ci/gitlab-ci/#add-the-jobs"), ("Exit codes", "reference/exit-codes/")]),
+  ("gl-uvx", "gitlab", "uvx", "GitLab CI: uvx",
+   "Only the before_script differs from the pip form: a shell function runs ASH through uvx.", "",
+   [(".gitlab-ci.yml", t_gl_uvx)],
+   [("Run ASH with uvx instead of pip", "how-to/ci/gitlab-ci/#uvx")]),
+  ("gl-image", "gitlab", "container", "GitLab CI: your own ASH image",
+   "Build ASH's image once with the ci target and push it to your registry. registry.example.com is a placeholder for your registry.", "",
+   [(".gitlab-ci.yml", t_gl_image)],
+   [("Use your own ASH image", "how-to/ci/gitlab-ci/#use-your-own-ash-image"), ("Build and host your own image", "how-to/run-in-a-container/#own-image")]),
+  ("gl-na", "gitlab", "nix brew", "GitLab CI: not offered for Nix or Homebrew",
+   "The GitLab guide documents the pip, uvx, and own-image forms. Its Nix mode is covered in the other CI systems guide.", nix_caveat,
+   [],
+   [("Run ASH in GitLab CI", "how-to/ci/gitlab-ci/"), ("Nix mode in CI", "how-to/ci/other-ci/#nix"), ("Integrations overview", "integrations/")]),
+
+  ("ci-pip", "otherci", "uvtool pipx pip", "Other CI systems: shell recipe, pip",
+   "Run it from the root of the checkout, with the virtual environment outside it. The guide wraps this recipe for Jenkins, AWS CodeBuild, Azure Pipelines, and CircleCI. It documents the pip virtual environment form, so it stands in for uv tool and pipx.", "",
+   [("Shell", t_ci_pip)],
+   [("The recipe", "how-to/ci/other-ci/#recipe"), ("Jenkins", "how-to/ci/other-ci/#jenkins"), ("Exit codes", "reference/exit-codes/")]),
+  ("ci-uvx", "otherci", "uvx", "Other CI systems: shell recipe, uvx",
+   "Needs uv on the build host's PATH. uvx builds the environment on the first call and reuses it. Use it where the commands share one shell (Jenkins, CodeBuild, a generic shell step); Azure Pipelines and CircleCI start a new shell for each step, so the guide covers their form.", "",
+   [("Shell", t_ci_uvx)],
+   [("The recipe", "how-to/ci/other-ci/#recipe"), ("Run without installing: uvx", "how-to/install/#run-without-installing-uvx")]),
+  ("ci-na", "otherci", "container nix brew", "Other CI systems: not offered here",
+   "The shell recipe covers pip and uvx. Container mode in CI builds an image on every fresh host, and the guide explains the alternatives. Nix mode has its own section.", nix_caveat,
+   [],
+   [("Local mode or container mode", "how-to/ci/other-ci/#modes"), ("Nix mode in CI", "how-to/ci/other-ci/#nix"), ("Integrations overview", "integrations/")]),
+
+  ("mcp-installed", "mcp", "uvtool pipx pip brew", "MCP server: installed ash",
+   "Your MCP client starts the server with this command over stdio. ash must be on the PATH of the process that starts it, and the scanner tools installed for that user with ash dependencies install.", "",
+   [("MCP client configuration (JSON)", t_mcp_installed)],
+   [("Run over stdio", "how-to/mcp-server/#run-over-stdio"), ("Setup for 16 agent platforms", "how-to/agent-plugins/#choose-your-platform")]),
+  ("mcp-uvx", "mcp", "uvx", "MCP server: uvx",
+   "uvx installs ASH from GitHub the first time the client starts the server, so ASH does not need to be installed. The entry installs ASH without the cdk extra, so the cdk-nag scanner is reported MISSING; the guide shows how to add it.", "",
+   [("MCP client configuration (JSON)", t_mcp_uvx)],
+   [("Start the server with uvx", "how-to/mcp-server/#start-the-server-with-uvx-instead-of-an-installed-ash"), ("Setup for 16 agent platforms", "how-to/agent-plugins/#choose-your-platform")]),
+  ("mcp-na", "mcp", "container nix", "MCP server: not offered for a container or Nix",
+   "The docs run the server over stdio from an installed ash or uvx. A containerized server is covered for the AWS deployments, over streamable HTTP.", nix_caveat,
+   [],
+   [("Run the server in a container", "how-to/mcp-server/#run-in-a-container"), ("Deploy ASH on AWS", "how-to/deploy-on-aws/#targets"), ("Integrations overview", "integrations/")])
+] %}
+
+<div class="ash-builder" data-ash-builder>
+  <div class="ash-builder__pickers" data-ash-builder-pickers hidden>
+    <div class="ash-builder__group">
+      <span class="ash-builder__label" id="builder-pick-label">What do you want to do?</span>
+      <div class="ash-mode-picker" role="group" aria-labelledby="builder-pick-label">
+        {% for id, label, symbol in picks %}
+        <button type="button" aria-pressed="{{ 'true' if id == 'local' else 'false' }}" data-ash-pick="{{ id }}">{{ icon(symbol) }} {{ label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="ash-builder__group">
+      <span class="ash-builder__label" id="builder-backend-label">How do you run ASH?</span>
+      <div class="ash-mode-picker" role="group" aria-labelledby="builder-backend-label">
+        {% for id, label, status in backends %}
+        <button type="button" aria-pressed="{{ 'true' if id == 'uvtool' else 'false' }}" data-ash-backend="{{ id }}">{{ label }}{% if status %} <span class="ash-builder__tag">{{ status }}</span>{% endif %}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <p class="ash-sr-only" role="status" aria-live="polite" data-ash-builder-status></p>
+
+  <div class="ash-builder__panels">
+    {% for id, pick, on, title, note, caveat, blocks, links in families %}
+    <section class="ash-builder__panel" aria-labelledby="builder-{{ id }}" data-ash-panel="{{ id }}" data-ash-pick-for="{{ pick }}" data-ash-backends-for="{{ on }}" data-ash-title="{{ title | e }}"{% if caveat %} data-ash-caveat="{{ caveat | e }}"{% endif %}>
+      <h3 class="ash-builder__title" id="builder-{{ id }}">{{ title }}</h3>
+      <p class="ash-builder__note">{{ note }}</p>
+      {% if caveat %}<p class="ash-builder__caveat">{{ caveat }}</p>{% endif %}
+      {% for label, text in blocks %}
+      <div class="ash-builder__block">
+        <div class="ash-terminal__comment"># {{ label }}</div>
+        <div class="ash-builder__code"><pre tabindex="0"><code>{{ text | e }}</code></pre><button class="ash-copy" type="button" data-ash-copy="{{ text | e }}" aria-label="Copy {{ title | e }}: {{ label | e }}">{{ icon("content-copy") }}</button></div>
+      </div>
+      {% endfor %}
+      <p class="ash-builder__links">{% for label, path in links %}<a href="{{ path | url }}">{{ label }}</a>{% if not loop.last %} <span aria-hidden="true">·</span> {% endif %}{% endfor %}</p>
+    </section>
+    {% endfor %}
+  </div>
+</div>
