@@ -437,7 +437,7 @@ ARG UV_VERSION="0.13.4"
 RUN with-retry 'install-pinned-tool uv -b /root/.local/bin'
 RUN uv --version
 
-ARG SYFT_VERSION="v1.54.1"
+ARG SYFT_VERSION="v1.57.1"
 RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'
 RUN syft --version
 

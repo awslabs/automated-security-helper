@@ -79,8 +79,8 @@ _INSTALLED_BY_THE_SCRIPT = sorted(
 )
 
 
-# The pinned SHA256 of the syft executable inside syft_1.54.1_linux_amd64.tar.gz.
-_SYFT_LINUX_AMD64_EXECUTABLE = "dbf75864e7a7ff9e1fbf00552c31483f693188632a9f68f343cd7653dac513d6"  # pragma: allowlist secret
+# The pinned SHA256 of the syft executable inside syft_1.57.1_linux_amd64.tar.gz.
+_SYFT_LINUX_AMD64_EXECUTABLE = "de3982edbbc250c4a40764c7b1f30bbf54b681f9b99391ee6b85bfdfa5d4dffe"  # pragma: allowlist secret
 
 
 def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
@@ -344,7 +344,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": "0"  # pragma: allowlist secret
+                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": "0"  # pragma: allowlist secret
                 * 64
             },
         )
@@ -384,7 +384,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": real_digest,  # pragma: allowlist secret
+                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": real_digest,  # pragma: allowlist secret
                 # The executable digest too: the fixture's member is not the real
                 # syft, and the installer checks the member against its own pin.
                 _SYFT_LINUX_AMD64_EXECUTABLE: hashlib.sha256(payload).hexdigest(),
@@ -477,7 +477,7 @@ class TestTheExecutableDigestIsChecked:
         pins = _pins_dir(
             tmp_path,
             {
-                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": archive_digest,  # pragma: allowlist secret
+                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": archive_digest,  # pragma: allowlist secret
                 _SYFT_LINUX_AMD64_EXECUTABLE: executable_digest
                 or hashlib.sha256(payload).hexdigest(),
             },
@@ -714,7 +714,7 @@ from automated_security_helper.utils.tool_downloads import (  # noqa: E402
     THIRD_PARTY_LICENSES,
 )
 
-_SYFT_ARCHIVE_DIGEST = "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47"  # pragma: allowlist secret
+_SYFT_ARCHIVE_DIGEST = "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c"  # pragma: allowlist secret
 _TRIVY_ARCHIVE_DIGEST = "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"  # pragma: allowlist secret
 _TRIVY_LINUX_AMD64_EXECUTABLE = "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e"  # pragma: allowlist secret
 
@@ -910,7 +910,7 @@ class TestLicenseFilesTravelWithTheBinary:
         pins = _pins_dir(
             tmp_path,
             {
-                'version="v1.54.1",\n        license="Apache-2.0",\n'
+                'version="v1.57.1",\n        license="Apache-2.0",\n'
                 '        repository="https://github.com/anchore/syft"': (
                     'version="v1.0.0",\n        license="Apache-2.0",\n'
                     '        repository="https://github.com/anchore/syft"'

@@ -148,7 +148,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "gitleaks": "v8.30.1",
     "grype": "v0.121.3",
     "opengrep": "v1.30.2",
-    "syft": "v1.54.1",
+    "syft": "v1.57.1",
     "trivy": "v0.75.0",
     # Tagged without a leading "v" upstream, so the release URL has none either.
     "uv": "0.13.4",
@@ -216,12 +216,12 @@ _GRYPE_ASSETS: dict[PlatformArch, str] = {
 }
 
 _SYFT_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "syft_1.54.1_linux_amd64.tar.gz",
-    ("linux", "arm64"): "syft_1.54.1_linux_arm64.tar.gz",
-    ("darwin", "amd64"): "syft_1.54.1_darwin_amd64.tar.gz",
-    ("darwin", "arm64"): "syft_1.54.1_darwin_arm64.tar.gz",
-    ("windows", "amd64"): "syft_1.54.1_windows_amd64.zip",
-    ("windows", "arm64"): "syft_1.54.1_windows_arm64.zip",
+    ("linux", "amd64"): "syft_1.57.1_linux_amd64.tar.gz",
+    ("linux", "arm64"): "syft_1.57.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "syft_1.57.1_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "syft_1.57.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "syft_1.57.1_windows_amd64.zip",
+    ("windows", "arm64"): "syft_1.57.1_windows_arm64.zip",
 }
 
 # Bare executables, not archives. The names carry no version; see _DIGESTS_TAKEN_AT.
@@ -258,7 +258,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #   https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
 #   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
 #   https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_checksums.txt
-#   https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_checksums.txt
+#   https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_checksums.txt
 #
 # Two entries have no upstream checksums file to transcribe from, so their digests
@@ -361,13 +361,13 @@ _DIGESTS: dict[str, str] = {
     "grype_0.121.3_darwin_amd64.tar.gz": "65bfb1b3b30d32e9dab156a60003c7146e619f649992be227bf09c9ccbf44f7e",  # pragma: allowlist secret
     "grype_0.121.3_darwin_arm64.tar.gz": "54336f2cd8cdee8b3d8ea83462561ff7fa9293498054c7c53a193db44bfea4c8",  # pragma: allowlist secret
     "grype_0.121.3_windows_amd64.zip": "3007a5afea25c60030a49d6c24d4e5abb6c94c0dbeed7ea303eb26df8e900c18",  # pragma: allowlist secret
-    # syft v1.54.1
-    "syft_1.54.1_linux_amd64.tar.gz": "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47",  # pragma: allowlist secret
-    "syft_1.54.1_linux_arm64.tar.gz": "dfdf0537610113edbefe1f1fc6548bc957b2d77439636ec824fcf0e10d46d054",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_amd64.tar.gz": "2956322838b2f64e470eea474495f0cd96be4f222b1ac037258cdc47d965064e",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_arm64.tar.gz": "b4319c3abaa87a0170ab76ee83ea2260ca34b53aecfa3ab0dd5428d2319d744f",  # pragma: allowlist secret
-    "syft_1.54.1_windows_amd64.zip": "8b56e8285e295e0bbed26eeea9b16ed51c493be97ccdf42dae6326c84fe8e19f",  # pragma: allowlist secret
-    "syft_1.54.1_windows_arm64.zip": "440019acac7c5b3b44edb8d224aa226b52aadca66a1c3a0a8d58a9525f675e36",  # pragma: allowlist secret
+    # syft v1.57.1
+    "syft_1.57.1_linux_amd64.tar.gz": "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c",  # pragma: allowlist secret
+    "syft_1.57.1_linux_arm64.tar.gz": "aa3d3e07344f590bcce8d31043b752daa76c8a56c2aa34ceeee63c6168152582",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_amd64.tar.gz": "2355758c1142982a67b309604c5d75effdbe638a57c771979ea8fd1a16656abc",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_arm64.tar.gz": "e0a74a5d2688d1254b4e17b71f068a83215e3625f846265bf6614c7ba06f3a96",  # pragma: allowlist secret
+    "syft_1.57.1_windows_amd64.zip": "3a01fe865076bb548352195b77e88fa4649277861ea458efe165c3a810b6dcc7",  # pragma: allowlist secret
+    "syft_1.57.1_windows_arm64.zip": "8cdd580b5f7160d12b66c7c5191100a6cf792e130d8a28deeae5ea45e0030e00",  # pragma: allowlist secret
     # trivy v0.75.0
     "trivy_0.75.0_Linux-64bit.tar.gz": "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f",  # pragma: allowlist secret
     "trivy_0.75.0_Linux-ARM64.tar.gz": "a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3",  # pragma: allowlist secret
@@ -414,13 +414,13 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "grype_0.121.3_darwin_amd64.tar.gz": "adf8a820354af9b57531509d6350cade122e7cb4ae944177b24347970a94e188",  # pragma: allowlist secret
     "grype_0.121.3_darwin_arm64.tar.gz": "13904166719c73277fe6b1ebc2636063627b802302787f5831ad4a545a9b93ab",  # pragma: allowlist secret
     "grype_0.121.3_windows_amd64.zip": "05e7faff2354b7e125ad4bd481a4a9ac967325c49f5331dfcffac7e98a3e262d",  # pragma: allowlist secret
-    # syft v1.54.1
-    "syft_1.54.1_linux_amd64.tar.gz": "dbf75864e7a7ff9e1fbf00552c31483f693188632a9f68f343cd7653dac513d6",  # pragma: allowlist secret
-    "syft_1.54.1_linux_arm64.tar.gz": "7d3cc523a2652d26568b9b2b94b5419dbf05f34ce896cf29904a0073d84eecf2",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_amd64.tar.gz": "9de0c19c5e6bf06884c4699c11449fcf97cfe68b7d0451730dfc38894c6b3bda",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_arm64.tar.gz": "bc08d98ac3ca9cf475952b8eab22dfda70f3ab475ceb4e0113b9f77b24b75e26",  # pragma: allowlist secret
-    "syft_1.54.1_windows_amd64.zip": "b7e78564e72dc550301ff221c9e034d9ece77d16f8e5cc0f7782caa302addbc6",  # pragma: allowlist secret
-    "syft_1.54.1_windows_arm64.zip": "a6dc42b0802fcad9582b178bc6117e4c3fe7cd94912d14054bb489717f34e223",  # pragma: allowlist secret
+    # syft v1.57.1
+    "syft_1.57.1_linux_amd64.tar.gz": "de3982edbbc250c4a40764c7b1f30bbf54b681f9b99391ee6b85bfdfa5d4dffe",  # pragma: allowlist secret
+    "syft_1.57.1_linux_arm64.tar.gz": "b0b37d4e18dbb923c9321a332c2f5b1ef2db13f599e58d6f3aee3a1ba3545365",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_amd64.tar.gz": "3e55452f3929913316a1dc3b7032b901c8a83ef26cdb9b210d93a5883be8b561",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_arm64.tar.gz": "d991548e2410d494c2a0da0bf0ac433111fe842f3475f59aee1904484a3aa549",  # pragma: allowlist secret
+    "syft_1.57.1_windows_amd64.zip": "42deb23bff7852997bf0316a540d3dcb364953273152749205e47881dd270c53",  # pragma: allowlist secret
+    "syft_1.57.1_windows_arm64.zip": "fe858f3fe4d5e55d54a48bb6e93a1ceb4cf78225f54c7afe99edde86d05d6688",  # pragma: allowlist secret
     # trivy v0.75.0
     "trivy_0.75.0_Linux-64bit.tar.gz": "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e",  # pragma: allowlist secret
     "trivy_0.75.0_Linux-ARM64.tar.gz": "869e310e208f0f2e3e90e4f842cc6adaa2b2c046fecbaade481e6b23fcc8f2a9",  # pragma: allowlist secret
@@ -923,7 +923,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "semgrep commit": "9240f708f8d7e2fbd38b67aa6cd17704b1f81e14",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
-    "syft commit": "b254e6d92f28c3868a755f62fb3ca8f26e9fee76",  # pragma: allowlist secret
+    "syft commit": "a0c0d3890a9d79421c403e8fcadec50a2e55bf21",  # pragma: allowlist secret
     "trivy commit": "591e9799316a602e703f0b484f6c6d7b234ec8f3",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
     "uv commit": "7456b60bc6bc348e13e06e3691bf08e78d3aef54",  # pragma: allowlist secret
@@ -1097,7 +1097,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "syft": ThirdPartyLicense(
         tool="syft",
-        version="v1.54.1",
+        version="v1.57.1",
         license="Apache-2.0",
         repository="https://github.com/anchore/syft",
         commit=_THIRD_PARTY_HASHES["syft commit"],
