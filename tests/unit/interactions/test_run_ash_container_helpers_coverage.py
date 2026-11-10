@@ -42,7 +42,7 @@ import os
 import signal
 import sys
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
+from subprocess import CalledProcessError
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import patch

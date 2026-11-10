@@ -139,9 +139,7 @@ class TestWithAConsole:
         assert child.calls == []
         assert clock.sleeps == []
 
-    def test_a_runtime_that_stops_late_in_the_grace_is_still_left_to_stop(
-        self, clock
-    ):
+    def test_a_runtime_that_stops_late_in_the_grace_is_still_left_to_stop(self, clock):
         child = _Child(clock=clock, exits_after=(_SLICES - 1) * _SLICE)
 
         stop_after_interrupt(child)
