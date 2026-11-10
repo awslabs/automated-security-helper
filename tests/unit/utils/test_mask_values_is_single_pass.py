@@ -428,6 +428,48 @@ def test_a_few_values_use_one_alternation_and_more_use_the_lookups(monkeypatch):
         assert masked != text, count
 
 
+def test_a_family_that_shares_its_longest_run_costs_no_more_checks():
+    # Every token of one JWT algorithm opens with the same header, which is
+    # usually the longest run of the token. The anchor is the run the fewest
+    # values contain, here a payload or signature that only one value has.
+    header = _derived("jwt-header", 36)
+
+    def values_of(count: int) -> List[str]:
+        return [
+            f"{header}.{_derived(f'jwt-payload-{n}', 30)}.{_derived(f'jwt-sig-{n}', 24)}"
+            for n in range(count)
+        ]
+
+    few_values, many_values = values_of(2), values_of(2_000)
+    words = _words(4, 300)
+    text = " ".join(f"{header}.{word}.{word[::-1]}" for word in words)
+    text += f" a {few_values[0]} b {few_values[1]}."
+    few = _checks(_index(few_values), text)
+    many_index = _index(many_values)
+    many = _checks(many_index, text)
+    assert many_index.mask_values(text) == _reference(many_index, text)
+    assert many <= few + 2, (few, many)
+
+
+def test_loose_shapes_of_many_lengths_stay_within_their_lengths_per_position():
+    lengths = list(range(12, 41))
+
+    def values_of(count: int) -> List[str]:
+        return [
+            _derived(f"wide-{number}", lengths[number % len(lengths)]) + "=="
+            for number in range(count)
+        ]
+
+    text = " ".join(
+        "".join(random.Random(number).choices(_ALPHABET, k=14 + number % 17))
+        for number in range(400)
+    )
+    positions = sum(len(found.group()) - 7 for found in re.finditer(r"\S{8,}", text))
+    index = _index(values_of(2_000), shape_values=values_of(2_000))
+    assert _checks(index, text) <= len(lengths) * positions
+    assert index.mask_values(text) == _reference(index, text)
+
+
 def test_a_value_whose_longest_run_is_inside_keeps_its_edge_boundaries():
     value = "3a\th#" + _derived("inside-edge", 12) + "!"
     index = _index([value])

@@ -75,10 +75,17 @@ def _best_of(index: _SecretIndex, text: str, repeats: int) -> float:
     return best
 
 
-@pytest.mark.parametrize("suffix", ["", "=="], ids=["word-edged", "loose"])
-def test_two_thousand_values_cost_about_what_twenty_cost(suffix):
+#: A loose shape is tried once per different length it has with a first character,
+#: and the lengths of the values here (11 to 38) are all there at 2,000 values but
+#: about 20 of them at 20 values: measured 2.1x. The bound leaves room for that.
+@pytest.mark.parametrize(
+    ("suffix", "bound"),
+    [("", _RATIO_BOUND), ("==", 4.0)],
+    ids=["word-edged", "loose"],
+)
+def test_two_thousand_values_cost_about_what_twenty_cost(suffix, bound):
     # Twenty values (forty branches) are past the few that keep one alternation.
     text = _prose(7, 200_000)
     few = _best_of(_index_of(20, suffix), text, repeats=5)
     many = _best_of(_index_of(2_000, suffix), text, repeats=3)
-    assert many <= _RATIO_BOUND * few, (few, many, many / few)
+    assert many <= bound * few, (few, many, many / few)

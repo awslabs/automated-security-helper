@@ -1335,14 +1335,17 @@ class _SecretIndex:
         the cost of a text grew with the number of values times its length, and
         a report that held a thousand secrets took minutes to mask. The cost of
         a text is now its length times a bound at each place a value or shape
-        can start, and that bound does not grow with the number of values: at a
-        word run it is the values that share their longest word run with it, at
-        a place a shape can start it is the number of distinct lengths among the
-        shapes (at most ``MAX_PROPAGATED_VALUE_LENGTH``), and the few values
-        with no word character and shapes that may span whitespace are tried
-        only where their first character is. An index of a few values keeps one
-        alternation (``_AlternationPlan``): the engine runs it at C speed and
-        it is faster than the lookups until it has about ten branches.
+        can start. The bound is not a count of all the values: at a word run it
+        is the values that share their anchor run (the run of a value that the
+        fewest values contain) with it, so a family that shares a long run and
+        differs in another costs one comparison per occurrence; at a place a
+        shape can start it is the number of different lengths among the shapes
+        with that first character (at most ``MAX_PROPAGATED_VALUE_LENGTH``);
+        and the few values with no word character and shapes that may span
+        whitespace are tried only where their first character is. An index of
+        a few values keeps one alternation (``_AlternationPlan``): the engine
+        runs it at C speed and it is faster than the lookups until it has about
+        ten branches.
         """
         if not self.values and not self.shapes:
             return text
@@ -1441,16 +1444,18 @@ class _MaskPlan:
     longest match is taken and the next one is looked for after it. The
     matches are found without trying each value or shape at each position:
 
-    * A value is looked up by the longest run of word characters in it. Every
-      run of word characters of a value is a whole run in any text the value
-      matches in: inside the value a run has a character that is not a word
-      character on each side, and a run at the start or end of the value gets
-      its boundary from the assertion ``_token_pattern`` makes there. So each
-      run of the text is one dictionary lookup, then the values that share
-      that longest run are compared, each checked for the boundary at its own
-      start and end, which the longest run does not give when it is not there. The longest run, not the first, because
-      real secrets of a family share their first run (``sk``, ``eyJ``,
-      ``https``) and almost never their longest.
+    * A value is looked up by one of its runs of word characters, its anchor.
+      Every run of word characters of a value is a whole run in any text the
+      value matches in: inside the value a run has a character that is not a
+      word character on each side, and a run at the start or end of the value
+      gets its boundary from the assertion ``_token_pattern`` makes there. So
+      each run of the text is one dictionary lookup, then the values that
+      share that anchor are compared, each checked for the boundary at its own
+      start and end, which the anchor does not give when it is not there. The
+      anchor is the run that the fewest values contain, the longest of those:
+      real secrets of a family share runs (``sk``, ``proj``, the whole header
+      of a JWT, ``https``) and differ in another, which is the one rarest in
+      the index.
     * A shape whose prefix and suffix are word characters starts at the start
       of a run of word characters of a run of non-whitespace characters, and
       ends at the end of one: the pairs of those are looked up by their first
@@ -1476,9 +1481,9 @@ class _MaskPlan:
         #: Candidates compared so far (a value tried at a word run, a shape
         #: length tried at a position, an alternation tried at a position).
         self.checks = 0
-        #: Longest run of word characters of a value -> (where that run is in
-        #: the value, the value, whether its last character is a word
-        #: character).
+        #: Anchor run of a value -> (where that run is in the value, the
+        #: value, whether its first and its last character are word
+        #: characters).
         self._by_anchor: Dict[str, List[Tuple[int, str, bool, bool]]] = {}
         #: (first, last character, length) of a shape with a word character at
         #: both ends -> the second character of its prefix, "" if it has one.
@@ -1501,15 +1506,15 @@ class _MaskPlan:
 
         members: Dict[str, List[Tuple[int, int, str]]] = {}
         anywhere: List[Tuple[int, int, str]] = []
+        runs_of: Dict[str, Dict[str, int]] = {}
+        held_by: Dict[str, int] = {}
         for value in values:
             if not value:
                 continue
-            anchor = max(
-                _WORD_RUN.finditer(value),
-                key=lambda located: len(located.group()),
-                default=None,
-            )
-            if anchor is None:
+            runs: Dict[str, int] = {}
+            for located in _WORD_RUN.finditer(value):
+                runs.setdefault(located.group(), located.start())
+            if not runs:
                 members.setdefault(value[0], []).append(
                     (
                         len(value),
@@ -1518,8 +1523,13 @@ class _MaskPlan:
                     )
                 )
                 continue
-            self._by_anchor.setdefault(anchor.group(), []).append(
-                (anchor.start(), value, _is_word(value[0]), _is_word(value[-1]))
+            runs_of[value] = runs
+            for run in runs:
+                held_by[run] = held_by.get(run, 0) + 1
+        for value, runs in runs_of.items():
+            anchor = min(runs, key=lambda run: (held_by[run], -len(run), runs[run]))
+            self._by_anchor.setdefault(anchor, []).append(
+                (runs[anchor], value, _is_word(value[0]), _is_word(value[-1]))
             )
         lengths: Dict[str, Set[int]] = {}
         for shape in shapes:
@@ -1592,11 +1602,12 @@ class _MaskPlan:
 
     def _value_spans(self, text: str, found: List[Tuple[int, int]]) -> None:
         size = len(text)
+        checks = 0
         for run in _WORD_RUN.finditer(text):
             entries = self._by_anchor.get(run.group())
             if entries is None:
                 continue
-            self.checks += len(entries)
+            checks += len(entries)
             for offset, value, left, right in entries:
                 start = run.start() - offset
                 if start < 0 or not text.startswith(value, start):
@@ -1607,6 +1618,7 @@ class _MaskPlan:
                 if right and end < size and _is_word(text[end]):
                     continue
                 found.append((start, end))
+        self.checks += checks
 
     def _shape_spans(self, text: str, found: List[Tuple[int, int]]) -> None:
         # A token of a shape that cannot span whitespace lies inside one run of
@@ -1658,6 +1670,7 @@ class _MaskPlan:
         end_set = set(ends)
         lengths = self._pair_lengths
         shortest, longest = lengths[0], lengths[-1]
+        checks = 0
         for start, _ in pieces:
             low = bisect_left(ends, start + shortest)
             high = bisect_right(ends, start + longest)
@@ -1670,7 +1683,7 @@ class _MaskPlan:
             first = run[start]
             best = 0
             for end in reachable:
-                self.checks += 1
+                checks += 1
                 seconds = self._pairs.get((first, run[end - 1], end - start))
                 if seconds is None or end - start <= best:
                     continue
@@ -1680,6 +1693,7 @@ class _MaskPlan:
                         break
             if best:
                 found.append((base + start, base + start + best))
+        self.checks += checks
 
     def _fallback_spans(self, text: str, found: List[Tuple[int, int]]) -> None:
         if self._fallback_starts is None:
@@ -1688,14 +1702,16 @@ class _MaskPlan:
             positions = (
                 located.start() for located in self._fallback_starts.finditer(text)
             )
+        checks = 0
         for position in positions:
             pattern = self._fallback.get(text[position], self._fallback_any)
             if pattern is None:
                 continue
-            self.checks += 1
+            checks += 1
             matched = pattern.match(text, position)
             if matched is not None:
                 found.append((position, matched.end()))
+        self.checks += checks
 
 
 _SHAPE_RUN = re.compile(r"\S{%d,}" % MIN_PROPAGATED_VALUE_LENGTH)
