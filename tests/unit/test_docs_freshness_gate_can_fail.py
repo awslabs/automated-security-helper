@@ -485,7 +485,12 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
 
     count = len(gate._segment_names(ScannerConfigSegment))
 
-    def check(partial_text=partial, how_text=how, choose_text=choose):
+    real_guides = gate.DOCS_DIR / "content" / "how-to" / "ci"
+    guide_names = [
+        f"{n}{s}" for n in gate.CI_GUIDE_NAMES for s in (".md", ".md.template")
+    ]
+
+    def check(partial_text=partial, how_text=how, choose_text=choose, guides=None):
         files = {
             "PLUGIN_DATA_PARTIAL": partial_text,
             "HOW_ASH_WORKS_MD": how_text,
@@ -495,9 +500,21 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
             path = tmp_path / f"{name}.txt"
             path.write_text(text, encoding="utf-8")
             monkeypatch.setattr(gate, name, path)
+        # The guides are read from DOCS_DIR/content/how-to/ci; stage copies there.
+        docs = tmp_path / "docs"
+        staged = docs / "content" / "how-to" / "ci"
+        staged.mkdir(parents=True, exist_ok=True)
+        for name in guide_names:
+            text = (guides or {}).get(name)
+            if text is None:
+                text = (real_guides / name).read_text(encoding="utf-8")
+            (staged / name).write_text(text, encoding="utf-8")
+        monkeypatch.setattr(gate, "DOCS_DIR", docs)
         # check_plugin_data reports page paths relative to REPO_ROOT.
         monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
         return gate.check_plugin_data()
+
+    assert check() == [], "the staged copies of the committed files were rejected"
 
     # The partial drops a built-in scanner, or invents one.
     invented = partial.replace('"builtin": [', '"builtin": [\n      "gosec",', 1)
@@ -525,6 +542,35 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
     )
     assert node != how
     assert any("Convert phase" in f for f in check(how_text=node))
+    # Every mention is checked, not only the first: a second, drifted one goes red.
+    second = how + f"\n\nASH ships {count + 2} built-in scanners.\n"
+    assert any(f"says {count + 2} built-in" in f for f in check(how_text=second))
+    second_node = how + "\n\nconvert[Convert phase<br/>archive]\n"
+    assert any("Convert phase" in f for f in check(how_text=second_node))
+    # A link shape that no longer matches is a failure, not nothing to check.
+    gone = partial.replace('"href": "reference/reporters/#', '"link": "reference/x/#')
+    assert any(
+        "no links into reference/reporters/" in f for f in check(partial_text=gone)
+    )
+    # The managed tools: the partial against the pinned list, and the guides' install
+    # lines (page and template) against the partial.
+    fewer_tools = partial.replace('"cfn-nag",\n    "gitleaks"', '"gitleaks"', 1)
+    assert fewer_tools != partial
+    assert any("MANAGED_TOOLS_PINNED" in f for f in check(partial_text=fewer_tools))
+    for name in guide_names:
+        text = (real_guides / name).read_text(encoding="utf-8")
+        stale = text.replace("--tool cfn-nag --tool gitleaks", "--tool gitleaks", 1)
+        if stale == text:  # the install line is wrapped between the two options
+            stale = text.replace("--tool cfn-nag", "--tool zizmor", 1)
+        assert stale != text, name
+        failures = check(guides={name: stale})
+        assert any(name in f and "install line" in f for f in failures), (
+            name,
+            failures,
+        )
+        bare = "\n".join(line for line in text.splitlines() if "--tool" not in line)
+        failures = check(guides={name: bare})
+        assert any(name in f and "no install line" in f for f in failures), name
 
 
 @pytest.mark.unit

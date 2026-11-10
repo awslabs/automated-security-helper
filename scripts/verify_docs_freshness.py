@@ -695,7 +695,11 @@ def check_plugin_data() -> list[str]:
         headings = set(
             re.findall(r"^## `([^`]+)`$", read_text(heading_page), re.MULTILINE)
         )
-        for anchor in re.findall(rf'"href": "{re.escape(page)}#([^"]+)"', text):
+        anchors = re.findall(rf'"href": "{re.escape(page)}#([^"]+)"', text)
+        if not anchors:
+            # A link shape that changed would otherwise read as nothing to check.
+            failures.append(f"{where}: no links into {page} to check")
+        for anchor in anchors:
             if anchor not in headings:
                 failures.append(
                     f"{where}: links to {page}#{anchor}, which is not a heading there"
@@ -707,24 +711,99 @@ def check_plugin_data() -> list[str]:
     )
     for page, pattern, count in prose:
         rel = page.relative_to(REPO_ROOT).as_posix()
-        match = re.search(pattern, read_text(page))
-        if match is None:
+        matches = list(re.finditer(pattern, read_text(page)))
+        if not matches:
             failures.append(f"{rel}: no sentence matching {pattern!r}")
-        elif int(match.group(1)) != count:
-            failures.append(
-                f"{rel}: says {match.group(1)} built-in scanners, the registry has {count}"
-            )
+        for match in matches:
+            if int(match.group(1)) != count:
+                failures.append(
+                    f"{rel}: says {match.group(1)} built-in scanners, "
+                    f"the registry has {count}"
+                )
 
-    diagram = re.search(r"Convert phase<br/>([^\]]+)\]", read_text(HOW_ASH_WORKS_MD))
-    if diagram is None:
-        failures.append("docs/content/concepts/how-ash-works.md: no Convert phase node")
-    else:
+    how = "docs/content/concepts/how-ash-works.md"
+    diagrams = list(
+        re.finditer(r"Convert phase<br/>([^\]]+)\]", read_text(HOW_ASH_WORKS_MD))
+    )
+    if not diagrams:
+        failures.append(f"{how}: no Convert phase node")
+    for diagram in diagrams:
         named = {n.strip() for n in diagram.group(1).split(",")}
         if named != converters:
             failures.append(
-                "docs/content/concepts/how-ash-works.md: the Convert phase node names "
-                f"{sorted(named)}, the registry has {sorted(converters)}"
+                f"{how}: the Convert phase node names {sorted(named)}, "
+                f"the registry has {sorted(converters)}"
             )
+
+    failures += _managed_tool_failures(text, where)
+    return failures
+
+
+#: The tools ``ash dependencies install`` installs for the CI snippets and guides,
+#: sorted. ``ash dependencies install --tool`` validates a name against the whole plugin
+#: registry (an unknown name is an error), which is the registry the partial is derived
+#: from, so it is no independent source for WHICH tools are managed. This list is
+#: therefore pinned by hand: a change to the managed set (a scanner that gains or loses
+#: install commands, MANAGED_TOOL_EXTRAS, NOT_MANAGED in
+#: scripts/generate_plugin_data_partial.py) must change this tuple, and the CI guides'
+#: install lines, in the same PR.
+MANAGED_TOOLS_PINNED = (
+    "actionlint",
+    "cfn-guard",
+    "cfn-nag",
+    "gitleaks",
+    "grype",
+    "opengrep",
+    "syft",
+    "trivy",
+)
+#: Guides whose install lines name the managed tools (each as .md and .md.template).
+CI_GUIDE_NAMES = ("github-actions", "gitlab-ci", "other-ci")
+#: A run of ``--tool NAME`` options, across line continuations and folded lines.
+_TOOL_RUN = re.compile(
+    r"(?:--tool[ \t]+[\w-]+(?:[ \t]*\\?[ \t]*\n[ \t]*|[ \t]+))+--tool[ \t]+[\w-]+"
+    r"|--tool[ \t]+[\w-]+"
+)
+#: A run shorter than this is an example about one tool, not the install line.
+_INSTALL_RUN_MIN = 3
+
+
+def _managed_tool_failures(partial_text: str, where: str) -> list[str]:
+    """The managed tools in the partial and in the CI guides' install lines.
+
+    The partial's list is held to ``MANAGED_TOOLS_PINNED``, and every long run of
+    ``--tool`` options in the guides (both the page and its template) is held to the
+    partial's list, in order. Each guide must have at least one such run.
+    """
+    failures: list[str] = []
+    block = _partial_block(partial_text, "managed_tools")
+    managed = re.findall(r'"([^"]+)"', block) if block is not None else None
+    if managed is None:
+        return [f"{where}: no 'managed_tools' list"]
+    if managed != list(MANAGED_TOOLS_PINNED):
+        failures.append(
+            f"{where}: managed_tools {managed} differ from MANAGED_TOOLS_PINNED "
+            f"{list(MANAGED_TOOLS_PINNED)} in scripts/verify_docs_freshness.py; "
+            "a change to the managed set touches both"
+        )
+    guides = DOCS_DIR / "content" / "how-to" / "ci"
+    for name in CI_GUIDE_NAMES:
+        for suffix in (".md", ".md.template"):
+            page = guides / f"{name}{suffix}"
+            rel = page.relative_to(REPO_ROOT).as_posix()
+            runs = [
+                re.findall(r"--tool[ \t]+([\w-]+)", match.group(0))
+                for match in _TOOL_RUN.finditer(read_text(page))
+            ]
+            runs = [run for run in runs if len(run) >= _INSTALL_RUN_MIN]
+            if not runs:
+                failures.append(f"{rel}: no install line naming the managed tools")
+            for run in runs:
+                if run != managed:
+                    failures.append(
+                        f"{rel}: an install line names {run}, the managed tools are "
+                        f"{managed}"
+                    )
     return failures
 
 

@@ -34,8 +34,8 @@ ash-scan:
     - export PATH="/opt/ash/bin:$PATH"
     - >-
       (cd "$(mktemp -d)" && ash dependencies install
-      --tool grype --tool syft --tool opengrep --tool cfn-nag
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+      --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks
+      --tool grype --tool opengrep --tool syft --tool trivy)
   script:
     - ash_exit=0
     - >-
@@ -115,8 +115,8 @@ ash-scan:
     - ash() { uvx --python 3.12 --from "$INSTALL_SPEC" ash "$@"; }
     - >-
       (cd "$(mktemp -d)" && ash dependencies install
-      --tool grype --tool syft --tool opengrep --tool cfn-nag
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+      --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks
+      --tool grype --tool opengrep --tool syft --tool trivy)
   # script, artifacts: same as above
 ```
 

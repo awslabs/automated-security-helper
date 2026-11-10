@@ -2266,6 +2266,73 @@ def test_plugin_data_maps_fail_on_an_unknown_or_missing_plugin() -> None:
 
 
 @pytest.mark.unit
+def test_plugin_data_managed_tools_do_not_depend_on_the_machine() -> None:
+    """Every built-in scanner is accountable, so a failed build cannot drop a tool."""
+    module = _plugin_data_module()
+    declared = {"actionlint": True, "gitleaks": True}
+    unmanaged = dict.fromkeys(module.NOT_MANAGED, False)
+    extras = dict.fromkeys(module.MANAGED_TOOL_EXTRAS, False)
+    sound = {**declared, **unmanaged, **extras}
+    assert module.managed_problems(sound) == []
+
+    # A scanner whose instance could not be built (cfn-nag's RubyGems case, in general).
+    broken = {**sound, "gitleaks": None}
+    assert any(
+        "gitleaks" in p and "could not be built" in p
+        for p in module.managed_problems(broken)
+    )
+    # An extra whose instance could not be built is no exemption.
+    extra = module.MANAGED_TOOL_EXTRAS[0]
+    assert any(extra in p for p in module.managed_problems({**sound, extra: None}))
+    # A built-in that is neither declared, extra nor listed as not managed.
+    unknown = {**sound, "brand-new": False}
+    assert any(
+        "brand-new" in p and "say which" in p for p in module.managed_problems(unknown)
+    )
+    # A not-managed scanner that now declares install commands.
+    flipped = {**sound, module.NOT_MANAGED[0]: True}
+    assert any(
+        module.NOT_MANAGED[0] in p and "NOT_MANAGED" in p
+        for p in module.managed_problems(flipped)
+    )
+    # A list entry for a scanner that is gone.
+    gone = {k: v for k, v in sound.items() if k != module.NOT_MANAGED[0]}
+    assert any(
+        module.NOT_MANAGED[0] in p and "not a built-in" in p
+        for p in module.managed_problems(gone)
+    )
+
+
+@pytest.mark.unit
+def test_plugin_data_converter_docs_are_complete() -> None:
+    module = _plugin_data_module()
+    commands = {"archive": None, "jupyter": "jupyter-nbconvert"}
+    assert module.converter_problems(commands) == []
+    assert any(
+        "pdf" in p and "no entry" in p
+        for p in module.converter_problems({**commands, "pdf": None})
+    )
+    assert any("archive" in p for p in module.converter_problems({"jupyter": "j"}))
+    assert any(
+        "{command}" in p
+        for p in module.converter_problems({**commands, "jupyter": None})
+    )
+
+
+@pytest.mark.integration
+def test_plugin_data_refuses_a_docs_root_that_is_not_the_checkout(
+    tmp_path: Path,
+) -> None:
+    """``--docs-root docs`` would write docs/docs/overrides/...; it is refused instead."""
+    result = _run_generator(
+        PLUGIN_DATA_GENERATOR, "--docs-root", str(REPO_ROOT / "docs")
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "checkout root" in result.stderr, result.stderr
+    assert not (REPO_ROOT / "docs" / "docs").exists()
+
+
+@pytest.mark.unit
 def test_plugin_data_render_is_readable_by_jinja() -> None:
     """The text the generator writes sets ``plugin_data`` for ``{% from ... import %}``.
 

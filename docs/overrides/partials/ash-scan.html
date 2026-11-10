@@ -71,6 +71,6 @@
     </div>
   </div>
   <p class="ash-scan__caption" data-scan-caption>Example data · Scanner coverage depends on configuration.</p>
-  <p class="ash-scan__caption ash-scan__convert-note">Converters ({% for c in plugin_data.converters %}{{ c.name }}{{ ", " if not loop.last else "" }}{% endfor %}) turn notebooks and archives into files scanners can read, so scanners audit the full tree.</p>
+  <p class="ash-scan__caption ash-scan__convert-note">Converters turn files scanners cannot read into files they can, so scanners audit the full tree.{% for c in plugin_data.converters %} The {{ c.name }} converter {{ c.description }}.{% endfor %}</p>
   <span class="ash-sr-only" role="status" aria-live="polite" aria-atomic="true" data-scan-announcement></span>
 </section>

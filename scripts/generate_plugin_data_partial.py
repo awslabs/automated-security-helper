@@ -33,12 +33,20 @@ What is derived and what is curated
 From the registry: which scanners, reporters and converters exist; each scanner's
 tool type (and with it its category and type tag); the converters' commands; each
 reporter's file extension; the tools ``ash dependencies install`` manages (the
-scanners that declare install commands); the built-in scanner count.
+built-in scanners that declare install commands); the built-in scanner count.
+
+The managed-tool set must not depend on the machine that regenerates it, so every
+built-in scanner has to be accounted for: it declares install commands, or it is in
+``MANAGED_TOOL_EXTRAS`` (managed although its commands are declared only where a
+prerequisite exists), or in ``NOT_MANAGED`` (installed some other way). A scanner whose
+instance cannot be built, or that fits none of the three, stops the generator instead of
+dropping out of the CI snippets.
 
 Curated here, keyed by plugin name, because nothing in the code says it:
 ``SCANNER_DOCS`` (display name, icon, tagline, language coverage), ``TRACKS`` (the
 example files, findings and severities of the scan example), ``SCAN_FORMATS`` (which
-report formats the example links). This is the pattern ``REPORTER_DOCS`` in
+report formats the example links), ``CONVERTER_DOCS`` (what each converter does, in a
+sentence). This is the pattern ``REPORTER_DOCS`` in
 ``generate_reporter_docs.py`` already uses. The check is a completeness one: an entry
 that names a plugin the registry lacks, a built-in scanner that is neither featured
 nor named in ``HOME_GRID_OMITTED``, or an engine whose tool type puts it in another
@@ -66,7 +74,8 @@ from _reference_docs import (  # noqa: E402
 )
 
 GENERATOR = "scripts/generate_plugin_data_partial.py"
-#: The partial, relative to the docs tree (``--docs-root``).
+#: The partial, relative to ``--docs-root``, which is the checkout root (the default),
+#: not its ``docs`` directory.
 PARTIAL = Path("docs/overrides/partials/generated/plugin-data.html")
 #: Pages the links point to, relative to the site root (as the templates' ``url`` filter wants them).
 SCANNERS_URL = "reference/scanners/"
@@ -185,6 +194,29 @@ HOME_GRID_OMITTED = (
 #: be installed here" otherwise), so the registry cannot be asked, and the install
 #: step of the CI snippets must name it all the same.
 MANAGED_TOOL_EXTRAS = ("cfn-nag",)
+#: Built-in scanners that declare no install commands because ASH installs their
+#: tool another way (``uv tool install`` on first use, a Python dependency of ASH, the
+#: Node.js on the machine), so ``ash dependencies install --tool`` is not how the CI
+#: snippets get them. A scanner here that starts declaring install commands is an
+#: error, so the snippets are not left without a tool that is now managed.
+NOT_MANAGED = (
+    "bandit",
+    "cdk-nag",
+    "cfn-lint",
+    "checkov",
+    "detect-secrets",
+    "npm-audit",
+    "semgrep",
+    "zizmor",
+)
+
+#: What each converter does, for the sentence under the scan example. ``{command}`` is
+#: filled from the converter's own command. An unknown or missing converter fails
+#: ``--check``.
+CONVERTER_DOCS: dict[str, str] = {
+    "archive": "extracts the scannable members of zip and tar archives",
+    "jupyter": "turns each notebook into a Python script with {command}",
+}
 
 #: The scan example's rows: the category it filters on, the file it shows, and the
 #: scanners it says run on it. ``engines`` is a list of groups; a group of several
@@ -319,6 +351,69 @@ def editorial_problems(
     return problems
 
 
+def managed_problems(declares: dict[str, bool | None]) -> list[str]:
+    """What makes the managed-tool set depend on the machine, or on a stale list.
+
+    ``declares`` maps every built-in scanner to whether its instance declares install
+    commands, or None when no instance could be built. Each built-in must be
+    accountable: declaring install commands, or named in ``MANAGED_TOOL_EXTRAS`` or
+    ``NOT_MANAGED``. Pure, so a test can feed it any registry.
+    """
+    problems: list[str] = []
+    for name in (*MANAGED_TOOL_EXTRAS, *NOT_MANAGED):
+        if name not in declares:
+            problems.append(
+                f"{name!r} is named in MANAGED_TOOL_EXTRAS or NOT_MANAGED but is not "
+                "a built-in scanner"
+            )
+    for name in MANAGED_TOOL_EXTRAS:
+        if name in NOT_MANAGED:
+            problems.append(f"{name!r} is in both MANAGED_TOOL_EXTRAS and NOT_MANAGED")
+    for name, declared in sorted(declares.items()):
+        if declared is None:
+            problems.append(
+                f"built-in scanner {name!r} could not be built, so whether it is a "
+                "managed tool is unknown on this machine; the partial would differ "
+                "from one built elsewhere"
+            )
+        elif declared and name in NOT_MANAGED:
+            problems.append(
+                f"{name!r} declares install commands but is in NOT_MANAGED; move it "
+                "out so the CI snippets install it"
+            )
+        elif (
+            not declared and name not in MANAGED_TOOL_EXTRAS and name not in NOT_MANAGED
+        ):
+            problems.append(
+                f"built-in scanner {name!r} declares no install commands and is in "
+                "neither MANAGED_TOOL_EXTRAS nor NOT_MANAGED; say which it is"
+            )
+    return problems
+
+
+def converter_problems(commands: dict[str, str | None]) -> list[str]:
+    """What is wrong with ``CONVERTER_DOCS`` against the registered converters.
+
+    ``commands`` maps each registered converter to its command (None when it runs in
+    the ASH process).
+    """
+    problems: list[str] = []
+    for name in CONVERTER_DOCS:
+        if name not in commands:
+            problems.append(
+                f"CONVERTER_DOCS names {name!r}, which no converter registers"
+            )
+    for name, command in sorted(commands.items()):
+        text = CONVERTER_DOCS.get(name)
+        if text is None:
+            problems.append(f"converter {name!r} has no entry in CONVERTER_DOCS")
+        elif "{command}" in text and not command:
+            problems.append(
+                f"CONVERTER_DOCS[{name!r}] uses {{command}}, but the converter has none"
+            )
+    return problems
+
+
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
@@ -376,7 +471,8 @@ def render(data: dict[str, Any]) -> str:
         "  generator.\n"
         "  Do not edit this file by hand: change the code or the generator, then run\n"
         f"    {command}\n"
-        f"  CI runs `{command} --check` and fails when this file is stale.\n"
+        "  tests/unit/test_generated_docs_freshness.py (integration tier) runs\n"
+        f"  `{command} --check` and fails when this file is stale.\n"
         "\n"
         "  Read it from a theme template with\n"
         '    {% from "partials/generated/plugin-data.html" import plugin_data %}\n'
@@ -475,30 +571,34 @@ def collect() -> tuple[dict[str, Any], list[str]]:
             }
         )
 
+    commands = {
+        plugin.name: getattr(plugin.instance, "command", None) or None
+        for plugin in converter_plugins
+    }
+    problems += converter_problems(commands)
     converters = []
-    for plugin in sorted(converter_plugins, key=lambda p: p.name):
+    for name, command in sorted(commands.items()):
+        text = CONVERTER_DOCS.get(name, "")
         converters.append(
             {
-                "name": plugin.name,
-                "command": getattr(plugin.instance, "command", None) or None,
+                "name": name,
+                "command": command,
+                "description": text.replace("{command}", command or ""),
             }
         )
 
+    declares: dict[str, bool | None] = {
+        plugin.name: (
+            None if plugin.instance is None else _declares_install(plugin.instance)
+        )
+        for plugin in scanner_plugins
+        if plugin.builtin
+    }
+    problems += managed_problems(declares)
     managed = sorted(
-        {
-            plugin.name
-            for plugin in scanner_plugins
-            if plugin.builtin
-            and plugin.instance is not None
-            and _declares_install(plugin.instance)
-        }
+        {name for name, declared in declares.items() if declared}
         | set(MANAGED_TOOL_EXTRAS)
     )
-    for name in MANAGED_TOOL_EXTRAS:
-        if name not in builtin:
-            problems.append(
-                f"MANAGED_TOOL_EXTRAS names {name!r}, which is not a built-in scanner"
-            )
 
     data = {
         "scanners": {
@@ -535,6 +635,11 @@ def main() -> int:
     refuse_check_to_stdout(parser, args)
 
     docs_root = Path(args.docs_root).resolve()
+    if args.output is None and not (docs_root / PARTIAL.parent.parent).is_dir():
+        parser.error(
+            f"--docs-root {docs_root} has no {PARTIAL.parent.parent.as_posix()}; "
+            "name the checkout root (the default), not its docs directory"
+        )
     prepare_environment(docs_root)
     output = Path(args.output) if args.output else docs_root / PARTIAL
     data, problems = collect()

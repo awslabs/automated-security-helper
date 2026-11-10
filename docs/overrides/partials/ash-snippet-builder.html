@@ -2,8 +2,10 @@
   Snippet builder for the home page: pick what to do and how you run ASH, get the
   command or config the docs teach for that pair.
 
-  Every snippet below is copied from a docs page named in its family's `links`, with
-  the version pin replaced by `ref`. That is config.extra.install_ref when
+  Every snippet below follows a docs page named in its family's `links`, with the
+  version pin replaced by `ref`. The tools the CI snippets install come from the plugin
+  data (the registry), and scripts/verify_docs_freshness.py holds both these snippets
+  and the CI guides' install lines to that same set. The pin is config.extra.install_ref when
   docs/hooks/install_refs.py set it (`main`, or `v` and the release number), and
   otherwise `v` and page.meta.ash_version, the pin the committed pages carry. No
   release number is written in this file. A pair the docs do not teach renders as a
