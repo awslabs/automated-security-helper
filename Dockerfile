@@ -441,7 +441,7 @@ ARG SYFT_VERSION="v1.54.1"
 RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'
 RUN syft --version
 
-ARG GRYPE_VERSION="v0.120.1"
+ARG GRYPE_VERSION="v0.121.3"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 

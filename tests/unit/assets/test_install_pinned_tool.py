@@ -1142,7 +1142,7 @@ class TestVerifyThirdParty:
         pins, third_party, path = self._tree(tmp_path)
         exe = Path(path) / "grype"
         exe.write_text('#!/bin/sh\necho "grype 0.119.0"\n')
-        self._fails(pins, third_party, path, "does not report 0.120.1")
+        self._fails(pins, third_party, path, "does not report 0.121.3")
 
     def test_an_executable_missing_from_path(self, tmp_path):
         pins, third_party, path = self._tree(tmp_path)

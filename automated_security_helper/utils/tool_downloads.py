@@ -146,7 +146,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "actionlint": "v1.7.12",
     "cfn-guard": "3.2.1",
     "gitleaks": "v8.30.1",
-    "grype": "v0.120.1",
+    "grype": "v0.121.3",
     "opengrep": "v1.30.2",
     "syft": "v1.54.1",
     "trivy": "v0.75.0",
@@ -207,11 +207,11 @@ _GITLEAKS_ASSETS: dict[PlatformArch, str] = {
 }
 
 _GRYPE_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "grype_0.120.1_linux_amd64.tar.gz",
-    ("linux", "arm64"): "grype_0.120.1_linux_arm64.tar.gz",
-    ("darwin", "amd64"): "grype_0.120.1_darwin_amd64.tar.gz",
-    ("darwin", "arm64"): "grype_0.120.1_darwin_arm64.tar.gz",
-    ("windows", "amd64"): "grype_0.120.1_windows_amd64.zip",
+    ("linux", "amd64"): "grype_0.121.3_linux_amd64.tar.gz",
+    ("linux", "arm64"): "grype_0.121.3_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "grype_0.121.3_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "grype_0.121.3_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "grype_0.121.3_windows_amd64.zip",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
@@ -257,7 +257,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # reviewer can diff this block against the upstream file line for line:
 #   https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
 #   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
-#   https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_checksums.txt
+#   https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_checksums.txt
 #   https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_checksums.txt
 #
@@ -355,12 +355,12 @@ _DIGESTS: dict[str, str] = {
     "gitleaks_8.30.1_darwin_arm64.tar.gz": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_x64.zip": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_arm64.zip": "b95f5e4f5c425cedca7ee203d9afd29597e692c4924a12ed42f970537c72cc0f",  # pragma: allowlist secret
-    # grype v0.120.1
-    "grype_0.120.1_linux_amd64.tar.gz": "0a9ee97ef5ae2ee953b0a80098105052e846cdbe319a57d808b519c33cd1343d",  # pragma: allowlist secret
-    "grype_0.120.1_linux_arm64.tar.gz": "29f47391dc283aa79fcc38e65224cd61f64dec0ecfd0db7074128ebf8ff23514",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_amd64.tar.gz": "5313004ccbc524c8757521dc3913f1edf4309f56bef06a2fb2d0c0eeade7cc62",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_arm64.tar.gz": "cf97957fa467d25575ec2cc3228289f391ea51cf88b9cffc5f83dc03d4cbc732",  # pragma: allowlist secret
-    "grype_0.120.1_windows_amd64.zip": "32e3c811f31822d17592908bafdc6288aaaca3d52583c479167a8dc8399ed65d",  # pragma: allowlist secret
+    # grype v0.121.3
+    "grype_0.121.3_linux_amd64.tar.gz": "e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85",  # pragma: allowlist secret
+    "grype_0.121.3_linux_arm64.tar.gz": "b7815598d48da78bfd16f5b98ef28e1bb09c03d34fc8c3e350f99b6ccb3c7cba",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_amd64.tar.gz": "65bfb1b3b30d32e9dab156a60003c7146e619f649992be227bf09c9ccbf44f7e",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_arm64.tar.gz": "54336f2cd8cdee8b3d8ea83462561ff7fa9293498054c7c53a193db44bfea4c8",  # pragma: allowlist secret
+    "grype_0.121.3_windows_amd64.zip": "3007a5afea25c60030a49d6c24d4e5abb6c94c0dbeed7ea303eb26df8e900c18",  # pragma: allowlist secret
     # syft v1.54.1
     "syft_1.54.1_linux_amd64.tar.gz": "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47",  # pragma: allowlist secret
     "syft_1.54.1_linux_arm64.tar.gz": "dfdf0537610113edbefe1f1fc6548bc957b2d77439636ec824fcf0e10d46d054",  # pragma: allowlist secret
@@ -408,12 +408,12 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "gitleaks_8.30.1_darwin_arm64.tar.gz": "ba52fb1bfabbcde42f032afad3d6e0b19dff8ed105229a16e7caa338bbc0e84f",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_x64.zip": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c",  # pragma: allowlist secret
     "gitleaks_8.30.1_windows_arm64.zip": "200df852fdecbedb19a33960657333cba5e231740bc8968972b507b50f93b194",  # pragma: allowlist secret
-    # grype v0.120.1
-    "grype_0.120.1_linux_amd64.tar.gz": "d6e3248b0e788b4da7450a9e03d1e72811771cf97de3640a18e6517bf6507eb7",  # pragma: allowlist secret
-    "grype_0.120.1_linux_arm64.tar.gz": "94afbea0a9b65a3a83b820e622e8ac337e26608c860315208d58dad9a80b25db",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_amd64.tar.gz": "4042c050aa6581f6c852d611c51ec62577dff24059547307063a317b975cb075",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_arm64.tar.gz": "1de9d74fff477a652408406b45786ed5694e3030c89dc75805ffe9424c802d36",  # pragma: allowlist secret
-    "grype_0.120.1_windows_amd64.zip": "96373670a07b8b6cbcfff4331c8b3d8ffb70d570f072450f8548d04bbe2db537",  # pragma: allowlist secret
+    # grype v0.121.3
+    "grype_0.121.3_linux_amd64.tar.gz": "30f8f7de5dda71952a20d4955034d30a081a5d10e6bd00d67ce78b56fd0251dc",  # pragma: allowlist secret
+    "grype_0.121.3_linux_arm64.tar.gz": "9d7014d4d96f5d91a8bf0cbc439fcc34750a06a079e30df7c684dc3f7d89d431",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_amd64.tar.gz": "adf8a820354af9b57531509d6350cade122e7cb4ae944177b24347970a94e188",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_arm64.tar.gz": "13904166719c73277fe6b1ebc2636063627b802302787f5831ad4a545a9b93ab",  # pragma: allowlist secret
+    "grype_0.121.3_windows_amd64.zip": "05e7faff2354b7e125ad4bd481a4a9ac967325c49f5331dfcffac7e98a3e262d",  # pragma: allowlist secret
     # syft v1.54.1
     "syft_1.54.1_linux_amd64.tar.gz": "dbf75864e7a7ff9e1fbf00552c31483f693188632a9f68f343cd7653dac513d6",  # pragma: allowlist secret
     "syft_1.54.1_linux_arm64.tar.gz": "7d3cc523a2652d26568b9b2b94b5419dbf05f34ce896cf29904a0073d84eecf2",  # pragma: allowlist secret
@@ -916,7 +916,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
-    "grype commit": "6f8d854af29d3a3086b11a84afa51554a2a245fe",  # pragma: allowlist secret
+    "grype commit": "cd1f23eb50dfb52647090158f453c7359172591f",  # pragma: allowlist secret
     "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
@@ -1056,7 +1056,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "grype": ThirdPartyLicense(
         tool="grype",
-        version="v0.120.1",
+        version="v0.121.3",
         license="Apache-2.0",
         repository="https://github.com/anchore/grype",
         commit=_THIRD_PARTY_HASHES["grype commit"],
