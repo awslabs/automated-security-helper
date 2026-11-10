@@ -910,8 +910,8 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "aws-guard-rules-registry/LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",  # pragma: allowlist secret
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
-    "cfn-lint commit": "be66fb3e224b41c85065cb3002ad0b24e31db535",  # pragma: allowlist secret
-    "checkov commit": "e5f995a6e2dd033e99354b6c477d056eb5eaf2d0",  # pragma: allowlist secret
+    "cfn-lint commit": "1d19193ad79ed20c83bf3fbafb6cd506e6d15b62",  # pragma: allowlist secret
+    "checkov commit": "5038a50e21a2253cb5aed2e739d2c22ee28d2e17",  # pragma: allowlist secret
     "cfn-guard commit": "e531ef56092abb662e08fc6062c92db6d53f99c9",  # pragma: allowlist secret
     "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
@@ -920,7 +920,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
-    "semgrep commit": "a35fe8306115b3e55274969098cc46f8451d6b4d",  # pragma: allowlist secret
+    "semgrep commit": "9240f708f8d7e2fbd38b67aa6cd17704b1f81e14",  # pragma: allowlist secret
     "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "b254e6d92f28c3868a755f62fb3ca8f26e9fee76",  # pragma: allowlist secret
@@ -1026,7 +1026,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # licenses/LICENSE and licenses/NOTICE.
     "cfn-lint": ThirdPartyLicense(
         tool="cfn-lint",
-        version="v1.57.2",
+        version="v1.60.0",
         license="MIT-0",
         repository="https://github.com/aws-cloudformation/cfn-lint",
         commit=_THIRD_PARTY_HASHES["cfn-lint commit"],
@@ -1039,7 +1039,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # The wheel's dist-info carries licenses/LICENSE. The repository has no NOTICE.
     "checkov": ThirdPartyLicense(
         tool="checkov",
-        version="3.3.26",
+        version="3.4.3",
         license="Apache-2.0",
         repository="https://github.com/bridgecrewio/checkov",
         commit=_THIRD_PARTY_HASHES["checkov commit"],
@@ -1085,7 +1085,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # of the two readings, and the one opengrep's entry takes from the same text.
     "semgrep": ThirdPartyLicense(
         tool="semgrep",
-        version="v1.180.0",
+        version="v1.185.0",
         license="LGPL-2.1-only",
         repository="https://github.com/semgrep/semgrep",
         commit=_THIRD_PARTY_HASHES["semgrep commit"],
