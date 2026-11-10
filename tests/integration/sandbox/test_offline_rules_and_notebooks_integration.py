@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -97,7 +98,11 @@ def _rules(tmp_path: Path, content: str) -> Path:
     rules = tmp_path / "rule-cache"
     rules.mkdir()
     (rules / "rules.yml").write_text(content)
-    (rules / ".ash-rules-fetched-at").write_text("2026-10-10T00:00:00Z\n")
+    # The product refuses a rule cache older than its staleness bound, so the
+    # download stamp is the time of this run, never a fixed date.
+    (rules / ".ash-rules-fetched-at").write_text(
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n"
+    )
     return rules
 
 
