@@ -929,7 +929,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "uv commit": "7456b60bc6bc348e13e06e3691bf08e78d3aef54",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "uv/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",  # pragma: allowlist secret
-    "zizmor commit": "99a054ed9283c90abdd2d5b9fb5101d27dde9783",  # pragma: allowlist secret
+    "zizmor commit": "21bd300700d43d9ba04b0c1fce72a89391ac80b4",  # pragma: allowlist secret
 }
 
 
@@ -1133,7 +1133,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # wheel's dist-info carries licenses/LICENSE.
     "zizmor": ThirdPartyLicense(
         tool="zizmor",
-        version="v1.30.1",
+        version="v1.32.0",
         license="MIT",
         repository="https://github.com/zizmorcore/zizmor",
         commit=_THIRD_PARTY_HASHES["zizmor commit"],
