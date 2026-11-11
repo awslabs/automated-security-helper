@@ -229,7 +229,7 @@ scanners:
 | `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`ferret-scan --max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
 | `ferret_debug` | bool | `false` | Enable ferret-scan's own debug logging (preprocessing/validation flow) |
 | `ferret_verbose` | bool | `false` | Enable ferret-scan's own verbose output (detailed finding info) |
-| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.7.0`, `==2.5.2`) |
+| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.7.0`, `==2.5.3`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 
 ### Options NOT Supported (Will Raise Error)

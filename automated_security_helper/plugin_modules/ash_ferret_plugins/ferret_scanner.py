@@ -2262,8 +2262,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
 # ferret-scan owns its scope.engines blocks (validate_suppression_scope and
 # suppression_scope_matches above). Registered at import, like the plugin
-# manager's own registry; an uninstalled or disabled plugin stays unregistered
-# and its blocks fail closed.
+# manager's own registry: an uninstalled plugin (module never imported) stays
+# unregistered and its blocks fail closed. A plugin that is imported but
+# DISABLED for the run is still registered — the loader imports listed modules
+# before it consults the enabled flag — so a scoped entry can still suppress
+# that scanner's findings in stored results, as cdk-nag's can.
 register_suppression_scope_engine("ferret-scan", FerretScanScanner)
 
 

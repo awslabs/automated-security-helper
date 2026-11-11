@@ -169,6 +169,51 @@ class TestMatching:
     def test_an_empty_block_fails_closed_at_match_time(self):
         assert not FerretScanScanner.suppression_scope_matches({}, _finding())
 
+    def test_an_unknown_band_fails_closed_at_match_time(self):
+        """The config checks refuse 'extreme'; a stored entry carrying it must
+        also match nothing, so validation and matching agree."""
+        assert not FerretScanScanner.suppression_scope_matches(
+            {"confidence_level": "extreme"}, _finding(confidence_level="high")
+        )
+
+    @pytest.mark.parametrize(
+        "block",
+        [{"confidence_level": ["low", 5]}, {"confidence_level": [True]}],
+        ids=["int-in-list", "bool-in-list"],
+    )
+    def test_a_non_string_list_element_fails_closed(self, block):
+        assert not FerretScanScanner.suppression_scope_matches(
+            block, _finding(confidence_level="low")
+        )
+
+    @pytest.mark.parametrize(
+        "block",
+        [["low"], "low", 42, None],
+        ids=["list", "string", "int", "none"],
+    )
+    def test_a_block_that_is_not_a_mapping_fails_closed(self, block):
+        assert not FerretScanScanner.suppression_scope_matches(block, _finding())
+
+    @pytest.mark.parametrize(
+        "value",
+        [1, ["low"], None, True],
+        ids=["int", "list", "null", "bool"],
+    )
+    def test_a_non_string_property_value_never_matches(self, value):
+        finding = _finding(properties=json.dumps({"confidenceLevel": value}))
+        assert not FerretScanScanner.suppression_scope_matches(
+            {"confidence_level": "low"}, finding
+        )
+
+    @pytest.mark.parametrize(
+        "properties", ["null", ""], ids=["json-null", "empty-string"]
+    )
+    def test_degenerate_properties_strings_never_match(self, properties):
+        finding = _finding(properties=properties)
+        assert not FerretScanScanner.suppression_scope_matches(
+            {"confidence_level": "high"}, finding
+        )
+
 
 class TestThroughAshSuppression:
     """The block as the matcher dispatches it, scanner attribution included."""
