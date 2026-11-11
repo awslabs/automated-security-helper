@@ -1509,12 +1509,16 @@ jobs:
           install-ash: "true"
       - name: Install Podman
         if: matrix.oci-runner == 'podman'
-        run: |
-          sudo apt-get update -q && sudo apt-get install -y --no-install-recommends podman
-          podman --version
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: podman
+          no-install-recommends: "true"
+      - name: Check Podman
+        if: matrix.oci-runner == 'podman'
+        run: podman --version
       - name: Install Finch
         if: matrix.oci-runner == 'finch'
-        run: sudo bash scripts/setup-finch-linux.sh
+        uses: ./.github/actions/setup-finch
       - uses: ./.github/actions/run-scan-test
         env:
           OCI_RUNNER: ${{ matrix.oci-runner }}
@@ -1732,9 +1736,12 @@ jobs:
           install-ash: "false"
       - name: Install bubblewrap and firejail
         if: runner.os == 'Linux'
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: bubblewrap firejail
+      - name: Check bubblewrap and firejail
+        if: runner.os == 'Linux'
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q bubblewrap firejail
           bwrap --version
           firejail --version | head -1
       # Ubuntu 23.10+ restricts unprivileged user namespaces through AppArmor. The
@@ -1821,9 +1828,12 @@ jobs:
           ruby-version: "3.3"
       - name: Install bubblewrap
         if: runner.os == 'Linux'
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: bubblewrap
+      - name: Check bubblewrap can create namespaces
+        if: runner.os == 'Linux'
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q bubblewrap
           if ! bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
             echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

@@ -24,11 +24,30 @@ set -euo pipefail
 # dpkg's own conffile question is a separate prompt, which the --force-confold
 # option below answers by keeping the installed file.
 export DEBIAN_FRONTEND=noninteractive
-APT_INSTALL=(apt-get install -y -o Dpkg::Options::=--force-confold)
+# Acquire::Retries makes apt retry a failed fetch itself; the bounded outer retries
+# below (apt-retry.sh and the download loop) cover an outage that outlasts it.
+APT_INSTALL=(apt-get install -y -o Acquire::Retries=5 -o Dpkg::Options::=--force-confold)
 
 ARCH=$(dpkg --print-architecture)
 KEYRING=/usr/share/keyrings/runfinch-finch-archive-keyring.gpg
 SOURCES=/etc/apt/sources.list.d/runfinch-finch.list
+APT_RETRY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.github/actions/apt-retry/apt-retry.sh"
+
+# Optional deb cache. When FINCH_DEB_CACHE_DIR is set (the setup-finch action sets it
+# and restores/saves that directory with actions/cache), the debs the download step
+# fetches are kept there. A later run that finds all three packages in it installs
+# with dpkg and never fetches an index. Unset, the script behaves as before: apt's
+# own cache, one apt transaction.
+CACHE_DIR="${FINCH_DEB_CACHE_DIR:-}"
+CACHE_HIT=0
+if [ -n "${CACHE_DIR}" ]; then
+    CACHE_HIT=1
+    for pkg in runfinch-finch containerd runc; do
+        if ! compgen -G "${CACHE_DIR}/${pkg}_*.deb" >/dev/null; then
+            CACHE_HIT=0
+        fi
+    done
+fi
 
 # The APT source names the noble suite, so refuse any other release before
 # anything is removed: noble packages on another Ubuntu are not what Finch
@@ -44,13 +63,25 @@ echo "=== WARNING: this removes Docker Engine and the Docker client configuratio
 echo "Packages: docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
 echo "Directories: /root/.docker /home/runner/.docker (stored registry credentials included)"
 
-echo "=== Adding Finch APT repository ==="
-# --yes lets gpg overwrite the keyring on a re-run; without it gpg asks, and
-# with no tty aborts. The key is fetched from the same origin as the packages,
-# so the signed-by check anchors the packages to that origin and nothing more.
-curl -fsSL https://artifact.runfinch.com/deb/GPG_KEY.pub | gpg --dearmor --batch --yes -o "${KEYRING}"
-echo "deb [signed-by=${KEYRING} arch=${ARCH}] https://artifact.runfinch.com/deb noble main" | tee "${SOURCES}"
-apt-get update -q
+# Adds the Finch APT source and refreshes the package indexes. Skipped on a full
+# cache hit, which needs neither; the dpkg-failure fallback below calls it.
+add_finch_repo_and_update() {
+    echo "=== Adding Finch APT repository ==="
+    # --yes lets gpg overwrite the keyring on a re-run; without it gpg asks, and
+    # with no tty aborts. The key is fetched from the same origin as the packages,
+    # so the signed-by check anchors the packages to that origin and nothing more.
+    # --retry-all-errors also retries a name-resolution failure, which curl's plain
+    # --retry treats as permanent.
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://artifact.runfinch.com/deb/GPG_KEY.pub | gpg --dearmor --batch --yes -o "${KEYRING}"
+    echo "deb [signed-by=${KEYRING} arch=${ARCH}] https://artifact.runfinch.com/deb noble main" | tee "${SOURCES}"
+    bash "${APT_RETRY}" --update-only
+}
+
+if [ "${CACHE_HIT}" -eq 1 ]; then
+    echo "=== Finch deb cache hit in ${CACHE_DIR}: no index fetch, no download ==="
+else
+    add_finch_repo_and_update
+fi
 
 # Download Finch and its containerd/runc replacements before Docker is removed.
 # A host with no Finch package for its architecture, or a repository that
@@ -68,7 +99,35 @@ apt-get update -q
 # the end state resolves and fills the apt cache the post-removal install
 # reads from.
 echo "=== Fetching Finch with containerd and runc (Docker is still installed; its containerd.io is swapped for them at the install below) ==="
-"${APT_INSTALL[@]}" --download-only runfinch-finch containerd runc
+#
+# With a cache directory, apt is pointed at it (Dir::Cache::archives), so the debs
+# land there instead of /var/cache/apt/archives. The download is tried three times,
+# 20 s and 60 s apart, with the index refreshed before each retry.
+DOWNLOAD_OPTS=()
+if [ -n "${CACHE_DIR}" ]; then
+    mkdir -p "${CACHE_DIR}/partial"
+    DOWNLOAD_OPTS=(-o "Dir::Cache::archives=${CACHE_DIR}")
+fi
+if [ "${CACHE_HIT}" -eq 0 ]; then
+    DOWNLOADED=0
+    for attempt in 1 2 3; do
+        "${APT_INSTALL[@]}" --download-only "${DOWNLOAD_OPTS[@]}" runfinch-finch containerd runc && DOWNLOADED=1 && break
+        [ "${attempt}" -lt 3 ] || break
+        echo "WARNING: download attempt ${attempt} failed; retrying" >&2
+        if [ "${attempt}" -eq 1 ]; then sleep 20; else sleep 60; fi
+        bash "${APT_RETRY}" --update-only --attempts 1 || true
+    done
+    if [ "${DOWNLOADED}" -ne 1 ]; then
+        echo "ERROR: could not download Finch, containerd and runc after 3 attempts; Docker is still installed." >&2
+        exit 1
+    fi
+    if [ -n "${CACHE_DIR}" ]; then
+        # The cache is saved by the runner user: make the debs readable to it and
+        # leave out apt's lock file and partial downloads.
+        rm -rf "${CACHE_DIR:?}/partial" "${CACHE_DIR:?}/lock"
+        chmod -R a+rX "${CACHE_DIR}"
+    fi
+fi
 
 echo "=== Removing Docker Engine (conflicts with Finch containerd) ==="
 # Only the packages that are installed: under set -e, `apt-get remove` of a
@@ -93,8 +152,27 @@ rm -rf /root/.docker /home/runner/.docker
 # One transaction naming the same set the download step proved and cached, so
 # the resolver here sees the end state it already resolved: Finch on Ubuntu's
 # containerd and runc, with Docker's containerd.io already purged above.
+#
+# With a cache directory the debs are installed with dpkg, which needs no index and
+# no network. Only if dpkg leaves a package unconfigured (a dependency the cache did
+# not hold) does the apt transaction below run, with -f to repair what dpkg started;
+# that path adds the Finch source and refreshes the indexes first. Without a cache
+# directory the apt transaction is the whole install, as before.
 echo "=== Installing Finch with containerd and runc in Docker's place ==="
-"${APT_INSTALL[@]}" runfinch-finch containerd runc
+INSTALLED=0
+FIX_OPTS=()
+if [ -n "${CACHE_DIR}" ]; then
+    if dpkg -i "${CACHE_DIR}"/*.deb; then
+        INSTALLED=1
+    else
+        echo "WARNING: dpkg could not finish the install from ${CACHE_DIR}; repairing with apt" >&2
+        FIX_OPTS=(-f)
+        add_finch_repo_and_update
+    fi
+fi
+if [ "${INSTALLED}" -eq 0 ]; then
+    "${APT_INSTALL[@]}" "${FIX_OPTS[@]}" runfinch-finch containerd runc
+fi
 
 echo "=== Starting Finch services ==="
 # A failed start is reported by the wait below, with the unit's status and

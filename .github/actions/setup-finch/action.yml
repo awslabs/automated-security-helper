@@ -1,0 +1,44 @@
+name: "Set up Finch (Linux)"
+description: "Run scripts/setup-finch-linux.sh with the downloaded .deb files cached, so a rerun or a DNS outage does not refetch about 200 MB from the Ubuntu mirrors"
+
+# Why: the Finch swap downloads containerd, runc and runfinch-finch (with whatever
+# they pull in) from archive.ubuntu.com and artifact.runfinch.com on every run. On
+# 2026-11-11 a hosted-runner DNS outage failed every leg that did this. The script
+# keeps its .debs in FINCH_DEB_CACHE_DIR; on a full hit it skips the index fetch and
+# installs from that directory with dpkg.
+#
+# Cache key. The Ubuntu package versions and the Finch version are not known before
+# an index fetch, and the fetch is what a hit avoids, so the key stands in for them:
+#   runner OS and architecture
+#   ImageVersion      the runner image build, which fixes the base package set and
+#                     the Ubuntu index snapshot the image was cut from
+#   ISO year-week     bounds how long a cached Finch release outlives a newer one
+#   script hash       a change to the install set invalidates the cache
+# No restore-keys: a partial match could mix debs from two image builds.
+#
+# Limit: within one week and one image build, a newer Finch release is not picked up
+# until the key rolls over. That is the cost of not touching the network on a hit.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Compute the Finch deb cache key
+      id: key
+      shell: bash
+      run: |
+        {
+          echo "image=${ImageVersion:-unknown}"
+          echo "week=$(date -u +%G-W%V)"
+          echo "dir=${RUNNER_TEMP}/finch-debs"
+        } >> "$GITHUB_OUTPUT"
+    - name: Restore the Finch deb cache
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}
+    - name: Install Finch
+      shell: bash
+      env:
+        FINCH_DEB_CACHE_DIR: ${{ steps.key.outputs.dir }}
+      run: sudo --preserve-env=FINCH_DEB_CACHE_DIR bash scripts/setup-finch-linux.sh
