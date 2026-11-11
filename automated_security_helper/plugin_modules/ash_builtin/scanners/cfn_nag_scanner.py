@@ -350,7 +350,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
     display_name = "CFN-Nag"
     docs_summary = "Template security checks"
-    covers = ["CloudFormation"]
+    covers = ("CloudFormation",)
 
     #: cfn_nag is a Ruby gem. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False

@@ -342,6 +342,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
 
     display_name = "Trivy"
     docs_summary = "Dependency vulnerability scanning"
+    covers = ("Dependency manifests and lockfiles",)
 
     #: Not Python-only: trivy is a native binary, installed from its pinned
     #: release asset, so a Python-only scan does not run it.

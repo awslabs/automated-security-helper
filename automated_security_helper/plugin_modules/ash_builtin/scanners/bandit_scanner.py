@@ -770,7 +770,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
     display_name = "Bandit"
     docs_summary = "Python security checks"
-    covers = ["Python"]
+    covers = ("Python",)
 
     #: bandit is a Python package ASH runs through uv. See
     #: ScannerPluginBase.python_only.

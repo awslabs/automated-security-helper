@@ -5,7 +5,9 @@
 
 * every built-in scanner and converter class declares a non-empty ``docs_summary``
   (read from the class, no instance);
-* ``display_name``, when declared, is text, and ``covers`` is a list of text;
+* each built-in declares its own ``display_name``, ``docs_summary`` and (scanners)
+  ``covers``, not an inherited value; ``covers`` is a tuple of text;
+* the jupyter converter's summary names the command the converter runs;
 * the three attributes are ClassVars, so none of them is a model field or reaches a
   JSON schema (the schema files are held byte-identical by the schema checks);
 * the generator's completeness check names a featured scanner that declares no
@@ -52,14 +54,35 @@ def test_a_declared_display_name_is_text(plugin_cls) -> None:
     assert name is None or (isinstance(name, str) and name.strip())
 
 
+@pytest.mark.parametrize("plugin_cls", BUILTIN_PLUGINS, ids=lambda c: c.__name__)
+def test_a_builtin_declares_its_own_metadata_not_its_parents(plugin_cls) -> None:
+    """A subclass that forgot to set its text would inherit a parent's, silently."""
+    own = vars(plugin_cls)
+    assert "docs_summary" in own, f"{plugin_cls.__name__} inherits its docs_summary"
+    assert "display_name" in own, f"{plugin_cls.__name__} inherits its display_name"
+
+
 @pytest.mark.parametrize("plugin_cls", BUILTIN_SCANNERS, ids=lambda c: c.__name__)
-def test_a_declared_covers_is_a_list_of_text(plugin_cls) -> None:
+def test_a_builtin_scanner_declares_covers_as_a_tuple_of_text(plugin_cls) -> None:
+    assert "covers" in vars(plugin_cls), f"{plugin_cls.__name__} inherits its covers"
     covers = plugin_cls.covers
-    assert covers is None or (
-        isinstance(covers, list)
+    assert (
+        isinstance(covers, tuple)
         and covers
         and all(isinstance(item, str) and item.strip() for item in covers)
     )
+
+
+def test_the_jupyter_summary_names_the_converters_command(script_loader) -> None:
+    """The summary used to be filled from the command; it is text now, so tie them."""
+    reference = script_loader("_plugin_reference")
+    plugins = [p for p in reference.discover("converter") if p.name == "jupyter"]
+    assert len(plugins) == 1
+    reference.instantiate(plugins)
+    instance = plugins[0].instance
+    assert instance is not None, plugins[0].instance_error
+    assert instance.command
+    assert instance.command in plugins[0].cls.docs_summary
 
 
 @pytest.mark.parametrize(
@@ -85,17 +108,26 @@ def test_a_featured_scanner_without_docs_is_reported(generator) -> None:
     assert any("declares no covers" in p and featured in p for p in problems)
 
 
+def test_a_registered_featured_scanner_absent_from_the_docs_is_reported(
+    generator,
+) -> None:
+    featured = next(iter(generator.SCANNER_DOCS))
+    problems = generator.editorial_problems({featured: "SAST"}, set(), set(), {})
+    assert any("no class docs" in p and featured in p for p in problems)
+
+
 def test_a_featured_scanner_with_docs_is_not_reported(generator) -> None:
     featured = next(iter(generator.SCANNER_DOCS))
-    docs = {featured: {"docs_summary": "Checks", "covers": ["Python"]}}
+    docs = {featured: {"docs_summary": "Checks", "covers": ("Python",)}}
     problems = generator.editorial_problems({featured: "SAST"}, set(), set(), docs)
     assert not [p for p in problems if "declares no" in p]
 
 
 def test_a_converter_without_a_summary_is_reported(generator) -> None:
-    problems = generator.converter_problems({"x": None}, summaries={"x": None})
+    none = frozenset()
+    problems = generator.converter_problems({"x": None}, none, {"x": None})
     assert problems == ["converter 'x' declares no docs_summary"]
-    assert generator.converter_problems({"x": None}, summaries={"x": "does it"}) == []
+    assert generator.converter_problems({"x": None}, none, {"x": "does it"}) == []
 
 
 def test_display_name_falls_back_to_the_config_name(generator) -> None:

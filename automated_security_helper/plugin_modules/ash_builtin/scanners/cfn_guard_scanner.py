@@ -356,7 +356,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
 
     display_name = "CFN Guard"
     docs_summary = "CloudFormation policy-as-code checks"
-    covers = ["CloudFormation"]
+    covers = ("CloudFormation",)
 
     #: Not Python-only: cfn-guard is a native binary, installed from its pinned
     #: release asset, so a Python-only scan does not run it.

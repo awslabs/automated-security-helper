@@ -238,7 +238,7 @@ def editorial_problems(
     scanners: dict[str, str | None],
     builtin: set[str],
     reporters: set[str],
-    docs: dict[str, dict[str, Any]] | None = None,
+    docs: dict[str, dict[str, Any]],
 ) -> list[str]:
     """What is wrong with the curated maps against the registry; empty when complete.
 
@@ -246,9 +246,9 @@ def editorial_problems(
     it could not be determined), ``builtin`` is the built-in subset, ``reporters``
     the registered reporter names, and ``docs`` maps each scanner name to what its
     class declares (:func:`model_docs`); a featured scanner needs a ``docs_summary``
-    and ``covers`` there. Pure, so a test can feed it any registry.
+    and ``covers`` there, and a registered featured scanner missing from ``docs`` is a
+    problem. Pure, so a test can feed it any registry.
     """
-    docs = docs or {}
     problems: list[str] = []
     for name in SCANNER_DOCS:
         if name not in scanners:
@@ -270,6 +270,8 @@ def editorial_problems(
         if not docs_entry.get("icon"):
             problems.append(f"SCANNER_DOCS[{name!r}] has no icon")
         declared = docs.get(name)
+        if name in scanners and declared is None:
+            problems.append(f"scanner {name!r} has no class docs to read")
         if declared is not None:
             if not declared.get("docs_summary"):
                 problems.append(f"scanner {name!r} declares no docs_summary")
@@ -355,8 +357,8 @@ def managed_problems(declares: dict[str, bool | None]) -> list[str]:
 
 def converter_problems(
     commands: dict[str, str | None],
-    unbuilt: frozenset[str] = frozenset(),
-    summaries: dict[str, str | None] | None = None,
+    unbuilt: frozenset[str],
+    summaries: dict[str, str | None],
 ) -> list[str]:
     """What is wrong with the registered converters' docs metadata.
 
@@ -373,7 +375,7 @@ def converter_problems(
             "this machine; the partial would differ from one built elsewhere"
         )
     for name in sorted(commands):
-        if summaries is not None and not summaries.get(name):
+        if not summaries.get(name):
             problems.append(f"converter {name!r} declares no docs_summary")
     return problems
 

@@ -239,7 +239,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
     display_name = "Opengrep"
     docs_summary = "Pattern-based code checks"
-    covers = ["Multiple languages"]
+    covers = ("Multiple languages",)
 
     #: opengrep is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False

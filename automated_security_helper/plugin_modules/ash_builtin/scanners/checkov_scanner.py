@@ -523,7 +523,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
     display_name = "Checkov"
     docs_summary = "Infrastructure policy checks"
-    covers = ["Terraform", "Kubernetes", "CloudFormation"]
+    covers = ("Terraform", "Kubernetes", "CloudFormation")
 
     #: checkov is a Python package ASH runs through uv. See
     #: ScannerPluginBase.python_only.

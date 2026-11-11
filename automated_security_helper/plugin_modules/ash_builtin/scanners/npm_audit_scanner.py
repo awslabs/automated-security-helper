@@ -417,7 +417,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     display_name = "npm audit"
     docs_summary = "Dependency vulnerability checks"
-    covers = ["Node.js"]
+    covers = ("Node.js",)
 
     #: npm-audit runs npm, yarn or pnpm. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False

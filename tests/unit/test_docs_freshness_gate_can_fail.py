@@ -612,6 +612,39 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
         bare = "\n".join(line for line in text.splitlines() if "--tool" not in line)
         failures = check(extras={name: bare})
         assert any(name in f and "no install line" in f for f in failures), name
+    # The optional pages are held only when a long run appears, and then to an in-order
+    # subset: an out-of-order three-tool run fails, an in-order subset and the full
+    # list pass.
+    optional_pages = [
+        name
+        for name in extra_pages
+        if any(
+            name.startswith(stem) for stem, req in gate.INSTALL_LINE_PAGES if not req
+        )
+    ]
+    assert optional_pages, "no optional install-line page is staged"
+    for name in optional_pages:
+        text = (real_content / name).read_text(encoding="utf-8")
+        full = " ".join(f"--tool {t}" for t in gate.MANAGED_TOOLS_PINNED)
+        subset = "--tool actionlint --tool gitleaks --tool trivy"
+        swapped = "--tool trivy --tool gitleaks --tool actionlint"
+        outside = "--tool actionlint --tool not-managed --tool trivy"
+        cases = ((full, True), (subset, True), (swapped, False), (outside, False))
+        for run, ok in cases:
+            failures = check(
+                extras={name: text + f"\n\nash dependencies install {run}\n"}
+            )
+            mine = [f for f in failures if name in f and "install line" in f]
+            assert bool(mine) is not ok, (name, run, failures)
+            if not ok:
+                assert any("in-order subset" in f for f in mine), mine
+    # A listed stem that matches no file fails, rather than leaving a page unchecked.
+    monkeypatch.setattr(
+        gate,
+        "INSTALL_LINE_PAGES",
+        (*gate.INSTALL_LINE_PAGES, ("reference/no-such-page", False)),
+    )
+    assert any("no-such-page" in f for f in check()), "a missing stem passed"
 
 
 @pytest.mark.unit

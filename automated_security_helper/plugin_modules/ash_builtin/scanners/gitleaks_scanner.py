@@ -530,6 +530,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
     display_name = "Gitleaks"
     docs_summary = "Secret detection"
+    covers = ("Files on disk",)
 
     #: Not Python-only: gitleaks is a native binary, installed from its pinned
     #: release asset, so a Python-only scan does not run it.

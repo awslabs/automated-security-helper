@@ -108,7 +108,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
     display_name = "Syft"
     docs_summary = "Software inventory"
-    covers = ["SBOM generation"]
+    covers = ("SBOM generation",)
 
     #: syft is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False

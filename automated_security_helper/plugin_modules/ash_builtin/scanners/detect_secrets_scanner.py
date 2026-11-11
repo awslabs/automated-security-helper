@@ -339,7 +339,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
     display_name = "detect-secrets"
     docs_summary = "Secret detection"
-    covers = ["Text files"]
+    covers = ("Text files",)
 
     #: detect-secrets runs in-process, from the Python library. See
     #: ScannerPluginBase.python_only.

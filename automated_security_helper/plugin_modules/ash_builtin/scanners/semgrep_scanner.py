@@ -140,7 +140,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
 
     display_name = "Semgrep"
     docs_summary = "Pattern-based code checks"
-    covers = ["Multiple languages"]
+    covers = ("Multiple languages",)
 
     #: semgrep is a Python package ASH runs through uv. See
     #: ScannerPluginBase.python_only.

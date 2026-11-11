@@ -321,7 +321,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
     display_name = "Grype"
     docs_summary = "Vulnerability matching"
-    covers = ["Packages and container images"]
+    covers = ("Packages and container images",)
 
     #: grype is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False

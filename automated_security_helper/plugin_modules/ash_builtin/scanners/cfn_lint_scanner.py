@@ -593,7 +593,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
 
     display_name = "cfn-lint"
     docs_summary = "CloudFormation template validation"
-    covers = ["CloudFormation"]
+    covers = ("CloudFormation",)
 
     #: Python-only: cfn-lint is a Python package ASH runs through uv, so it needs
     #: nothing but Python. Stated here rather than read from use_uv_tool, which the
