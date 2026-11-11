@@ -33,12 +33,38 @@ runs:
         } >> "$GITHUB_OUTPUT"
     - name: Restore the Finch deb cache
       id: cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.key.outputs.dir }}
         key: finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}
+    - name: "Cache report: finch-debs"
+      if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+      shell: bash
+      env:
+        CACHE_NAME: finch-debs
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        CACHE_MATCHED: ${{ steps.cache.outputs.cache-matched-key }}
+      run: |
+        # One line per cache per job, same shape everywhere, so hit rates can be
+        # counted across runs from job summaries.
+        if [ "${CACHE_HIT}" = "true" ]; then result=hit
+        elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+        else result=miss; fi
+        echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
     - name: Install Finch
       shell: bash
       env:
         FINCH_DEB_CACHE_DIR: ${{ steps.key.outputs.dir }}
       run: sudo --preserve-env=FINCH_DEB_CACHE_DIR bash scripts/setup-finch-linux.sh
+    # A composite action has no post phase, so the save is a step of its own after
+    # the install. Pull requests restore and never save; the entry is written by a
+    # push to main.
+    - name: Save the Finch deb cache (main only)
+      if: >-
+        steps.cache.outputs.cache-hit != 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}

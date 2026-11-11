@@ -859,12 +859,23 @@ ALLOWLIST: tuple[Entry, ...] = (
     Entry(
         file=".github/actions/setup-finch/action.yml",
         kind=KIND_CACHE,
-        action="actions/cache",
+        action="actions/cache/restore",
         publishes=(
             "path=${{ steps.key.outputs.dir }} "
             "key=finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}"
         ),
         reason=_FINCH_DEB_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/setup-finch/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.key.outputs.dir }} "
+            "key=finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}"
+        ),
+        reason=_FINCH_DEB_CACHE_REASON
+        + " Saved from a push to main only, in a step after the install.",
     ),
 )
 
