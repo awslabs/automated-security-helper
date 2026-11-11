@@ -1244,6 +1244,10 @@ class _RefusedIntegration(Exception):
 class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     """Lints GitHub Actions workflow files with actionlint."""
 
+    display_name = "actionlint"
+    docs_summary = "GitHub Actions workflow checks"
+    covers = ["GitHub Actions"]
+
     #: Not Python-only: actionlint is a native binary, installed from its pinned
     #: release asset, so a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False

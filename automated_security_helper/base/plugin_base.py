@@ -12,6 +12,7 @@ from typing import (
     Annotated,
     Any,
     Callable,
+    ClassVar,
     Dict,
     Iterable,
     List,
@@ -935,6 +936,11 @@ class PluginBase(UVToolMixin, BaseModel):
     results_dir: Path | None = None
     tool_version: str | None = None
     tool_description: str | None = None
+    # Docs-generation metadata, read from the class by scripts/generate_plugin_data_partial.py.
+    # ClassVars, so they stay out of the model and the JSON schemas built from it.
+    # display_name falls back to the plugin's config name when None.
+    display_name: ClassVar[str | None] = None
+    docs_summary: ClassVar[str | None] = None
     dependencies_satisfied: bool = False
     start_time: datetime | None = None
     end_time: datetime | None = None

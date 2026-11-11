@@ -521,6 +521,10 @@ class CheckovScannerConfig(ScannerPluginConfigBase):
 class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     """CheckovScanner implements IaC scanning using Checkov."""
 
+    display_name = "Checkov"
+    docs_summary = "Infrastructure policy checks"
+    covers = ["Terraform", "Kubernetes", "CloudFormation"]
+
     #: checkov is a Python package ASH runs through uv. See
     #: ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = True

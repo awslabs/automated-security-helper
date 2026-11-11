@@ -759,6 +759,17 @@ MANAGED_TOOLS_PINNED = (
 )
 #: Guides whose install lines name the managed tools (each as .md and .md.template).
 CI_GUIDE_NAMES = ("github-actions", "gitlab-ci", "other-ci")
+#: Other pages, under docs/content (each as .md and, where it exists, .md.template),
+#: that may name the managed tools in a ``--tool`` run, with whether the page must
+#: carry one. A run there is held to the same order as the CI guides'. The CLI
+#: reference and the advanced-usage page only show short examples of one or two
+#: tools (under _INSTALL_RUN_MIN), so they are held if a long run appears and are
+#: not required to have one; scale-large-repos installs the whole set in its job.
+INSTALL_LINE_PAGES = (
+    ("docs/advanced-usage", False),
+    ("how-to/scale-large-repos", True),
+    ("reference/cli", False),
+)
 #: A run of ``--tool NAME`` options, across line continuations and folded lines.
 _TOOL_RUN = re.compile(
     r"(?:--tool[ \t]+[\w-]+(?:[ \t]*\\?[ \t]*\n[ \t]*|[ \t]+))+--tool[ \t]+[\w-]+"
@@ -786,24 +797,35 @@ def _managed_tool_failures(partial_text: str, where: str) -> list[str]:
             f"{list(MANAGED_TOOLS_PINNED)} in scripts/verify_docs_freshness.py; "
             "a change to the managed set touches both"
         )
-    guides = DOCS_DIR / "content" / "how-to" / "ci"
-    for name in CI_GUIDE_NAMES:
+    content = DOCS_DIR / "content"
+    pages = [
+        (content / "how-to" / "ci" / f"{name}{suffix}", True)
+        for name in CI_GUIDE_NAMES
+        for suffix in (".md", ".md.template")
+    ]
+    for stem, required in INSTALL_LINE_PAGES:
         for suffix in (".md", ".md.template"):
-            page = guides / f"{name}{suffix}"
-            rel = page.relative_to(REPO_ROOT).as_posix()
-            runs = [
-                re.findall(r"--tool[ \t]+([\w-]+)", match.group(0))
-                for match in _TOOL_RUN.finditer(read_text(page))
-            ]
-            runs = [run for run in runs if len(run) >= _INSTALL_RUN_MIN]
-            if not runs:
-                failures.append(f"{rel}: no install line naming the managed tools")
-            for run in runs:
-                if run != managed:
-                    failures.append(
-                        f"{rel}: an install line names {run}; expected the "
-                        f"registry's alphabetical order: {managed}"
-                    )
+            page = content / f"{stem}{suffix}"
+            # A required page is held whether or not it is there (read_text then
+            # fails loudly); an optional one is held only when it exists, as the
+            # CLI reference has no template.
+            if required or page.exists():
+                pages.append((page, required))
+    for page, required in pages:
+        rel = page.relative_to(REPO_ROOT).as_posix()
+        runs = [
+            re.findall(r"--tool[ \t]+([\w-]+)", match.group(0))
+            for match in _TOOL_RUN.finditer(read_text(page))
+        ]
+        runs = [run for run in runs if len(run) >= _INSTALL_RUN_MIN]
+        if not runs and required:
+            failures.append(f"{rel}: no install line naming the managed tools")
+        for run in runs:
+            if run != managed:
+                failures.append(
+                    f"{rel}: an install line names {run}; expected the "
+                    f"registry's alphabetical order: {managed}"
+                )
     return failures
 
 

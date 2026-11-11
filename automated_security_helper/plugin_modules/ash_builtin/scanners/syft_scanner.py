@@ -106,6 +106,10 @@ class SyftScannerConfig(ScannerPluginConfigBase):
 class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     """SyftScanner implements IaC scanning using Syft."""
 
+    display_name = "Syft"
+    docs_summary = "Software inventory"
+    covers = ["SBOM generation"]
+
     #: syft is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False
 

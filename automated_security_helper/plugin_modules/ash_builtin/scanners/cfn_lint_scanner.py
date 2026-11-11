@@ -591,6 +591,10 @@ class CfnLintScannerConfig(ScannerPluginConfigBase):
 class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     """Validates CloudFormation templates with cfn-lint."""
 
+    display_name = "cfn-lint"
+    docs_summary = "CloudFormation template validation"
+    covers = ["CloudFormation"]
+
     #: Python-only: cfn-lint is a Python package ASH runs through uv, so it needs
     #: nothing but Python. Stated here rather than read from use_uv_tool, which the
     #: dependency check sets to False when it uses a cfn-lint on PATH instead.

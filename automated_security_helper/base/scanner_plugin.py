@@ -413,6 +413,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
+    #: Human-readable target coverage ("Terraform", "Python"), for the docs graphics.
+    #: Supplements the by-stack prose of the coverage page; it never replaces it.
+    covers: ClassVar[list[str] | None] = None
+
     # The content database cache this scanner's scan was pointed at, set by the
     # scanner when it resolves one (grype, trivy-repo), and handed to the staleness
     # check by content_database_probe_context so the check reads what the scan read.

@@ -415,6 +415,10 @@ _OFFLINE_REASON = (
 class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     """NpmAuditScanner implements IaC scanning using `npm/yarn/pnpm audit` based on the lock files discovered in the source directory."""
 
+    display_name = "npm audit"
+    docs_summary = "Dependency vulnerability checks"
+    covers = ["Node.js"]
+
     #: npm-audit runs npm, yarn or pnpm. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False
 

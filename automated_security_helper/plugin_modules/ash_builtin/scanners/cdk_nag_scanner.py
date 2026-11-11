@@ -1092,6 +1092,10 @@ class CdkNagScopeBlock(RedactedSection):
 class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     """CDK Nag security scanner, custom CDK-CLI-less implementation."""
 
+    display_name = "CDK-Nag"
+    docs_summary = "NagPack policy checks"
+    covers = ["CloudFormation"]
+
     #: cdk-nag evaluates templates through the CDK, which starts Node.js (jsii). See
     #: ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False

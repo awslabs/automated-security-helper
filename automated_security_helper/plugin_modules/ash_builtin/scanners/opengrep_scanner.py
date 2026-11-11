@@ -237,6 +237,10 @@ def patterns_mode_refusal(patterns: List[str]) -> str:
 class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
 
+    display_name = "Opengrep"
+    docs_summary = "Pattern-based code checks"
+    covers = ["Multiple languages"]
+
     #: opengrep is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False
 

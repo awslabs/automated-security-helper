@@ -340,6 +340,9 @@ class TrivyScannerConfig(ScannerPluginConfigBase):
 class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     """Dependency vulnerability scanning with trivy."""
 
+    display_name = "Trivy"
+    docs_summary = "Dependency vulnerability scanning"
+
     #: Not Python-only: trivy is a native binary, installed from its pinned
     #: release asset, so a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False
