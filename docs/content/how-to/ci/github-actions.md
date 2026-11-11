@@ -252,7 +252,7 @@ run builds one; see [Run ASH in a container](../run-in-a-container.md).
 Add it to the call in [Call the reusable workflows](#reusable), keeping the call's other
 `with:` entries as they are. The `ash-args` line is the gate, so leave it in place.
 
-<!-- doctest: config kind=github-actions -->
+<!-- doctest: config kind=other reason="two entries to add to the with: block of the call in Call the reusable workflows, not a workflow on their own" -->
 ```yaml
 with:
   ash-version: v3.7.1
