@@ -33,6 +33,27 @@ KEYRING=/usr/share/keyrings/runfinch-finch-archive-keyring.gpg
 SOURCES=/etc/apt/sources.list.d/runfinch-finch.list
 APT_RETRY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.github/actions/apt-retry/apt-retry.sh"
 
+# apt-retry.sh lives in the repository checkout, next to the action that wraps it.
+# Run standalone, as the usage line above allows, from a copy of this script with no
+# checkout beside it, the helper is absent: the index refresh then degrades to one
+# plain `apt-get update` with apt's own fetch retries, and the Azure mirror fallback
+# is skipped. Decided here, before anything is removed.
+HAVE_APT_RETRY=0
+if [ -f "${APT_RETRY}" ]; then
+    HAVE_APT_RETRY=1
+else
+    echo "WARNING: ${APT_RETRY} not found; apt will not be retried beyond Acquire::Retries and the mirror fallback is off" >&2
+fi
+
+# Refreshes the package indexes: through apt-retry.sh when present, else plain apt.
+refresh_index() {
+    if [ "${HAVE_APT_RETRY}" -eq 1 ]; then
+        bash "${APT_RETRY}" --update-only "$@"
+    else
+        apt-get update -q -o Acquire::Retries=5
+    fi
+}
+
 # Optional deb cache. When FINCH_DEB_CACHE_DIR is set (the setup-finch action sets it
 # and restores/saves that directory with actions/cache), the debs the download step
 # fetches are kept there. A later run that finds all three packages in it installs
@@ -74,7 +95,7 @@ add_finch_repo_and_update() {
     # --retry treats as permanent.
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://artifact.runfinch.com/deb/GPG_KEY.pub | gpg --dearmor --batch --yes -o "${KEYRING}"
     echo "deb [signed-by=${KEYRING} arch=${ARCH}] https://artifact.runfinch.com/deb noble main" | tee "${SOURCES}"
-    bash "${APT_RETRY}" --update-only
+    refresh_index
 }
 
 if [ "${CACHE_HIT}" -eq 1 ]; then
@@ -110,13 +131,21 @@ if [ -n "${CACHE_DIR}" ]; then
 fi
 if [ "${CACHE_HIT}" -eq 0 ]; then
     DOWNLOADED=0
+    # The attempt's output is kept so a failure that names the Azure mirror host can
+    # switch the mirror before the retry: the outage this guards against can start
+    # after the index fetch, during the deb fetch, where nothing else would look.
+    DOWNLOAD_LOG=$(mktemp /tmp/finch-download.XXXXXX)
     for attempt in 1 2 3; do
-        "${APT_INSTALL[@]}" --download-only "${DOWNLOAD_OPTS[@]}" runfinch-finch containerd runc && DOWNLOADED=1 && break
+        "${APT_INSTALL[@]}" --download-only "${DOWNLOAD_OPTS[@]}" runfinch-finch containerd runc 2>&1 | tee "${DOWNLOAD_LOG}" && DOWNLOADED=1 && break
         [ "${attempt}" -lt 3 ] || break
         echo "WARNING: download attempt ${attempt} failed; retrying" >&2
+        if [ "${HAVE_APT_RETRY}" -eq 1 ]; then
+            bash "${APT_RETRY}" --check-log "${DOWNLOAD_LOG}" || true
+        fi
         if [ "${attempt}" -eq 1 ]; then sleep 20; else sleep 60; fi
-        bash "${APT_RETRY}" --update-only --attempts 1 || true
+        refresh_index --attempts 1 || true
     done
+    rm -f "${DOWNLOAD_LOG:?}"
     if [ "${DOWNLOADED}" -ne 1 ]; then
         echo "ERROR: could not download Finch, containerd and runc after 3 attempts; Docker is still installed." >&2
         exit 1
@@ -162,11 +191,15 @@ echo "=== Installing Finch with containerd and runc in Docker's place ==="
 INSTALLED=0
 FIX_OPTS=()
 if [ -n "${CACHE_DIR}" ]; then
-    if dpkg -i "${CACHE_DIR}"/*.deb; then
+    # --force-confold is dpkg's own spelling of the APT_INSTALL option above: with no
+    # tty a conffile question would fail the install after Docker is already gone.
+    if dpkg -i --force-confold "${CACHE_DIR}"/*.deb; then
         INSTALLED=1
     else
         echo "WARNING: dpkg could not finish the install from ${CACHE_DIR}; repairing with apt" >&2
         FIX_OPTS=(-f)
+        # Tell the caller the cached debs needed repair, so it does not save them.
+        : > "${CACHE_DIR}.repaired"
         add_finch_repo_and_update
     fi
 fi

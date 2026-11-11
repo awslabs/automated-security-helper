@@ -11,6 +11,9 @@
 #   --update-only           run `apt-get update` and install nothing (implies --update)
 #   --attempts N            outer attempts, default 3
 #   --no-install-recommends pass it to `apt-get install`
+#   --check-log FILE        run nothing; if FILE (the output of an apt command the
+#                           caller ran) holds the Azure resolve failure, switch the
+#                           mirror as below, then exit 0
 #
 # Why this exists. On 2026-11-11 the hosted runners' DNS resolver failed for a
 # stretch of hours ("Temporary failure resolving 'azure.archive.ubuntu.com'"). apt's
@@ -31,6 +34,7 @@
 set -uo pipefail
 
 ATTEMPTS=3
+CHECK_LOG=""
 DO_UPDATE=0
 DO_INSTALL=1
 INSTALL_OPTS=()
@@ -45,6 +49,11 @@ while [ "$#" -gt 0 ]; do
             ATTEMPTS="${1:-}"
             ;;
         --no-install-recommends) INSTALL_OPTS+=(--no-install-recommends) ;;
+        --check-log)
+            shift
+            CHECK_LOG="${1:-}"
+            DO_INSTALL=0
+            ;;
         --)
             shift
             PACKAGES+=("$@")
@@ -81,7 +90,10 @@ FALLBACK_MIRROR="http://archive.ubuntu.com/ubuntu"
 prefer_fallback_mirror() {
     echo "apt-retry: the Azure mirror host did not resolve; preferring ${FALLBACK_MIRROR} for the next attempt"
     if [ -f /etc/apt/apt-mirrors.txt ]; then
-        "${SUDO[@]}" cp -p /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors.txt.apt-retry-orig 2>/dev/null || true
+        # Keep the first copy only: a second fallback must not overwrite the original.
+        if [ ! -e /etc/apt/apt-mirrors.txt.apt-retry-orig ]; then
+            "${SUDO[@]}" cp -p /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors.txt.apt-retry-orig 2>/dev/null || true
+        fi
         printf '%s/\tpriority:1\n' "${FALLBACK_MIRROR}" | "${SUDO[@]}" tee /etc/apt/apt-mirrors.txt >/dev/null || true
     fi
     local f
@@ -101,6 +113,16 @@ run_attempt() {
     fi
 }
 
+# --check-log FILE: apply only the mirror-fallback check to the output of an apt
+# command the caller ran itself (a download, say), then exit 0. Does nothing when
+# the Azure signature is absent from FILE.
+if [ -n "${CHECK_LOG}" ]; then
+    if [ -f "${CHECK_LOG}" ] && grep -qF "${AZURE_RESOLVE_FAILURE}" "${CHECK_LOG}"; then
+        prefer_fallback_mirror
+    fi
+    exit 0
+fi
+
 LOG=$(mktemp "${TMPDIR:-/tmp}/apt-retry.XXXXXX")
 trap 'rm -f -- "${LOG:?}"' EXIT
 
@@ -113,11 +135,13 @@ while :; do
     if [ "${rc}" -eq 0 ]; then
         exit 0
     fi
-    if [ "${attempt}" -ge "${ATTEMPTS}" ]; then
-        break
-    fi
+    # Checked before the last-attempt exit, so a caller that runs one attempt at a
+    # time (--attempts 1) still switches the mirror for its own next try.
     if grep -qF "${AZURE_RESOLVE_FAILURE}" "${LOG}"; then
         prefer_fallback_mirror
+    fi
+    if [ "${attempt}" -ge "${ATTEMPTS}" ]; then
+        break
     fi
     if [ "${attempt}" -eq 1 ]; then
         pause=20

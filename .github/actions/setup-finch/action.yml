@@ -56,12 +56,28 @@ runs:
       env:
         FINCH_DEB_CACHE_DIR: ${{ steps.key.outputs.dir }}
       run: sudo --preserve-env=FINCH_DEB_CACHE_DIR bash scripts/setup-finch-linux.sh
+    # The script leaves a marker file beside the cache directory when dpkg could not
+    # finish from the cached debs and apt had to repair the install. Those debs are
+    # not saved: a half-working set would be restored for the rest of the week.
+    - name: Check whether the cached debs needed repair
+      id: health
+      shell: bash
+      env:
+        CACHE_DIR: ${{ steps.key.outputs.dir }}
+      run: |
+        if [ -e "${CACHE_DIR}.repaired" ]; then
+          echo "repaired=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::the Finch debs needed an apt repair; the cache is not saved from this run"
+        else
+          echo "repaired=false" >> "$GITHUB_OUTPUT"
+        fi
     # A composite action has no post phase, so the save is a step of its own after
     # the install. Pull requests restore and never save; the entry is written by a
     # push to main.
     - name: Save the Finch deb cache (main only)
       if: >-
         steps.cache.outputs.cache-hit != 'true'
+        && steps.health.outputs.repaired != 'true'
         && github.event_name == 'push'
         && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
