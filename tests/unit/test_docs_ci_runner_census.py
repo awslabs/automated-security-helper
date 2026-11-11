@@ -564,6 +564,7 @@ EXPECTED_RUNNER_NONE = [
     (TRIVY_PAGE, 4, "gitlab-ci"),
     (GHA_PAGE, 5, "github-actions"),
     (GITLAB_PAGE, 4, "gitlab-ci"),
+    (GITLAB_PAGE, 5, "gitlab-ci"),
     (EXPORT_PAGE, 1, "github-actions"),
     (CODEBUILD_EXAMPLE, 1, "buildspec"),
 ]
