@@ -288,7 +288,7 @@ steps:
     inputs:
       versionSpec: "3.12"
   - script: |
-      sudo apt-get update && sudo apt-get install -y --no-install-recommends ruby-dev libyaml-dev
+      sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends ruby-dev libyaml-dev
       python -m venv "$(Agent.TempDirectory)/ash"
       "$(Agent.TempDirectory)/ash/bin/pip" install --quiet "$INSTALL_SPEC"
       echo "##vso[task.prependpath]$(Agent.TempDirectory)/ash/bin"
@@ -353,7 +353,7 @@ jobs:
       - run:
           name: Install ASH
           command: |
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends ruby ruby-dev libyaml-dev
+            sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends ruby ruby-dev libyaml-dev
             python3 -m venv "$HOME/ash-venv"
             "$HOME/ash-venv/bin/pip" install --quiet "$INSTALL_SPEC"
             echo 'export PATH="$HOME/ash-venv/bin:$PATH"' >> "$BASH_ENV"

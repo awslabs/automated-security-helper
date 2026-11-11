@@ -270,6 +270,12 @@ _GRYPE_DB_CACHE_REASON = (
     "content_databases.py), so no restored copy is older than that bound."
 )
 
+_FINCH_DEB_CACHE_REASON = (
+    "The cache stores already-public Ubuntu and Finch .deb packages fetched from "
+    "their official repositories, scoped by actions/cache to this repository, to "
+    "make the Finch install resilient to apt mirror outages."
+)
+
 ALLOWLIST: tuple[Entry, ...] = (
     # -- Digest-pinned scanner release assets (maintainer decision) ----------
     Entry(
@@ -848,6 +854,28 @@ ALLOWLIST: tuple[Entry, ...] = (
             "key=uv-agent-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ash-agent-plugins/agentic-coding/transpiler/uv.lock') }}"
         ),
         reason=_UV_SPLIT_CACHE_REASON,
+    ),
+    # -- Finch install .deb cache ---------------------------------------------
+    Entry(
+        file=".github/actions/setup-finch/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ steps.key.outputs.dir }} "
+            "key=finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}"
+        ),
+        reason=_FINCH_DEB_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/setup-finch/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ steps.key.outputs.dir }} "
+            "key=finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}"
+        ),
+        reason=_FINCH_DEB_CACHE_REASON
+        + " Saved from a push to main only, in a step after the install.",
     ),
 )
 

@@ -142,7 +142,7 @@ ash-scan:
   variables:
     INSTALL_SPEC: "{{ spec }}"
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
+    - apt-get update -o Acquire::Retries=3 && apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - python -m venv /opt/ash
     - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
     - export PATH="/opt/ash/bin:$PATH"
@@ -180,7 +180,7 @@ ash-scan:
   variables:
     INSTALL_SPEC: "{{ spec }}"
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
+    - apt-get update -o Acquire::Retries=3 && apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - pip install --quiet uv
     - ash() { uvx --python 3.12 --from "$INSTALL_SPEC" ash "$@"; }
     - >-
