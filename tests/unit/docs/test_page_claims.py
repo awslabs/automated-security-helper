@@ -9965,12 +9965,27 @@ def _read_pid(path: Path, what: str) -> int:
 
 def _wait_until_stopped(pid: int, held: Path) -> None:
     """Until the stand-in tool with ``pid`` is gone and nothing is set aside in
-    ``held``: the scan has stopped and put back what it was going to put back."""
+    ``held`` or in its ``.restoring`` sibling: the scan has stopped and put back
+    what it was going to put back.
+
+    The put-back protocol (automated_security_helper/core/previous_results.py,
+    ``restore()``): the server process, not the tool, renames ``held`` to
+    ``<held>.restoring``, moves the entries back one rename at a time, and
+    removes ``.restoring`` last. The tool is already dead when that starts, so
+    ``held`` alone goes absent at the first rename, before anything is back, and
+    a caller that then closes the client kills the server mid-restore and strands
+    ``.restoring``. Rename atomicity means at least one of the two directories
+    exists from before that first rename until the final removal, so waiting on
+    both returns only after the restore finished (or when the scan kept its own
+    results and neither directory ever appeared)."""
+    # Mirrors RESTORING_DIR_NAME in previous_results.py (HELD_DIR_NAME + ".restoring").
+    restoring = held.with_name(held.name + ".restoring")
     deadline = time.monotonic() + _MCP_STOP_SECONDS
-    while _process_alive(pid) or held.exists():
+    while _process_alive(pid) or held.exists() or restoring.exists():
         assert time.monotonic() < deadline, (
             f"the scan had not stopped {_MCP_STOP_SECONDS} s after the cancel: "
-            f"tool alive {_process_alive(pid)}, {held.name} there {held.exists()}"
+            f"tool alive {_process_alive(pid)}, {held.name} there {held.exists()}, "
+            f"{restoring.name} there {restoring.exists()}"
         )
         time.sleep(0.1)
 
