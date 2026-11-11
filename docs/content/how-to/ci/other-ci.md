@@ -18,8 +18,8 @@ python3 -m venv "$HOME/ash-venv"
   "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
 export PATH="$HOME/ash-venv/bin:$PATH"
 (cd "$(mktemp -d)" && ash dependencies install \
-  --tool grype --tool syft --tool opengrep --tool cfn-nag \
-  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+  --tool grype --tool opengrep --tool syft --tool trivy)
 ash scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
@@ -42,8 +42,8 @@ ash() {
     ash "$@"
 }
 (cd "$(mktemp -d)" && ash dependencies install \
-  --tool grype --tool syft --tool opengrep --tool cfn-nag \
-  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+  --tool grype --tool opengrep --tool syft --tool trivy)
 ash scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
@@ -204,7 +204,7 @@ pipeline {
           python3 -m venv "$WORKSPACE_TMP/ash"
           "$WORKSPACE_TMP/ash/bin/pip" install --quiet "$INSTALL_SPEC"
           export PATH="$WORKSPACE_TMP/ash/bin:$PATH"
-          (cd "$WORKSPACE_TMP/tools" && ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+          (cd "$WORKSPACE_TMP/tools" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
           ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
         '''
       }
@@ -250,7 +250,7 @@ phases:
       - python -m venv /opt/ash
       - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
       - export PATH="/opt/ash/bin:$PATH"
-      - (cd "$(mktemp -d)" && ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+      - (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
   build:
     commands:
       - ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
@@ -293,7 +293,7 @@ steps:
       "$(Agent.TempDirectory)/ash/bin/pip" install --quiet "$INSTALL_SPEC"
       echo "##vso[task.prependpath]$(Agent.TempDirectory)/ash/bin"
     displayName: Install ASH
-  - script: ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy
+  - script: ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy
     workingDirectory: $(Agent.TempDirectory)
     displayName: Install scanner tools
   - script: ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
@@ -361,7 +361,7 @@ jobs:
           key: ash-tools-v3.7.1-{{ arch }}
       - run:
           name: Install scanner tools
-          command: (cd "$(mktemp -d)" && ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+          command: (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
       - save_cache:
           key: ash-tools-v3.7.1-{{ arch }}
           paths:

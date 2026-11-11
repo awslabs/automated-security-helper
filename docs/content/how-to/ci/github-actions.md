@@ -387,8 +387,8 @@ jobs:
           printf '::stop-commands::%s\n' "${token}"
           status=0
           ash dependencies install \
-            --tool grype --tool syft --tool opengrep --tool cfn-nag \
-            --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy \
+            --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+            --tool grype --tool opengrep --tool syft --tool trivy \
             2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
@@ -495,8 +495,8 @@ the install and scan steps of the job above:
     printf '::stop-commands::%s\n' "${token}"
     status=0
     ash dependencies install \
-      --tool grype --tool syft --tool opengrep --tool cfn-nag \
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy \
+      --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+      --tool grype --tool opengrep --tool syft --tool trivy \
       2>&1 || status=$?
     printf '\n::%s::\n' "${token}"
     exit "${status}"

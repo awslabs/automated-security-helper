@@ -113,6 +113,9 @@ ZERO_SHA = "0" * 40
 #   the scripts/generate_*.py named in the page's banner; the same freshness test runs
 #   each one's --check. Listed by name rather than as reference/*.md, because a
 #   hand-written page added to that directory later is not golden.
+# * docs/overrides/partials/generated/plugin-data.html: the plugin data the home page
+#   graphics read, written whole by scripts/generate_plugin_data_partial.py; the same
+#   freshness test runs its --check.
 #
 # Out, deliberately:
 # * The per-backend copies of tool-reference.md under ash-agent-plugins/.../plugins/ and
@@ -147,6 +150,10 @@ GOLDEN: tuple[tuple[str, str], ...] = (
     ("docs/content/reference/mcp-tools.md", "generated MCP tool reference page"),
     ("docs/content/reference/reporters.md", "generated reporter reference"),
     ("docs/content/reference/scanners.md", "generated scanner reference"),
+    (
+        "docs/overrides/partials/generated/plugin-data.html",
+        "generated plugin data partial",
+    ),
 )
 
 

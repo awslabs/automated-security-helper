@@ -626,6 +626,188 @@ def check_scanners() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check 2b: the plugin data behind the home page graphics, and the counts in prose
+# ---------------------------------------------------------------------------
+
+PLUGIN_DATA_PARTIAL = (
+    DOCS_DIR / "overrides" / "partials" / "generated" / "plugin-data.html"
+)
+HOW_ASH_WORKS_MD = DOCS_DIR / "content" / "concepts" / "how-ash-works.md"
+CHOOSE_SCANNERS_MD = DOCS_DIR / "content" / "how-to" / "choose-scanners.md"
+
+
+def _partial_block(text: str, key: str) -> str | None:
+    """The text of the list ``"key": [ ... ]`` in the plugin data partial, or None."""
+    match = re.search(rf'"{re.escape(key)}": \[(.*?)\]', text, re.DOTALL)
+    return match.group(1) if match else None
+
+
+def check_plugin_data() -> list[str]:
+    """scripts/generate_plugin_data_partial.py wrote the registry's names, and prose agrees.
+
+    The partial is held against a second source here (the config segments, which
+    are what ``scanner_names`` reads), the way the reference pages are, so a
+    generator that dropped or invented a name is caught even though its own
+    ``--check`` compares only against itself. The prose counts that used to be
+    typed by hand ("16 built-in scanners", the converters in the phases diagram)
+    are compared with the same registry. Every link the partial gives into the
+    scanner and reporter references must name a heading that exists there.
+    """
+    from automated_security_helper.config.ash_config import (
+        ConverterConfigSegment,
+        ScannerConfigSegment,
+    )
+
+    failures: list[str] = []
+    where = "docs/overrides/partials/generated/plugin-data.html"
+    text = read_text(PLUGIN_DATA_PARTIAL)
+    builtin = set(_segment_names(ScannerConfigSegment))
+    expected_lists = {
+        "builtin": builtin,
+        "all": set(scanner_names()),
+    }
+    for key, expected in expected_lists.items():
+        block = _partial_block(text, key)
+        listed = set(re.findall(r'"([^"]+)"', block)) if block is not None else set()
+        if block is None:
+            failures.append(f"{where}: no {key!r} list of scanner names")
+        elif listed != expected:
+            failures.append(
+                f"{where}: {key!r} scanners differ from the registry: "
+                f"missing {sorted(expected - listed)}, extra {sorted(listed - expected)}"
+            )
+
+    converters = set(_segment_names(ConverterConfigSegment))
+    block = _partial_block(text, "converters")
+    listed = (
+        set(re.findall(r'"name": "([^"]+)"', block)) if block is not None else set()
+    )
+    if listed != converters:
+        failures.append(
+            f"{where}: converters {sorted(listed)} differ from the registry "
+            f"{sorted(converters)}"
+        )
+
+    for page, heading_page in (
+        ("reference/scanners/", SCANNERS_REFERENCE_MD),
+        ("reference/reporters/", REPORTERS_REFERENCE_MD),
+    ):
+        headings = set(
+            re.findall(r"^## `([^`]+)`$", read_text(heading_page), re.MULTILINE)
+        )
+        anchors = re.findall(rf'"href": "{re.escape(page)}#([^"]+)"', text)
+        if not anchors:
+            # A link shape that changed would otherwise read as nothing to check.
+            failures.append(f"{where}: no links into {page} to check")
+        for anchor in anchors:
+            if anchor not in headings:
+                failures.append(
+                    f"{where}: links to {page}#{anchor}, which is not a heading there"
+                )
+
+    prose = (
+        (HOW_ASH_WORKS_MD, r"ASH ships (\d+) built-in scanners", len(builtin)),
+        (CHOOSE_SCANNERS_MD, r"all (\d+) built-in scanners", len(builtin)),
+    )
+    for page, pattern, count in prose:
+        rel = page.relative_to(REPO_ROOT).as_posix()
+        matches = list(re.finditer(pattern, read_text(page)))
+        if not matches:
+            failures.append(f"{rel}: no sentence matching {pattern!r}")
+        for match in matches:
+            if int(match.group(1)) != count:
+                failures.append(
+                    f"{rel}: says {match.group(1)} built-in scanners, "
+                    f"the registry has {count}"
+                )
+
+    how = "docs/content/concepts/how-ash-works.md"
+    diagrams = list(
+        re.finditer(r"Convert phase<br/>([^\]]+)\]", read_text(HOW_ASH_WORKS_MD))
+    )
+    if not diagrams:
+        failures.append(f"{how}: no Convert phase node")
+    for diagram in diagrams:
+        named = {n.strip() for n in diagram.group(1).split(",")}
+        if named != converters:
+            failures.append(
+                f"{how}: the Convert phase node names {sorted(named)}, "
+                f"the registry has {sorted(converters)}"
+            )
+
+    failures += _managed_tool_failures(text, where)
+    return failures
+
+
+#: The tools ``ash dependencies install`` installs for the CI snippets and guides,
+#: sorted. ``ash dependencies install --tool`` validates a name against the whole plugin
+#: registry (an unknown name is an error), which is the registry the partial is derived
+#: from, so it is no independent source for WHICH tools are managed. This list is
+#: therefore pinned by hand: a change to the managed set (a scanner that gains or loses
+#: install commands, MANAGED_TOOL_EXTRAS, NOT_MANAGED in
+#: scripts/generate_plugin_data_partial.py) must change this tuple, and the CI guides'
+#: install lines, in the same PR.
+MANAGED_TOOLS_PINNED = (
+    "actionlint",
+    "cfn-guard",
+    "cfn-nag",
+    "gitleaks",
+    "grype",
+    "opengrep",
+    "syft",
+    "trivy",
+)
+#: Guides whose install lines name the managed tools (each as .md and .md.template).
+CI_GUIDE_NAMES = ("github-actions", "gitlab-ci", "other-ci")
+#: A run of ``--tool NAME`` options, across line continuations and folded lines.
+_TOOL_RUN = re.compile(
+    r"(?:--tool[ \t]+[\w-]+(?:[ \t]*\\?[ \t]*\n[ \t]*|[ \t]+))+--tool[ \t]+[\w-]+"
+    r"|--tool[ \t]+[\w-]+"
+)
+#: A run shorter than this is an example about one tool, not the install line.
+_INSTALL_RUN_MIN = 3
+
+
+def _managed_tool_failures(partial_text: str, where: str) -> list[str]:
+    """The managed tools in the partial and in the CI guides' install lines.
+
+    The partial's list is held to ``MANAGED_TOOLS_PINNED``, and every long run of
+    ``--tool`` options in the guides (both the page and its template) is held to the
+    partial's list, in order. Each guide must have at least one such run.
+    """
+    failures: list[str] = []
+    block = _partial_block(partial_text, "managed_tools")
+    managed = re.findall(r'"([^"]+)"', block) if block is not None else None
+    if managed is None:
+        return [f"{where}: no 'managed_tools' list"]
+    if managed != list(MANAGED_TOOLS_PINNED):
+        failures.append(
+            f"{where}: managed_tools {managed} differ from MANAGED_TOOLS_PINNED "
+            f"{list(MANAGED_TOOLS_PINNED)} in scripts/verify_docs_freshness.py; "
+            "a change to the managed set touches both"
+        )
+    guides = DOCS_DIR / "content" / "how-to" / "ci"
+    for name in CI_GUIDE_NAMES:
+        for suffix in (".md", ".md.template"):
+            page = guides / f"{name}{suffix}"
+            rel = page.relative_to(REPO_ROOT).as_posix()
+            runs = [
+                re.findall(r"--tool[ \t]+([\w-]+)", match.group(0))
+                for match in _TOOL_RUN.finditer(read_text(page))
+            ]
+            runs = [run for run in runs if len(run) >= _INSTALL_RUN_MIN]
+            if not runs:
+                failures.append(f"{rel}: no install line naming the managed tools")
+            for run in runs:
+                if run != managed:
+                    failures.append(
+                        f"{rel}: an install line names {run}; expected the "
+                        f"registry's alphabetical order: {managed}"
+                    )
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Check 3: MCP tool names in docs match code
 # ---------------------------------------------------------------------------
 
@@ -1408,6 +1590,9 @@ _DOCS_PATHS = (
     "REPORTERS_REFERENCE_MD",
     "MCP_TOOLS_REFERENCE_MD",
     "INSTALL_MD",
+    "PLUGIN_DATA_PARTIAL",
+    "HOW_ASH_WORKS_MD",
+    "CHOOSE_SCANNERS_MD",
 )
 #: Code files, by their path inside the package, so a rebase never depends on where
 #: the previous one put them.
@@ -1461,6 +1646,10 @@ def main(argv: list[str] | None = None) -> int:
     checks = [
         ("Reporter list in docs matches code", check_reporters),
         ("Scanner list in docs matches code", check_scanners),
+        (
+            "Plugin data behind the home page graphics matches code",
+            check_plugin_data,
+        ),
         ("MCP tool names in docs match code", check_mcp_tools),
         ("Version consistency", check_version_consistency),
         ("Config file path consistency", check_config_path),
