@@ -75,6 +75,11 @@
     },
     {
       "kind": "no-harness",
+      "path": "docs/content/assets/javascripts/ash-snippet-builder.js",
+      "reason": "The docs home page's snippet-builder browser script, same disposition as ash.js above: served by the MkDocs site (docs/overrides/home.html) and measured by no jest report because no ancestor directory of docs/content/assets/javascripts holds a JS harness config."
+    },
+    {
+      "kind": "no-harness",
       "path": "docs/content/assets/javascripts/ash-scan.js",
       "reason": "The docs scan-demo page's browser script, same disposition as ash.js above: served by the MkDocs site, exercised by the sibling Playwright suite (scan.spec.cjs routes and asserts on it, including the aborted-load path), and measured by no jest report because no ancestor directory holds a JS harness config."
     },
