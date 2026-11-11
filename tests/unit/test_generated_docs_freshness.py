@@ -2225,11 +2225,20 @@ def _registry_matching_the_maps(module) -> tuple[dict, set, set]:
     return scanners, set(scanners), reporters
 
 
+def _class_docs(scanners: dict) -> dict[str, dict]:
+    """What the scanner classes declare, for a registry that names every scanner."""
+    return {
+        name: {"display_name": name, "docs_summary": "Checks", "covers": ("Files",)}
+        for name in scanners
+    }
+
+
 @pytest.mark.unit
 def test_plugin_data_maps_are_complete_for_a_matching_registry() -> None:
     module = _plugin_data_module()
     scanners, builtin, reporters = _registry_matching_the_maps(module)
-    assert module.editorial_problems(scanners, builtin, reporters) == []
+    docs = _class_docs(scanners)
+    assert module.editorial_problems(scanners, builtin, reporters, docs) == []
 
 
 @pytest.mark.unit
@@ -2241,28 +2250,41 @@ def test_plugin_data_maps_fail_on_an_unknown_or_missing_plugin() -> None:
     # A built-in scanner nobody decided about.
     grown = {**scanners, "brand-new-scanner": "SAST"}
     problems = module.editorial_problems(
-        grown, builtin | {"brand-new-scanner"}, reporters
+        grown, builtin | {"brand-new-scanner"}, reporters, _class_docs(grown)
     )
     assert any("brand-new-scanner" in p and "HOME_GRID_OMITTED" in p for p in problems)
 
     # A featured scanner the registry no longer has.
     shrunk = {k: v for k, v in scanners.items() if k != "bandit"}
-    problems = module.editorial_problems(shrunk, builtin - {"bandit"}, reporters)
+    problems = module.editorial_problems(
+        shrunk, builtin - {"bandit"}, reporters, _class_docs(shrunk)
+    )
     assert any("SCANNER_DOCS names 'bandit'" in p for p in problems)
+
+    docs = _class_docs(scanners)
 
     # A tool type no category covers.
     odd = {**scanners, "grype": "CONTAINER"}
-    problems = module.editorial_problems(odd, builtin, reporters)
+    problems = module.editorial_problems(odd, builtin, reporters, docs)
     assert any("grype" in p and "tool type" in p for p in problems)
 
     # An engine whose tool type puts it under another category than its track.
     moved = {**scanners, "bandit": "SECRETS"}
-    problems = module.editorial_problems(moved, builtin, reporters)
+    problems = module.editorial_problems(moved, builtin, reporters, docs)
     assert any("bandit" in p and "category" in p for p in problems)
 
     # A report format whose reporter was removed.
-    problems = module.editorial_problems(scanners, builtin, reporters - {"sarif"})
+    problems = module.editorial_problems(scanners, builtin, reporters - {"sarif"}, docs)
     assert any("SCAN_FORMATS names 'sarif'" in p for p in problems)
+
+    # A featured scanner whose class declares no summary or coverage, or is not read.
+    bare = {**docs, "bandit": {"display_name": "Bandit"}}
+    problems = module.editorial_problems(scanners, builtin, reporters, bare)
+    assert any("'bandit' declares no docs_summary" in p for p in problems)
+    assert any("'bandit' declares no covers" in p for p in problems)
+    unread = {k: v for k, v in docs.items() if k != "bandit"}
+    problems = module.editorial_problems(scanners, builtin, reporters, unread)
+    assert any("'bandit' has no class docs" in p for p in problems)
 
 
 @pytest.mark.unit
@@ -2307,24 +2329,25 @@ def test_plugin_data_managed_tools_do_not_depend_on_the_machine() -> None:
 def test_plugin_data_converter_docs_are_complete() -> None:
     module = _plugin_data_module()
     commands = {"archive": None, "jupyter": "jupyter-nbconvert"}
-    assert module.converter_problems(commands) == []
-    assert any(
-        "pdf" in p and "no entry" in p
-        for p in module.converter_problems({**commands, "pdf": None})
-    )
-    assert any("archive" in p for p in module.converter_problems({"jupyter": "j"}))
-    assert any(
-        "{command}" in p
-        for p in module.converter_problems({**commands, "jupyter": None})
-    )
-    # A converter that could not be built is its own error, whether or not its text
-    # uses {command}, and it does not also read as a missing command.
+    summaries = {"archive": "extracts archives", "jupyter": "converts notebooks"}
+    none = frozenset()
+    assert module.converter_problems(commands, none, summaries) == []
+    # A converter whose class declares no summary (the deleted "no entry" case).
+    for missing in (None, ""):
+        problems = module.converter_problems(
+            {**commands, "pdf": None}, none, {**summaries, "pdf": missing}
+        )
+        assert any("pdf" in p and "declares no docs_summary" in p for p in problems)
+    # A converter the summaries do not mention at all is the same error.
+    problems = module.converter_problems({**commands, "pdf": None}, none, summaries)
+    assert any("pdf" in p and "declares no docs_summary" in p for p in problems)
+    # A converter that could not be built is its own error and nothing else.
     for name in ("archive", "jupyter"):
         problems = module.converter_problems(
-            {**commands, name: None}, frozenset({name})
+            {**commands, name: None}, frozenset({name}), summaries
         )
         assert any(name in p and "could not be built" in p for p in problems), problems
-        assert not any("{command}" in p for p in problems), problems
+        assert len(problems) == 1, problems
 
 
 @pytest.mark.integration

@@ -687,6 +687,10 @@ class ZizmorScannerConfig(ScannerPluginConfigBase):
 class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     """GitHub Actions workflow and composite action analysis with zizmor."""
 
+    display_name = "zizmor"
+    docs_summary = "GitHub Actions workflow and composite action analysis"
+    covers = ("GitHub Actions workflows", "Composite actions")
+
     #: Python-only: zizmor is a Python package ASH runs through uv, so it needs
     #: nothing but Python. Its PyPI wheel holds the native binary, as semgrep's
     #: holds semgrep-core. Stated here rather than read from use_uv_tool, which

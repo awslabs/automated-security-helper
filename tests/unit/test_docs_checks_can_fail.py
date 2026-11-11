@@ -3454,8 +3454,11 @@ def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
     assert not_run, result.stdout
     # The error text quotes the path as the OS spells it: on Windows with
     # backslashes, doubled by the repr of the message, so a run of them is a separator.
+    # The freshness gate also checks the committed generated partial, which lives
+    # outside content/reference.
+    admitted = ("docs/content/reference/", "docs/overrides/partials/generated/")
     assert all(
-        "docs/content/reference/" in re.sub(r"\\+", "/", line) for line in not_run
+        any(path in re.sub(r"\\+", "/", line) for path in admitted) for line in not_run
     ), not_run
     assert result.returncode == 2
 

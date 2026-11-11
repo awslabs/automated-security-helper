@@ -768,6 +768,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     and returns results in a structured format using the StaticAnalysisReport model.
     """
 
+    display_name = "Bandit"
+    docs_summary = "Python security checks"
+    covers = ("Python",)
+
     #: bandit is a Python package ASH runs through uv. See
     #: ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = True

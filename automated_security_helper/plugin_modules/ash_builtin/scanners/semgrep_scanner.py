@@ -138,6 +138,10 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
 class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
 
+    display_name = "Semgrep"
+    docs_summary = "Pattern-based code checks"
+    covers = ("Multiple languages",)
+
     #: semgrep is a Python package ASH runs through uv. See
     #: ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = True

@@ -319,6 +319,10 @@ def _declared_grype_db_bound(
 class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     """GrypeScanner implements IaC scanning using Grype."""
 
+    display_name = "Grype"
+    docs_summary = "Vulnerability matching"
+    covers = ("Packages and container images",)
+
     #: grype is a native binary. See ScannerPluginBase.python_only.
     python_only: ClassVar[bool | None] = False
 
