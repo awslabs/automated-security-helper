@@ -1277,6 +1277,25 @@ def test_historical_docs_are_not_held_to_todays_file_names(tmp_path, file_code):
     assert dc.check_report_files([page], tmp_path, file_code) == []
 
 
+@pytest.mark.integration
+def test_curated_release_notes_are_historical_docs(tmp_path, file_code):
+    """The notes the release bump moves out of the changelog are held like it.
+
+    The bump moves the changelog's ``## Unreleased`` body into
+    ``.github/release-notes/<tag>.md``; the same text must not start failing the
+    checks that compare against today's code because it changed files.
+    """
+    page = _write(tmp_path, ".github/release-notes/v9.9.9.md", "Removed `ash.sarf`.\n")
+    assert dc.check_report_files([page], tmp_path, file_code) == []
+    # Control: the same line in a page that is not a record of a release is found.
+    live = _write(tmp_path, "docs/page.md", "Removed `ash.sarf`.\n")
+    assert dc.check_report_files([live], tmp_path, file_code) != []
+    assert dc.is_historical_doc(".github/release-notes/v9.9.9.md")
+    assert dc.is_historical_doc("CHANGELOG.md")
+    assert not dc.is_historical_doc("docs/content/contributing/releases.md")
+    assert not dc.is_historical_doc(".github/workflows/ash-create-release.yml")
+
+
 # ---------------------------------------------------------------------------
 # Scanner names in tables
 # ---------------------------------------------------------------------------
