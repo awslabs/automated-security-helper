@@ -1,0 +1,36 @@
+/*
+#
+# This example clones the ASH repo and the repo to be scanned, then runs `ash`
+# against the repo.
+#
+# This will build the ASH container image, run the scan using the built image,
+# and publish the scan results as a build artifact.
+#
+*/
+node {
+  def ASH_VERSION = 'v1.3.3'
+
+  git(
+    branch: ASH_VERSION,
+    url: 'https://github.com/awslabs/automated-security-helper.git',
+  )
+
+  sh(
+    script: """
+      # Clone the ASH repository from GitHub at the desired version
+      git clone https://github.com/awslabs/automated-security-helper.git \
+        ../automated-security-helper \
+        --branch "${ASH_VERSION}"
+
+      # Run the ASH container image
+      export PATH="$(pwd)/../automated-security-helper:$PATH"
+      ash \
+        --source-dir $(pwd) \
+        --output-dir $(pwd)/${ASH_OUTPUT_PATH}
+    """
+  )
+
+  archiveArtifacts(
+    artifacts: "${ASH_OUTPUT_PATH}/**"
+  )
+}
