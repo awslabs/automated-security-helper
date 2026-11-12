@@ -933,7 +933,8 @@ def _children_of_the_worker(tasks: Path = _TASKS) -> list[int] | None:
     pids: list[int] = []
     listed = False
     try:
-        for thread in tasks.iterdir():
+        # A directory read has no defined order; walk the threads by tid.
+        for thread in sorted(tasks.iterdir(), key=lambda p: (len(p.name), p.name)):
             try:
                 text = (thread / "children").read_text()
             except FileNotFoundError:
