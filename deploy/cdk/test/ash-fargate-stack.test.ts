@@ -36,9 +36,9 @@ describe('Fargate MCP service', () => {
 
   test('this target does NOT opt into the stateless fallback', () => {
     /*
-     * The AgentCore stack sets ASH_MCP_STATELESS_FALLBACK=warn so its shipped
-     * defaults start; this one deliberately does not, and the asymmetry is the
-     * point rather than an oversight. Behind a load balancer that may route
+     * The AgentCore stack set ASH_MCP_STATELESS_FALLBACK=warn until its default
+     * ASH had --stateless-http; this one never did, and the guard against copying
+     * it here stays. Behind a load balancer that may route
      * consecutive requests to different replicas, a stateful server is wrong for a
      * reason no measurement here excuses -- AgentCore's evidence is specific to
      * AgentCore. So this target keeps exiting 65 until its AshVersion can serve
