@@ -44,7 +44,18 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
-## Unreleased
+## v3.8.0 (2026-11-12)
+
+### Breaking behavior changes in a minor release
+
+3.8.0 contains breaking changes, and it is a minor release on purpose: 4.0.0 is reserved for the v4 packaging work. If you pin ASH to `<4`, semantic versioning will not warn you about the changes below, so check each one before you upgrade.
+
+- Incomplete scans now exit 1 by default (#640). `fail_on_incomplete_scanners` defaults to `true`, so a scan in which a scanner reported ERROR or MISSING exits 1 instead of returning a clean scan's exit code. To keep the old exit code, pass `--no-fail-on-incomplete-scanners` or set `fail_on_incomplete_scanners: false` in your config.
+- A stale content database now fails the scan (#696). Each scanner database has a declared maximum age: 120 hours for grype, 24 hours for trivy, and 30 days for the offline semgrep and opengrep rulesets. A database past that age, or one whose age cannot be read, makes the scan exit 1. The findings are still written. To get a warning instead of a failure, pass `--allow-stale-content-db` or set `content_db_staleness: warn`.
+- MCP scans can now report the status `incomplete` (#640, #696). A scan with a coverage gap or a stale content database used to report `completed`; it now reports `incomplete` and still returns its findings. Clients that only handle `completed` and `failed` need to handle the new value. MCP scans take no command-line flags, so the opt-outs are the config settings: `fail_on_incomplete_scanners: false` for a coverage gap, and `content_db_staleness: warn` for a stale database.
+- MCP `upload_id` values are capped at 128 characters (#665). An `upload_id` longer than 128 characters, or one containing a character other than letters, digits, and `. _ ~ + = -`, is now refused. Before this release, any value without a path separator was accepted. There is no opt-out; use a shorter id.
+
+The commits below also carry breaking-change notes, listed under BREAKING CHANGE: a scanner that fails on every target it attempted now reports ERROR rather than PASSED (#514), an unresolvable cdk-nag pack name now fails the scan (#514), and nested `.gitignore` and `.ashignore` files now apply to their own subtree (#501).
 
 ### Features
 
@@ -8843,6 +8854,168 @@ These affect working on ASH, not the installed package.
   jupyter converter tests can build the Windows configuration, which pins nbconvert to
   one version, on any host, and a test reads the version the convert phase's converter
   is asked for.
+
+### BREAKING CHANGE
+
+- fail_on_incomplete_scanners now defaults to true. Pass
+--no-fail-on-incomplete-scanners or set it to false to keep the old exit code
+for a partial scan.
+The reusable scan workflow (workflow_call, a published surface) now installs
+the cdk extra, so callers with CloudFormation get cdk-nag findings where the
+scanner previously reported MISSING; `ash-args: --exclude-scanners cdk-nag`
+keeps the previous outcome.
+- a scanner that attempted at least one target and failed on all
+of them now reports ERROR with a non-zero exit code and SARIF
+executionSuccessful=false, where it previously reported PASSED with zero
+findings. Pipelines running a scanner that cannot execute will begin failing
+rather than completing.
+- a requested cdk-nag pack whose name cannot be resolved now raises instead
+of being skipped with a logged error, so a configuration naming a pack that does not exist
+fails the scan rather than silently evaluating a subset of the requested rules. Separately,
+`include_compliant_checks` no longer has any effect: cdk-nag 3.x reports through CDK's
+policy validation framework, whose report contains violations only, so the compliant and
+suppressed records 2.x listed alongside them are no longer available at any setting.
+- nested .gitignore and .ashignore files now apply to the
+subtree they sit in. Previously their rules compiled against a synthetic base
+and matched nothing, so those files were scanned. A repository with a vendored
+or generated directory that ships its own ignore file will see those files
+leave the scan set, which means fewer findings than the same scan produced
+before. The reduction is not silent: each ignore file's removal count is logged,
+and ASH_INCLUSIONS negations such as !**/*.template.json still win over it, so
+CloudFormation templates under an excluded directory continue to be scanned.
+
+### Feat
+
+- scoped suppressions, unknown-key warn mode, and an expires alias (#868)
+- **scanners**: actionlint, cfn-lint/cfn-guard, gitleaks, zizmor and trivy fs as builtin scanners (#727)
+- **sandbox**: opt-in OS sandboxing for scanner subprocesses (#757)
+- **deploy**: opt-in VPC placement for the CodeCommit gate and per-resource cfn-guard suppressions (#761)
+- **config**: read pyproject.toml [tool.ash] and ashrc files; add extends and patch (#712)
+- **cli**: add --cli-json-input and --generate-cli-skeleton (#710)
+- **suppressions**: scope a suppression to a function or class by name (#707)
+- stop reporting success when nothing was scanned; fail_on_incomplete_scanners now defaults on (#640)
+- fail the scan when a content database is past its declared bound (#696)
+- **suppressions**: match a suppression to one package copy (#687)
+- **workspace**: run additional_scanners and tag their findings, and report skipped projects in every reporter (#661)
+- **cli**: surface scanner version and reachability (#606, #626) (#627)
+- test against Python 3.14 and cap requires-python at <3.15 (#596)
+- **ferret-scan**: support ferret-scan v2.4.5 and surface new options (#565)
+- distributed execute-and-collect, deployable AWS targets, and ASHScanStep (#494)
+- **plugins**: make ASH installable with npx skills, and document agent installs (#534)
+- **mcp**: expose workspace mode over MCP with confined scan targets (#493)
+- **nix**: add --mode nix so scanners come from a pinned flake (#508)
+
+### Fix
+
+- retry the apt install route on transient failures (#915)
+- slice the sandbox child wait so a held interrupt can land (#896)
+- **reporters**: preserve finding metadata and distinguish occurrences (#807)
+- cure the post-merge test floor the linked CI jobs carry (#877)
+- **deps**: say when uv sync removes what ash dependencies install added (#866)
+- unified bug fixes for the tier contract, CI gates, version and docs (#865)
+- clear more standing unit-test failures on main (#856)
+- clear unit-test failures found on the EC2 venue matrix (#852)
+- **models**: treat an empty additional-report id as no id (#851)
+- **config**: refuse a config path with a NUL as unreadable (#848)
+- refuse a too-deep parsed config and pick console color per stream (#845)
+- **plugin,merge**: signal cause and one-line override refusal (#842)
+- **config**: refuse a named config file that does not exist (#841)
+- harden scanner execution, configuration handling, and report output (#800)
+- carry the remaining scanner, test and CI follow-ups from the restack (#834)
+- Harden scanner configuration, reporting, and MCP source delivery (#830)
+- **sandbox**: resolve the content database caches the way grype and trivy do on each platform (#797)
+- **sandbox**: harden the Linux backends (Unix sockets, host caches, output dir, firejail confinement) (#786)
+- **converters**: do not follow symlinks out of the scanned tree (#795)
+- **config**: repository-local and MCP-supplied config cannot select packages, scanner configs or sandbox grants (#784)
+- **sandbox**: least-privilege macOS profile and working scanners under sandbox-exec (#793)
+- **sandbox**: keep the operator's sandbox mode when its config is in the tree (#780)
+- **deps**: bump aws-cdk-lib to 2.273.0 for bundled brace-expansion CVEs (#782)
+- **deps**: bump handlebars to 4.7.10 for GHSA-8r5x-fm3f-whwj (#781)
+- **sandbox**: repo-local config can no longer widen the sandbox (#779)
+- **ci**: stop writing GITHUB_PATH from setup-ash and run-scan-test (#776)
+- **deploy**: take the CodeCommit gate's VPC egress destination from ScanEgressCidr (#774)
+- **ci**: close zizmor findings in workflows and composite actions (#764)
+- **npm-audit**: turn pnpm audit advisories into findings (#767)
+- **npm-audit**: parse yarn audit output and report yarn audit failures (#765)
+- **deps**: pin and verify the goose, cursor, q, and kiro-cli installs (#763)
+- **container**: pin apt and pip packages and drop root in the Dockerfiles (#762)
+- **cli**: keep the pre-#766 --tool names working as deprecated aliases (#773)
+- **container**: apply --uv-tool-pins to the scanners ash dependencies install builds (#766)
+- **npm-audit**: report a failed audit as ERROR, not PASSED (#759)
+- **deps**: tool install integrity: pinned digests, verified-present skip, third-party notices (#740)
+- **offline**: say how to seed the semgrep and opengrep rule cache, and stop the MISSING message suggesting --dryrun (#755)
+- **scanners**: scanner execution correctness: spawn failures, environ race, offline resolution (#737)
+- **mcp**: confine config paths to allowed roots (#728)
+- **types**: give the Nix interpreter its own name in _verify (#730)
+- **security**: replace directory-glob secret and Actions suppressions (#724)
+- second batch of output bugs found by snapshot tests (#719)
+- **cli**: stop rich from dropping [tool.ash] in the --config help (#726)
+- **nix**: run the flake's Python scanners instead of a uv substitute (#723)
+- **deps**: drop sprintf-js from the deploy CDK lockfiles (#721)
+- **deps**: bump werkzeug to 3.1.9 for GHSA-g6x2-hccm-hh4m (#722)
+- **ci**: give the SARIF upload a job that can hold security-events: write (#713)
+- output bugs found by snapshot tests (#718)
+- **logging**: make debug output and scanner hangs visible in CI (#711)
+- **ferret**: support ferret-scan 2.5.x and raise the window to <2.6.0 (#706)
+- **scanners**: run a verified pre-installed tool offline instead of re-resolving through uv (#708)
+- **npm-audit**: suppress transitive findings whose every root advisory is suppressed (#716)
+- **security**: suppress GHSA-vfj7-8cjw-p6xm (braces, no fix) until 2026-11-04 (#715)
+- **config**: declare unused-suppressions, read aliased field names, and look plugin config up by declared name (#691)
+- **core**: retry a Windows read that lands inside an atomic replace (#699)
+- **deps**: move gitpython off 3.1.61 for GHSA-59cr-6r3x-644w (#697)
+- **core**: replace ash_aggregated_results.json atomically (#690)
+- **docs**: regenerate MCP and CLI references, and read the reporter registry in the docs-freshness check (#689)
+- **mcp**: deny by default, validate caller-supplied ids, and make sessions and profiles compose (#665)
+- **reporters**: read flat.json line numbers from region, not contextRegion (#682)
+- derive the values that were restated by hand, and make the gates over them able to fail (#678)
+- **docs**: generate the CLI, reporter and MCP references from the code that defines them (#680)
+- **deps**: move pyjwt and brace-expansion off versions with new advisories (#686)
+- scan hand-authored dependency files for secrets, and bound which env vars a config file may interpolate (#673)
+- **ci**: make the base-image fallback actually reach the build (#681)
+- **ci**: derive the floating tag from the released major, not a literal v3 (#636)
+- **core**: correct the scanner version probe and its reported format (#635)
+- **ci**: stop the container build legs from scanning the checkout, and retry the nerdctl snapshot GC race (#631)
+- **ci**: suppress bandit's subprocess rules on the stdio MCP server test (#619)
+- **inspect**: write suppressions to active config (#622)
+- **models**: make scanner_results hold the type it declares (#614)
+- **sarif**: reduce a file:// URI to a path Windows recognizes (#600)
+- **mcp**: repair the resource_management integration tests, and the two defects they caught (#611)
+- **cli**: report startup failures when the process has no console (#595)
+- **sarif**: preserve rule severity during aggregation (#580)
+- **tests**: give each xdist worker its own jsii package cache (#607)
+- **config**: preserve comments and escape reasons when writing suppressions (#593)
+- **logging**: keep Rich markup from destroying failing-command diagnostics (#589)
+- **ci**: run the gate on main, keyed per commit so it cannot be evicted (#587)
+- **cdk-nag**: stop a scan that evaluated nothing from reporting SKIPPED (#576)
+- **scan**: the exit code has to be able to say "nothing was checked" (#575)
+- **cdk**: make every cdk-nag suppression reason true of its resource, and widen the inline template margin (#574)
+- **ci**: close the gaps where a gate reported nothing (#563)
+- **cfn-nag**: count failed templates so a broken scan cannot report PASSED (#572)
+- **junitxml**: read the severity threshold from the config, not from a property nothing writes (#573)
+- **deps**: provision the three scanners ASH could never install, with pinned digests (#568)
+- **models**: resolve the AshConfig forward reference on first use (#567)
+- make the retry and cache guards that never fired actually fire (#560)
+- **reporting**: make a scanner's report tell the truth about what it scanned (#559)
+- **ci**: suppress six pre-existing bandit findings in test code (#571)
+- land the CDK ref fixture change with the suppression it requires (#558)
+- **transpiler**: drop the dead transpile entry point and fix the docs it broke (#544)
+- **plugins**: stop the installed ASH tag going stale, and SHA-pin two actions (#542)
+- **test**: stop a leaked stdout log handler from failing the scan-set silence test (#545)
+- **scanners**: probe a uv tool's version once, not once per project (#549)
+- **scanners**: report SKIPPED when a scanner evaluated nothing (#535)
+- **cdk-nag**: migrate to cdk-nag 3.x and report per-target failures (#514)
+- **scanners**: set the detect-secrets scan root on every scan (#502)
+- **scan-set**: apply nested ignore files to the subtree they sit in (#501)
+
+### Refactor
+
+- **mcp**: drop the unreachable arm of get_scan_results' scan_id ternary (#617)
+
+### Perf
+
+- make secret masking single-pass over the report (#898)
+- **ci**: stop the required-checks gate queueing for a runner on a green run (#738)
+- **ci**: collapse the five cheap install methods into one matrix leg (#669)
 
 ## v3.7.1 (2026-09-03)
 

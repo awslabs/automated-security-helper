@@ -15,7 +15,7 @@ module "ash_image" {
   source = "../../../ash-image-pipeline"
 
   name_prefix         = "ash-pr-gate"
-  ash_version         = "v3.7.1"
+  ash_version         = "v3.8.0"
   target_architecture = "x86_64"
   rebuild_schedule    = "rate(1 day)"
 
