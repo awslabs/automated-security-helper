@@ -420,7 +420,7 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *
  * `refuse` is the default when the variable is unset, so nothing an existing
  * deployment does changes. `warn` starts stateful and says so loudly. Only the
- * AgentCore stack sets `warn`, and only because that is where stateful was
+ * AgentCore stack set `warn`, and only because that is where stateful was
  * MEASURED to work — a live runtime completed initialize, tools/list and
  * tools/call, with controls proving sessions were genuinely enforced. The residual
  * hazard there is narrower than the old refusal message claimed: not "rejects
@@ -431,9 +431,9 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * This is maintainer decision D6's second option. The first — moving
  * `DEFAULT_ASH_VERSION` to a ref whose `ash mcp` accepts the flag — is the right
  * end state and needs a release cut from `main`, which no change here can make.
- * `cz bump` makes that move at the first release after 3.7.1, and the AgentCore
- * stack stops setting `warn` then (a tripwire test fails at
- * that bump until it does, as set out where the stack sets it).
+ * `cz bump` made that move at 3.8.0, the first release after 3.7.1, and the
+ * AgentCore stack no longer sets `warn` (a tripwire test failed at that bump until
+ * it was removed, and now fails if it comes back).
  *
  * The Fargate stack deliberately does NOT set it. Its hazard is a load balancer
  * routing consecutive requests to different replicas, which no measurement here

@@ -130,7 +130,7 @@ describe('AgentCore runtime contract', () => {
     expect(buildSpec).toContain('--no-stateless-http');
   });
 
-  test('the runtime resolves the contradiction between its own two defaults', () => {
+  test('the runtime sets no stateless fallback', () => {
     /*
      * AshVersion defaults to DEFAULT_ASH_VERSION and McpStatelessHttp defaults to
      * true. Through v3.7.1 the default release's `ash mcp` had no --stateless-http,
