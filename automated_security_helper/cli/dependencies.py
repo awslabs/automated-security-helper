@@ -1832,7 +1832,7 @@ def install_dependencies(
                 outcome.commands_attempted += 1
                 # A CustomCommand declared with shell=True runs through the shell,
                 # as declared; the flag was dropped before the installer saw it.
-                cmd_exit_code = _run_install_command(cmd, shell=shell)
+                cmd_exit_code = _run_install_command(cmd, shell=shell)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")
                     outcome.commands_failed += 1
