@@ -136,7 +136,9 @@ def _check(
         "in deploy/cdk/lib/ash-agentcore-stack.ts and re-synthesize "
         "(deploy/cdk/scripts/synth-templates.sh). The fallback "
         "went at the first release that has the flag and must not come back. These "
-        "jest tests assert its absence and change with it: " + "; ".join(JEST_TESTS_ON_THE_FALLBACK) + "."
+        "jest tests assert its absence and change with it: "
+        + "; ".join(JEST_TESTS_ON_THE_FALLBACK)
+        + "."
     )
     assert FALLBACK not in environment, (
         f"DEFAULT_ASH_VERSION is {default_ash_version}, whose `ash mcp` has "
