@@ -62,6 +62,12 @@ global_settings:
       reason: >-
         False positive. A changelog sentence about a Security Hub credentials check; it
         holds words, not a credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: ".github/release-notes/*.md"
+      reason: >-
+        False positive. The release notes carry the same Security Hub credentials-check
+        sentence as the CHANGELOG entry above, quoted in prose beside option names. They
+        hold words, not a credential.
     - rule_id: SSN
       path: docs/content/reference/converters.md
       reason: >-
