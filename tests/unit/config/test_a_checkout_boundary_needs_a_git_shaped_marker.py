@@ -34,6 +34,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -867,7 +868,17 @@ def test_a_runs_window_opens_safely_beside_a_concurrent_warning(
         sys.setswitchinterval(1e-6)
         for thread in threads:
             thread.start()
+        # The contention window is at least 1.5 s, then it stays open until
+        # both sides have completed once (or a generous deadline passes): on
+        # a starved runner one side can get no turn inside a fixed window,
+        # and the coverage check below would then fail on scheduling alone.
         stop.wait(1.5)
+        deadline = time.monotonic() + 60
+        while (
+            not (completed["forget"] > 0 and completed["warn"] > 0)
+            and time.monotonic() < deadline
+        ):
+            stop.wait(0.05)
     finally:
         stop.set()
         for thread in threads:
