@@ -615,7 +615,7 @@ exit 1
     expect(stderr).not.toContain('runs STATEFUL');
   });
 
-  test('taking the fallback back out of that environment restores exit 65', () => {
+  test('an ASH without the stateless flag still exits 65 on the shipped defaults', () => {
     // The control for the test above: the environment carries no fallback, so an
     // ASH without --stateless-http (an AshVersion pinned to v3.7.1 or earlier by
     // hand) still exits 65 with the server never bound. Without it, the test above

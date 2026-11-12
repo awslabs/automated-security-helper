@@ -161,6 +161,7 @@ def is_historical_doc(rel: str) -> bool:
     """Whether ``rel`` (a repository-relative path) is a record of a past release."""
     return rel in HISTORICAL_DOCS or rel.startswith(HISTORICAL_DOC_DIRS)
 
+
 #: Template placeholder the version manager renders (scripts/version_template_manager.py).
 VERSION_PLACEHOLDER = "{{VERSION}}"
 
