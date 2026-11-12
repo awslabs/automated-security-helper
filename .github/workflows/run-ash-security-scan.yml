@@ -48,6 +48,15 @@ on:
         required: false
         default: "local"
         type: string
+      runner:
+        description: >-
+          Runner label for the scan job and the reporting job. The default,
+          ubuntu-latest, is what every caller has always got. A caller whose
+          repository has the capacity can pass ubuntu-24.04-arm, whose hosted queue
+          is much shorter; this repository's own callers do.
+        type: string
+        required: false
+        default: "ubuntu-latest"
       scan-timeout-minutes:
         description: >-
           Minutes the scan job may run before it is cancelled. The default matches
@@ -332,7 +341,7 @@ env:
 jobs:
   ash:
     name: SAST, SCA, and IaC Scan
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ fromJSON(inputs.scan-timeout-minutes) }}
     outputs:
       # Empty when nothing was uploaded; the report job and the caller's SARIF job
@@ -2335,7 +2344,7 @@ jobs:
       && (needs.ash.result == 'success' || needs.ash.result == 'failure')
       && needs.ash.outputs.artifact-id != ''
       && (inputs.post-pr-comment || inputs.collect-junit-xml-report || inputs.collect-sarif-report)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
