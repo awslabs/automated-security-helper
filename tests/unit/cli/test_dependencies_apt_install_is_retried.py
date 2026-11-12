@@ -3,7 +3,15 @@
 
 """An ``apt-get install`` that fails once is retried, up to three attempts."""
 
+from __future__ import annotations
+
+import types
+
+import pytest
+
 from automated_security_helper.cli import dependencies
+
+pytestmark = pytest.mark.unit
 
 APT = ["apt-get", "install", "-y", "curl"]
 
@@ -18,7 +26,9 @@ def _script(monkeypatch, codes):
         return remaining.pop(0)
 
     monkeypatch.setattr(dependencies, "run_command", fake_run)
-    monkeypatch.setattr(dependencies.time, "sleep", sleeps.append)
+    monkeypatch.setattr(
+        dependencies, "time", types.SimpleNamespace(sleep=sleeps.append)
+    )
     return calls, sleeps
 
 
