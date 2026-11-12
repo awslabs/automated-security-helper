@@ -10,6 +10,7 @@ import os
 import platform
 import shlex
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PureWindowsPath
 from typing import Annotated, Any, Iterable, List, NoReturn, Optional, Tuple
@@ -928,6 +929,37 @@ def run_command(args: List[str], shell: bool = False):
         return 1
 
 
+#: Seconds to wait before the second and third attempt of an ``apt-get install``.
+#: apt and DNS fail transiently on a fresh runner; the other package managers
+#: are left to fail on their first error as before.
+_APT_RETRY_DELAYS_SECONDS = (2, 5)
+
+
+def _run_install_command(cmd: List[str], shell: bool = False) -> int:
+    """Run one install command, retrying an ``apt-get install`` that exits non-zero.
+
+    Up to three attempts with short, increasing pauses. Only a non-zero exit is
+    retried, and the last attempt's exit code is returned unchanged, so a
+    persistent failure is reported exactly as a single failed attempt was.
+    """
+    is_apt_install = (
+        not shell and len(cmd) > 1 and cmd[0] == "apt-get" and cmd[1] == "install"
+    )
+    if not is_apt_install:
+        return run_command(cmd, shell=shell) if shell else run_command(cmd)  # nosec B604
+    code = run_command(cmd)
+    for attempt, delay in enumerate(_APT_RETRY_DELAYS_SECONDS, start=2):
+        if code == 0:
+            break
+        print(
+            f"apt-get install failed with exit code {code}; retrying in "
+            f"{delay}s (attempt {attempt} of {len(_APT_RETRY_DELAYS_SECONDS) + 1})"
+        )
+        time.sleep(delay)
+        code = run_command(cmd)
+    return code
+
+
 def _consoles_that_no_color_turns_off() -> tuple:
     """The consoles ``--no-color`` turns color off on: the panels' and the table's,
     the error one and the shared one the ``print()`` lines are written through."""
@@ -1800,9 +1832,7 @@ def install_dependencies(
                 outcome.commands_attempted += 1
                 # A CustomCommand declared with shell=True runs through the shell,
                 # as declared; the flag was dropped before the installer saw it.
-                cmd_exit_code = (
-                    run_command(cmd, shell=shell) if shell else run_command(cmd)  # nosec B604
-                )
+                cmd_exit_code = _run_install_command(cmd, shell=shell)
                 if cmd_exit_code != 0:
                     print(f"Command failed with exit code: {cmd_exit_code}")
                     outcome.commands_failed += 1
