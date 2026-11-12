@@ -545,7 +545,11 @@ export class AshImageBuild extends Construct {
       // console has not run.
       code: lambda.Code.fromInline(BOOTSTRAP_STARTER_CODE),
       handler: 'index.handler',
-      runtime: lambda.Runtime.PYTHON_3_14,
+      // Spelled out because the pinned aws-cdk-lib predates the PYTHON_3_15
+      // constant; inline code is allowed for Python runtimes, hence the option.
+      runtime: new lambda.Runtime('python3.15', lambda.RuntimeFamily.PYTHON, {
+        supportsInlineCode: true,
+      }),
       timeout: Duration.minutes(1),
       description:
         'Starts the ASH image build during stack creation; the build answers ' +

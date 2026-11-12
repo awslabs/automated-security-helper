@@ -42,11 +42,14 @@ prerequisite exists), or in ``NOT_MANAGED`` (installed some other way). A scanne
 instance cannot be built, or that fits none of the three, stops the generator instead of
 dropping out of the CI snippets.
 
+Declared by each plugin class, read from the class (no instance): ``display_name``,
+``docs_summary`` (a scanner's tagline, a converter's sentence) and, on scanners,
+``covers``. A plugin without a ``display_name`` shows under its config name.
+
 Curated here, keyed by plugin name, because nothing in the code says it:
-``SCANNER_DOCS`` (display name, icon, tagline, language coverage), ``TRACKS`` (the
-example files, findings and severities of the scan example), ``SCAN_FORMATS`` (which
-report formats the example links), ``CONVERTER_DOCS`` (what each converter does, in a
-sentence). This is the pattern ``REPORTER_DOCS`` in
+``SCANNER_DOCS`` (the featured scanners, their icon and strip style), ``TRACKS`` (the
+example files, findings and severities of the scan example) and ``SCAN_FORMATS`` (which
+report formats the example links). This is the pattern ``REPORTER_DOCS`` in
 ``generate_reporter_docs.py`` already uses. The check is a completeness one: an entry
 that names a plugin the registry lacks, a built-in scanner that is neither featured
 nor named in ``HOME_GRID_OMITTED``, or an engine whose tool type puts it in another
@@ -106,76 +109,20 @@ CATEGORY_LABELS = (
 )
 
 #: The scanners the home page's grid features, in the order it shows them, with the
-#: words only a person can write. ``strip`` is how the one-line strip above the
+#: presentation only a person can choose: the icon, and ``strip``, which is how the one-line strip above the
 #: workflow section shows the scanner: "icon" with its icon, "plain" as text, absent
 #: when it is not in the strip.
 SCANNER_DOCS: dict[str, dict[str, str]] = {
-    "bandit": {
-        "display": "Bandit",
-        "icon": "language-python",
-        "tagline": "Python security checks",
-        "covers": "Python",
-        "strip": "plain",
-    },
-    "semgrep": {
-        "display": "Semgrep",
-        "icon": "code-braces",
-        "tagline": "Pattern-based code checks",
-        "covers": "Multiple languages",
-        "strip": "plain",
-    },
-    "opengrep": {
-        "display": "Opengrep",
-        "icon": "code-tags-check",
-        "tagline": "Pattern-based code checks",
-        "covers": "Multiple languages",
-    },
-    "checkov": {
-        "display": "Checkov",
-        "icon": "check-decagram-outline",
-        "tagline": "Infrastructure policy checks",
-        "covers": "Terraform, Kubernetes, CloudFormation",
-        "strip": "icon",
-    },
-    "cdk-nag": {
-        "display": "CDK-Nag",
-        "icon": "cloud-check-outline",
-        "tagline": "NagPack policy checks",
-        "covers": "CloudFormation",
-    },
-    "cfn-nag": {
-        "display": "CFN-Nag",
-        "icon": "cloud-outline",
-        "tagline": "Template security checks",
-        "covers": "CloudFormation",
-    },
-    "detect-secrets": {
-        "display": "detect-secrets",
-        "icon": "fingerprint",
-        "tagline": "Secret detection",
-        "covers": "Text files",
-        "strip": "icon",
-    },
-    "grype": {
-        "display": "Grype",
-        "icon": "cube-scan",
-        "tagline": "Vulnerability matching",
-        "covers": "Packages and container images",
-        "strip": "icon",
-    },
-    "npm-audit": {
-        "display": "npm audit",
-        "icon": "package-variant-closed",
-        "tagline": "Dependency vulnerability checks",
-        "covers": "Node.js",
-    },
-    "syft": {
-        "display": "Syft",
-        "icon": "layers-outline",
-        "tagline": "Software inventory",
-        "covers": "SBOM generation",
-        "strip": "icon",
-    },
+    "bandit": {"icon": "language-python", "strip": "plain"},
+    "semgrep": {"icon": "code-braces", "strip": "plain"},
+    "opengrep": {"icon": "code-tags-check"},
+    "checkov": {"icon": "check-decagram-outline", "strip": "icon"},
+    "cdk-nag": {"icon": "cloud-check-outline"},
+    "cfn-nag": {"icon": "cloud-outline"},
+    "detect-secrets": {"icon": "fingerprint", "strip": "icon"},
+    "grype": {"icon": "cube-scan", "strip": "icon"},
+    "npm-audit": {"icon": "package-variant-closed"},
+    "syft": {"icon": "layers-outline", "strip": "icon"},
 }
 #: Built-in scanners the grid deliberately does not feature. Every built-in scanner
 #: is in ``SCANNER_DOCS`` or here, so adding one forces the choice.
@@ -209,14 +156,6 @@ NOT_MANAGED = (
     "semgrep",
     "zizmor",
 )
-
-#: What each converter does, for the sentence under the scan example. ``{command}`` is
-#: filled from the converter's own command. An unknown or missing converter fails
-#: ``--check``.
-CONVERTER_DOCS: dict[str, str] = {
-    "archive": "extracts the scannable members of zip and tar archives",
-    "jupyter": "turns each notebook into a Python script with {command}",
-}
 
 #: The scan example's rows: the category it filters on, the file it shows, and the
 #: scanners it says run on it. ``engines`` is a list of groups; a group of several
@@ -281,16 +220,34 @@ SCAN_FORMATS = (
 )
 
 
+def model_docs(plugin_cls: Any) -> dict[str, Any]:
+    """The docs metadata a plugin class declares, read from the class (no instance)."""
+    return {
+        "display_name": getattr(plugin_cls, "display_name", None),
+        "docs_summary": getattr(plugin_cls, "docs_summary", None),
+        "covers": getattr(plugin_cls, "covers", None),
+    }
+
+
+def display_name(name: str, declared: dict[str, Any]) -> str:
+    """The plugin's declared display name, else its config name."""
+    return declared.get("display_name") or name
+
+
 def editorial_problems(
     scanners: dict[str, str | None],
     builtin: set[str],
     reporters: set[str],
+    docs: dict[str, dict[str, Any]],
 ) -> list[str]:
     """What is wrong with the curated maps against the registry; empty when complete.
 
     ``scanners`` maps every registered scanner name to its tool type value (None when
     it could not be determined), ``builtin`` is the built-in subset, ``reporters``
-    the registered reporter names. Pure, so a test can feed it any registry.
+    the registered reporter names, and ``docs`` maps each scanner name to what its
+    class declares (:func:`model_docs`); a featured scanner needs a ``docs_summary``
+    and ``covers`` there, and a registered featured scanner missing from ``docs`` is a
+    problem. Pure, so a test can feed it any registry.
     """
     problems: list[str] = []
     for name in SCANNER_DOCS:
@@ -309,11 +266,18 @@ def editorial_problems(
                 f"built-in scanner {name!r} is neither in SCANNER_DOCS nor in "
                 "HOME_GRID_OMITTED; feature it or omit it on purpose"
             )
-    for name, docs in SCANNER_DOCS.items():
-        for key in ("display", "icon", "tagline", "covers"):
-            if not docs.get(key):
-                problems.append(f"SCANNER_DOCS[{name!r}] has no {key}")
-        if docs.get("strip", "icon") not in ("icon", "plain"):
+    for name, docs_entry in SCANNER_DOCS.items():
+        if not docs_entry.get("icon"):
+            problems.append(f"SCANNER_DOCS[{name!r}] has no icon")
+        declared = docs.get(name)
+        if name in scanners and declared is None:
+            problems.append(f"scanner {name!r} has no class docs to read")
+        if declared is not None:
+            if not declared.get("docs_summary"):
+                problems.append(f"scanner {name!r} declares no docs_summary")
+            if not declared.get("covers"):
+                problems.append(f"scanner {name!r} declares no covers")
+        if docs_entry.get("strip", "icon") not in ("icon", "plain"):
             problems.append(f"SCANNER_DOCS[{name!r}] strip must be 'icon' or 'plain'")
         tool_type = scanners.get(name)
         if name in scanners and tool_type not in TOOL_TYPE_CATEGORY:
@@ -333,7 +297,7 @@ def editorial_problems(
                 if name not in SCANNER_DOCS:
                     problems.append(
                         f"track {track['category']!r} names {name!r}, which is not "
-                        "in SCANNER_DOCS (it needs a display name)"
+                        "in SCANNER_DOCS (it needs an icon)"
                     )
                     continue
                 derived = TOOL_TYPE_CATEGORY.get(scanners.get(name) or "")
@@ -392,14 +356,17 @@ def managed_problems(declares: dict[str, bool | None]) -> list[str]:
 
 
 def converter_problems(
-    commands: dict[str, str | None], unbuilt: frozenset[str] = frozenset()
+    commands: dict[str, str | None],
+    unbuilt: frozenset[str],
+    summaries: dict[str, str | None],
 ) -> list[str]:
-    """What is wrong with ``CONVERTER_DOCS`` against the registered converters.
+    """What is wrong with the registered converters' docs metadata.
 
     ``commands`` maps each registered converter to its command (None when it runs in
     the ASH process). ``unbuilt`` names the converters whose instance could not be
     built here: their command is unknown, not absent, so the run stops rather than
-    publish what this machine happens to see.
+    publish what this machine happens to see. ``summaries`` maps each converter to the
+    ``docs_summary`` its class declares; a converter with none is an error.
     """
     problems: list[str] = []
     for name in sorted(unbuilt):
@@ -407,19 +374,9 @@ def converter_problems(
             f"converter {name!r} could not be built, so its command is unknown on "
             "this machine; the partial would differ from one built elsewhere"
         )
-    for name in CONVERTER_DOCS:
-        if name not in commands:
-            problems.append(
-                f"CONVERTER_DOCS names {name!r}, which no converter registers"
-            )
-    for name, command in sorted(commands.items()):
-        text = CONVERTER_DOCS.get(name)
-        if text is None:
-            problems.append(f"converter {name!r} has no entry in CONVERTER_DOCS")
-        elif "{command}" in text and not command and name not in unbuilt:
-            problems.append(
-                f"CONVERTER_DOCS[{name!r}] uses {{command}}, but the converter has none"
-            )
+    for name in sorted(commands):
+        if not summaries.get(name):
+            problems.append(f"converter {name!r} declares no docs_summary")
     return problems
 
 
@@ -526,7 +483,8 @@ def collect() -> tuple[dict[str, Any], list[str]]:
         tool_types[plugin.name] = str(value) if value else None
     builtin = {p.name for p in scanner_plugins if p.builtin}
     reporter_names = {p.name for p in reporter_plugins}
-    problems = editorial_problems(tool_types, builtin, reporter_names)
+    class_docs = {p.name: model_docs(p.cls) for p in scanner_plugins}
+    problems = editorial_problems(tool_types, builtin, reporter_names, class_docs)
 
     extensions: dict[str, str | None] = {}
     for plugin in reporter_plugins:
@@ -538,13 +496,14 @@ def collect() -> tuple[dict[str, Any], list[str]]:
     home = []
     for name, docs in SCANNER_DOCS.items():
         tool_type = tool_types.get(name) or ""
+        declared = class_docs.get(name, {})
         entry: dict[str, Any] = {
             "name": name,
-            "display": docs["display"],
+            "display": display_name(name, declared),
             "category": TOOL_TYPE_CATEGORY.get(tool_type),
             "icon": docs["icon"],
-            "tagline": docs["tagline"],
-            "covers": docs["covers"],
+            "tagline": declared.get("docs_summary") or "",
+            "covers": ", ".join(declared.get("covers") or []),
             "tag": TOOL_TYPE_TAG.get(tool_type),
             "strip": docs.get("strip"),
             "href": f"{SCANNERS_URL}#{name}",
@@ -560,7 +519,7 @@ def collect() -> tuple[dict[str, Any], list[str]]:
                 "file": track["file"],
                 "icon": track["icon"],
                 "engines": [
-                    " + ".join(SCANNER_DOCS.get(n, {}).get("display", n) for n in group)
+                    " + ".join(display_name(n, class_docs.get(n, {})) for n in group)
                     for group in track["engines"]
                 ],
                 "finding": track["finding"],
@@ -585,15 +544,16 @@ def collect() -> tuple[dict[str, Any], list[str]]:
         for plugin in converter_plugins
     }
     unbuilt = frozenset(p.name for p in converter_plugins if p.instance is None)
-    problems += converter_problems(commands, unbuilt)
+    summaries = {p.name: model_docs(p.cls)["docs_summary"] for p in converter_plugins}
+    problems += converter_problems(commands, unbuilt, summaries)
     converters = []
     for name, command in sorted(commands.items()):
-        text = CONVERTER_DOCS.get(name, "")
+        text = summaries.get(name) or ""
         converters.append(
             {
                 "name": name,
                 "command": command,
-                "description": text.replace("{command}", command or ""),
+                "description": text,
             }
         )
 

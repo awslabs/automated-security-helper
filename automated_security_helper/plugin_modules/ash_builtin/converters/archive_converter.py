@@ -2198,6 +2198,9 @@ class ArchiveConverterConfig(ConverterPluginConfigBase):
 class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     """Converter implementation for Archive file extraction."""
 
+    display_name = "Archive"
+    docs_summary = "extracts the scannable members of zip and tar archives"
+
     def model_post_init(self, context):
         # Without a config, ConverterPluginBase would give a nameless one, and the
         # work directory would be named for the class (work/ArchiveConverter)

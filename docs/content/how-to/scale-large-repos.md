@@ -213,8 +213,8 @@ jobs:
               uv tool dir --bin >> "${GITHUB_PATH}" &&
               cd "${RUNNER_TEMP}" &&
               "$(uv tool dir --bin)/ash" dependencies install \
-                --tool grype --tool syft --tool opengrep --tool cfn-nag \
-                --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy
+                --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+                --tool grype --tool opengrep --tool syft --tool trivy
           } 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"

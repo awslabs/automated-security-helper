@@ -3199,6 +3199,41 @@ global_settings:
         template creates no secret, so the ECR repositories are the only resources
         it trips this on. The check is a minimum length of 1 on a property an
         unbound Fn::If presents as ''. See the block comment above.
+    # W1030 is the same minimum-length check reported by the cdk-nag wrapper's own
+    # synth, which started flagging these parameter defaults when aws-cdk-lib 2.276.0
+    # updated its bundled property specs. One entry per template, nine records in all.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Three records: SecretString from McpAuthHeaderValue, EncryptionConfiguration.KmsKey
+        from KmsKeyArn, and RequestHeaderAllowlist.0 from McpAuthHeaderName. The
+        empty-string default is the documented feature-off sentinel for an optional
+        input (KMS key, MCP auth header and value), validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        One record, EncryptionConfiguration.KmsKey from KmsKeyArn. The empty-string
+        default is the documented feature-off sentinel for an optional KMS key,
+        validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        One record, EncryptionConfiguration.KmsKey from KmsKeyArn. The empty-string
+        default is the documented feature-off sentinel for an optional KMS key,
+        validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Two records: SecretString from McpAuthHeaderValue and
+        EncryptionConfiguration.KmsKey from KmsKeyArn. The empty-string default is
+        the documented feature-off sentinel for an optional input (KMS key, MCP auth
+        value), validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Two records, EncryptionConfiguration.KmsKey from KmsKeyArn on the two
+        repositories. The empty-string default is the documented feature-off
+        sentinel for an optional KMS key, validated before use.
 
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml

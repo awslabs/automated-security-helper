@@ -318,6 +318,9 @@ class JupyterConverterConfig(ConverterPluginConfigBase):
 class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
 
+    display_name = "Jupyter"
+    docs_summary = "turns each notebook into a Python script with jupyter-nbconvert"
+
     # How the dependency check chose to run nbconvert: "uv" (`uv tool run` with
     # this converter's requirement) or "direct" (the jupyter-nbconvert it verified,
     # by that path, kept in _nbconvert_path). None before a check. A conversion

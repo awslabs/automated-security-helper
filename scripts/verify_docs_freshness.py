@@ -759,6 +759,22 @@ MANAGED_TOOLS_PINNED = (
 )
 #: Guides whose install lines name the managed tools (each as .md and .md.template).
 CI_GUIDE_NAMES = ("github-actions", "gitlab-ci", "other-ci")
+#: Other pages, under docs/content (each as .md and, where it exists, .md.template),
+#: that may name the managed tools in a ``--tool`` run, with whether the page must
+#: carry one. Every stem must resolve to at least one file. A required page
+#: (scale-large-repos, which installs the whole set in its job) is held to the full
+#: list in the registry's order, like the CI guides. An optional page (the CLI
+#: reference and the advanced-usage page show short examples of one or two tools,
+#: under _INSTALL_RUN_MIN) is held only if a long run appears, and then to an
+#: in-order subset of the registry's order, so a three-tool example is fine and a
+#: re-ordered one is not.
+#: Known uncovered: docs/content/contributing/testing.md carries a three-tool run
+#: that this list does not read.
+INSTALL_LINE_PAGES = (
+    ("docs/advanced-usage", False),
+    ("how-to/scale-large-repos", True),
+    ("reference/cli", False),
+)
 #: A run of ``--tool NAME`` options, across line continuations and folded lines.
 _TOOL_RUN = re.compile(
     r"(?:--tool[ \t]+[\w-]+(?:[ \t]*\\?[ \t]*\n[ \t]*|[ \t]+))+--tool[ \t]+[\w-]+"
@@ -786,25 +802,58 @@ def _managed_tool_failures(partial_text: str, where: str) -> list[str]:
             f"{list(MANAGED_TOOLS_PINNED)} in scripts/verify_docs_freshness.py; "
             "a change to the managed set touches both"
         )
-    guides = DOCS_DIR / "content" / "how-to" / "ci"
-    for name in CI_GUIDE_NAMES:
-        for suffix in (".md", ".md.template"):
-            page = guides / f"{name}{suffix}"
-            rel = page.relative_to(REPO_ROOT).as_posix()
-            runs = [
-                re.findall(r"--tool[ \t]+([\w-]+)", match.group(0))
-                for match in _TOOL_RUN.finditer(read_text(page))
-            ]
-            runs = [run for run in runs if len(run) >= _INSTALL_RUN_MIN]
-            if not runs:
-                failures.append(f"{rel}: no install line naming the managed tools")
-            for run in runs:
-                if run != managed:
-                    failures.append(
-                        f"{rel}: an install line names {run}; expected the "
-                        f"registry's alphabetical order: {managed}"
-                    )
+    content = DOCS_DIR / "content"
+    pages = [
+        (content / "how-to" / "ci" / f"{name}{suffix}", True)
+        for name in CI_GUIDE_NAMES
+        for suffix in (".md", ".md.template")
+    ]
+    for stem, required in INSTALL_LINE_PAGES:
+        found = [
+            content / f"{stem}{suffix}"
+            for suffix in (".md", ".md.template")
+            if (content / f"{stem}{suffix}").exists()
+        ]
+        if not found:
+            # A stem that matches nothing would leave the page unchecked and the
+            # gate green, so a renamed or removed page fails here.
+            failures.append(
+                f"docs/content/{stem}(.md|.md.template): listed in "
+                "INSTALL_LINE_PAGES but no such file exists"
+            )
+        # A required page is held whether or not its template exists (read_text
+        # then fails loudly); an optional one only where a file exists, as the CLI
+        # reference has no template.
+        pages.extend((page, required) for page in found)
+    for page, required in pages:
+        rel = page.relative_to(REPO_ROOT).as_posix()
+        runs = [
+            re.findall(r"--tool[ \t]+([\w-]+)", match.group(0))
+            for match in _TOOL_RUN.finditer(read_text(page))
+        ]
+        runs = [run for run in runs if len(run) >= _INSTALL_RUN_MIN]
+        if not runs and required:
+            failures.append(f"{rel}: no install line naming the managed tools")
+        for run in runs:
+            # A required page installs the whole set, so its run is the full list.
+            # An optional page may show any in-order subset of it.
+            if required and run != managed:
+                failures.append(
+                    f"{rel}: an install line names {run}; expected the "
+                    f"registry's alphabetical order: {managed}"
+                )
+            elif not required and not _is_ordered_subset(run, managed):
+                failures.append(
+                    f"{rel}: an install line names {run}; expected an in-order "
+                    f"subset of the registry's alphabetical order: {managed}"
+                )
     return failures
+
+
+def _is_ordered_subset(run: list[str], managed: list[str]) -> bool:
+    """Whether ``run`` is ``managed`` with some entries left out, order kept."""
+    remaining = iter(managed)
+    return all(name in remaining for name in run)
 
 
 # ---------------------------------------------------------------------------

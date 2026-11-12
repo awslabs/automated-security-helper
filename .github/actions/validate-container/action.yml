@@ -181,8 +181,7 @@ runs:
       run: brew install --cask finch
     - name: "finch: install (Linux)"
       if: inputs.runtime == 'finch' && runner.os == 'Linux'
-      shell: bash
-      run: sudo bash scripts/setup-finch-linux.sh
+      uses: ./.github/actions/setup-finch
     - name: "finch: init and start VM (macOS only)"
       if: inputs.runtime == 'finch' && runner.os == 'macOS'
       shell: bash

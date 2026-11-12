@@ -490,7 +490,22 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
         f"{n}{s}" for n in gate.CI_GUIDE_NAMES for s in (".md", ".md.template")
     ]
 
-    def check(partial_text=partial, how_text=how, choose_text=choose, guides=None):
+    real_content = gate.DOCS_DIR / "content"
+    # The other pages whose --tool runs are held to the same order, as stem + suffix.
+    extra_pages = [
+        f"{stem}{suffix}"
+        for stem, _required in gate.INSTALL_LINE_PAGES
+        for suffix in (".md", ".md.template")
+        if (real_content / f"{stem}{suffix}").exists()
+    ]
+
+    def check(
+        partial_text=partial,
+        how_text=how,
+        choose_text=choose,
+        guides=None,
+        extras=None,
+    ):
         files = {
             "PLUGIN_DATA_PARTIAL": partial_text,
             "HOW_ASH_WORKS_MD": how_text,
@@ -509,6 +524,13 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
             if text is None:
                 text = (real_guides / name).read_text(encoding="utf-8")
             (staged / name).write_text(text, encoding="utf-8")
+        for name in extra_pages:
+            text = (extras or {}).get(name)
+            if text is None:
+                text = (real_content / name).read_text(encoding="utf-8")
+            target = docs / "content" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
         monkeypatch.setattr(gate, "DOCS_DIR", docs)
         # check_plugin_data reports page paths relative to REPO_ROOT.
         monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
@@ -573,6 +595,56 @@ def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
         bare = "\n".join(line for line in text.splitlines() if "--tool" not in line)
         failures = check(guides={name: bare})
         assert any(name in f and "no install line" in f for f in failures), name
+    # The pages that install the set outside the CI guides: the required one must carry
+    # a long run in the registry's order, in the page and its template.
+    required_pages = [
+        name
+        for name in extra_pages
+        if any(name.startswith(stem) for stem, req in gate.INSTALL_LINE_PAGES if req)
+    ]
+    assert required_pages, "no required install-line page is staged"
+    for name in required_pages:
+        text = (real_content / name).read_text(encoding="utf-8")
+        stale = text.replace("--tool cfn-nag", "--tool zzz-first --tool cfn-nag", 1)
+        assert stale != text, f"{name}: no --tool cfn-nag to reorder"
+        failures = check(extras={name: stale})
+        assert any(name in f and "alphabetical order" in f for f in failures), failures
+        bare = "\n".join(line for line in text.splitlines() if "--tool" not in line)
+        failures = check(extras={name: bare})
+        assert any(name in f and "no install line" in f for f in failures), name
+    # The optional pages are held only when a long run appears, and then to an in-order
+    # subset: an out-of-order three-tool run fails, an in-order subset and the full
+    # list pass.
+    optional_pages = [
+        name
+        for name in extra_pages
+        if any(
+            name.startswith(stem) for stem, req in gate.INSTALL_LINE_PAGES if not req
+        )
+    ]
+    assert optional_pages, "no optional install-line page is staged"
+    for name in optional_pages:
+        text = (real_content / name).read_text(encoding="utf-8")
+        full = " ".join(f"--tool {t}" for t in gate.MANAGED_TOOLS_PINNED)
+        subset = "--tool actionlint --tool gitleaks --tool trivy"
+        swapped = "--tool trivy --tool gitleaks --tool actionlint"
+        outside = "--tool actionlint --tool not-managed --tool trivy"
+        cases = ((full, True), (subset, True), (swapped, False), (outside, False))
+        for run, ok in cases:
+            failures = check(
+                extras={name: text + f"\n\nash dependencies install {run}\n"}
+            )
+            mine = [f for f in failures if name in f and "install line" in f]
+            assert bool(mine) is not ok, (name, run, failures)
+            if not ok:
+                assert any("in-order subset" in f for f in mine), mine
+    # A listed stem that matches no file fails, rather than leaving a page unchecked.
+    monkeypatch.setattr(
+        gate,
+        "INSTALL_LINE_PAGES",
+        (*gate.INSTALL_LINE_PAGES, ("reference/no-such-page", False)),
+    )
+    assert any("no-such-page" in f for f in check()), "a missing stem passed"
 
 
 @pytest.mark.unit
