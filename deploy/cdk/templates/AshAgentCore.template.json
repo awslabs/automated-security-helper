@@ -1560,7 +1560,6 @@
        ""
       ]
      },
-     "ASH_MCP_STATELESS_FALLBACK": "warn",
      "ASH_MCP_TRUST_UPSTREAM_HOST_CHECK": "true",
      "ASH_MCP_TRUST_UPSTREAM_SESSION_ID": "true"
     },
