@@ -206,25 +206,27 @@ def test_an_abandon_cancels_no_other_project(tmp_path, monkeypatch):
     cancelled if the abandon touched any other project's event.
     """
     scan = _AScanThatWaitsForItsCancel()
+    # The quick project's release is set before the run, not by a wall-clock
+    # timer: its per-project budget runs from its own start, and a loaded
+    # runner that delays a timer thread past that budget abandons it too. With
+    # the release already set, quick returns at once if (and only if) its
+    # event was not cancelled, and the single worker slot still keeps it from
+    # starting until the slow project's abandon has run.
     release = threading.Event()
+    release.set()
     scan.release["quick"] = release
     monkeypatch.setattr(execution_module, "_scan_one_project", scan)
     scan_wide = CancelEvent()
     events = {"slow": CancelEvent(), "quick": CancelEvent()}
 
-    finish_quick = threading.Timer(0.7, release.set)
-    finish_quick.start()
-    try:
-        with cancel_scope(scan_wide):
-            collected = _run_projects(
-                [_project(tmp_path, "slow"), _project(tmp_path, "quick")],
-                _settings(tmp_path, project_timeout=0.4),
-                None,
-                1,
-                cancel_events=events,
-            )
-    finally:
-        finish_quick.cancel()
+    with cancel_scope(scan_wide):
+        collected = _run_projects(
+            [_project(tmp_path, "slow"), _project(tmp_path, "quick")],
+            _settings(tmp_path, project_timeout=0.4),
+            None,
+            1,
+            cancel_events=events,
+        )
 
     assert _settle(scan, "slow") == "cancelled"
     assert _settle(scan, "quick") == "finished on its own"
