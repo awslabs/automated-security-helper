@@ -48,6 +48,12 @@ jobs:
       # No security-events here. The called workflow drops it, so granting it here
       # never reached the upload step; the sarif job below holds it instead.
     with:
+      # The scan and its reporting job run on the arm64 hosted image. On ubuntu-latest
+      # the scan queued 22.8 minutes and the reporting job another 12.2 in run
+      # 43285884861, for under seven minutes of work; the arm queue on the same run was
+      # under a minute, and the Unified CI scan matrix already runs its arm legs green.
+      # The job names, and so the required check name, do not change.
+      runner: ubuntu-24.04-arm
       # This job is the required check `ash / SAST, SCA, and IaC Scan`, so the ASH
       # that judges a pull request is never the one the pull request changes.
       #
@@ -144,6 +150,8 @@ jobs:
     with:
       # The exact artifact the scan job uploaded, in whichever attempt it ran.
       artifact-id: ${{ needs.ash.outputs.artifact-id }}
+      # The runner the scan used (5.5 minutes of queue for 0.4 of work on ubuntu-latest).
+      runner: ubuntu-24.04-arm
 
   # WHY THIS JOB EXISTS
   #

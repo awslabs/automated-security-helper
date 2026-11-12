@@ -20,7 +20,7 @@ from __future__ import annotations
 #: The runner pools, in the order every family lists its three jobs.
 POOLS = ("linux", "macos", "windows")
 
-#: The unit tier: ``-m unit``, unsharded.
+#: The unit tier: ``-m unit``, with a shard axis.
 UNIT_TEST_JOB_IDS = tuple(f"unit-test-{pool}" for pool in POOLS)
 
 #: The integration tier: ``-m integration``, with a shard axis.

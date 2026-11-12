@@ -36,6 +36,15 @@ def load_script(name: str) -> ModuleType:
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    # Scripts import their siblings by bare name (``_plugin_reference`` does
+    # ``from generate_config_reference import ...``), which resolves only when
+    # ``scripts/`` is on ``sys.path``. Until now that worked only when an
+    # earlier test had put it there, so make the load self-sufficient and
+    # take the entry back out.
+    scripts_dir = str(SCRIPTS_DIR)
+    added_path = scripts_dir not in sys.path
+    if added_path:
+        sys.path.insert(0, scripts_dir)
     try:
         spec.loader.exec_module(module)
     except BaseException:
@@ -45,6 +54,9 @@ def load_script(name: str) -> ModuleType:
         # misleading AttributeError instead of the real error.
         sys.modules.pop(module_name, None)
         raise
+    finally:
+        if added_path and scripts_dir in sys.path:
+            sys.path.remove(scripts_dir)
     return module
 
 
