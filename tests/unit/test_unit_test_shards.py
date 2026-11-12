@@ -2804,7 +2804,16 @@ class TestTheIntegrationAndE2eFamiliesMirrorTheUnitFamily:
             job["strategy"]["matrix"]["python-version"]
             == unit["strategy"]["matrix"]["python-version"]
         )
-        assert job["strategy"]["max-parallel"] == unit["strategy"]["max-parallel"]
+        # The caps are pinned as (unit, integration) pairs. They match in every pool
+        # but macOS: the unit job's cap is 12 so that the 3 Python versions x 4
+        # shards of a pull request start together, while the integration job keeps
+        # its cap of 10 (it is not sharded, and the macOS pool is the smallest). A
+        # pool missing here, or a cap moved in either job, fails this test.
+        caps = {"linux": (24, 24), "macos": (12, 10), "windows": (12, 12)}
+        assert (
+            unit["strategy"]["max-parallel"],
+            job["strategy"]["max-parallel"],
+        ) == caps[pool]
         assert job["strategy"]["fail-fast"] is False
 
     def test_the_integration_jobs_differ_in_nothing_but_pool_specific_keys(self):

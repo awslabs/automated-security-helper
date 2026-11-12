@@ -135,12 +135,19 @@ def test_both_workflows_take_the_artifact_name_defaulting_to_ash_output(path):
 def test_the_upload_workflow_takes_an_optional_artifact_id():
     inputs = _inputs(UPLOAD_WORKFLOW)
 
-    assert set(inputs) == {"artifact-id", "artifact-name"}, inputs
+    assert set(inputs) == {"artifact-id", "artifact-name", "runner"}, inputs
     spec = inputs["artifact-id"]
     assert spec.get("required", False) is False, "existing callers pass nothing"
     assert spec["type"] == "string"
     assert spec.get("default") == ""
     assert "upload-artifact" in spec["description"]
+
+    # The runner label of the upload job: optional, so existing callers get the
+    # runner they have always had.
+    runner = inputs["runner"]
+    assert runner["type"] == "string"
+    assert runner.get("required", False) is False, "existing callers pass nothing"
+    assert runner.get("default") == "ubuntu-latest"
 
 
 @pytest.mark.unit

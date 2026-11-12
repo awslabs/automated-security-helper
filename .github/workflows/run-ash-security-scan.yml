@@ -439,6 +439,7 @@ jobs:
           INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
           INPUT_BASE_REF: ${{ inputs.base-ref }}
           INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          INPUT_RUNNER: ${{ inputs.runner }}
         run: |
           set -euo pipefail
           # Byte by byte, so the answer is the same whatever locale the runner has: in
