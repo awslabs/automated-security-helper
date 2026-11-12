@@ -22,19 +22,19 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.1
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
-      ash-version: v3.7.1
+      ash-version: v3.8.0
       ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
   sarif:
     needs: ash
     if: ${{ !cancelled() && needs.ash.outputs.artifact-id != '' }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.7.1
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0
     permissions:
       contents: read
       security-events: write
@@ -59,10 +59,10 @@ code 1.
 
 ASH's zizmor scanner reports each `uses:` line that names a tag as `zizmor/unpinned-uses` at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
-commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.7.1`
-prints the commit that `v3.7.1` names. Replace the `v3.7.1` after each `@`, and the
+commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.8.0`
+prints the commit that `v3.8.0` names. Replace the `v3.8.0` after each `@`, and the
 `ash-version` value, with that SHA, and end each `uses:` line with the comment
-`# v3.7.1`.
+`# v3.8.0`.
 
 A pull request scan reads the configuration in the branch it scans, so the branch can change
 the gate. The workflow passes the `fail-on-findings` choice on the command line, and the
@@ -255,13 +255,13 @@ Add it to the call in [Call the reusable workflows](#reusable), keeping the call
 <!-- doctest: config kind=other reason="two entries to add to the with: block of the call in Call the reusable workflows, not a workflow on their own" -->
 ```yaml
 with:
-  ash-version: v3.7.1
+  ash-version: v3.8.0
   ash-mode: container
 ```
 
 The `install-*` inputs only matter in local mode, where they download scanner tools onto
 the runner. In container mode the scanners run inside the image, so the example sets none
-of them. The inputs a workflow accepts depend on its version: the workflow at `v3.7.1`
+of them. The inputs a workflow accepts depend on its version: the workflow at `v3.8.0`
 defines only `install-grype`, `install-syft`, and `install-opengrep`, all defaulting to
 `false`, and a caller that passes an input the referenced workflow does not define fails
 before any job starts. Check the workflow file at the tag you pin before adding one.
@@ -349,7 +349,7 @@ jobs:
       security-events: write
       actions: read # private repositories only
     env:
-      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
+      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -483,7 +483,7 @@ the install and scan steps of the job above:
   uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
   with:
     path: ~/.ash/bin
-    key: ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.7.1
+    key: ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.8.0
 - name: Install scanner tools
   working-directory: ${{ runner.temp }}
   run: |

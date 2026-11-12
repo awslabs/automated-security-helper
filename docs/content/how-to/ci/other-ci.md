@@ -15,7 +15,7 @@ the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
 ```bash
 python3 -m venv "$HOME/ash-venv"
 "$HOME/ash-venv/bin/pip" install --quiet \
-  "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
+  "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
 export PATH="$HOME/ash-venv/bin:$PATH"
 (cd "$(mktemp -d)" && ash dependencies install \
   --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
@@ -38,7 +38,7 @@ the virtual environment form unless you take the extra step in their sections:
 ```bash
 ash() {
   uvx --python 3.12 --from \
-    'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1' \
+    'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0' \
     ash "$@"
 }
 (cd "$(mktemp -d)" && ash dependencies install \
@@ -194,7 +194,7 @@ Ruby:
 pipeline {
   agent { label 'linux' }
   environment {
-    INSTALL_SPEC = 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
+    INSTALL_SPEC = 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
   }
   stages {
     stage('ASH') {
@@ -239,7 +239,7 @@ A `buildspec.yml` for a standard Linux image, for example
 version: 0.2
 env:
   variables:
-    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
+    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
 phases:
   install:
     runtime-versions:
@@ -282,7 +282,7 @@ An `azure-pipelines.yml` for a Microsoft-hosted Ubuntu agent:
 pool:
   vmImage: ubuntu-latest
 variables:
-  INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
+  INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
 steps:
   - task: UsePythonVersion@0
     inputs:
@@ -347,7 +347,7 @@ jobs:
     docker:
       - image: cimg/python:3.12-node
     environment:
-      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
+      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
     steps:
       - checkout
       - run:
@@ -358,12 +358,12 @@ jobs:
             "$HOME/ash-venv/bin/pip" install --quiet "$INSTALL_SPEC"
             echo 'export PATH="$HOME/ash-venv/bin:$PATH"' >> "$BASH_ENV"
       - restore_cache:
-          key: ash-tools-v3.7.1-{{ arch }}
+          key: ash-tools-v3.8.0-{{ arch }}
       - run:
           name: Install scanner tools
           command: (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
       - save_cache:
-          key: ash-tools-v3.7.1-{{ arch }}
+          key: ash-tools-v3.8.0-{{ arch }}
           paths:
             - ~/.ash/bin
       - run:

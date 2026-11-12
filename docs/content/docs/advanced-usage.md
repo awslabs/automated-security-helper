@@ -713,7 +713,7 @@ logging.getLogger("ash").addHandler(handler)
 
 ## CI/CD Integration
 
-> **Tip**: The examples below use pinned versions (`@v3.7.1`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
+> **Tip**: The examples below use pinned versions (`@v3.8.0`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
 
 ### GitHub Actions
 
@@ -737,7 +737,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
       - name: Run ASH scan
         # Workflow commands are stopped around the scan, as the reusable scan
         # workflow does: tool output is untrusted, and a `::`-line in it would
@@ -772,7 +772,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
     - ash --mode local
   artifacts:
     paths:

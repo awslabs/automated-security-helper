@@ -13,18 +13,18 @@ step 3 creates a small repository to test the gate on.
 
 ## 1. Build the image and push it to your registry
 
-ASH publishes no prebuilt image. Build one from `v3.7.1`, name it for your registry,
+ASH publishes no prebuilt image. Build one from `v3.8.0`, name it for your registry,
 and push it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.1
-ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.1 \
+export ASH_IMAGE_NAME=registry.example.com/security/ash:3.8.0
+ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.8.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
 
-You should see `Building image registry.example.com/security/ash:3.7.1`, a few minutes
+You should see `Building image registry.example.com/security/ash:3.8.0`, a few minutes
 of build output, and then the push. `--oci-runner docker` builds with the runtime you push
 with; without it, ASH uses finch when finch is installed. The image holds every scanner
 tool and runs as a non-root user with the UID and GID you passed; use the ones your CI
@@ -181,7 +181,7 @@ docker run --rm \
   --mount type=bind,source="$PWD/../ash-results",destination=/out \
   --mount type=bind,source=/etc/ash/ash.yaml,destination=/etc/ash/ash.yaml,readonly \
   --env ASH_CONFIG=/etc/ash/ash.yaml \
-  registry.example.com/security/ash:3.7.1 \
+  registry.example.com/security/ash:3.8.0 \
   ash scan --source-dir /src --output-dir /out
 ```
 
@@ -208,7 +208,7 @@ on each runner image or in each job:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
 ASH_CONFIG=/etc/ash/ash.yaml ash scan --source-dir . --output-dir ../ash-results
 ```
 
@@ -247,7 +247,7 @@ rebuild the image on a schedule with it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v3.7.1 \
+ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v3.8.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```

@@ -298,8 +298,8 @@ ash --source-dir . --output-dir out --scanners detect-secrets --offline
 ash scan --offline \\
   --log-level INFO
 ash config init --force && ash report --format text | tee report.txt
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.1 ash --mode local
-uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.1 --version
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --mode local
+uvx git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 --version
 docker run --rm -v "$(pwd):/src" ghcr.io/example/ash:latest ash --source-dir /src
 ASH_LOG=1 sudo -E ash -vd --version
 result=$(ash report --format text)
@@ -331,7 +331,7 @@ jobs:
 {FENCE}yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.1
+    rev: v3.8.0
     hooks:
       - id: ash-simple-scan
 {FENCE}
