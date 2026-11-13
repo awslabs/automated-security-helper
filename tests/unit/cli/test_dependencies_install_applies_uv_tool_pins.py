@@ -258,9 +258,7 @@ class TestTheDockerfileInstallsOnlyThroughThePins:
         process only.
         """
         installs = [
-            run
-            for run in _dockerfile_run_instructions()
-            if DEPS_INSTALL in run
+            run for run in _dockerfile_run_instructions() if DEPS_INSTALL in run
         ]
         assert installs, f"the Dockerfile no longer runs `{DEPS_INSTALL}`"
         for run in installs:

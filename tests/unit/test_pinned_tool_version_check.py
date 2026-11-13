@@ -653,9 +653,7 @@ class TestGemsAreJudgedByTheImagesRuby:
     ) -> None:
         pins = checker.enumerate_pins(checker.load_pins_module())
         # main() reads REPO_PINS too, so the stub answers those projects as well.
-        versions = {
-            p.project: p.version for p in pins + checker.enumerate_repo_pins()
-        }
+        versions = {p.project: p.version for p in pins + checker.enumerate_repo_pins()}
         bundler = versions["bundler"]
 
         def run(bundler_releases: "list[dict[str, Any]]") -> "tuple[int, str]":

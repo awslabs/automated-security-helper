@@ -99,4 +99,6 @@ def warn_deprecated_command_alias(alias: str, stream: Optional[TextIO] = None) -
     callback: a callback would also fire for the canonical name, and group
     callbacks can run more than once for a single command line.
     """
-    print(shown_not_obeyed(deprecated_command_message(alias)), file=stream or sys.stderr)
+    print(
+        shown_not_obeyed(deprecated_command_message(alias)), file=stream or sys.stderr
+    )

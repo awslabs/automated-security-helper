@@ -487,7 +487,9 @@ def test_no_build_without_a_custom_containerfile_runs_the_stock_image(commands):
 
     assert result.returncode == 0, result.stderr
     run = _run_command(commands)
-    assert run[run.index(CANONICAL_CLI_NAME) - 1] == "automated-security-helper:non-root"
+    assert (
+        run[run.index(CANONICAL_CLI_NAME) - 1] == "automated-security-helper:non-root"
+    )
 
 
 def test_an_image_named_by_the_environment_is_the_custom_images_base_not_the_run(
