@@ -1577,8 +1577,10 @@ def _core_case_second_change_untrailered(r: _Repo) -> list[str]:
 def _merge_resolving_golden(r: _Repo, merge_message: str) -> list[str]:
     # A branch that merges main: main's untrailered change to a generated doc enters the
     # range, the branch's own change to it is untrailered too, and the merge commit
-    # resolves the file. Only the merge's trailer can explain it.
-    doc = "docs/content/docs/cli-reference-generated.md"
+    # resolves the file. Only the merge's trailer can explain it. The file must be one
+    # GOLDEN lists: this case used docs/content/docs/cli-reference-generated.md, which
+    # left GOLDEN when the CLI reference moved, so the "no trailer" case found nothing.
+    doc = "docs/content/reference/cli.md"
     r.write(doc, "base\n")
     r.base = r.commit(f"docs: seed\n\n{GOOD}")
     r._git("checkout", "-q", "-b", "upstream")
