@@ -82,8 +82,9 @@ cd automated-security-helper
 pip install .
 ```
 
-Pin `@v{{VERSION}}` for a reproducible install. The floating `@v3` tag follows
-stable v3 releases. See the [installation guide](docs/content/how-to/install.md)
+Pin `@v{{VERSION}}` for a reproducible install. The floating `@v3` tag is frozen at
+v3.8.0 and no longer follows releases, so pin a release tag instead. See the
+[installation guide](docs/content/how-to/install.md)
 for Windows and offline environments.
 
 </details>

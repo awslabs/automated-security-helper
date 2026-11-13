@@ -32,8 +32,9 @@ ash --scanners cdk-nag,detect-secrets --no-progress
 Install from GitHub, with a git URL or with Homebrew from the repository's tap;
 [Install ASH](how-to/install.md) shows each method. ASH is not published on PyPI. The
 PyPI project named `automated-security-helper` is not published by this project, so do not
-install ASH by that name. Pin an exact release tag or a commit. The floating `v3` tag moves to
-every new 3.x release, including releases with breaking changes. A pin fixes ASH's own
+install ASH by that name. Pin an exact release tag or a commit. The floating `v3` tag is
+frozen at v3.8.0 and no longer moves to new releases; take release tags from the GitHub
+releases page. A pin fixes ASH's own
 code, not every dependency: uv, pipx, and pip resolve ASH's dependencies again when they
 install it. Homebrew installs the release its formula names, the latest one, with the
 dependency versions locked in that release's `uv.lock`.

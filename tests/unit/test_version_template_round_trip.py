@@ -33,10 +33,13 @@ edit away.
 What this asserts, and what it deliberately does not
 ----------------------------------------------------
 It asserts the round trip: ``template`` with ``{{VERSION}}`` and ``{{RELEASE}}`` replaced
-by the packaged version is byte-identical to the committed doc. The two placeholders
-differ only on the docs site's main version (``{{VERSION}}`` renders as ``main`` there, see
-docs/hooks/install_refs.py); a release and ``generate`` render both as the version, which
-is why rendering goes through ``VersionTemplateManager.render``. That is the whole invariant
+by the packaged version is byte-identical to the committed doc. Every build renders both
+placeholders as its version, which is why rendering goes through
+``VersionTemplateManager.render``; the two stay distinct so an install command's ref can
+be told from a prose release number (scripts/docs_checks.py check_release_placeholders).
+The committed doc is also what the docs site's main version serves (see
+docs/hooks/install_refs.py), so this round trip is also what keeps the main docs' install
+commands pinned to the current release. That is the whole invariant
 ``generate`` establishes, so checking it on every pull request means a doc-only edit
 fails here instead of at the next release.
 

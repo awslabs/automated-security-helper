@@ -38,7 +38,7 @@ scan exits 1. See [Extras](#extras).
 | [`pipx`](#install-with-pipx) | you already use pipx | supported |
 | [`pip` in a virtual environment](#install-with-pip) | you manage Python environments yourself | supported |
 | [Container image](#container-image) | you want every scanner without installing them | build it yourself |
-| [Nix mode](#nix-mode) | you use Nix | not in any release; install from `main` or use a source checkout |
+| [Nix mode](#nix-mode) | you use Nix | supported |
 | [Homebrew](#homebrew) | you install your tools with Homebrew, on macOS or Linux | supported |
 | pre-commit | you want a scan on every commit | see [Run ASH with pre-commit](pre-commit.md) |
 | From a clone | you are changing ASH | see [Contribute to ASH](../contributing/index.md) |
@@ -176,19 +176,19 @@ the install needs a C compiler.
 
 | Reference | What you get |
 |---|---|
-| `@v3.8.0` | That release. The release process creates each version tag once and moves only the `v3` tag. |
+| `@v3.8.0` | That release. The release process creates each version tag once and never moves it. |
 | a full commit SHA | That commit. The only reference that cannot change. |
-| `@v3` | The latest 3.x release. It moves with each release. |
+| `@v3` | v3.8.0, forever. The retired floating tag: frozen there, it no longer moves with releases. |
 | `@main` | The current development state. |
 
 Release tags are lightweight and unsigned, and releases have no signed artifacts. If
 you need a reference that cannot change, pin a commit SHA.
 
-The `v3` tag moves to each new 3.x release, and a release is not always made from
-`main`: v3.7.1 is a backport made on a separate branch, outside `main`'s history. While
-`v3` points at a release like that, it lacks features of `main` that these docs
-describe. A 3.x release can also include breaking changes, so read the release notes
-before upgrading a `v3` or `<4` pin.
+Floating major tags are retired: the `v3` tag used to move to each new 3.x release
+and is now frozen at v3.8.0, so a `v3` pin never receives updates again -- pin a
+release tag instead. A release is not always made from `main`: v3.7.1 is a backport
+made on a separate branch, outside `main`'s history. A 3.x release can also include
+breaking changes, so read the release notes before upgrading a `<4` pin.
 
 ### Install from main
 
@@ -202,6 +202,11 @@ uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://gith
 `main` reports the same version number as the latest release until the next release
 is made, so `ash --version` does not tell the two apart. Pin a commit SHA instead of
 `@main` when you need to know which code you ran.
+
+In [Nix mode](#nix-mode), an install of `main` resolves its flake to the latest
+release's tag, because that is the version it reports. Set
+`ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main`, or the commit you
+pinned, so the scanner toolchain matches the code.
 
 ## Container image
 
@@ -230,15 +235,28 @@ A file that is missing, cannot be read, does not parse, or is not a valid config
 scan with exit code 3 before the previous run's output is cleared, and that includes the
 file `ASH_CONFIG` names when `--config` names a valid one.
 
-Nix mode is not in any release: v3.7.x rejects `--mode nix`. Use it from a source
-checkout or from an install of `main`:
+Nix mode is in the latest release; v3.7.x and older reject `--mode nix`, so install a
+newer release:
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network and scans in a Nix shell" -->
+```bash
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+ash scan --mode nix
+```
+
+Which flake supplies the shell's tools:
 
 - From a source checkout, ASH uses that checkout's `flake.nix`.
-- An install of `main` looks for the flake at the release tag that matches its version
-  number. Until a release contains `flake.nix`, that fails with an error saying
-  `flake.nix` does not exist. Set `ASH_NIX_FLAKE_REF` to a flake reference that has
-  it: a checkout, written `path:` followed by its absolute path, or a branch or commit,
-  such as `github:awslabs/automated-security-helper/main`.
+- An installed ASH looks for the flake at the release tag matching the version it
+  reports, which releases newer than v3.7.x ship, so a release install needs nothing
+  set.
+- Set `ASH_NIX_FLAKE_REF` to scan with a different flake: a checkout, written `path:`
+  followed by its absolute path, or a branch, tag or commit of this repository or a
+  fork. An install of `main` reports the latest release's version number and so
+  resolves to that release's flake, not `main`'s; set
+  `ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main`, or a matching
+  commit, so the scanner toolchain matches the code you run (see
+  [Install from main](#install-from-main)).
 
 ## Homebrew
 

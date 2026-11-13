@@ -207,32 +207,34 @@ class TestTheExpansion:
     def test_an_axis_product_less_its_excludes(self):
         # 25 OS and Python combinations, cut into three jobs by OS: 2 Linux and 2 macOS
         # images and 1 Windows image, each on 5 Python versions. The unit pools and the
-        # integration tier split each combination into 4 shards (the note above
-        # unit-test-linux in the workflow; tests/unit/test_unit_test_shards.py holds
-        # those axes to one list of four); the e2e tier runs once per image, on one
-        # Python version.
-        assert LEGS["unit-test-linux"] == 2 * 5 * 4
-        assert LEGS["unit-test-macos"] == 2 * 5 * 4
-        assert LEGS["unit-test-windows"] == 1 * 5 * 4
-        assert UNIT_TEST_LEGS == 40 + 40 + 20
-        assert LEGS["integration-test-linux"] == 2 * 5 * 4
-        assert LEGS["integration-test-macos"] == 2 * 5 * 4
-        assert LEGS["integration-test-windows"] == 1 * 5 * 4
-        assert sum(LEGS[name] for name in INTEGRATION_TEST_JOB_IDS) == 25 * 4
+        # integration tier split each combination into the pool's shard count -- 6 on
+        # Linux, 8 on macOS and Windows (the note above unit-test-linux in the workflow;
+        # tests/unit/test_unit_test_shards.py pins those axes per pool); the e2e tier
+        # runs once per image, on one Python version.
+        assert LEGS["unit-test-linux"] == 2 * 5 * 6
+        assert LEGS["unit-test-macos"] == 2 * 5 * 8
+        assert LEGS["unit-test-windows"] == 1 * 5 * 8
+        assert UNIT_TEST_LEGS == 60 + 80 + 40
+        assert LEGS["integration-test-linux"] == 2 * 5 * 6
+        assert LEGS["integration-test-macos"] == 2 * 5 * 8
+        assert LEGS["integration-test-windows"] == 1 * 5 * 8
+        assert sum(LEGS[name] for name in INTEGRATION_TEST_JOB_IDS) == 180
         assert [LEGS[name] for name in E2E_TEST_JOB_IDS] == [2, 2, 1]
+        # The standalone integration suite runs in four shards of its own.
+        assert LEGS["integration-test"] == 4
 
     def test_the_jobs_that_publish_a_pytest_check_run_are_the_three_tiers(self):
         """The check-run note counts one run per leg of every job that calls the action."""
         assert sorted(PYTEST_JOB_IDS) == sorted(
             [*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS, *E2E_TEST_JOB_IDS]
         ), PYTEST_JOB_IDS
-        assert PYTEST_CHECK_RUNS == 100 + 100 + 5
+        assert PYTEST_CHECK_RUNS == 180 + 180 + 5
 
     def test_no_matrix_is_past_githubs_limit_of_256_jobs(self):
         """GitHub rejects the workflow, not just the leg, past 256 jobs from one matrix.
 
         The limit applies to each matrix. The unit-test matrix was the closest, at 200
-        legs as one job; the tiers are nine matrices now and the largest is 40.
+        legs as one job; the tiers are nine matrices now and the largest is 80.
         """
         too_big = {name: legs for name, legs in LEGS.items() if legs > 256}
         assert not too_big, too_big
@@ -332,17 +334,18 @@ class TestThePullRequestCover:
 
     def test_the_pull_request_tiers_add_up(self):
         # One image per pool and the 3 cover Pythons; every unit job runs each
-        # combination in 4 shards.
-        unit_linux_and_macos = 1 * 3 * 4 + 1 * 3 * 4
-        unit_windows = 1 * 3 * 4
-        unit = unit_linux_and_macos + unit_windows
-        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == unit == 36
-        assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == 3 * 3 * 4
+        # combination in its pool's shard count (6 on Linux, 8 on macOS and Windows).
+        unit_linux = 1 * 3 * 6
+        unit_macos_and_windows = 1 * 3 * 8 + 1 * 3 * 8
+        unit = unit_linux + unit_macos_and_windows
+        assert sum(PR_LEGS[n] for n in UNIT_TEST_JOB_IDS) == unit == 66
+        assert sum(PR_LEGS[n] for n in INTEGRATION_TEST_JOB_IDS) == unit == 66
         assert [PR_LEGS[n] for n in E2E_TEST_JOB_IDS] == [1, 1, 1]
-        assert PR_PYTEST_CHECK_RUNS == unit + 36 + 3
+        assert PR_PYTEST_CHECK_RUNS == unit + 66 + 3
 
     def test_ensure_cache_runs_on_the_two_labels_with_headroom_on_a_pull_request(self):
-        """The fan-out waits for this job, so on a pull request it must not touch a saturated label."""
+        """Nothing waits for this job any more, but its save should still land while the
+        first wave runs, so on a pull request it must not touch a saturated label."""
         images = {c["os"] for c in _cells(JOBS["ensure-cache"], "pull_request")}
         assert images == {"ubuntu-24.04-arm", "windows-latest"}
         # Every pull-request leg of a tier still runs on an image the job covers, or on
@@ -522,12 +525,9 @@ class TestTheCommentsMatchTheWorkflow:
             "137 on a pull request",
             "contributes 212 check",
             "212 is this",
-            # (The four-shard unit tier's figures, 291 / 211 / 136, came back when all
-            # three unit pools were sharded, and were then superseded by the advisory
-            # e2e-express job: the current figures are 293 / 213 / 138. "291 on a push"
-            # and "136 on a pull request" are not in this list because the history
-            # sentence in the required-checks note still states them as the superseded
-            # figures, the same convention as "109 on a pull request" above.)
+            # (The four-shard unit tier's figures, 291 / 211 / 136, were the current ones
+            # for a while; since the slow pools took eight shards they are stale again
+            # and sit at the end of this list.)
             # Before the Windows unit pool was sharded four ways (unit-test 25 -> 40).
             # ("109 on a pull request" is not in this list: the history sentence in the
             # required-checks note still states it as the superseded figure.)
@@ -535,10 +535,19 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 157 check",
             "157 is this",
             "~442 runner jobs",
-            # Before the advisory e2e-express job was added (+2 on every event).
+            # Before the slow pools took eight shards and Linux six (the 2x-wall change:
+            # run 43449176506; the standalone integration-test job sharded, docs-examples
+            # split out, the ensure-cache needs edge dropped).
             "expands to 291 jobs",
+            "291-job",
             "contributes 211 check",
             "211 is this",
+            "~592 runner jobs",
+            # Before the advisory e2e-express job was added (+2 on every event).
+            "expands to 455 jobs",
+            "455-job",
+            "contributes 335 check",
+            "335 is this",
         ):
             assert stale not in COMMENTS
 
@@ -549,14 +558,6 @@ SETUP_ASH_ACTION = REPO_ROOT / ".github" / "actions" / "setup-ash" / "action.yml
 RUN_UNIT_TESTS_ACTION = (
     REPO_ROOT / ".github" / "actions" / "run-unit-tests" / "action.yml"
 )
-#: Jobs that call setup-ash and do not wait for ensure-cache, each with the reason. The
-#: test below fails when an entry is no longer true, so the list cannot become stale.
-NOT_WAITING = {
-    "warm-image-layers": (
-        "push-only, off the critical path of its own cache, and its image layer cache "
-        "is a different cache with its own one-writer concurrency group"
-    ),
-}
 
 
 def _setup_ash_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
@@ -610,17 +611,30 @@ class TestEnsureCache:
         assert LEGS[ENSURE_CACHE] == len(images)
         assert job["strategy"]["max-parallel"] == len(images)
 
-    def test_every_caller_waits_for_it_except_the_named_ones(self):
-        for name in SETUP_ASH_CALLERS:
-            waits = ENSURE_CACHE in _needs(JOBS[name])
-            assert waits == (name not in NOT_WAITING), (
-                f"{name}: waits={waits}; NOT_WAITING names {sorted(NOT_WAITING)}"
+    def test_no_caller_waits_for_it_and_the_gate_still_does(self):
+        """No `needs` edge points at ensure-cache except required-checks'.
+
+        The edge was the one serial link under every test and scan job (52 s on run
+        43449176506, set by the windows cell) and bought nothing a miss does not:
+        setup-ash only restores here (the saver tests below), a restore tolerates a
+        miss, and an unchanged lock file reads main's entry by exact key. The failure
+        direction is unchanged: ensure-cache's failure fails the run through the gate,
+        whose own `needs` the test below this one pins.
+        """
+        for name, job in JOBS.items():
+            if name == "required-checks":
+                continue
+            assert ENSURE_CACHE not in _needs(job), (
+                f"{name} waits for {ENSURE_CACHE}; that serial link was dropped "
+                "deliberately (the note above the integration tier in the workflow)"
             )
-        assert set(NOT_WAITING) <= set(SETUP_ASH_CALLERS), "a stale NOT_WAITING entry"
 
     def test_it_runs_on_every_event_and_reads_only_the_repository(self):
         job = JOBS[ENSURE_CACHE]
-        assert "if" not in job, "a skipped ensure-cache would skip its dependents"
+        assert "if" not in job, (
+            "a conditional ensure-cache would stop saving the cache on some events, "
+            "and its failure would stop reaching the gate there"
+        )
         assert "needs" not in job
         assert "continue-on-error" not in job
         assert job["permissions"] == {"contents": "read"}

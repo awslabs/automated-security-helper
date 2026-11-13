@@ -95,8 +95,8 @@ REDIRECT_HOOK = "docs/hooks/redirects.py"
 REDIRECTS_FILE = "docs/redirects.yml"
 
 #: Renders the version-pinned pages from their templates. docs/hooks/install_refs.py
-#: uses it to make main's install commands install main; `check` uses its patterns to
-#: read which release a built page pins.
+#: uses it to render a release build's pages as that release; `check` uses its
+#: patterns to read which release a built page pins.
 TEMPLATE_MANAGER = "scripts/version_template_manager.py"
 
 #: What `check` publishes, in this order. Release-shaped numbers, because whether a
@@ -924,11 +924,12 @@ def check_published(
         problems.append(f"the root 404.html does not link to /{LATEST}/")
 
     # The version-pinned pages (docs/hooks/install_refs.py). A release pins itself
-    # everywhere, tables and text samples included. The main version's install
-    # commands pin no release, and every install-command form a page uses in the
-    # newest release names main on that page in the main version. The committed pages
-    # pin the current version, which is neither 0.0.1 nor 0.0.0, so a pass means every
-    # build rendered the pages from their templates.
+    # everywhere, tables and text samples included: the committed pages pin the
+    # current version, which is neither 0.0.1 nor 0.0.0, so a pass means every release
+    # build rendered the pages from their templates. The main version is served as
+    # committed: its pages describe unreleased code, and their install commands pin
+    # the current release, the one a reader of any docs version should install, in
+    # every install-command form the newest release's page uses.
     manager, urls = pinned
     for directory, wanted in (
         (CHECK_NEWEST, {CHECK_NEWEST}),
@@ -959,21 +960,27 @@ def check_published(
         commands = page_text(built[1], commands_only=True)
         main_pins |= manager.release_pins(commands)
         problems += unrecognized_pin_problems(manager, commands, f"{DEV_VERSION}/{url}")
+        main_forms = set(manager.forms_pinning_a_release(commands))
         for form in manager.forms_pinning_a_release(
             page_text(release[1], commands_only=True)
         ):
-            if not manager.branch_ref_pattern(form, DEV_VERSION).search(commands):
+            if form not in main_forms:
                 problems.append(
-                    f"{DEV_VERSION}/{url} has no {form} install command naming "
-                    f"{DEV_VERSION}, though {CHECK_NEWEST}/{url} has one naming a release"
+                    f"{DEV_VERSION}/{url} has no {form} install command pinning a "
+                    f"release, though {CHECK_NEWEST}/{url} has one (the main version "
+                    "serves the committed page, which must keep every install form "
+                    "of its template)"
                 )
-    if urls and main_pins:
-        problems.append(
-            f"the install commands of the version-pinned pages of {DEV_VERSION}/ pin "
-            f"{sorted(main_pins)}, not no release (docs/hooks/install_refs.py renders "
-            "them from their templates, where an install command names its ref with "
-            "v{{VERSION}}, never with {{RELEASE}})"
-        )
+    if urls:
+        wanted_main = {manager.packaged_release()}
+        if main_pins != wanted_main:
+            problems.append(
+                f"the install commands of the version-pinned pages of {DEV_VERSION}/ "
+                f"pin {sorted(main_pins)}, not {sorted(wanted_main)} (the main version "
+                "serves the committed pages, whose install commands pin the current "
+                "release: a reader of the main docs installs the latest release, "
+                "never main)"
+            )
 
     summary = (
         f"{len(listed)} versions, {page_count} pages checked, "

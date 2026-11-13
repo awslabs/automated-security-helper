@@ -249,11 +249,18 @@ def _site(
     template: str | None = None,
     manager: str | None = None,
     install_template: str = INSTALL_TEMPLATE,
+    page: str | None = None,
 ) -> Path:
     repo = tmp_path / "site"
     pinned = {
         PINNED_PAGE + ".template": install_template,
-        PINNED_PAGE: _manager().render(install_template, COMMITTED_VERSION),
+        # The committed page, which the main version serves as it is: by default the
+        # template rendered with the current version, as a release bump writes it.
+        PINNED_PAGE: (
+            _manager().render(install_template, COMMITTED_VERSION)
+            if page is None
+            else page
+        ),
     }
     pyproject = {
         "pyproject.toml": f'[tool.commitizen]\nversion = "{COMMITTED_VERSION}"\n'
@@ -377,33 +384,43 @@ DEFECTS = [
         "do not carry the outdated notice and not the unreleased one",
     ),
     (
+        # The main version serves the committed page either way, so the defect shows
+        # on the release builds, which no longer render their own versions in.
+        # ({{RELEASE}} written as an install ref is invisible here too, now that no
+        # build renders the two placeholders differently: check_release_placeholders
+        # in scripts/docs_checks.py is the guard for that, and
+        # tests/unit/test_docs_checks_can_fail.py proves it can fail.)
         "the install refs hook is not registered",
         {"mkdocs": _without(MKDOCS, "  - docs/hooks/install_refs.py\n")},
-        f"the version-pinned pages of main/ pin ['{COMMITTED_VERSION}'], not no release",
+        f"the version-pinned pages of 0.0.1/ pin ['{COMMITTED_VERSION}'], not ['0.0.1']",
     ),
     (
-        "the branch renderer keeps the release",
-        {
-            "manager": _patched(
-                MANAGER_SCRIPT.read_text(encoding="utf-8"),
-                "def render_for_branch(self, content: str, branch: str, release: str) -> str:",
-                "def render_for_branch(self, content: str, branch: str, release: str) -> str:\n"
-                f"        return self.render(content, {COMMITTED_VERSION!r})\n\n"
-                "    def _unused(self, content: str, branch: str, release: str) -> str:",
-            )
-        },
-        f"the version-pinned pages of main/ pin ['{COMMITTED_VERSION}'], not no release",
+        # The main version serves the committed page, so a page rendered for another
+        # release pins it there, while the release builds still render their own.
+        "the committed page pins another release",
+        {"page": _manager().render(INSTALL_TEMPLATE, "8.8.8")},
+        (
+            f"the install commands of the version-pinned pages of main/ pin "
+            f"['8.8.8'], not ['{COMMITTED_VERSION}']"
+        ),
     ),
     (
-        "a release number in an install command",
+        # A form dropped from the committed page, while the template keeps it,
+        # disappears from main's install commands only: the release builds render
+        # the template, which still has it.
+        "the committed page lost an install form",
         {
-            "install_template": _patched(
-                INSTALL_TEMPLATE, "rev: v{{VERSION}}", "rev: v{{RELEASE}}"
+            "page": _manager().render(
+                _without(
+                    INSTALL_TEMPLATE,
+                    f"git ls-remote {REPO_URL} refs/tags/v{{{{VERSION}}}}\n",
+                ),
+                COMMITTED_VERSION,
             )
         },
         (
-            f"the install commands of the version-pinned pages of main/ pin "
-            f"['{COMMITTED_VERSION}'], not no release"
+            f"main/{PINNED_URL}/ has no refs/tags/ (git ls-remote) install command "
+            "pinning a release"
         ),
     ),
     (
@@ -415,17 +432,6 @@ DEFECTS = [
             + f"\n```yaml\n- rev: v{{{{VERSION}}}}\n  repo: {REPO_URL}\n```\n"
         },
         f"{PINNED_URL}/ has a rev: pin of",
-    ),
-    (
-        "the branch renderer leaves the tag lookup",
-        {
-            "manager": _patched(
-                MANAGER_SCRIPT.read_text(encoding="utf-8"),
-                'content.replace("refs/tags/" + tag, "refs/heads/" + branch)',
-                "content",
-            )
-        },
-        f"main/{PINNED_URL}/ has no refs/tags/ (git ls-remote) install command naming main",
     ),
     (
         "a release keeps the committed pin",
@@ -662,29 +668,32 @@ def _text(out: Path, page: str) -> str:
 
 
 @pytest.mark.integration
-def test_the_main_build_installs_main(tmp_path):
+def test_the_main_build_serves_the_committed_release_pins(tmp_path):
     repo = _site(tmp_path)
     out = _build(repo, tmp_path, "main")
     text = _text(out, PINNED_URL)
     commands = dv.page_text(
         (out / PINNED_URL / "index.html").read_bytes(), commands_only=True
     )
-    assert _manager().release_pins(commands) == set(), commands
-    for form, *_ in _install_forms():
-        assert _manager().branch_ref_pattern(form, "main").search(commands), form
-    # The release number stays where {{RELEASE}} put it: the version sample, a
-    # sentence, and the table.
+    # The committed page stands: its install commands pin the current release, in
+    # every form the manager lists, and nothing names main.
+    assert _manager().release_pins(commands) == {COMMITTED_VERSION}, commands
+    used = _manager().forms_pinning_a_release(commands)
+    assert used == [form for form, *_ in _install_forms()], used
     assert f"automated-security-helper v{COMMITTED_VERSION}" in text
     assert f"Each file pins ASH v{COMMITTED_VERSION}" in text
     assert _manager().release_pins(text) == {COMMITTED_VERSION}
-    assert f"git+{REPO_URL}.git@main" in text
-    assert f"--branch main {REPO_URL}" in text
-    assert "rev: main" in text
-    # A tag looked up by name becomes the branch's head, so the command still works.
-    assert f"git ls-remote {REPO_URL} refs/heads/main" in text
-    assert "ash:main" in text
+    assert f"git+{REPO_URL}.git@v{COMMITTED_VERSION}" in text
+    assert f"--branch v{COMMITTED_VERSION} {REPO_URL}" in text
+    assert f"rev: v{COMMITTED_VERSION}" in text
+    assert f"git ls-remote {REPO_URL} refs/tags/v{COMMITTED_VERSION}" in text
+    assert f"ash:{COMMITTED_VERSION}" in text
+    assert "@main" not in text
+    # The notice names the ref the hook recorded for the main build.
     notice = " ".join(text.split())
-    assert "The install commands in this version of the docs install main" in notice
+    assert "The install commands on these pages install the latest release" in notice
+    assert f"the latest release, v{COMMITTED_VERSION} , not main" in notice
+    assert "To run what these pages describe, install from main" in notice
 
 
 def _install_forms():
@@ -1194,10 +1203,12 @@ def test_the_docs_dir_named_here_is_the_sites():
 
 @pytest.mark.unit
 def test_the_site_targets_leave_out_the_pages_the_build_skips():
-    """README.md and the example's README are version-pinned and have templates, but
-    the build never renders them, so the check never reads them."""
+    """README.md, the examples' READMEs and the GitHub Actions example workflow are
+    version-pinned and have templates, but none of them lives under the site's
+    docs_dir, so the build never renders them and the check never reads them."""
     assert set(REAL_TARGETS) - set(SITE_TARGETS) == {
         "README.md",
+        "examples/GitHubActions/ash-repo-scan.yml",
         "examples/streamlit_ui/README.md",
     }, SITE_TARGETS
 
@@ -1291,10 +1302,9 @@ def test_no_real_page_holds_a_pin_the_check_would_reject(target):
     name it. Only the pages the build renders: see SITE_TARGETS."""
     manager = _manager()
     template = _real_template(target)
-    release = _built_text(manager.render(template, "3.4.0"), commands_only=False)
-    main = _built_text(
-        manager.render_for_branch(template, "main", "3.4.0"), commands_only=True
-    )
+    rendered = manager.render(template, "3.4.0")
+    release = _built_text(rendered, commands_only=False)
+    main = _built_text(rendered, commands_only=True)
     assert dv.unrecognized_pin_problems(manager, release, f"3.4.0/{target}") == []
     assert dv.unrecognized_pin_problems(manager, main, f"main/{target}") == []
     assert manager.release_pins(release) <= {"3.4.0"}
@@ -1345,7 +1355,8 @@ def test_a_release_build_pins_that_release(tmp_path):
     assert _manager().release_pins(text) == {"1.2.3"}, text
     assert "automated-security-helper v1.2.3" in text
     assert f"git ls-remote {REPO_URL} refs/tags/v1.2.3" in text
-    assert "install commands in this version" not in text
+    # A release page carries no unreleased notice.
+    assert "The install commands on these pages" not in text
 
 
 @pytest.mark.integration
@@ -1353,7 +1364,9 @@ def test_any_other_build_uses_the_committed_page(tmp_path):
     repo = _site(tmp_path)
     text = _text(_build(repo, tmp_path, None), PINNED_URL)
     assert _manager().release_pins(text) == {COMMITTED_VERSION}, text
-    assert "install commands in this version" not in text
+    # The hook did not vouch for this build, so the notice names no ref.
+    notice = " ".join(text.split())
+    assert "install the latest release, not main" in notice
 
 
 @pytest.mark.integration

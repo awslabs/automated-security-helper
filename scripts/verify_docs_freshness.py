@@ -976,12 +976,13 @@ def _version_pins(content: str) -> list[str]:
 
 
 def _is_floating_tag(pin: str, version: str) -> bool:
-    """Whether ``pin`` is a moving major or minor tag of ``version``.
+    """Whether ``pin`` is a major or minor tag of ``version``.
 
-    The release process moves ``v3`` to each 3.x release, and the install pages
-    document it beside the exact pin, so ``@v3`` (or ``@v3.7``) is current while
-    the version it abbreviates is. A pre-release or build suffix is a tag of its
-    own and never floats; an exact pin of another release is outdated.
+    The install pages mention ``@v3`` beside the exact pin, whether they offer it
+    as a tag the release process moves or describe it as retired and frozen at a
+    release, so ``@v3`` (or ``@v3.7``) is not a stale pin while the version it
+    abbreviates is current. A pre-release or build suffix is a tag of its own and
+    never floats; an exact pin of another release is outdated.
     """
     parts = pin.removeprefix("@v").split(".")
     current = version.split(".")

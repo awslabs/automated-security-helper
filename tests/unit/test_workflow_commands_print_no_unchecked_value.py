@@ -387,18 +387,6 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "MERGE_SHA": FIXED_FORM,
     },
     (
-        ".github/workflows/ash-tag-on-merge.yml",
-        "tag-and-release",
-        "Update floating major tag",
-    ): {
-        "VERSION": OWN_TREE,
-        # "v" and the digits of a major that the step's version pattern matched.
-        "FLOATING": FIXED_FORM,
-        # A remote tag that packaging.version parsed: PEP 440 admits no control
-        # character, colon or bracket.
-        "NEWEST": FIXED_FORM,
-    },
-    (
         ".github/workflows/ash-typescript-ci.yml",
         "typescript-tests",
         "Confirm the package is present",

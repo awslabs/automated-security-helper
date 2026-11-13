@@ -35,6 +35,7 @@
   "compact_report": false,
   "changed_files_only": null,
   "base_ref": null,
+  "staged": null,
   "allow_in_tree_tools": false,
   "shard_index": null,
   "shard_count": null,

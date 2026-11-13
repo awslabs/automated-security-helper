@@ -55,8 +55,8 @@ def _installed_tools() -> set[str]:
     return tools
 
 
-#: `tests/integration` as a pytest argument of its own. The job's separate docs
-#: examples step runs `tests/integration/docs`, which is not this path.
+#: `tests/integration` as a pytest argument of its own. The separate docs-examples
+#: job runs `tests/integration/docs`, which is not this path.
 _SUITE_PATH = re.compile(r"tests/integration(?=[\s\\]|$)")
 
 
@@ -75,6 +75,39 @@ def test_the_suite_step_requires_actionlint_and_gitleaks() -> None:
     env = _suite_env()
     assert env.get("ASH_REQUIRE_ACTIONLINT") == "1"
     assert env.get("ASH_REQUIRE_GITLEAKS") == "1"
+
+
+def test_the_docs_examples_job_installs_exactly_what_the_integration_job_does() -> None:
+    """The docs-examples job's install steps are integration-test's, byte for byte.
+
+    The workflow says so in a comment, and the steps are hand-written twice, so this
+    is what holds them together: the docs pages run the same scanners (the tutorial
+    twin needs the bandit the install puts on ~/.local/bin), and a tool dropped from
+    one job alone would skip or fail pages with nothing else saying why.
+    """
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+
+    def installs(job_id: str) -> list[str]:
+        return [
+            str(step["run"])
+            for step in jobs[job_id]["steps"]
+            if str(step.get("run", "")).strip().startswith("uv sync")
+            or "ash dependencies install" in str(step.get("run", ""))
+        ]
+
+    integration = installs("integration-test")
+    assert len(integration) == 2, integration
+    assert installs("docs-examples") == integration
+    # The docs step itself puts the two install directories on PATH, as the suite
+    # step does; without them the tutorial pages cannot find bandit.
+    (docs_step,) = [
+        step
+        for step in jobs["docs-examples"]["steps"]
+        if "tests/integration/docs" in str(step.get("run", ""))
+    ]
+    assert 'export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"' in str(
+        docs_step["run"]
+    )
 
 
 @pytest.fixture(scope="module")

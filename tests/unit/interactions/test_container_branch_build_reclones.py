@@ -21,7 +21,7 @@ context is ASH's own source tree, which the clone step builds without cloning (.
 is always one). Whether a name is a branch is
 decided from its shape, without asking the remote: anything that is not LOCAL, a
 release-shaped tag or a full commit id is treated as a branch, which includes the
-floating v3 tag, which does move.
+retired floating v3 tag -- a tag that was moved between releases before it was frozen.
 
 Not asserted, because it needs a container runtime: the cache behavior itself. It
 rests on the documented rule above.
@@ -135,7 +135,7 @@ class TestTheCloneDateBuildArg:
     def test_a_branch_build_passes_a_new_clone_date(
         self, monkeypatch, recorded_builds, tmp_path, branch
     ):
-        """v3 is the floating major-version tag and moves; a short id cannot be fetched."""
+        """v3 is the retired floating tag, which has moved; a short id cannot be fetched."""
         monkeypatch.setattr(rac, "datetime", _Clock)
 
         first = _clone_dates(_build_image_argv(branch, tmp_path, recorded_builds))

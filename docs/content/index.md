@@ -107,6 +107,8 @@ Configure scanners, severity thresholds, ignore paths, and suppressions in your 
 
 Run [locally](getting-started/local.md), integrate with [CI/CD](getting-started/ci.md), or connect your AI tools through the [Model Context Protocol](how-to/mcp-server.md).
 
+[Who uses ASH](personas/index.md) starts from the role instead: setups for [developers](personas/developer.md), [security reviewers](personas/security-reviewer.md), and [security analysts](personas/security-analyst.md), and where ASH sits [across the SDLC and AI-DLC](personas/sdlc-aidlc.md).
+
 ## Reports and next steps
 
 <!-- doctest: config kind=pre-commit -->
