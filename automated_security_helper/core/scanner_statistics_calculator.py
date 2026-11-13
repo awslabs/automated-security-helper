@@ -665,7 +665,7 @@ class ScannerStatisticsCalculator:
         ``ScanResultsContainer.targets_attempted``, which is tri-state: absent from a serialized
         report means the scanner does not track per-target outcomes and is making no claim
         (``exclude_none=True`` drops the None), while a present 0 means it tracked and attempted
-        none. Absent must never read as zero -- bandit, checkov, semgrep, grype, syft,
+        none. Absent must never read as zero -- bandit, checkov, grype, syft,
         detect-secrets, opengrep, cfn-nag and npm-audit are all in the no-claim state, and
         reading them as tracked-zero would turn every row of a clean report yellow.
 

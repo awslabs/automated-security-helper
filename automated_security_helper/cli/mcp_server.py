@@ -834,7 +834,7 @@ async def get_scan_results(
                 - "full" (default): Return all results including raw_results, validation_checkpoints, etc.
                 - "summary": Return only summary data (metadata, findings counts, scanner summaries)
                 - "minimal": Return only basic scan status and completion info
-        scanners: Comma-separated list of scanner names to include (e.g., "bandit,semgrep").
+        scanners: Comma-separated list of scanner names to include (e.g., "bandit,opengrep").
                   If not specified, includes all scanners.
         severities: Comma-separated list of severity levels to include (e.g., "critical,high,medium").
                     Options: critical, high, medium, low, info, suppressed
@@ -1749,7 +1749,7 @@ ASH version {version}
 ASH is installed and ready to perform security scans in local mode.
 Local mode includes these scanners:
 • Bandit (Python security issues)
-• Semgrep (Multi-language security patterns)
+• Opengrep (Multi-language security patterns; serves the retired semgrep scanner name)
 • detect-secrets (Hardcoded secrets detection)
 • Checkov (Infrastructure as Code security)
 • cdk-nag (CDK security issues)
@@ -1773,7 +1773,7 @@ ASH is a security scanning orchestrator that runs multiple security tools:
 
 🔍 **What ASH Scans For:**
 • Python security issues (Bandit)
-• Multi-language security patterns (Semgrep)
+• Multi-language security patterns (Opengrep)
 • Hardcoded secrets and credentials (detect-secrets)
 • Infrastructure as Code issues (Checkov)
 • CDK security problems (cdk-nag)

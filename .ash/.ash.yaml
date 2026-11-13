@@ -2828,8 +2828,6 @@ scanners:
       config_file: .ash/.grype.yaml
   opengrep:
     enabled: true
-  semgrep:
-    enabled: true
   syft:
     enabled: true
 converters:

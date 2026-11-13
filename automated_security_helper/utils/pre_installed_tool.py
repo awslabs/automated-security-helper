@@ -5,7 +5,7 @@
 
 Why this exists
 ---------------
-bandit, checkov and semgrep run through ``uv tool run --from <requirement>``.
+bandit and checkov run through ``uv tool run --from <requirement>``.
 When ``uv tool list`` cannot see the tool but an executable of the same name is
 on PATH, the scanners logged "Using pre-installed <tool> at <path>" and then
 ran through uv anyway. Under ``ASH_OFFLINE`` that is ``uv tool run --offline
@@ -90,7 +90,7 @@ from automated_security_helper.utils.subprocess_utils import spawn_run
 
 Status = Literal["satisfied", "unsatisfied", "unverifiable"]
 
-# A cold import of checkov or semgrep takes seconds; this bounds a hung one.
+# A cold import of checkov takes seconds; this bounds a hung one.
 _VERSION_PROBE_TIMEOUT = 120
 _UV_DRY_RUN_TIMEOUT = 60
 

@@ -63,7 +63,7 @@ class ScannerMetrics(ScannerSeverityCount):
     the ``total`` / ``actionable_count()`` helpers from ``ScannerSeverityCount``.
     """
 
-    scanner_name: str  # Name of the scanner (e.g., "bandit", "semgrep")
+    scanner_name: str  # Name of the scanner (e.g., "bandit", "opengrep")
     actionable: int = 0  # Number of findings at or above the threshold severity
     duration: Optional[float] = (
         None  # Time taken by the scanner in seconds, None for skipped/missing scanners
@@ -92,7 +92,7 @@ class ScannerMetrics(ScannerSeverityCount):
     #
     # ``targets_attempted`` keeps the container's tri-state meaning rather than defaulting to 0.
     # None means the scanner does not track per-target outcomes and is making no claim; bandit,
-    # checkov, semgrep, grype, syft, detect-secrets, opengrep, cfn-nag and npm-audit are all in
+    # checkov, grype, syft, detect-secrets, opengrep, cfn-nag and npm-audit are all in
     # that state. Reading them as "attempted zero" would report every one of them as having
     # evaluated nothing.
     targets_attempted: int | None = None

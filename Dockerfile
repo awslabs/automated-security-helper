@@ -144,6 +144,9 @@ FROM ${BASE_IMAGE} AS core
 ENV SHELL="bash"
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
+# The historical name is kept so existing build invocations keep working; the
+# rulesets it names are downloaded for the opengrep scanner, which serves the
+# retired semgrep scanner's alias and reads the same registry packs.
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
 ARG ASH_BIN_PATH="/.ash/bin"
 
@@ -278,13 +281,12 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 
 
 #
-# Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
+# Grype/Syft/Opengrep - Also sets default location env vars for root user for CI compat
 #
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
-ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
-RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
-    chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 #
@@ -364,7 +366,7 @@ RUN grype --version
 #     CONTINUED            <- no TAKEN, exit 0
 #
 # So OFFLINE=YES provisioned nothing on podman or finch: no grype database, no
-# semgrep or opengrep rules cache. CI never caught it because the only offline leg
+# opengrep rules cache. CI never caught it because the only offline leg
 # in the matrix is `oci-runner: docker`, where SHELL is honoured and bash runs it.
 # The exposure was users building offline images with a non-docker runtime.
 #
@@ -376,16 +378,14 @@ RUN grype --version
 # build time.
 RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     with-retry 'grype db update' && \
-    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    mkdir -p ${OPENGREP_RULES_CACHE_DIR} && \
     for i in $OFFLINE_SEMGREP_RULESETS; do \
-        outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
+        outfile="${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
-        cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
     done && \
     fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && \
-    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
     printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
-    chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
+    chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
 # Assert the block above actually provisioned something, so a repeat of the defect
@@ -399,11 +399,11 @@ RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
 # re-evaluates the same condition through the same shell would be silenced by
 # whatever silenced the block.
 #
-# Only the semgrep and opengrep caches are asserted non-empty. The grype database
+# Only the opengrep cache is asserted non-empty by name. The grype database
 # lands in GRYPE_DB_CACHE_DIR as a versioned subdirectory whose layout is grype's to
 # change, so this asserts the directory is non-empty rather than naming a file in it.
 RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
-    for d in "${GRYPE_DB_CACHE_DIR}" "${SEMGREP_RULES_CACHE_DIR}" "${OPENGREP_RULES_CACHE_DIR}"; do \
+    for d in "${GRYPE_DB_CACHE_DIR}" "${OPENGREP_RULES_CACHE_DIR}"; do \
         if [ -z "$(ls -A "${d}" 2>/dev/null)" ]; then \
             echo "OFFLINE=YES but ${d} is empty: the offline provisioning step did not run." >&2; \
             echo "If this fired after a Dockerfile edit, check that the RUN above is POSIX sh --" >&2; \
@@ -411,7 +411,7 @@ RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
             exit 1; \
         fi; \
     done; \
-    echo "offline provisioning verified: grype db, semgrep and opengrep caches are all non-empty"; \
+    echo "offline provisioning verified: grype db and opengrep caches are all non-empty"; \
     fi
 
 ARG TRIVY_VERSION="v0.75.0"
@@ -463,7 +463,7 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-# bandit, checkov and semgrep are installed with `uv tool install`, and each scanner's
+# bandit and checkov are installed with `uv tool install`, and each scanner's
 # own default is a version range, so on its own this would install whatever release
 # PyPI had on the day. `--uv-tool-pins` prints the --config-overrides that pin each to
 # the version of its THIRD_PARTY_LICENSES entry, so the license files and the source
@@ -473,10 +473,8 @@ RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
-# The Python tools' license files, read from each installed wheel's dist-info and,
-# for semgrep, whose wheel carries none, fetched from its repository at the pinned
-# commit and checked against their SHA256.
-RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
+# The Python tools' license files, read from each installed wheel's dist-info.
+RUN with-retry 'install-pinned-tool --licenses-only bandit checkov'
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and

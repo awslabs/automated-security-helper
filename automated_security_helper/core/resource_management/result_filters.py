@@ -172,7 +172,7 @@ def apply_content_filters(
 
     Args:
         results: The full scan results.
-        scanners: Comma-separated scanner names (e.g., "bandit,semgrep").
+        scanners: Comma-separated scanner names (e.g., "bandit,opengrep").
         severities: Comma-separated severity levels (e.g., "critical,high").
 
     Returns:

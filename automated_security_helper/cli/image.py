@@ -75,7 +75,7 @@ def build_ash_image_cli_command(
         str,
         typer.Option(
             "--offline-semgrep-rulesets",
-            help="Specify Semgrep rulesets for use in ASH offline mode",
+            help="Specify rulesets to bake into the opengrep offline cache for ASH offline mode (the flag keeps its historical name; the semgrep scanner is served by the opengrep plugin)",
         ),
     ] = "p/ci",
     container_uid: Annotated[

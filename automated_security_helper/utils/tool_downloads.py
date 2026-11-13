@@ -5,8 +5,8 @@
 
 Why this module exists
 ----------------------
-ASH ships ten scanners but, until this module, could only *install* three of them
-(bandit, checkov and semgrep, via ``uv tool install``) plus opengrep by binary
+ASH ships nine scanners but, until this module, could only *install* two of them
+(bandit and checkov, via ``uv tool install``) plus opengrep by binary
 download. grype, syft and trivy had no install path inside ASH at all, so a
 machine without them scanned with those scanners absent. That state was invisible
 from the outside: the scan reported them as not having run and still exited 0.
@@ -358,7 +358,7 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 # Why this exists
 # ---------------
 # The image redistributes upstream release binaries -- every tool in TOOL_VERSIONS,
-# plus opengrep and uv -- and the Python scanners bandit, checkov and semgrep, which
+# plus opengrep and uv -- and the Python scanners bandit and checkov, which
 # ``ashx dependencies install`` puts in place with ``uv tool install``. Every one of
 # those licenses makes redistribution conditional on shipping something with the
 # binary: Apache-2.0 section 4(a) and (d) a copy of the license and the upstream
@@ -384,9 +384,9 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 #   install`` -- the wheel is the archive: a file with no ``url`` is read from the
 #   installed wheel's dist-info, checked against the hash its RECORD lists, and the
 #   installed version must be the entry's. A file with a ``url`` is the fallback for
-#   a wheel that does not carry it: semgrep's wheel declares
-#   ``License-Expression: LGPL-2.1-or-later`` in its METADATA and ships no license
-#   file at all, so its LICENSE and COPYRIGHT are fetched from its repository. Were
+#   a wheel that does not carry it (the retired semgrep entry's wheel declared a
+#   license expression in METADATA and shipped no license file, so its LICENSE and
+#   COPYRIGHT were fetched from its repository). Were
 #   a later wheel to carry the file, the dist-info copy is used instead and must
 #   still hash to the pin, so the image's bytes are the same either way. These
 #   entries are staged by ``install-pinned-tool --licenses-only`` after ``ash
@@ -633,8 +633,7 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 # SHA256 of that file downloaded from its URL in the entry. Archive-member files
 # have no digest here: the archive digest in _DIGESTS covers them. For grype, syft
 # and trivy the archive's LICENSE was also checked byte-identical to the
-# repository's at the same commit. semgrep's two files are byte-identical to
-# opengrep's, which forked it, so they share digests.
+# repository's at the same commit.
 _THIRD_PARTY_HASHES: dict[str, str] = {
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
     "checkov commit": "e5f995a6e2dd033e99354b6c477d056eb5eaf2d0",  # pragma: allowlist secret
@@ -642,9 +641,6 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
-    "semgrep commit": "a35fe8306115b3e55274969098cc46f8451d6b4d",  # pragma: allowlist secret
-    "semgrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
-    "semgrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
     "syft commit": "b254e6d92f28c3868a755f62fb3ca8f26e9fee76",  # pragma: allowlist secret
     "trivy commit": "591e9799316a602e703f0b484f6c6d7b234ec8f3",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
@@ -709,22 +705,6 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
                 "opengrep", "https://github.com/opengrep/opengrep", "COPYRIGHT"
             ),
         ),
-    ),
-    # The wheel's dist-info holds no license file, only METADATA's
-    # `License-Expression: LGPL-2.1-or-later`, so both files come from the
-    # repository. COPYRIGHT grants "version 2.1" with no "or later", the narrower
-    # of the two readings, and the one opengrep's entry takes from the same text.
-    "semgrep": ThirdPartyLicense(
-        tool="semgrep",
-        version="v1.180.0",
-        license="LGPL-2.1-only",
-        repository="https://github.com/semgrep/semgrep",
-        commit=_THIRD_PARTY_HASHES["semgrep commit"],
-        files=(
-            _from_source("semgrep", "https://github.com/semgrep/semgrep", "LICENSE"),
-            _from_source("semgrep", "https://github.com/semgrep/semgrep", "COPYRIGHT"),
-        ),
-        distribution="semgrep",
     ),
     "syft": ThirdPartyLicense(
         tool="syft",

@@ -17,6 +17,7 @@ from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.scope import plugin_probe_scope
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
@@ -99,6 +100,27 @@ def _declared_scanner_roster(config) -> List[str]:
             seen.add(key)
             unique.append(str(name))
     return unique
+
+
+def _resolve_scanner_name_aliases(names: List[str]) -> List[str]:
+    """The caller's scanner names with retired names resolved, order kept.
+
+    ``utils/scanner_names.SCANNER_NAME_ALIASES`` names the retired scanners
+    (``semgrep`` is served by the opengrep plugin). The mapping is logged once
+    per name, so a scan asked for ``--scanners semgrep`` says which scanner it
+    ran. Unknown names pass through unchanged for the allowlist check below to
+    warn about or refuse.
+    """
+    resolved = []
+    for name in names:
+        canonical = canonical_scanner_name(name)
+        if canonical != name:
+            ASH_LOGGER.info(
+                f"Scanner name {name} is an alias of the {canonical} plugin; "
+                f"running {canonical}"
+            )
+        resolved.append(canonical)
+    return resolved
 
 
 def _scanner_display_name(plugin_instance) -> str:
@@ -240,6 +262,14 @@ class ScanPhase(EnginePhase):
         # caller's object would make a second call in the same process inherit
         # the first shard's exclusions.
         excluded_scanners = list(excluded_scanners)
+
+        # Retired scanner names resolve to the plugin that serves them before
+        # anything matches on them (the allowlist check, the shard partition and
+        # --exclude-scanners all compare against registered config names, and an
+        # alias is not one). `--scanners semgrep` therefore selects opengrep
+        # instead of refusing with ScannerSelectionError, with the mapping named.
+        enabled_scanners = _resolve_scanner_name_aliases(enabled_scanners)
+        excluded_scanners = _resolve_scanner_name_aliases(excluded_scanners)
 
         ASH_LOGGER.debug("Entering: ScanPhase.execute()")
 

@@ -60,12 +60,12 @@ trivy's vulnerability database
     before scanning and fails if it cannot; offline, ``--skip-db-update`` bypasses the rule
     entirely (db.go:145-151), which is the case ASH's check exists for.
 
-semgrep and opengrep offline rulesets
+opengrep offline rulesets
     Downloaded into the image at build time when ``OFFLINE=YES`` (Dockerfile, the
-    ``OFFLINE_SEMGREP_RULESETS`` loop), which also writes the download time to
-    ``RULESET_FETCHED_AT_FILE`` in each cache directory. Neither tool has any staleness
-    notion for a local rules file, so the bound here is ASH's own choice and not a tool
-    default; the reasoning is on the entry. Online, semgrep and opengrep fetch the rules at
+    ``OFFLINE_SEMGREP_RULESETS`` loop; the build-arg keeps its historical name), which also
+    writes the download time to ``RULESET_FETCHED_AT_FILE`` in the cache directory. The tool
+    has no staleness notion for a local rules file, so the bound here is ASH's own choice and
+    not a tool default; the reasoning is on the entry. Online, opengrep fetches the rules at
     scan time and no local copy is involved, so the check applies to offline runs only.
 
 Where a stale database used to be used SILENTLY
@@ -144,7 +144,7 @@ def content_db_staleness_flag_overrides(allow_stale: bool) -> list[str]:
 #: Written next to an offline ruleset when it is downloaded, holding the download time as an
 #: RFC 3339 UTC timestamp. A rules file carries no build time of its own, and its mtime is
 #: reset by an ordinary ``cp``, so the download records the time explicitly. No extension, so
-#: neither semgrep nor opengrep tries to load it as a rule file from the ``--config`` directory.
+#: opengrep does not try to load it as a rule file from the ``--config`` directory.
 RULESET_FETCHED_AT_FILE = ".ash-rules-fetched-at"
 
 
@@ -200,7 +200,7 @@ TRIVY_DB_MAX_AGE = timedelta(hours=24)
 OFFLINE_RULESET_MAX_AGE = timedelta(days=30)
 
 OFFLINE_RULESET_BOUND_REASON = (
-    "ASH's own choice, not a tool default: neither semgrep nor opengrep has any notion of a "
+    "ASH's own choice, not a tool default: opengrep has no notion of a "
     "local rules file going stale, so there is no tool number to adopt. 30 days because a "
     "ruleset encodes code patterns rather than advisories, and ages more slowly than a "
     "vulnerability feed: holding it to grype's 5 days would fail every air-gapped image "
@@ -263,28 +263,6 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
             "no max-age option exists; trivy refreshes on its own NextUpdate metadata unless "
             "--skip-db-update is passed (pkg/db/db.go:145-174 at v0.75.0). ASH's scan-time "
             "check holds it to the bound in both modes"
-        ),
-    ),
-    ContentDatabase(
-        name="semgrep-offline-rules",
-        scanner="semgrep",
-        cache_path="/deps/.semgrep",
-        max_age=OFFLINE_RULESET_MAX_AGE,
-        bound_source=OFFLINE_RULESET_BOUND_REASON,
-        bound_is_tool_default=False,
-        timestamp_label="downloaded",
-        age_source=(
-            f"the download time in `{RULESET_FETCHED_AT_FILE}` in the cache directory, "
-            "else the oldest rules file's mtime"
-        ),
-        refresh=(
-            "rebuild the offline image (`ashx build-image --offline`), which downloads the "
-            "rulesets again, or download them into $SEMGREP_RULES_CACHE_DIR and record the "
-            f"time in {RULESET_FETCHED_AT_FILE}"
-        ),
-        how_enforced=(
-            "none in semgrep: a local rules file has no staleness check. ASH's scan-time "
-            "check holds it to the bound in offline mode, the only mode that uses it"
         ),
     ),
     ContentDatabase(

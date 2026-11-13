@@ -1281,17 +1281,6 @@ disable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = "automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner"
-disable_error_code = [
-    "arg-type",
-    "attr-defined",
-    "call-arg",
-    "no-untyped-def",
-    "type-arg",
-    "union-attr",
-]
-
-[[tool.mypy.overrides]]
 module = "automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner"
 disable_error_code = [
     "arg-type",

@@ -706,7 +706,7 @@ jobs:
           # Windows -- python-local only (Docker disabled on hosted Windows)
           - { os: windows-latest, method: python-local, config-file: default }
 
-          # Offline mode -- validates OFFLINE=YES Docker build (grype db + semgrep rulesets cached at build time)
+          # Offline mode -- validates OFFLINE=YES Docker build (grype db + opengrep rulesets cached at build time)
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: docker, offline: true }
 
           # Community plugins -- python-local on all platforms
@@ -982,7 +982,7 @@ jobs:
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ashx \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,syft \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
       # each sandboxed scanner's stderr. System daemons log their own sandbox
@@ -993,7 +993,7 @@ jobs:
           WORK: ${{ runner.temp }}
         run: |
           sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
-            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
+            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
             | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 150 || true
           for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/ash.log; do
             echo "::group::$log (errors and warnings)"

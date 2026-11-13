@@ -617,7 +617,6 @@ runs:
             "grype",
             "npm-audit",
             "opengrep",
-            "semgrep",
             "syft",
         ]
 

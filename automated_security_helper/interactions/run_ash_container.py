@@ -1093,7 +1093,9 @@ def run_ash_container(
         oci_runner: Use the specified OCI runner instead of docker to run the containerized tools
         build_target: Specify the target stage of the ASH image to build
         offline: Build ASH for offline execution
-        offline_semgrep_rulesets: Specify Semgrep rulesets for use in ASH offline mode
+        offline_semgrep_rulesets: Rulesets baked into the opengrep offline cache
+            (the parameter keeps its historical name; the semgrep scanner is
+            served by the opengrep plugin)
         container_uid: UID to use for the container user
         container_gid: GID to use for the container user
         verbose: Enable verbose logging

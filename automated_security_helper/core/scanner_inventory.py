@@ -239,7 +239,8 @@ def _normalized_version(raw) -> Optional[str]:
 #:
 #: ``--version`` comes first because it is the form every scanner binary ASH
 #: ships answers correctly. Measured across the ten reachable on one machine --
-#: grype, syft, bandit, semgrep, checkov, npm, opengrep, cfn_nag_scan,
+#: grype, syft, bandit, semgrep (retired; opengrep serves it), checkov, npm,
+#: opengrep, cfn_nag_scan,
 #: detect-secrets and the python cdk_nag uses -- all ten exit 0 and print a
 #: parseable version for ``--version``. grype and syft also answer the
 #: subcommand form, so putting the flag form first costs them nothing.

@@ -113,7 +113,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     subcommands: Annotated[
         List[str],
         Field(
-            description="Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'semgrep' as Semgrep supports multiple subcommands, but we are specifically interested in running a scan."
+            description="Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'opengrep' as Opengrep supports multiple subcommands, but we are specifically interested in running a scan."
         ),
     ] = []
     args: Annotated[
@@ -265,7 +265,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         Defaults to every entry in ``utils/content_databases.py`` whose ``scanner`` is this
         scanner's config name. A scanner that reads its database only in some modes -- the
-        semgrep and opengrep offline rulesets -- overrides this to say so. The executor
+        opengrep offline rulesets -- overrides this to say so. The executor
         holds each one to its declared age bound after the scan; see
         ``utils/content_db_staleness.py``.
         """

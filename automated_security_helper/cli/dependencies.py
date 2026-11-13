@@ -39,6 +39,7 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.process_env import set_environ
+from automated_security_helper.utils.scanner_names import SCANNER_NAME_ALIASES
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
@@ -76,6 +77,10 @@ EXIT_BAD_SELECTION = 2
 # start exiting 2, and it warns so they can move to the new key.
 DEPRECATED_TOOL_ALIASES: dict[str, str] = {
     "ArchiveConverter": "archive",
+    # Retired scanner names resolve to the plugin that serves them
+    # (utils/scanner_names.SCANNER_NAME_ALIASES holds the canonical table):
+    # `--tool semgrep` installs opengrep's tool rather than exiting 2.
+    **SCANNER_NAME_ALIASES,
 }
 
 
@@ -362,7 +367,7 @@ def install_dependencies(
                 # The plugin's own section of the resolved config, looked up the way
                 # the scan path looks it up (ExecutionEngine.get_scanner). Without
                 # it every plugin was built from its defaults, so a
-                # `--config-overrides scanners.semgrep.options.tool_version===X`
+                # `--config-overrides scanners.bandit.options.tool_version===X`
                 # reached resolved_config and stopped there: the scanner installed
                 # its default range, and the image carried whatever release PyPI
                 # had that day instead of the version its license entry records.

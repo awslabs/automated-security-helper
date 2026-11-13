@@ -104,8 +104,8 @@ global_settings:
         a version bump that moves them fails a test instead of drifting.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 638
-      line_end: 654
+      line_start: 637
+      line_end: 650
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -375,7 +375,7 @@ global_settings:
     #
     # This file enables a different scanner set from .ash/.ash.yaml -- bandit,
     # ferret-scan and trivy-repo, with cdk-nag, cfn-nag, checkov, detect-secrets,
-    # grype, npm-audit, opengrep, semgrep, snyk-code and syft all off. Everything
+    # grype, npm-audit, opengrep, snyk-code and syft all off. Everything
     # below exists because of that difference rather than because the code differs.
     # Most of it is trivy-repo asking a question checkov or cfn-nag already asked
     # under a different rule id and answering it differently, and the rest is
@@ -1328,8 +1328,6 @@ scanners:
     options:
       config_file: .ash/.grype.yaml
   opengrep:
-    enabled: false
-  semgrep:
     enabled: false
   snyk-code:
     enabled: false
