@@ -782,6 +782,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    #: --mode precommit --staged: bandit reads Python, so a staged set with no
+    #: .py file skips it, and when there is one bandit is given the staged files
+    #: as positional targets (bandit scans a file target as it scans a walked
+    #: file; -r matters only for directories) instead of walking the tree. The
+    #: --exclude machinery is anchored at the directory target as before and
+    #: still applies to the file targets.
+    staged_scope_patterns: ClassVar[Optional[Tuple[str, ...]]] = ("*.py",)
+    staged_target_style: ClassVar[Optional[str]] = "positional"
+
     # The operator's .bandit file, when config_file names one; see
     # _process_config_options.
     _ini_file: Optional[Path] = PrivateAttr(default=None)
@@ -922,17 +931,22 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         """The base pre-scan, with a configuration handed to ``scan()`` applied first.
 
         The executor passes each target's scanner configuration to ``scan()``,
-        and the base ``_pre_scan`` replaces ``self.config`` with it after the
-        dependency check and without rebuilding anything (``configure()`` is
-        called by nothing on that route), so the argv built at construction
-        stayed: the old ``--confidence-level``, no ``--ignore-nosec``, the old
-        ``--ini`` or ``--configfile``, while the ``--exclude`` rebuilt per scan
-        took the new ``excluded_paths`` and the run looked configured. Here a
-        configuration that differs from the current one is applied
-        (``_apply_config``) before the base runs its dependency check, so the
-        check and the argv read the configuration the scan runs under; one
-        equal to the current configuration, which the executor passes on every
-        target, changes nothing.
+        and the base ``_pre_scan`` used to replace ``self.config`` with it
+        without rebuilding anything (``configure()`` is called by nothing on
+        that route), so the argv built at construction stayed: the old
+        ``--confidence-level``, no ``--ignore-nosec``, the old ``--ini`` or
+        ``--configfile``, while the ``--exclude`` rebuilt per scan took the new
+        ``excluded_paths`` and the run looked configured. Here a configuration
+        that differs from the current one is applied (``_apply_config``) before
+        the base runs its dependency check, so the check and the argv read the
+        configuration the scan runs under; one equal to the current
+        configuration, which the executor passes on every target, changes
+        nothing. ``None`` is handed down, so the base's own swap (which now
+        also runs before its dependency check) does not run a second time --
+        which makes the validation reset here bandit's own duty: the new
+        configuration can change the requirement the check verifies
+        (``tool_version``, extras), so the memoized verdict and the
+        verified-PATH record no longer answer for it.
         """
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
@@ -943,6 +957,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             ):
                 self.config = replacement
                 self._apply_config()
+                self._reset_dependency_validation()
         return super()._pre_scan(target, target_type, None, *args, **kwargs)
 
     def validate_plugin_dependencies(self) -> bool:
@@ -965,6 +980,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # First, while use_uv_tool still says what construction set: the
         # tool-version probe, which construction leaves to this point.
         self.resolve_deferred_tool_version()
+        # A copy on PATH an earlier validation of this instance verified and
+        # chose to run directly is honored while it still exists: with
+        # use_uv_tool already False, a re-validation skipped the selection
+        # branch below and fell to the consolidated resolver, which paid its
+        # cold `uv tool run ... --version` probe per re-check (checkov's
+        # measured shape; bandit's resolver answer keeps the route but still
+        # pays the probe).
+        if self._honored_verified_pre_installed():
+            return True
         if not self._validate_uv_tool_availability():
             # UV is required but not present. The consolidated resolver answers
             # a bandit on PATH, if there is one; it runs directly once verified

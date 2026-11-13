@@ -83,7 +83,7 @@ if TYPE_CHECKING:
 # Anchored with \Z: "$" also matches just before a trailing newline, which
 # would let a key ending in one through to the tool's command line.
 _VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?\Z")
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from automated_security_helper.utils.output_excerpt import head_and_tail
 
 # How much of a tool's stderr goes into the failure message. The full text stays
@@ -422,6 +422,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     # check by content_database_probe_context so the check reads what the scan read.
     _content_db_cache_dir: Optional[Path] = PrivateAttr(default=None)
 
+    # True once a validate_plugin_dependencies of this instance answered True,
+    # so validate_plugin_dependencies_once answers without re-probing; None
+    # before then and after every False answer, which is re-validated (today's
+    # behavior for a failing tool, so a transient probe failure at setup still
+    # gets its per-target retry and a genuinely missing tool still fails
+    # loudly, per target, with the _pre_scan warning).
+    _dependencies_validated: Optional[bool] = PrivateAttr(default=None)
+
     dependency_unavailable_reason: Annotated[
         str | None,
         Field(
@@ -482,6 +490,33 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: class's: cfn-nag and cdk-nag set it when they passed over a candidate they could
     #: not parse, and reset it at the top of each scan(). Read before the class value.
     _nothing_scanned_reason: Optional[str] = PrivateAttr(default=None)
+    #: What this scanner scans, as fnmatch globs over source-relative POSIX paths
+    #: and base names, read only under ``--mode precommit --staged`` and only by
+    #: scanners that run through the template ``scan()``. With a staged scope in
+    #: the context, a source scan whose staged files match none of these is
+    #: skipped with a log line instead of running the tool. None, the default,
+    #: means "this scanner reads any file": it is never pattern-skipped. Scanners
+    #: that enumerate their own files from the run's scan set (detect-secrets,
+    #: cdk-nag, cfn-nag, npm-audit) need none of this: the recorded scan set is
+    #: already the staged files, and their own nothing-to-scan channels fire.
+    staged_scope_patterns: ClassVar[Optional[Tuple[str, ...]]] = None
+    #: How the staged files are handed to the tool in place of the directory
+    #: target, for a tool that takes file targets. ``"positional"`` appends each
+    #: file where the directory went (bandit); ``"per-file-flag"`` appends
+    #: ``staged_target_flag`` before each file (checkov's ``--file``). None, the
+    #: default, keeps the directory target: the tool scans the whole tree even
+    #: under --staged, and only the pattern skip above applies.
+    staged_target_style: ClassVar[Optional[str]] = None
+    #: The flag ``"per-file-flag"`` repeats before each staged file.
+    staged_target_flag: ClassVar[str] = "--file"
+    #: This source scan's staged file targets, absolute, set by ``scan()`` when a
+    #: staged scope is active and ``staged_target_style`` is declared; consumed by
+    #: ``_resolve_arguments`` in place of the directory target. Reset per scan().
+    _staged_scan_files: Optional[List[Path]] = PrivateAttr(default=None)
+    #: Whether staged files matched this scanner and the run's scan set then left
+    #: every one of them out; the skip's reason says so instead of "no staged
+    #: file matches". Reset per scan().
+    _staged_all_filtered: bool = PrivateAttr(default=False)
     #: Files this scanner asked ASH to own (``_neutral_tool_file``), by path, with
     #: the text each holds. Written when the arguments are resolved.
     _neutral_files: Dict[str, str] = PrivateAttr(default_factory=dict)
@@ -892,6 +927,174 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             with open_for_write(written) as handle:
                 handle.write(content)
 
+    def _staged_scope_paths(
+        self, target: str | Path, target_type: str
+    ) -> Optional[List[Path]]:
+        """The staged files this scanner would scan under ``target``, or None.
+
+        None means no staged scope applies here: the context carries none
+        (every run but ``--mode precommit --staged``), or the target is the
+        converted tree, whose files were produced from staged inputs already
+        (the converters read the run's restricted scan set), or this scanner
+        declares neither ``staged_scope_patterns`` nor ``staged_target_style``,
+        so the scope has nothing to decide for it.
+
+        A staged name whose working-tree file is gone (staged, then deleted on
+        disk) is left out: there is nothing to hand the tool. The paths are
+        absolute, under ``target``, so the tool reports them as it reports a
+        directory scan's and every suppression and ignore path resolves as in a
+        whole-repository run.
+        """
+        if target_type != "source":
+            return None
+        if self.staged_scope_patterns is None and self.staged_target_style is None:
+            return None
+        staged = getattr(self.context, "staged_files", None)
+        if staged is None:
+            return None
+        from automated_security_helper.utils.staged_files import (
+            matching_staged_files,
+        )
+
+        root = Path(target)
+        paths: List[Path] = []
+        for relative in matching_staged_files(staged, self.staged_scope_patterns):
+            candidate = root.joinpath(*PurePosixPath(relative).parts)
+            if candidate.is_symlink():
+                # The whole-tree walk leaves links out of the scan set (a link
+                # whose target leaves the tree is links_not_scanned), and
+                # is_file() follows them, so a staged link must never become a
+                # file target that reads whatever it points at.
+                ASH_LOGGER.debug(
+                    f"Leaving the staged link {relative} out of the file "
+                    "targets, as the scan set leaves links out."
+                )
+                continue
+            if candidate.is_file():
+                paths.append(candidate)
+        if not paths:
+            return paths
+        kept = self._staged_targets_in_scan_set(paths, root)
+        if not kept:
+            # Distinct from "no staged file matches": files DID match, and the
+            # run's scan set left every one out. scan() words the skip with
+            # this, so a filter defect could never hide behind the
+            # nothing-matches reason.
+            self._staged_all_filtered = True
+        return kept
+
+    def _staged_targets_in_scan_set(
+        self, candidates: List[Path], root: Path
+    ) -> List[Path]:
+        """``candidates``, less what the run's scan set leaves out.
+
+        The staged names come from git, and the run's recorded scan set is the
+        filtered view of the tree: the repository's ignore files, the config's
+        exclusions and the links that leave the tree are already applied to it,
+        and every scanner that picks its own files reads it back. A file-target
+        scanner has to honor the same filters, or a force-added gitignored file
+        (or one under ``ignore_paths``) is handed straight to its tool while the
+        docs say suppressions and ignores resolve as in a whole-tree run.
+
+        A scan set that cannot be read leaves the candidates as they are (the
+        symlink cut above still applied): over-scanning is the safe failure, and
+        the findings in an ignored file are still dropped by the SARIF step.
+
+        Membership compares ``Path.resolve()`` spellings on both sides, never
+        ``abspath``: the scan set's entries are the source directory as the
+        context spells it with each file's path below it, and the candidates are
+        the engine's target with the staged name below it, so under a symlinked
+        checkout path (the staged_files.py reader's own case) or another
+        spelling of one directory an unresolved compare dropped every candidate
+        and silently skipped the scanner.
+        """
+        from automated_security_helper.utils.scan_output_dirs import scan_set_of
+
+        try:
+            entries = scan_set_of(self.context)
+        except Exception as exc:  # noqa: BLE001 - the filter must not fail the scan
+            ASH_LOGGER.warning(
+                f"Could not read the run's scan set to filter the staged file "
+                f"targets of {self.__class__.__name__}: {exc}. The staged files "
+                "are scanned as they are; findings the ignore paths cover are "
+                "still dropped after the scan."
+            )
+            return candidates
+        # ONE resolve of the source root, then a lexical rebase of each entry
+        # onto it: the entries are the context's source directory as it spells
+        # it with each file's path below (utils/scan_output_dirs.scan_set_of),
+        # so os.path.relpath needs no filesystem. Resolving every entry instead
+        # walked the filesystem once per scan-set file, per file-target scanner,
+        # inside the hook that exists to make a one-file commit fast. Only the
+        # few candidates are resolved for real, which is what absorbs a
+        # symlinked spelling of the checkout path on either side.
+        source_text = os.fspath(self.context.source_dir)
+        resolved_source = Path(source_text).resolve()
+        allowed = {
+            (resolved_source / os.path.relpath(entry, source_text)).as_posix()
+            for entry in entries
+        }
+        kept = []
+        for candidate in candidates:
+            try:
+                resolved = Path(candidate).resolve()
+            except (OSError, RuntimeError):
+                # A symlink loop on the path: RuntimeError from Path.resolve()
+                # on Python 3.12 and earlier, OSError on 3.13. Nothing
+                # scannable sits at that name.
+                continue
+            if resolved.as_posix() in allowed:
+                kept.append(candidate)
+        left_out = len(candidates) - len(kept)
+        if left_out:
+            ASH_LOGGER.info(
+                f"{self.__class__.__name__}: {left_out} staged file(s) are not "
+                "in the scan set (ignored, excluded, or links) and are not "
+                "scanned under --staged."
+            )
+        return kept
+
+    #: The bounds past which the staged files are not put on the command line:
+    #: a mass reformat or a vendored-dependency drop can stage thousands of
+    #: files, and one argv has to carry them all (Windows bounds the whole line
+    #: at about 32,767 characters; Linux bounds it too). Past either bound the
+    #: scanner falls back to the directory target with a log line; the scan-set
+    #: restriction still scopes every scanner that reads the scan set back.
+    _STAGED_TARGET_MAX_FILES: ClassVar[int] = 500
+    _STAGED_TARGET_MAX_ARGV_BYTES: ClassVar[int] = 24576
+
+    def _staged_targets_fit(self, staged_targets: List[Path]) -> bool:
+        """Whether ``staged_targets`` fit on one command line, with headroom."""
+        if len(staged_targets) > self._STAGED_TARGET_MAX_FILES:
+            return False
+        flag_cost = (
+            len(self.staged_target_flag) + 1
+            if self.staged_target_style == "per-file-flag"
+            else 1
+        )
+        argv_bytes = sum(
+            len(Path(target).as_posix()) + flag_cost for target in staged_targets
+        )
+        return argv_bytes <= self._STAGED_TARGET_MAX_ARGV_BYTES
+
+    def _staged_target_arguments(self, staged_targets: List[Path]) -> List[str]:
+        """The argv segment that stands where the directory target went.
+
+        An overridable hook for a scanner whose tool spells file targets some
+        other way; every shipped scanner uses one of the two styles here
+        (checkov's Terraform handling widens the TARGET LIST to same-directory
+        sibling files in its ``_staged_scope_paths`` and keeps the plain
+        per-file ``--file`` form).
+        """
+        if self.staged_target_style == "per-file-flag":
+            arguments: List[str] = []
+            for staged_file in staged_targets:
+                arguments.extend(
+                    [self.staged_target_flag, Path(staged_file).as_posix()]
+                )
+            return arguments
+        return [Path(staged_file).as_posix() for staged_file in staged_targets]
+
     def _resolve_arguments(
         self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
@@ -940,10 +1143,23 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 value = str(value)
             args.append(value)
 
+        staged_targets = self._staged_scan_files
+        if staged_targets:
+            # --mode precommit --staged, for a tool that takes file targets:
+            # the staged files stand where the directory went, so the tool reads
+            # N files instead of walking the tree. The paths are absolute under
+            # the same scan root, so suppressions and the SARIF path handling
+            # see the shapes a directory scan produces.
+            args.extend(self._staged_target_arguments(staged_targets))
+        else:
+            args.extend(
+                [
+                    self.args.scan_path_arg,
+                    Path(target).as_posix(),
+                ]
+            )
         args.extend(
             [
-                self.args.scan_path_arg,
-                Path(target).as_posix(),
                 self.args.output_arg,
                 (
                     Path(results_file).as_posix()
@@ -957,6 +1173,52 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             ]
         )
         return [item for item in args if item is not None and str(item).strip() != ""]
+
+    def validate_plugin_dependencies_once(self) -> bool:
+        """The dependency verdict, from this instance's one satisfied validation.
+
+        ``validate_plugin_dependencies`` runs once per instance and its True
+        verdict is memoized: the scan phase's setup already validated each
+        selected scanner (and, for a tool verified on PATH, decided the route
+        it runs by -- ``use_uv_tool``), yet ``_pre_scan`` validated again per
+        target, after ``start_time``, so the re-validation's probes landed in
+        the scanner's measured duration and, for checkov, discarded the
+        verified-PATH route (the consolidated resolver flipped the scan back
+        through uv). A memoized answer re-runs nothing, so the setup decision
+        stands and the per-target cost is a field read.
+
+        A False verdict is NOT memoized: a scanner that failed validation at
+        setup re-validates per target, as before, so a transient probe failure
+        gets its retry and a genuinely missing tool still fails per target
+        with the warning. ``dependencies_satisfied`` is set to the answer
+        either way, as both callers set it from the un-memoized call.
+        """
+        verdict = self._dependencies_validated
+        if verdict is None:
+            verdict = bool(self.validate_plugin_dependencies())
+            if verdict:
+                self._dependencies_validated = True
+        self.dependencies_satisfied = verdict
+        return verdict
+
+    def _reset_dependency_validation(self) -> None:
+        """Forget this instance's dependency verdict and the route it decided.
+
+        Called when the config is swapped for one that says something else: the
+        config builds the requirement the check verifies (tool_version), so the
+        memoized verdict and the verified-PATH record no longer answer for it.
+        Dropping the record alone was not enough: the earlier decision had set
+        ``use_uv_tool`` False, and a validation that starts there skips its
+        ``if self.use_uv_tool`` selection branch and falls to the consolidated
+        resolver, which pays the cold uv probe and flips the route -- the exact
+        shape this unit removes -- so the flag goes back to the uv route the
+        decision started from, and the next validation runs selection afresh.
+        """
+        self._dependencies_validated = None
+        if self._verified_pre_installed_executable is not None:
+            self._verified_pre_installed_executable = None
+            if self.use_uv_tool is False:
+                self.use_uv_tool = True
 
     def _pre_scan(
         self,
@@ -975,7 +1237,29 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.start_time = datetime.now(timezone.utc)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        self.dependencies_satisfied = self.validate_plugin_dependencies()
+        # The config swap FIRST, before the dependency check reads anything the
+        # config decides (tool_version builds the requirement). It used to sit
+        # after the check, which meant the current target was checked against
+        # the verdict of the config it was replacing; with the verdict now
+        # memoized, it would also have left the memo answering for the old
+        # config on this very target. A config that says what this one already
+        # says is not swapped in: building it again from its dump makes every
+        # nested entry a new object (an entry that carries an identity the dump
+        # does not write got a new one on each scan) and drops the private
+        # state the first build recorded. Only a config that differs replaces
+        # it, and that resets the dependency verdict and the route it decided.
+        if config is not None:
+            if hasattr(config, "model_dump") and callable(config.model_dump):
+                config = config.model_dump(by_alias=True)
+            if config != self.config.model_dump(by_alias=True):
+                self.config = self.config.__class__.model_validate(config)
+                self._reset_dependency_validation()
+
+        # Honors the setup phase's validation of this instance (memoized above)
+        # instead of re-probing per target: the probes ran after start_time, so
+        # their cost read as scan time, and a re-run discarded a verified-PATH
+        # route (checkov's measured shape).
+        self.validate_plugin_dependencies_once()
 
         if not self.dependencies_satisfied:
             self._plugin_log(
@@ -1038,16 +1322,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 target_type=target_type,
                 level=logging.DEBUG,
             )
-        if config is not None:
-            if hasattr(config, "model_dump") and callable(config.model_dump):
-                config = config.model_dump(by_alias=True)
-            # A config that says what this one already says is not swapped in:
-            # building it again from its dump makes every nested entry a new
-            # object (an entry that carries an identity the dump does not write
-            # got a new one on each scan) and drops the private state the first
-            # build recorded. Only a config that differs replaces it.
-            if config != self.config.model_dump(by_alias=True):
-                self.config = self.config.__class__.model_validate(config)
+        # The swap itself already happened, before the dependency check at the
+        # top of this method; config is its dump form (or None) from there on.
         self._plugin_log(
             f"config setting: {self._setting_names(config)}",
             target_type=target_type,
@@ -1774,6 +2050,61 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
             self._post_scan(target=target, target_type=target_type)
             return True
+
+        # Per target, like exit_code above: a converted scan must not run on the
+        # source target's staged file list or carry its skip reason.
+        self._staged_scan_files = None
+        self._staged_all_filtered = False
+        self._nothing_scanned_reason = None
+        staged_targets = self._staged_scope_paths(target, target_type)
+        if staged_targets is not None:
+            if not staged_targets:
+                # The same clean-skip shape as the empty target above: the tool
+                # is not started, and the row reads as "nothing to scan" with
+                # this reason rather than as a clean scan of the whole tree.
+                # Two distinct reasons, so a filter defect could never pass as
+                # "nothing matched": files that matched and were all left out
+                # by the run's scan set say so, at WARNING.
+                if self._staged_all_filtered:
+                    reason = (
+                        f"{self.__class__.__name__} was skipped under --staged: "
+                        "staged files match what it scans, and the run's scan "
+                        "set leaves every one of them out (ignored, excluded, "
+                        "or a link)"
+                    )
+                    level = logging.WARNING
+                else:
+                    reason = (
+                        f"{self.__class__.__name__} was skipped under --staged: "
+                        "no staged file matches what it scans"
+                    )
+                    level = logging.INFO
+                self._nothing_scanned_reason = reason
+                self._plugin_log(
+                    f"{reason}. Not running the tool on {target_type}.",
+                    target_type=target_type,
+                    level=level,
+                    append_to_stream="stderr",
+                )
+                self._post_scan(target=target, target_type=target_type)
+                return True
+            if self.staged_target_style is not None:
+                if self._staged_targets_fit(staged_targets):
+                    self._staged_scan_files = staged_targets
+                else:
+                    # A mass change staged more than one command line can carry
+                    # (ARG_MAX; about 32 KB on Windows): the tool would fail to
+                    # start on exactly the big commits. The directory target
+                    # still covers every staged file, and the scan-set
+                    # restriction still scopes the scanners that read it back.
+                    self._plugin_log(
+                        f"--staged: {len(staged_targets)} staged files are more "
+                        "than one command line can carry; scanning the "
+                        "directory target instead.",
+                        target_type=target_type,
+                        level=logging.INFO,
+                        append_to_stream="stderr",
+                    )
 
         try:
             validated = self._pre_scan(

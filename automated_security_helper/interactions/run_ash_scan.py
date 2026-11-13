@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -274,6 +274,17 @@ class ScanOptions(BaseModel):
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
     excluded_scanners: Optional[List[str]] = Field(default_factory=list)
+    # The --only-scanners allowlist. None means the flag was not given, which is
+    # a different thing from an empty list, so this field is NOT in the
+    # none-to-empty-list validator below: when it is a list, it states the whole
+    # selection and the precommit mode default and the config's precommit keys
+    # are not consulted (_selected_scanners). The CLI refuses it together with
+    # --scanners or --add-scanners; a library caller that sets it alongside them
+    # gets only_scanners, which wins by the same precedence.
+    only_scanners: Optional[List[str]] = None
+    # The --add-scanners names: additive to whatever base the mode and config
+    # give, exactly what --scanners does today, under a name that says so.
+    add_scanners: Optional[List[str]] = Field(default_factory=list)
     # Who gave the two lists above: "mcp" only from the MCP workspace tool, whose
     # SKIPPED rows and selection refusals then name its scanners and
     # excluded_scanners parameters instead of the CLI's flags.
@@ -307,6 +318,14 @@ class ScanOptions(BaseModel):
     min_severity: str = "low"
     changed_files_only: bool = False
     base_ref: str = "origin/main"
+    # --mode precommit only: scan the staged files (git diff --cached) instead
+    # of the whole tree. Validated in run_ash_scan before any mode runs.
+    staged: bool = False
+    # The staged list the caller already read (source-relative POSIX paths),
+    # so a caller that read it to fast-exit on an empty set (the CLI) hands the
+    # same list to the scan instead of a second git read racing a `git add`.
+    # None with staged=True reads the list here; meaningless without staged.
+    staged_files: Optional[List[str]] = None
     # One shard of a split scan, or both None for an ordinary whole scan. Left
     # unvalidated here on purpose: ScanPhase._execute_phase is the single place
     # that refuses an unusable pair, so a second rule in this model could drift
@@ -356,6 +375,7 @@ class ScanOptions(BaseModel):
     @field_validator(
         "scanners",
         "excluded_scanners",
+        "add_scanners",
         "output_formats",
         "config_overrides",
         "custom_build_arg",
@@ -5532,7 +5552,12 @@ def _run_container_mode(
         # record every scanner MISSING. Appended last so it wins.
         config_overrides=[*(opts.config_overrides or []), "sandbox.mode=off"],
         strategy=opts.strategy,
-        scanners=opts.scanners,
+        # --only-scanners and --add-scanners folded into the one list the
+        # container forwards as --scanners entries: the inner scan runs in
+        # local mode, where the three inclusion flags mean the same thing
+        # (_folded_scanner_allowlist), and the inner CLI skips the --scanners
+        # deprecation line under ASH_IN_CONTAINER.
+        scanners=_folded_scanner_allowlist(opts),
         exclude_scanners=opts.excluded_scanners,
         progress=opts.progress,
         output_formats=opts.output_formats,
@@ -5878,6 +5903,13 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
         argv.extend(["--scanners", scanner])
     for scanner in opts.excluded_scanners or []:
         argv.extend(["--exclude-scanners", scanner])
+    # None means not given (ScanOptions); an entry per name, as the other scanner
+    # lists are spelled. The inner scan applies the same precedence this process
+    # would (--only-scanners replaces, --add-scanners adds).
+    for scanner in opts.only_scanners or []:
+        argv.extend(["--only-scanners", scanner])
+    for scanner in opts.add_scanners or []:
+        argv.extend(["--add-scanners", scanner])
     for module in opts.ash_plugin_modules or []:
         argv.extend(["--ash-plugin-modules", module])
     for fmt in opts.output_formats or []:
@@ -6199,6 +6231,120 @@ def _refuse_an_unknown_severity_restriction(restriction: Optional[str]) -> None:
         )
 
 
+def _resolved_precommit_config(opts: ScanOptions):
+    """The ``precommit`` section of the config a scan of *opts* resolves, or None.
+
+    Read as :func:`_host_config_value` reads an exit-code field -- the host-side
+    resolution, before the orchestrator's own -- because the scanner selection
+    has to exist before ``ASHScanOrchestrator.create`` is called with it. None
+    when no config file supplies the config and no ``--config-overrides`` entry
+    names the section (the defaults' empty section would change nothing anyway),
+    and None when resolution fails: the orchestrator's own resolve refuses an
+    unloadable config with exit 3 before any scanner runs, so a selection read
+    off the mode default here is never acted on. The dotted-key check is this
+    function's own rather than :func:`_host_config_value`'s ``name in
+    overridden``, because the section's keys arrive as ``precommit.only_scanners
+    = [...]``, not as a bare ``precommit``.
+    """
+    try:
+        config, from_file = _host_resolved_config(opts)
+    except Exception:
+        return None
+    overridden = {
+        override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        for override in opts.config_overrides or []
+    }
+    if from_file or any(
+        key == "precommit" or key.startswith("precommit.") for key in overridden
+    ):
+        return getattr(config, "precommit", None)
+    return None
+
+
+def _selected_scanners(opts: ScanOptions, logger) -> List[str]:
+    """The scanner allowlist the orchestrator is created with, precedence applied.
+
+    The one place the selection precedence lives; the CLI help, the config
+    section's description and docs/content/how-to/pre-commit.md describe it.
+    Lowest to highest:
+
+    1. The mode default: ``--mode precommit`` starts from
+       ``PRECOMMIT_MODE_SCANNERS``; every other mode starts empty (no
+       narrowing).
+    2. The config's ``precommit`` section, in precommit mode only:
+       ``only_scanners`` replaces the mode default, ``add_scanners`` adds to it
+       (the model refuses both at once).
+    3. The command line: ``--only-scanners`` states the whole selection, so the
+       mode default and the config keys are not consulted at all;
+       ``--add-scanners`` and the deprecated ``--scanners`` add to whatever base
+       stands. The CLI refuses ``--only-scanners`` beside either additive flag.
+
+    ``--exclude-scanners`` is not applied here: the engine subtracts it after
+    selection (``selection_after_exclusions``), so an excluded name wins over
+    any inclusion, whichever of the sources above named it.
+
+    De-duplicated preserving first appearance, so the log and the SKIPPED rows
+    read the same from run to run; the engine compares names case-insensitively
+    either way.
+    """
+    additive = list(opts.scanners or []) + list(opts.add_scanners or [])
+    if opts.only_scanners is not None:
+        return list(opts.only_scanners)
+    if opts.mode != RunMode.precommit:
+        return additive
+    base = list(PRECOMMIT_MODE_SCANNERS)
+    section = _resolved_precommit_config(opts)
+    if section is not None:
+        only = list(getattr(section, "only_scanners", None) or [])
+        add = list(getattr(section, "add_scanners", None) or [])
+        if only:
+            base = only
+            logger.verbose(
+                f"precommit.only_scanners replaces the precommit default set: {only}"
+            )
+        if add:
+            base = base + add
+            logger.verbose(f"precommit.add_scanners adds to the selection: {add}")
+    return list(dict.fromkeys(additive + base))
+
+
+def _folded_scanner_allowlist(opts: ScanOptions) -> List[str]:
+    """The inclusion flags folded to one allowlist, for the paths with no
+    precommit union: workspace mode, and the list container mode forwards.
+    There every inclusion flag means the same thing, an allowlist entry, so
+    ``--only-scanners`` is the list when given and the additive flags
+    concatenate otherwise. Precommit mode's union stays in
+    :func:`_selected_scanners`; the container's inner scan runs in local mode
+    and the workspace executor applies no mode default, so nothing is folded
+    away.
+    """
+    if opts.only_scanners is not None:
+        return list(opts.only_scanners)
+    return list(opts.scanners or []) + list(opts.add_scanners or [])
+
+
+def _staged_findings_filter_set(source_dir: Path, staged_files: List[str]) -> Set[Path]:
+    """The staged files as resolved absolute paths, for the engine's filter.
+
+    The same shape ``_changed_file_set_for`` feeds ``restrict_to_changed_files``
+    (resolved paths, compared against the resolved SARIF locations), built from
+    the source-relative POSIX names the staged scope carries. An entry that
+    cannot be resolved (a symlink loop at its name) names no scannable file and
+    is left out; an empty list is a filter that matches nothing, which is the
+    honest answer when nothing staged is in scope.
+    """
+    resolved: Set[Path] = set()
+    for relative in staged_files:
+        candidate = Path(source_dir).joinpath(*PurePosixPath(relative).parts)
+        try:
+            resolved.add(candidate.resolve())
+        except (OSError, RuntimeError):
+            # RuntimeError is what Path.resolve() raises for a symlink loop on
+            # Python 3.12 and earlier; 3.13 raises OSError for the same loop.
+            continue
+    return resolved
+
+
 def _run_local_mode(
     opts: ScanOptions, logger
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
@@ -6249,9 +6395,41 @@ def _run_local_mode(
                 f"Applying {len(opts.config_overrides or [])} configuration overrides"
             )
 
-        final_scanners = list(opts.scanners or [])
-        if opts.mode == RunMode.precommit:
-            final_scanners = list(set(final_scanners + list(PRECOMMIT_MODE_SCANNERS)))
+        final_scanners = _selected_scanners(opts, logger)
+
+        # --mode precommit --staged: the staged files are the scan's target set.
+        # Read here, once, and handed to the orchestrator, which limits the
+        # run's recorded scan set to them and puts them on the plugin context
+        # for the scanners that take file targets. An unreadable list is a
+        # refusal, never a silent whole-tree scan of what the caller asked to
+        # scope; an empty list runs the machinery with nothing to scan, which
+        # reports zero findings and exits clean (the CLI already exits earlier
+        # and faster for that case).
+        staged_files: Optional[List[str]] = None
+        if opts.staged:
+            from automated_security_helper.utils.staged_files import (
+                staged_files_for_source,
+            )
+
+            # The CLI read the list already (its empty-set fast exit): the same
+            # list is scanned, not a second read racing a `git add` in between.
+            staged_files = (
+                opts.staged_files
+                if opts.staged_files is not None
+                else staged_files_for_source(opts.source_dir)
+            )
+            if staged_files is None:
+                raise RuntimeError(
+                    "--staged could not read the staged file list for "
+                    f"{opts.source_dir.as_posix()}: it needs git and a git "
+                    "repository (the cause was logged). Run without --staged "
+                    "to scan the whole tree."
+                )
+            if not staged_files:
+                logger.info(
+                    "--staged: no staged file is inside the scanned directory, "
+                    "so there is nothing to scan."
+                )
 
         final_show_progress = _live_progress_enabled(opts)
 
@@ -6259,6 +6437,7 @@ def _run_local_mode(
             source_dir=opts.source_dir,
             output_dir=opts.output_dir,
             work_dir=opts.output_dir / ASH_WORK_DIR_NAME,
+            staged_files=staged_files,
             enabled_scanners=final_scanners,
             excluded_scanners=list(opts.excluded_scanners or []),
             config_path=config,
@@ -6336,16 +6515,35 @@ def _run_local_mode(
             logger,
             values=config_environment_values(getattr(orchestrator, "config", None)),
         )
-        if _changed_file_set is not None:
-            orchestrator.restrict_to_changed_files(_changed_file_set)
+        _filter_file_set = _changed_file_set
+        if staged_files is not None:
+            # Defense in depth for --staged, through the same engine filter as
+            # --changed-files-only: whatever a tool read beyond the staged
+            # files (checkov's Terraform sibling context; a scanner that fell
+            # back to the directory target past the argv bound), the model
+            # keeps staged-file findings only, so every report, summary count
+            # and the exit code honor the scope. With --changed-files-only
+            # too, both scopes were asked for, so their intersection reports.
+            staged_set = _staged_findings_filter_set(opts.source_dir, staged_files)
+            _filter_file_set = (
+                staged_set
+                if _filter_file_set is None
+                else _filter_file_set & staged_set
+            )
+        if _filter_file_set is not None:
+            orchestrator.restrict_to_changed_files(_filter_file_set)
         orchestrator.add_metadata(
             # Recorded on every result set, so a reporter that reads "not
             # reported" as "fixed" (aws-security-hub can archive such findings)
-            # knows whether the changed-files filter removed findings that are not
-            # fixed. True when a changed-file set was computed; False otherwise,
-            # also when the flag fell back to a full scan. Always explicit, so
-            # results that predate the marker are told apart from a full scan.
-            changed_files_only=_changed_file_set is not None,
+            # knows whether a file filter removed findings that are not fixed.
+            # From the COMBINED filter, not the flag alone: --staged filters the
+            # results too, and a staged run marked False would let such a
+            # reporter archive real findings as fixed. True when any file set
+            # restricted the results (the --changed-files-only set, the staged
+            # set, or both); False otherwise, also when the flag fell back to a
+            # full scan. Always explicit, so results that predate the marker are
+            # told apart from a full scan.
+            changed_files_only=_filter_file_set is not None,
             # Beside the marker, for the same reporter: the directory the scan
             # looked at, recorded at scan time while it exists
             # (utils/scan_source.py; a report made on another host cannot work it
@@ -6658,7 +6856,11 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
     return ProjectScanSettings(
         output_dir=opts.output_dir,
         phases=tuple(phases),
-        enabled_scanners=tuple(opts.scanners or []),
+        # The inclusion flags folded to one allowlist: workspace mode applies no
+        # precommit mode default (precommit changes only the output here), so
+        # --only-scanners is the list when given and the additive flags
+        # concatenate otherwise (_folded_scanner_allowlist).
+        enabled_scanners=tuple(_folded_scanner_allowlist(opts)),
         excluded_scanners=tuple(opts.excluded_scanners or []),
         selection_origin=opts.selection_origin,
         output_formats=tuple(
@@ -7752,6 +7954,8 @@ def run_ash_scan(
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL,
     scanners: List[str] | None = None,
     exclude_scanners: List[str] | None = None,
+    only_scanners: List[str] | None = None,
+    add_scanners: List[str] | None = None,
     progress: bool = True,
     output_formats: List[ExportFormat] | None = None,
     cleanup: bool = False,
@@ -7770,6 +7974,8 @@ def run_ash_scan(
     min_severity: str = "low",
     changed_files_only: bool = False,
     base_ref: str = "origin/main",
+    staged: bool = False,
+    staged_files: List[str] | None = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
     mode: RunMode = RunMode.local,
@@ -7840,6 +8046,8 @@ def run_ash_scan(
         strategy=strategy,
         scanners=scanners,
         excluded_scanners=exclude_scanners,
+        only_scanners=only_scanners,
+        add_scanners=add_scanners,
         progress=progress,
         output_formats=output_formats,
         cleanup=cleanup,
@@ -7858,6 +8066,8 @@ def run_ash_scan(
         min_severity=min_severity,
         changed_files_only=changed_files_only,
         base_ref=base_ref,
+        staged=staged,
+        staged_files=staged_files,
         shard_index=shard_index,
         shard_count=shard_count,
         mode=mode,
@@ -7901,6 +8111,45 @@ def run_ash_scan(
             f"mode={opts.mode.value!r}: the ASH that mode runs reads the config "
             "without it"
         )
+    # Before any mode runs: --staged is the precommit scope and nothing else
+    # applies it, so any other mode is refused rather than silently scanning
+    # the whole tree (the CLI refuses it earlier with a usage error; this is
+    # the same contract for a library caller). staged_files is the scope's
+    # data, so a caller that hands it to a mode that cannot read it is told
+    # too, instead of having it dropped without a word.
+    if (opts.staged or opts.staged_files is not None) and (
+        opts.mode != RunMode.precommit
+    ):
+        name = "staged" if opts.staged else "staged_files"
+        raise ValueError(
+            f"{name} is supported only with mode=precommit: it scopes the "
+            f"scan to the files git has staged, and mode={opts.mode.value!r} "
+            "does not read that scope. Run with mode=RunMode.precommit, or "
+            f"drop {name}."
+        )
+    if opts.staged and opts.workspace_plan is not None:
+        raise ValueError(
+            "staged is not supported in workspace mode: the staged scope "
+            "is read for one source directory. Scan the project directly."
+        )
+    if opts.staged_files is not None and not opts.staged:
+        # Without the scope the scan covers the whole tree and the list would
+        # be dropped without a word -- the exact silence the staged refusals
+        # exist to prevent.
+        raise ValueError(
+            "staged_files is read only with staged=True: without the staged "
+            "scope the scan covers the whole tree and the list would be "
+            "ignored. Pass staged=True, or drop staged_files."
+        )
+    if opts.staged_files is not None:
+        from automated_security_helper.utils.staged_files import (
+            validate_staged_entries,
+        )
+
+        # A caller's list is input like any other: an absolute path or a ..
+        # climbs out of the source directory, which the staged scope must
+        # never scan.
+        validate_staged_entries(opts.staged_files)
     for name, value, workspace_ok in (
         ("untrusted_config", opts.untrusted_config, False),
         # Workspace mode resolves each project's own config (the comment

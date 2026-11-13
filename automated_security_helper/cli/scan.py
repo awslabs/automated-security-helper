@@ -662,6 +662,41 @@ def _refuse_changed_files_only_in_container_mode(
     raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
 
+def _refuse_staged_outside_precommit_mode(
+    staged: bool,
+    mode: RunMode | str | None,
+    workspace: object,
+    from_environment: bool,
+) -> None:
+    """Refuse ``--staged`` outside ``--mode precommit``, before anything runs.
+
+    The staged scope exists for the pre-commit hook; no other mode applies it,
+    and silently scanning the whole tree would be the opposite of what the
+    caller asked for. Workspace mode is refused with it: the staged scope is
+    read for one source directory.
+    """
+    if not staged:
+        return
+    source = "ASH_STAGED is set, and --staged" if from_environment else "--staged"
+    if workspace is not None:
+        echo(
+            f"{source} is not supported with --workspace: the staged scope is "
+            "read for one source directory. Scan the project directly with "
+            "--mode precommit --staged.",
+            err=True,
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+    if mode is not None and RunMode(mode) == RunMode.precommit:
+        return
+    echo(
+        f"{source} is supported only with --mode precommit: it scopes the scan "
+        "to the files git has staged for commit. Run with --mode precommit, or "
+        "drop --staged.",
+        err=True,
+    )
+    raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+
+
 def _validate_shard_options(
     shard_index: int | None,
     shard_count: int | None,
@@ -900,7 +935,13 @@ def run_ash_scan_cli_command(
         Optional[List[str]],
         typer.Option(
             rich_help_panel="Scan",
-            help="Specific scanner names to run. Defaults to all scanners.",
+            help=(
+                "Deprecated: use --only-scanners to state the whole selection, or "
+                "--add-scanners to add to the mode's default set. Behavior is "
+                "unchanged: specific scanner names to run (additive to the "
+                "precommit set in --mode precommit; the whole selection "
+                "elsewhere). Cannot be combined with --only-scanners."
+            ),
             envvar="ASH_SCANNERS",
         ),
     ] = None,
@@ -910,6 +951,37 @@ def run_ash_scan_cli_command(
             rich_help_panel="Scan",
             help="Specific scanner names to exclude from running. Takes precedence over scanners parameter.",
             envvar="ASH_EXCLUDED_SCANNERS",
+        ),
+    ] = None,
+    only_scanners: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--only-scanners",
+            rich_help_panel="Scan",
+            help=(
+                "Run exactly these scanners: the whole selection, replacing the "
+                "mode's default set (--mode precommit's five) and the config "
+                "file's precommit.only_scanners/add_scanners keys. Repeatable, "
+                "and each value may name several scanners separated by commas, "
+                "as --scanners accepts. Cannot be combined with --add-scanners "
+                "or the deprecated --scanners. --exclude-scanners still removes "
+                "names from it."
+            ),
+        ),
+    ] = None,
+    add_scanners: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--add-scanners",
+            rich_help_panel="Scan",
+            help=(
+                "Scanner names to run in addition to the selection the mode and "
+                "config give: in --mode precommit, the five default scanners "
+                "plus the config's precommit keys; elsewhere the same additive "
+                "meaning as --scanners. Repeatable, comma lists accepted. "
+                "Cannot be combined with --only-scanners. --exclude-scanners "
+                "still applies last."
+            ),
         ),
     ] = None,
     ash_plugin_modules: Annotated[
@@ -1032,7 +1104,10 @@ def run_ash_scan_cli_command(
                 "Execution mode preset. 'local' (default) runs the scan in this "
                 "process with the scanner tools installed on this machine. "
                 "'precommit' is a local scan that runs only "
-                f"{', '.join(PRECOMMIT_MODE_SCANNERS)}, plus any --scanners, with "
+                f"{', '.join(PRECOMMIT_MODE_SCANNERS)}, plus any --add-scanners "
+                "(or the deprecated --scanners); the config file's "
+                "precommit.only_scanners and the --only-scanners flag replace "
+                "that set instead. It prints "
                 "simplified output and no progress display; in workspace mode it "
                 "changes only the output. 'container' builds the ASH container "
                 "image and runs the scan inside it. 'nix' runs the scan inside "
@@ -1223,6 +1298,29 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASE_REF",
         ),
     ] = "origin/main",
+    staged: Annotated[
+        bool,
+        typer.Option(
+            "--staged",
+            rich_help_panel="Scan",
+            help=(
+                "With --mode precommit only: scan the staged files (git diff "
+                "--cached, without deletions; a rename's new path) instead of "
+                "the whole tree, so a commit pays for what it stages. What the "
+                "tools read is the working-tree copy of each staged file; under "
+                "the pre-commit framework the two are identical, because it "
+                "stashes unstaged changes around the hooks. Suppressions and "
+                "ignore paths apply exactly as in a whole-tree scan; findings "
+                "in files that are not staged are out of scope. With nothing "
+                "staged the scan exits 0 without starting any scanner. Unlike "
+                "--changed-files-only, which only filters the reports after "
+                "scanning everything, --staged saves the scan time. Any other "
+                "--mode refuses it (exit 5). Planned to become the precommit "
+                "default in ASH v4."
+            ),
+            envvar="ASH_STAGED",
+        ),
+    ] = False,
     allow_in_tree_tools: Annotated[
         bool,
         typer.Option(
@@ -1473,6 +1571,12 @@ def run_ash_scan_cli_command(
         mode,
         from_environment=_from_environment(ctx, "changed_files_only"),
     )
+    _refuse_staged_outside_precommit_mode(
+        staged,
+        mode,
+        workspace,
+        from_environment=_from_environment(ctx, "staged"),
+    )
     # With the other early refusals, so the workspace dry run below refuses what the
     # run refuses and names the same first problem.
     runner_for_the_run = _oci_runner_for_this_run(ctx, oci_runner, mode)
@@ -1706,6 +1810,41 @@ def run_ash_scan_cli_command(
         scanners = []
     if exclude_scanners is None:
         exclude_scanners = []
+    if add_scanners is None:
+        add_scanners = []
+    # --only-scanners states the whole selection, so either additive flag beside
+    # it is ambiguous: names in both repeat themselves, names in one contradict
+    # "exactly these". Refused rather than resolved to either reading, before
+    # the dry run answers and before any scan starts. None means the flag was
+    # not given; typer never produces an empty list for it.
+    if only_scanners is not None and add_scanners:
+        _fail_usage(
+            "--only-scanners cannot be combined with --add-scanners: "
+            "--only-scanners already states the whole scanner selection. Put "
+            "every name in --only-scanners, or drop it and keep --add-scanners."
+        )
+    if only_scanners is not None and scanners:
+        _fail_usage(
+            "--only-scanners cannot be combined with --scanners, which is "
+            "deprecated: --only-scanners already states the whole scanner "
+            "selection. Put every name in --only-scanners, or use "
+            "--add-scanners to add to the mode's default set."
+        )
+    if scanners and os.environ.get("ASH_IN_CONTAINER", "NO").upper() not in [
+        "YES",
+        "1",
+        "TRUE",
+    ]:
+        # A warning, not a refusal: behavior is unchanged. Skipped inside the
+        # container, where the forwarded command line is machine-built from the
+        # host's flags and the host already said this once.
+        echo(
+            "DeprecationWarning: --scanners (and ASH_SCANNERS) is deprecated. "
+            "Use --only-scanners to state the whole scanner selection, or "
+            "--add-scanners to add scanners to the mode's default set. "
+            "--scanners keeps its current behavior.",
+            err=True,
+        )
     if ash_plugin_modules is None:
         ash_plugin_modules = []
     # "a_ash_plugins, b_ash_plugins", from the flag or ASH_PLUGIN_MODULES, names two
@@ -1749,7 +1888,15 @@ def run_ash_scan_cli_command(
         # refuses what the run refuses and names the same first problem.
         _exit_with_workspace_dry_run(
             workspace_plan,
-            scanners=tuple(scanners),
+            # Folded as the real workspace run folds them (run_ash_scan's
+            # _folded_scanner_allowlist): workspace mode applies no precommit
+            # default, so --only-scanners is the list when given and the
+            # additive flags concatenate otherwise.
+            scanners=tuple(
+                only_scanners
+                if only_scanners is not None
+                else [*scanners, *add_scanners]
+            ),
             exclude_scanners=tuple(exclude_scanners),
             ash_plugin_modules=tuple(ash_plugin_modules),
         )
@@ -1786,6 +1933,35 @@ def run_ash_scan_cli_command(
     # entered here and not inside run_ash_scan because the MCP runner calls
     # run_ash_scan inside a scope of its own, whose event its registry stops; a
     # scope installed below the shared frame would shadow it.
+    # --staged with nothing staged: say so and exit clean before any engine,
+    # plugin or report machinery starts. This is the hook's hot path (a commit
+    # touching only files ASH does not scan still runs the hook), so it has to
+    # cost one git call, not a scan. run_ash_scan applies the same scope for
+    # callers that skip the CLI; an unreadable staged list is refused there too.
+    staged_for_scan = None
+    if staged:
+        from automated_security_helper.utils.staged_files import (
+            staged_files_for_source,
+        )
+
+        staged_for_scan = staged_files_for_source(
+            Path(source_dir) if source_dir is not None else Path.cwd()
+        )
+        if staged_for_scan is None:
+            echo(
+                "--staged could not read the staged file list: it needs git and "
+                "a git repository (the cause was logged). Run without --staged "
+                "to scan the whole tree.",
+                err=True,
+            )
+            raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+        if not staged_for_scan:
+            echo(
+                "--staged: nothing is staged inside the scanned directory, so "
+                "there is nothing to scan. Exiting clean."
+            )
+            raise typer.Exit(0)
+
     cancel_event = CancelEvent()
     # A second Ctrl-C takes the die-now ending, which never returns to the
     # interrupt arm below, so the word on how the run ended is registered with
@@ -1803,6 +1979,8 @@ def run_ash_scan_cli_command(
                 strategy=strategy,
                 scanners=scanners,
                 exclude_scanners=exclude_scanners,
+                only_scanners=only_scanners,
+                add_scanners=add_scanners,
                 progress=cli_final_show_progress,
                 output_formats=parsed_output_formats,
                 cleanup=cleanup,
@@ -1821,6 +1999,8 @@ def run_ash_scan_cli_command(
                 min_severity=MinSeverity(min_severity).value,
                 changed_files_only=changed_files_only,
                 base_ref=base_ref,
+                staged=staged,
+                staged_files=staged_for_scan,
                 shard_index=shard_index,
                 shard_count=shard_count,
                 mode=mode or RunMode.local,

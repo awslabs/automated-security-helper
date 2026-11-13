@@ -1004,6 +1004,15 @@ class PluginBase(UVToolMixin, BaseModel):
     # through uv, or None. _run_subprocess reports it.
     _uv_run_failure: str | None = PrivateAttr(default=None)
 
+    # The executable _select_tool_execution verified on PATH for this plugin's
+    # requirement and chose to run directly (use_uv_tool False), or None. A later
+    # dependency validation of the same instance honors that decision instead of
+    # re-resolving: the consolidated resolver's answer flipped the scan back
+    # through uv after setup had verified the PATH copy, so the verified copy
+    # never ran and the resolver's cold version probe was paid per target. See
+    # UVToolMixin._honored_verified_pre_installed.
+    _verified_pre_installed_executable: str | None = PrivateAttr(default=None)
+
     #: The responses ``_process_command_response`` has folded and no recorder
     #: has yet retired. Held as the objects themselves, never their ``id()``:
     #: a mark keyed on an address outlived its dict on the paths that never

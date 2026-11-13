@@ -48,13 +48,59 @@ Do not ignore all of `.ash/`: an ASH config file can live there, as `.ash/.ash.y
 
 ## What the hook runs {#behavior}
 
-The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
+The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommit mode:
 
-- runs five scanners: bandit, detect-secrets, checkov, cdk-nag, and npm-audit. `--scanners`
-  can add others but cannot remove these; `--exclude-scanners` removes them.
-- scans the whole repository on every run, not only the staged files. A commit that touches
-  one file is still blocked by a finding in a file committed earlier.
+- runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
+  `--add-scanners` adds others to that set; `--only-scanners` replaces the set and runs
+  exactly what it names; `--exclude-scanners` removes names, whichever source added them.
+  The deprecated `--scanners` behaves like `--add-scanners` here. See
+  [Choosing the scanners](#scanner-selection).
+- with `--staged` (which the hook passes), scans the staged files instead of the whole
+  repository, so a one-file commit pays for one file. See
+  [Staged-file scope](#staged-scope).
 - prints simplified output and writes the usual reports to `.ash/ash_output/`.
+
+## Staged-file scope (`--staged`) {#staged-scope}
+
+`--staged` reads the staged file list from `git diff --cached` (added, copied, modified
+and renamed entries; a rename is scanned at its new path; a deleted file cannot be
+scanned and is not listed) and makes it the scan's target set:
+
+- bandit and checkov are handed the staged files instead of the tree; the scanners that
+  pick their own files (detect-secrets, cdk-nag, npm-audit) read the same staged list.
+  For Terraform, checkov also reads a staged file's same-directory `.tf`/`.tfvars`
+  siblings, so same-directory `variables.tf` defaults and `locals` still resolve;
+  nothing recurses into subdirectories, so a local module that lives in one is read
+  only when its own files are staged.
+- a scanner none of whose files are staged is skipped, with a log line saying so.
+- converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
+  when nothing staged matches them.
+- suppressions and `ignore_paths` resolve against the same scan root as a whole-repository
+  run, so a suppression that matches a finding in a full scan matches it here too.
+- findings in files that are not staged are out of scope by definition: the hook judges
+  the commit, not the repository. The reports are filtered to the staged files, so even
+  what a tool read for context (the Terraform siblings above, or the large-commit
+  fallback below) never adds findings. Keep a whole-repository scan in CI for the rest.
+- a commit staging more files than one command line can carry (about 500) makes bandit
+  and checkov fall back to scanning the directory, with a log line: the reports still
+  hold staged-file findings only, and what degrades is the time win.
+- with nothing staged, the scan logs that and exits 0 without starting any scanner.
+
+What the tools read is the working-tree copy of each staged file. Under the
+pre-commit framework the two are identical, because it stashes unstaged changes
+around the hooks; a direct `ash --mode precommit --staged` run after `git add -p`,
+or after editing a file it had staged, scans content that differs from what the
+commit will contain.
+
+`--staged` works only with `--mode precommit`; any other mode refuses it (exit 5).
+Without the flag, a precommit scan still covers the whole repository: on every ASH v3
+release the flag is opt-in, the hooks in this repository pass it for you, and it is
+planned to become the precommit default in ASH v4.
+
+This is not what `--changed-files-only` does. `--changed-files-only` scans everything
+and only filters the reports against a `<base_ref>...HEAD` diff afterwards, so it saves
+no scan time and cannot see staged-but-uncommitted content; `--staged` is the scan-time
+scope built for the hook.
 
 The hook's environment includes the `cdk` extra that cdk-nag needs. cdk-nag and npm-audit
 also need Node.js and npm on `PATH`, but only when the repository has files they scan:
@@ -80,6 +126,35 @@ is the same hook under another name.
 
 Do not add `--no-fail-on-incomplete-scanners` to the hook: with it, a commit passes when a
 scanner did not run, and the output says only `Passed`.
+
+### Choosing the scanners {#scanner-selection}
+
+The selection precommit mode runs is resolved in this order, later entries winning:
+
+1. The mode default: the five scanners above.
+2. The ASH config file: `precommit.only_scanners` replaces the default set;
+   `precommit.add_scanners` adds to it. Setting both keys is refused.
+3. The command line: `--only-scanners` replaces everything above, mode default and config
+   keys alike; `--add-scanners`, or the deprecated `--scanners`, adds to whatever stands.
+   `--only-scanners` cannot be combined with either additive flag.
+4. `--exclude-scanners` applies last: an excluded name does not run, whichever source
+   included it.
+
+So a repository that wants its hook to run only bandit and detect-secrets states it once
+in its ASH config instead of in every clone's hook `args`:
+
+<!-- doctest: config kind=ash -->
+```yaml
+project_name: my-project
+precommit:
+  only_scanners:
+    - bandit
+    - detect-secrets
+```
+
+A committer can still widen one run with `--add-scanners`, or override the file entirely
+with `--only-scanners`. `--scanners` keeps working with a deprecation warning; it is the
+same additive selection `--add-scanners` now names explicitly.
 
 ### Add Python packages to the hook {#additional-dependencies}
 

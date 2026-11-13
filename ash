@@ -364,7 +364,7 @@ ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 # The root ash options that take a value. A value can be a subcommand's name
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
-ASH_ROOT_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
 
 # The first word of ASH_ARG_WORDS that names an ash subcommand, in SUBCOMMAND,
 # with its index in SUBCOMMAND_AT (-1 and "" when none is named), not counting
