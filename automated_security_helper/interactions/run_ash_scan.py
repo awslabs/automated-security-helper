@@ -351,7 +351,9 @@ class ScanOptions(BaseModel):
                 f"min_severity must be one of {', '.join(accepted)} (any case), "
                 f"not {v!r}"
             )
-        return value
+        # Lowercased: the value is forwarded to the container and Nix CLIs, whose
+        # option is a case-sensitive choice, so "HIGH" would be a usage error there.
+        return value.lower()
 
     @field_validator(
         "scanners",
@@ -5067,8 +5069,10 @@ def _names_the_output_directorys_own_results(opts: ScanOptions) -> bool:
     """
     if not opts.existing_results:
         return False
-    named = Path(opts.existing_results).resolve()
-    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    # realpath, not Path.resolve(): before Python 3.13 resolve() raises
+    # RuntimeError for a symbolic link loop, and a loop is just another file here.
+    named = Path(os.path.realpath(opts.existing_results))
+    own = Path(os.path.realpath(Path(opts.output_dir) / "ash_aggregated_results.json"))
     return named == own
 
 
@@ -5790,8 +5794,9 @@ def _refuse_a_results_file_the_shell_cannot_be_handed(
     """
     if not opts.existing_results:
         return
-    named = Path(opts.existing_results).resolve()
-    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    # realpath for the same reason as _names_the_output_directorys_own_results.
+    named = Path(os.path.realpath(opts.existing_results))
+    own = Path(os.path.realpath(Path(opts.output_dir) / "ash_aggregated_results.json"))
     if named == own:
         return
     _logged_refusal(
@@ -6064,6 +6069,18 @@ def _run_nix_mode(
         kept_on_purpose=bool(opts.existing_results),
     )
     output_file = opts.output_dir / "ash_aggregated_results.json"
+    if shell_code == 2 and not output_file.exists():
+        # As in container mode: the scan inside exits 2 for findings only after
+        # writing the results file, and for a usage error without one. The
+        # shell's checkout may be an older ASH that rejects an option this ASH
+        # passes it.
+        logger.error(
+            "The scan inside the Nix shell exited 2 without writing a results "
+            "file, which is how the ASH command line rejects its arguments: the "
+            "ASH the shell runs may be older than this one and not accept an "
+            "option this ASH passes it. Run it from the same checkout as this ASH."
+        )
+        sys.exit(3)
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
