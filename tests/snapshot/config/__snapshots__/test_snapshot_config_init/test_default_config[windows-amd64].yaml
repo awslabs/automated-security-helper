@@ -480,3 +480,6 @@ mcp-resource-management:
 workspace:
   max_parallel_projects: null
   project_timeout: null
+precommit:
+  only_scanners: []
+  add_scanners: []

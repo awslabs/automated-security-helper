@@ -420,6 +420,9 @@ output_formats: []
 workspace:
   max_parallel_projects: null
   project_timeout: null
+precommit:
+  only_scanners: []
+  add_scanners: []
 
 Successfully updated config file: <TMP>/demo-project/ash.yaml
 [exit code: 0]

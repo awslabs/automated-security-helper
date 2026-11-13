@@ -935,7 +935,13 @@ def run_ash_scan_cli_command(
         Optional[List[str]],
         typer.Option(
             rich_help_panel="Scan",
-            help="Specific scanner names to run. Defaults to all scanners.",
+            help=(
+                "Deprecated: use --only-scanners to state the whole selection, or "
+                "--add-scanners to add to the mode's default set. Behavior is "
+                "unchanged: specific scanner names to run (additive to the "
+                "precommit set in --mode precommit; the whole selection "
+                "elsewhere). Cannot be combined with --only-scanners."
+            ),
             envvar="ASH_SCANNERS",
         ),
     ] = None,
@@ -945,6 +951,37 @@ def run_ash_scan_cli_command(
             rich_help_panel="Scan",
             help="Specific scanner names to exclude from running. Takes precedence over scanners parameter.",
             envvar="ASH_EXCLUDED_SCANNERS",
+        ),
+    ] = None,
+    only_scanners: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--only-scanners",
+            rich_help_panel="Scan",
+            help=(
+                "Run exactly these scanners: the whole selection, replacing the "
+                "mode's default set (--mode precommit's five) and the config "
+                "file's precommit.only_scanners/add_scanners keys. Repeatable, "
+                "and each value may name several scanners separated by commas, "
+                "as --scanners accepts. Cannot be combined with --add-scanners "
+                "or the deprecated --scanners. --exclude-scanners still removes "
+                "names from it."
+            ),
+        ),
+    ] = None,
+    add_scanners: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--add-scanners",
+            rich_help_panel="Scan",
+            help=(
+                "Scanner names to run in addition to the selection the mode and "
+                "config give: in --mode precommit, the five default scanners "
+                "plus the config's precommit keys; elsewhere the same additive "
+                "meaning as --scanners. Repeatable, comma lists accepted. "
+                "Cannot be combined with --only-scanners. --exclude-scanners "
+                "still applies last."
+            ),
         ),
     ] = None,
     ash_plugin_modules: Annotated[
@@ -1067,7 +1104,10 @@ def run_ash_scan_cli_command(
                 "Execution mode preset. 'local' (default) runs the scan in this "
                 "process with the scanner tools installed on this machine. "
                 "'precommit' is a local scan that runs only "
-                f"{', '.join(PRECOMMIT_MODE_SCANNERS)}, plus any --scanners, with "
+                f"{', '.join(PRECOMMIT_MODE_SCANNERS)}, plus any --add-scanners "
+                "(or the deprecated --scanners); the config file's "
+                "precommit.only_scanners and the --only-scanners flag replace "
+                "that set instead. It prints "
                 "simplified output and no progress display; in workspace mode it "
                 "changes only the output. 'container' builds the ASH container "
                 "image and runs the scan inside it. 'nix' runs the scan inside "
@@ -1770,6 +1810,41 @@ def run_ash_scan_cli_command(
         scanners = []
     if exclude_scanners is None:
         exclude_scanners = []
+    if add_scanners is None:
+        add_scanners = []
+    # --only-scanners states the whole selection, so either additive flag beside
+    # it is ambiguous: names in both repeat themselves, names in one contradict
+    # "exactly these". Refused rather than resolved to either reading, before
+    # the dry run answers and before any scan starts. None means the flag was
+    # not given; typer never produces an empty list for it.
+    if only_scanners is not None and add_scanners:
+        _fail_usage(
+            "--only-scanners cannot be combined with --add-scanners: "
+            "--only-scanners already states the whole scanner selection. Put "
+            "every name in --only-scanners, or drop it and keep --add-scanners."
+        )
+    if only_scanners is not None and scanners:
+        _fail_usage(
+            "--only-scanners cannot be combined with --scanners, which is "
+            "deprecated: --only-scanners already states the whole scanner "
+            "selection. Put every name in --only-scanners, or use "
+            "--add-scanners to add to the mode's default set."
+        )
+    if scanners and os.environ.get("ASH_IN_CONTAINER", "NO").upper() not in [
+        "YES",
+        "1",
+        "TRUE",
+    ]:
+        # A warning, not a refusal: behavior is unchanged. Skipped inside the
+        # container, where the forwarded command line is machine-built from the
+        # host's flags and the host already said this once.
+        echo(
+            "DeprecationWarning: --scanners (and ASH_SCANNERS) is deprecated. "
+            "Use --only-scanners to state the whole scanner selection, or "
+            "--add-scanners to add scanners to the mode's default set. "
+            "--scanners keeps its current behavior.",
+            err=True,
+        )
     if ash_plugin_modules is None:
         ash_plugin_modules = []
     # "a_ash_plugins, b_ash_plugins", from the flag or ASH_PLUGIN_MODULES, names two
@@ -1813,7 +1888,15 @@ def run_ash_scan_cli_command(
         # refuses what the run refuses and names the same first problem.
         _exit_with_workspace_dry_run(
             workspace_plan,
-            scanners=tuple(scanners),
+            # Folded as the real workspace run folds them (run_ash_scan's
+            # _folded_scanner_allowlist): workspace mode applies no precommit
+            # default, so --only-scanners is the list when given and the
+            # additive flags concatenate otherwise.
+            scanners=tuple(
+                only_scanners
+                if only_scanners is not None
+                else [*scanners, *add_scanners]
+            ),
             exclude_scanners=tuple(exclude_scanners),
             ash_plugin_modules=tuple(ash_plugin_modules),
         )
@@ -1896,6 +1979,8 @@ def run_ash_scan_cli_command(
                 strategy=strategy,
                 scanners=scanners,
                 exclude_scanners=exclude_scanners,
+                only_scanners=only_scanners,
+                add_scanners=add_scanners,
                 progress=cli_final_show_progress,
                 output_formats=parsed_output_formats,
                 cleanup=cleanup,

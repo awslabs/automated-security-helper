@@ -50,8 +50,11 @@ Do not ignore all of `.ash/`: an ASH config file can live there, as `.ash/.ash.y
 
 The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommit mode:
 
-- runs five scanners: bandit, detect-secrets, checkov, cdk-nag, and npm-audit. `--scanners`
-  can add others but cannot remove these; `--exclude-scanners` removes them.
+- runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
+  `--add-scanners` adds others to that set; `--only-scanners` replaces the set and runs
+  exactly what it names; `--exclude-scanners` removes names, whichever source added them.
+  The deprecated `--scanners` behaves like `--add-scanners` here. See
+  [Choosing the scanners](#scanner-selection).
 - with `--staged` (which the hook passes), scans the staged files instead of the whole
   repository, so a one-file commit pays for one file. See
   [Staged-file scope](#staged-scope).
@@ -123,6 +126,35 @@ is the same hook under another name.
 
 Do not add `--no-fail-on-incomplete-scanners` to the hook: with it, a commit passes when a
 scanner did not run, and the output says only `Passed`.
+
+### Choosing the scanners {#scanner-selection}
+
+The selection precommit mode runs is resolved in this order, later entries winning:
+
+1. The mode default: the five scanners above.
+2. The ASH config file: `precommit.only_scanners` replaces the default set;
+   `precommit.add_scanners` adds to it. Setting both keys is refused.
+3. The command line: `--only-scanners` replaces everything above, mode default and config
+   keys alike; `--add-scanners`, or the deprecated `--scanners`, adds to whatever stands.
+   `--only-scanners` cannot be combined with either additive flag.
+4. `--exclude-scanners` applies last: an excluded name does not run, whichever source
+   included it.
+
+So a repository that wants its hook to run only bandit and detect-secrets states it once
+in its ASH config instead of in every clone's hook `args`:
+
+<!-- doctest: config kind=ash -->
+```yaml
+project_name: my-project
+precommit:
+  only_scanners:
+    - bandit
+    - detect-secrets
+```
+
+A committer can still widen one run with `--add-scanners`, or override the file entirely
+with `--only-scanners`. `--scanners` keeps working with a deprecation warning; it is the
+same additive selection `--add-scanners` now names explicitly.
 
 ### Add Python packages to the hook {#additional-dependencies}
 

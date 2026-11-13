@@ -42,13 +42,44 @@
 ┌─ Scan ──────────────────────────────────────────────────────────────────────────────────────────┐
 │ --source-dir                <str>                            The source directory to scan       │
 │                                                              [env var: ASH_SOURCE_DIR]          │
-│ --scanners                  <str>                            Specific scanner names to run.     │
-│                                                              Defaults to all scanners.          │
+│ --scanners                  <str>                            Deprecated: use --only-scanners to │
+│                                                              state the whole selection, or      │
+│                                                              --add-scanners to add to the       │
+│                                                              mode's default set. Behavior is    │
+│                                                              unchanged: specific scanner names  │
+│                                                              to run (additive to the precommit  │
+│                                                              set in --mode precommit; the whole │
+│                                                              selection elsewhere). Cannot be    │
+│                                                              combined with --only-scanners.     │
 │                                                              [env var: ASH_SCANNERS]            │
 │ --exclude-scanners          <str>                            Specific scanner names to exclude  │
 │                                                              from running. Takes precedence     │
 │                                                              over scanners parameter.           │
 │                                                              [env var: ASH_EXCLUDED_SCANNERS]   │
+│ --only-scanners             <str>                            Run exactly these scanners: the    │
+│                                                              whole selection, replacing the     │
+│                                                              mode's default set (--mode         │
+│                                                              precommit's five) and the config   │
+│                                                              file's                             │
+│                                                              precommit.only_scanners/add_scann… │
+│                                                              keys. Repeatable, and each value   │
+│                                                              may name several scanners          │
+│                                                              separated by commas, as --scanners │
+│                                                              accepts. Cannot be combined with   │
+│                                                              --add-scanners or the deprecated   │
+│                                                              --scanners. --exclude-scanners     │
+│                                                              still removes names from it.       │
+│ --add-scanners              <str>                            Scanner names to run in addition   │
+│                                                              to the selection the mode and      │
+│                                                              config give: in --mode precommit,  │
+│                                                              the five default scanners plus the │
+│                                                              config's precommit keys; elsewhere │
+│                                                              the same additive meaning as       │
+│                                                              --scanners. Repeatable, comma      │
+│                                                              lists accepted. Cannot be combined │
+│                                                              with --only-scanners.              │
+│                                                              --exclude-scanners still applies   │
+│                                                              last.                              │
 │ --mode                      <precommit|container|local|nix>  Execution mode preset. 'local'     │
 │                                                              (default) runs the scan in this    │
 │                                                              process with the scanner tools     │
@@ -56,10 +87,15 @@
 │                                                              'precommit' is a local scan that   │
 │                                                              runs only bandit, detect-secrets,  │
 │                                                              checkov, cdk-nag, npm-audit, plus  │
-│                                                              any --scanners, with simplified    │
-│                                                              output and no progress display; in │
-│                                                              workspace mode it changes only the │
-│                                                              output. 'container' builds the ASH │
+│                                                              any --add-scanners (or the         │
+│                                                              deprecated --scanners); the config │
+│                                                              file's precommit.only_scanners and │
+│                                                              the --only-scanners flag replace   │
+│                                                              that set instead. It prints        │
+│                                                              simplified output and no progress  │
+│                                                              display; in workspace mode it      │
+│                                                              changes only the output.           │
+│                                                              'container' builds the ASH         │
 │                                                              container image and runs the scan  │
 │                                                              inside it. 'nix' runs the scan     │
 │                                                              inside `nix develop`, whose shell  │

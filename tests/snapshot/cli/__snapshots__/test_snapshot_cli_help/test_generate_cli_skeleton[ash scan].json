@@ -3,6 +3,8 @@
   "output_dir": null,
   "scanners": null,
   "exclude_scanners": null,
+  "only_scanners": null,
+  "add_scanners": null,
   "ash_plugin_modules": null,
   "config_overrides": null,
   "offline": false,
