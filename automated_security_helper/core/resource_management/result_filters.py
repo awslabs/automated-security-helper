@@ -189,7 +189,12 @@ def apply_content_filters(
     def _scanner_key(name: str) -> str:
         return canonical_scanner_name(name.strip()).lower()
 
-    scanner_list = [_scanner_key(s) for s in scanners.split(",")] if scanners else None
+    # Deduplicated in request order: ``opengrep,semgrep`` names one scanner.
+    scanner_list = (
+        list(dict.fromkeys(_scanner_key(s) for s in scanners.split(",")))
+        if scanners
+        else None
+    )
     severity_list = (
         [s.strip().lower() for s in severities.split(",")] if severities else None
     )

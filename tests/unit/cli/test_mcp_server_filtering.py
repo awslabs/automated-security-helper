@@ -66,8 +66,9 @@ def test_scanner_filtering():
 
     # Verify filter metadata is added
     assert "_content_filters" in filtered
-    assert "opengrep" in filtered["_content_filters"]["scanners"]
-    assert "semgrep" in filtered["_content_filters"]["scanners"]
+    # The retired name resolves to the scanner that serves it, so the two
+    # requested names are one entry.
+    assert filtered["_content_filters"]["scanners"] == ["opengrep"]
 
 
 def test_severity_filtering():
