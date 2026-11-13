@@ -1045,7 +1045,18 @@ SOFTWARE.
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="What the hook runs">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#staged-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Staged-file scope (--staged)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Staged-file scope (--staged)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3145,7 +3156,18 @@ SOFTWARE.
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="What the hook runs">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#staged-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Staged-file scope (--staged)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Staged-file scope (--staged)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3358,14 +3380,53 @@ writes a <code>.ash/.gitignore</code> that ignores it, or add the line yourself:
 </span></code></pre></div>
 <p>Do not ignore all of <code>.ash/</code>: an ASH config file can live there, as <code>.ash/.ash.yaml</code>.</p>
 <h2 id="behavior">What the hook runs<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
-<p>The <code>ash</code> hook runs <code>ashv3 --mode=precommit</code> with your <code>args</code>. Precommit mode:</p>
+<p>The <code>ash</code> hook runs <code>ashv3 --mode=precommit --staged</code> with your <code>args</code>. Precommit mode:</p>
 <ul>
 <li>runs five scanners: bandit, detect-secrets, checkov, cdk-nag, and npm-audit. <code>--scanners</code>
   can add others but cannot remove these; <code>--exclude-scanners</code> removes them.</li>
-<li>scans the whole repository on every run, not only the staged files. A commit that touches
-  one file is still blocked by a finding in a file committed earlier.</li>
+<li>with <code>--staged</code> (which the hook passes), scans the staged files instead of the whole
+  repository, so a one-file commit pays for one file. See
+  <a href="#staged-scope">Staged-file scope</a>.</li>
 <li>prints simplified output and writes the usual reports to <code>.ash/ash_output/</code>.</li>
 </ul>
+<h2 id="staged-scope">Staged-file scope (<code>--staged</code>)<a class="headerlink" href="#staged-scope" title="Permanent link">&para;</a></h2>
+<p><code>--staged</code> reads the staged file list from <code>git diff --cached</code> (added, copied, modified
+and renamed entries; a rename is scanned at its new path; a deleted file cannot be
+scanned and is not listed) and makes it the scan's target set:</p>
+<ul>
+<li>bandit and checkov are handed the staged files instead of the tree; the scanners that
+  pick their own files (detect-secrets, cdk-nag, npm-audit) read the same staged list.
+  For Terraform, checkov also reads a staged file's same-directory <code>.tf</code>/<code>.tfvars</code>
+  siblings, so same-directory <code>variables.tf</code> defaults and <code>locals</code> still resolve;
+  nothing recurses into subdirectories, so a local module that lives in one is read
+  only when its own files are staged.</li>
+<li>a scanner none of whose files are staged is skipped, with a log line saying so.</li>
+<li>converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
+  when nothing staged matches them.</li>
+<li>suppressions and <code>ignore_paths</code> resolve against the same scan root as a whole-repository
+  run, so a suppression that matches a finding in a full scan matches it here too.</li>
+<li>findings in files that are not staged are out of scope by definition: the hook judges
+  the commit, not the repository. The reports are filtered to the staged files, so even
+  what a tool read for context (the Terraform siblings above, or the large-commit
+  fallback below) never adds findings. Keep a whole-repository scan in CI for the rest.</li>
+<li>a commit staging more files than one command line can carry (about 500) makes bandit
+  and checkov fall back to scanning the directory, with a log line: the reports still
+  hold staged-file findings only, and what degrades is the time win.</li>
+<li>with nothing staged, the scan logs that and exits 0 without starting any scanner.</li>
+</ul>
+<p>What the tools read is the working-tree copy of each staged file. Under the
+pre-commit framework the two are identical, because it stashes unstaged changes
+around the hooks; a direct <code>ash --mode precommit --staged</code> run after <code>git add -p</code>,
+or after editing a file it had staged, scans content that differs from what the
+commit will contain.</p>
+<p><code>--staged</code> works only with <code>--mode precommit</code>; any other mode refuses it (exit 5).
+Without the flag, a precommit scan still covers the whole repository: on every ASH v3
+release the flag is opt-in, the hooks in this repository pass it for you, and it is
+planned to become the precommit default in ASH v4.</p>
+<p>This is not what <code>--changed-files-only</code> does. <code>--changed-files-only</code> scans everything
+and only filters the reports against a <code>&lt;base_ref&gt;...HEAD</code> diff afterwards, so it saves
+no scan time and cannot see staged-but-uncommitted content; <code>--staged</code> is the scan-time
+scope built for the hook.</p>
 <p>The hook's environment includes the <code>cdk</code> extra that cdk-nag needs. cdk-nag and npm-audit
 also need Node.js and npm on <code>PATH</code>, but only when the repository has files they scan:
 CloudFormation templates for cdk-nag, including the <code>*.template.json</code> files <code>cdk synth</code>
