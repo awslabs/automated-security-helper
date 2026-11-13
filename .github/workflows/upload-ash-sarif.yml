@@ -87,6 +87,13 @@ on:
         required: false
         default: "ash_output"
         type: string
+      runner:
+        description: >-
+          Runner label for the upload job. Defaults to ubuntu-latest; pass the
+          label the scan ran on to keep both jobs in one runner pool.
+        required: false
+        default: "ubuntu-latest"
+        type: string
 
 jobs:
   upload-sarif:
@@ -97,7 +104,7 @@ jobs:
     # pull request's own run uploads the same report. Every other event uploads
     # here, unlike the scan workflow's own step, which runs on pull_request only.
     if: github.event_name != 'merge_group'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     steps:
       - name: Checkout

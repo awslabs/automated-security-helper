@@ -30,29 +30,29 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 231 jobs on a push
-  # to main, 229 on a merge-queue run, where warm-image-layers does not run, and 118 on a
+  # Sized off a count rather than a guess: this workflow expands to 291 jobs on a push
+  # to main, 289 on a merge-queue run, where warm-image-layers does not run, and 136 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
-  # ~472 runner jobs instead of ~235. The duplicate result on a queued merge is the
+  # ~592 runner jobs instead of ~295. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 25 cells + uvx x 5 OS = 105 legs in place of the 25 bundled cells (uvx ran on 3.12
   # only) -- it would be ~602 against ~300, so running them as one leg per combination
-  # cuts a large share of what this deliberate duplication costs. Most of the 231 is the
-  # unit-test and integration-test families, which are 140 legs since the suite was split
-  # by tier: the unit tier is 40 legs (5 operating systems x 5 Python versions, unsharded
-  # on Linux and macOS, 20 legs; the Windows pool is cut four ways, 5 x 4 = 20 legs; the
-  # notes above unit-test-linux and on unit-test-windows), the integration tier is 100
-  # (the same 25 x 4 shards) and the e2e tier is 5 (one per runner label, Python 3.12
-  # only; see the notes on those jobs). The unit family was 200 legs when every OS and
-  # Python version ran eight shards of the whole suite, 25 when the tier first ran
-  # unsharded and timed out at 30 minutes, 100 while it was cut into four shards, 25
-  # again once each leg's timeout was sized from the measured shard walls, and is 40 now
-  # that the Windows pool is sharded again after a leg overran its sized timeout. Each
+  # cuts a large share of what this deliberate duplication costs. Most of the 291 is the
+  # unit-test and integration-test families, which are 200 legs since the suite was split
+  # by tier: the unit tier is 100 legs (5 operating systems x 5 Python versions x 4
+  # shards; the notes above unit-test-linux and on unit-test-windows), the integration
+  # tier is 100 (the same 25 x 4 shards) and the e2e tier is 5 (one per runner label,
+  # Python 3.12 only; see the notes on those jobs). The unit family was 200 legs when
+  # every OS and Python version ran eight shards of the whole suite, 25 when the tier
+  # first ran unsharded and timed out at 30 minutes, 100 while it was cut into four
+  # shards, 25 again once each leg's timeout was sized from the measured shard walls, 40
+  # while only the Windows pool was sharded, and is 100 now that every pool is cut four
+  # ways to bring the longest leg of a pull request under about 20 minutes. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 231-job push figure is
+  # count rises faster than the test time does. The 291-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -671,14 +671,20 @@ jobs:
   # ci level we should separate our testing groups and require categorizing tests as unit
   # vs integration vs e2e", and "integration needs shards, unit should not".
   #
-  # The Linux and macOS unit pools run UNSHARDED: one leg per OS and Python version, 20
-  # legs. The Windows unit pool is the exception and runs four shards per Python version,
-  # 20 legs (the note on unit-test-windows). The maintainer's word on this split,
-  # verbatim: "i get shards for integration/e2e tests but
-  # for unit they shouldn't be needed" (2026-11-03). The shards were never what made the
-  # unit tier correct -- a shard owns modules by a path hash, so four shards run exactly
-  # what one unsharded leg runs -- they only bought legs under the 30-minute timeout, and
-  # the timeout is what moves instead.
+  # ALL THREE UNIT POOLS ARE SHARDED FOUR WAYS. The Linux and macOS pools ran unsharded
+  # for a time, on the maintainer's word (verbatim: "i get shards for integration/e2e
+  # tests but for unit they shouldn't be needed", 2026-11-03), and the Windows pool went
+  # back to four shards on a measurement (the note on unit-test-windows). The pull-request
+  # run 43285884861 then measured the unsharded Linux and macOS legs as the critical path
+  # of the whole workflow: unit-test (ubuntu-24.04-arm, py3.12) ran 37.9 minutes and
+  # (py3.10) 37.2, and the three macos-15 legs ran 45 minutes and more, while the sharded
+  # Windows legs took 20 to 30 minutes per shard and the rest of the workflow finished
+  # well before them. All three pools take the shard axis of the Windows pool and of the
+  # integration tier, verbatim, so a leg holds a quarter of the suite. The shards were
+  # never what made the unit tier correct -- a shard owns modules by a path hash, so four
+  # shards run exactly what one unsharded leg runs -- they buy wall clock, at the price
+  # of one more checkout and dependency install per shard (about two minutes each) and
+  # 60 more legs per push or merge-queue run and 18 more per pull request.
   #
   # The history, kept because each shape was a measured answer to the previous one: the
   # tier first ran unsharded under timeout-minutes 30 on the reading that its in-process
@@ -697,22 +703,21 @@ jobs:
   #   macos-latest     py3.12  3547 s (59.1 min)   macos-15         py3.10  3448 s (57.5)
   #   windows-latest   py3.10  6127 s (102.1 min)
   #
-  # Each unit job's timeout-minutes is ceil(its pool's worst projected cell x 1.3),
-  # rounded up to a multiple of 5: 90 for the Linux pool and 80 for the macOS pool. The
-  # Windows pool was given 210 the same way and then re-cut: see unit-test-windows. The
-  # projection overstates the unsharded wall, because the sum of
-  # four shards counts four checkouts and installs (about two minutes each) where one leg
-  # pays one, so the 1.3 margin sits on top of that slack. The projection is a reading,
-  # not a measurement of this layout: the first run on this branch is the measurement,
+  # With the Linux and macOS pools sharded again, their timeouts follow the shard walls:
+  # a leg runs a quarter of what the worst unsharded cell ran, so the figures above
+  # (4124 s and 3547 s summed over four shards, about 17 and 15 minutes per shard with
+  # its own checkout and install) are the per-leg walls to size against, and the measured
+  # unsharded legs of run 43285884861 (37.9 minutes on arm Linux, 45 and more on macOS)
+  # split four ways land at about 10 to 12 minutes plus the install. timeout-minutes is
+  # 45 for both pools, about 2.5 times the worst per-shard figure, which covers the pool
+  # variance the Windows legs showed (36 to 212 minutes for one suite). The projection is
+  # a reading, not a measurement of this layout: the first run of it is the measurement,
   # and the timeouts move with it. The first unsharded run (41677686649, 2026-11-03)
-  # measured two Windows legs at about 138 minutes against the projected 135 bound while
-  # a sibling leg finished in 44 (pool variance), and the pull-request run 41949551817
-  # then cancelled the Windows py3.10 leg at 212.6 minutes against its 210 bound, so the
-  # Windows pool went back to four shards with a 90-minute timeout. The cost of
-  # unsharding is a longer single leg on the
-  # critical path of every run, which the maintainer's word accepts where the measured
-  # legs fit their bounds; the integration tier keeps its four shards and the 30-minute
-  # timeout, and the e2e tier stays as it is.
+  # measured two Windows legs at about 138 minutes while a sibling leg finished in 44
+  # (pool variance), and the pull-request run 41949551817 then cancelled the Windows
+  # py3.10 leg at 212.6 minutes against its 210 bound, so the Windows pool went back to
+  # four shards with a 90-minute timeout. The integration tier keeps its four shards and
+  # the 30-minute timeout, and the e2e tier stays as it is.
   #
   # A shard owns the test modules whose path hashes to its number, and ignores the others
   # at collection time (tests/utils/sharding.py, through the ASH_TEST_SHARD variable the
@@ -723,9 +728,8 @@ jobs:
   # Each entry of a shard axis is its own literal and carries the total it was cut for
   # (`3of4`), so no second number has to agree with the list. A shard dropped from the
   # list is caught by tests/unit/test_unit_test_shards.py, which holds the three
-  # integration jobs and the Windows unit job to one axis and to one another, and holds
-  # the Linux and macOS unit jobs to no shard axis at all. The Linux and macOS unit jobs
-  # and the e2e jobs pass no shard, which the action reads as the whole tier. GitHub
+  # integration jobs and the three unit jobs to one axis and to one another. The e2e jobs
+  # pass no shard, which the action reads as the whole tier. GitHub
   # rejects a matrix of more than 256 jobs; the largest matrix here is 40 legs, and
   # test_unified_ci_job_counts.py fails before the workflow does.
   #
@@ -736,13 +740,13 @@ jobs:
   # split.
   # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   unit-test-linux:
-    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    # ceil(68.7 min x 1.3) rounded up to a multiple of 5: the worst projected unsharded
-    # cell of this pool (ubuntu-latest, py3.10, 4124 s over its four shards in run
-    # 41511189913; the note above this job).
-    timeout-minutes: 90
+    # Sized per shard: the worst cell of this pool (ubuntu-latest, py3.10) summed 4124 s
+    # over its four shards in run 41511189913, about 17 minutes a shard with its own
+    # install; 45 is about 2.5 times that (the note above this job).
+    timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: write
@@ -755,8 +759,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        # No shard axis: the unit tier runs whole, one leg per OS and Python version
-        # (the note above this job; the integration jobs keep theirs).
+        # The shard axis of integration-test-linux, verbatim (the note above this job).
+        shard: [1of4, 2of4, 3of4, 4of4]
         # The pull-request cover (the note on ensure-cache): on a pull_request event these
         # drop the x86_64 image and Python 3.11 and 3.13; on every other event they match
         # nothing and the full matrix runs.
@@ -807,23 +811,24 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           install-ash: "false"
-      # No shard input: the action's empty default runs the whole tier, the e2e jobs'
-      # existing shape, and the artifact uploads as a complete set of one (shard1of1).
+      # The shard input the integration jobs pass: this leg runs one quarter of the tier
+      # and uploads as shard<i>of4, which unit-coverage admits only as a whole set.
       - uses: ./.github/actions/run-unit-tests
         with:
           os: ${{ matrix.os }}
           python-version: ${{ matrix.python-version }}
           marker: unit
+          shard: ${{ matrix.shard }}
 
   # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   unit-test-macos:
-    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    # ceil(59.1 min x 1.3) rounded up to a multiple of 5: the worst projected unsharded
-    # cell of this pool (macos-latest, py3.12, 3547 s over its four shards in run
-    # 41511189913; the note above unit-test-linux).
-    timeout-minutes: 80
+    # Sized per shard: the worst cell of this pool (macos-latest, py3.12) summed 3547 s
+    # over its four shards in run 41511189913, about 15 minutes a shard with its own
+    # install; 45 is three times that (the note above unit-test-linux).
+    timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: write
@@ -832,11 +837,13 @@ jobs:
     strategy:
       fail-fast: false
       # cap the macOS unit-test fan-out because the macOS runner pool is the smallest
-      max-parallel: 10
+      # (12 so that the 3 Python versions x 4 shards of a pull request start together)
+      max-parallel: 12
       matrix:
         os: [macos-latest, macos-15]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        # No shard axis, as on unit-test-linux.
+        # The shard axis of integration-test-macos, verbatim, as on unit-test-linux.
+        shard: [1of4, 2of4, 3of4, 4of4]
         # The pull-request cover (the note on ensure-cache): macos-latest and Python 3.11 and
         # 3.13 drop out on a pull_request event only.
         exclude:
@@ -851,20 +858,21 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           install-ash: "false"
-      # No shard input: the action's empty default runs the whole tier, the e2e jobs'
-      # existing shape, and the artifact uploads as a complete set of one (shard1of1).
+      # The shard input the integration jobs pass: this leg runs one quarter of the tier
+      # and uploads as shard<i>of4, which unit-coverage admits only as a whole set.
       - uses: ./.github/actions/run-unit-tests
         with:
           os: ${{ matrix.os }}
           python-version: ${{ matrix.python-version }}
           marker: unit
+          shard: ${{ matrix.shard }}
 
   # One of three unit-test jobs split by OS so each runner pool has its own cap. Edit all three alike.
   unit-test-windows:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})"
     needs: [ensure-cache]
     runs-on: ${{ matrix.os }}
-    # THIS POOL IS THE ONE UNIT POOL THAT IS SHARDED, FOUR WAYS, AND WHY
+    # THIS POOL WAS THE FIRST UNIT POOL TO BE SHARDED, FOUR WAYS, AND WHY
     #
     # The unsharded Windows legs are what set the critical path of every run. The first
     # unsharded run (41677686649) measured two legs at about 138 minutes while a sibling
@@ -892,14 +900,12 @@ jobs:
     #
     # What was rejected: raising the 210-minute timeout again (a leg that already needed
     # more than 210 minutes would hold a runner even longer to report one verdict, and the
-    # next slow runner would overrun the new bound too); sharding the Linux and macOS
-    # unit pools as well (the 36-minute arm leg and the 90 and 80 minute bounds of those
-    # pools were not exceeded in the measured runs, and the maintainer's word of
-    # 2026-11-03 is that the unit tier should not need shards, which this pool departs
-    # from on a measurement and the other two do not); and more than four shards (every
+    # next slow runner would overrun the new bound too); and more than four shards (every
     # shard repeats the checkout and dependency install, about two minutes). The cost is
     # 15 extra legs per push or merge-queue run and 9 per pull request (the notes on
-    # required-checks).
+    # required-checks). The Linux and macOS pools were left unsharded at first and took
+    # the same axis later, on the 37.9 and 45 minute legs of run 43285884861 (the note
+    # above unit-test-linux).
     #
     # Coverage is unaffected: the unit-coverage job downloads the Python 3.12 unit
     # artifacts of an OS family by a `unit-shard*` pattern and refuses a set with a shard
@@ -943,9 +949,9 @@ jobs:
 
   # Applies the 80% total-coverage gate to the unit tier's coverage, once per OS family.
   #
-  # Each leg combines the unit artifacts of one runner type on Python 3.12 (one artifact,
-  # `shard1of1`, the complete set of one an unsharded run uploads, or on Windows the four
-  # `shard<i>of4` artifacts; the combine script
+  # Each leg combines the unit artifacts of one runner type on Python 3.12 (the four
+  # `shard<i>of4` artifacts of every pool, or one `shard1of1` artifact, the complete set
+  # of one an unsharded run uploads; the combine script
   # checks that the set is complete and refuses a partial one) and fails below 80%. The gate applies to the UNIT tier only: the
   # base gated the coverage of the whole suite, and the integration and e2e tiers measure
   # no coverage. The 95% core target and a coverage configuration per tier are follow-up
@@ -2853,27 +2859,27 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 175 check
-  # runs to a pull request (374 to a merge-queue run, which runs the full matrices) and few of
+  # Most jobs above name themselves from their matrix, so this workflow contributes 211 check
+  # runs to a pull request (494 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
-  # `unit-test` and the integration and e2e families means enumerating all 145 of their names -- and then any matrix edit either orphans
+  # `unit-test` and the integration and e2e families means enumerating all 205 of their names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
   # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
   # two contexts today while every other check on the pull request is advisory -- a count that
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. The 186 was measured on pull request 599, the 374 is derived
+  # stale unnoticed. The 186 was measured on pull request 599, the 494 is derived
   # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 175 is this workflow's own contribution to a pull request: the 118 jobs that run there,
-  # plus the 57 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
+  # 211 is this workflow's own contribution to a pull request: the 136 jobs that run there,
+  # plus the 75 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 374: the 229 jobs that run there plus 145 check runs.
+  # the full matrices, is 494: the 289 jobs that run there plus 205 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -2915,14 +2921,19 @@ jobs:
   # shards per Python version (5 legs to 20, +15; on a pull request 3 Python versions x 4 =
   # 12 legs in place of 3, +9) after a Windows leg overran its sized timeout (the note on
   # unit-test-windows): 231 on a push, 229 on a merge-queue run, and 118 on a pull request.
+  # Then the Linux and macOS unit pools were cut into four shards as well (each 10 legs to
+  # 40, +60 on a push; on a pull request 3 Python versions x 4 = 12 legs in place of 3 for
+  # each, +18) after the unsharded arm Linux and macOS legs of run 43285884861 became the
+  # critical path of the workflow (the note above unit-test-linux): 291 on a push, 289 on
+  # a merge-queue run, and 136 on a pull request.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
-  # these figures can drift from GitHub's census but not from this file. The 145 `PyTest - ...`
+  # these figures can drift from GitHub's census but not from this file. The 205 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 231 comes from, per job, on a push to main: lint 1, ensure-cache 5, actionlint 1,
-  # snapshot-trailers 1, unit-test 40, unit-coverage 4,
+  # Where 291 comes from, per job, on a push to main: lint 1, ensure-cache 5, actionlint 1,
+  # snapshot-trailers 1, unit-test 100, unit-coverage 4,
   # integration-test-linux 40, integration-test-macos 40, integration-test-windows 20,
   # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, warm-image-layers 2,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
@@ -2930,8 +2941,8 @@ jobs:
   # integration-test 1, build-docs 1, converter-integration 2, install-validation 32, homebrew-macos 1,
   # required-checks 1.
   #
-  # Where 118 comes from, per job, on a pull request (the pull-request cover, the note on
-  # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 18,
+  # Where 136 comes from, per job, on a pull request (the pull-request cover, the note on
+  # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 36,
   # unit-coverage 2, integration-test-linux 12, integration-test-macos 12,
   # integration-test-windows 12, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
@@ -2983,7 +2994,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the tier split and the jobs added after
-  # it; the 374 above is the current merge-queue figure and 175 the pull-request one. That
+  # it; the 494 above is the current merge-queue figure and 211 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #

@@ -12,7 +12,7 @@ import hashlib
 import random
 import string
 import time
-from typing import List
+from typing import List, Tuple
 
 import pytest
 
@@ -65,14 +65,24 @@ def _index_of(count: int, suffix: str = "") -> _SecretIndex:
     return index
 
 
-def _best_of(index: _SecretIndex, text: str, repeats: int) -> float:
-    index.mask_values("a warm up text with 0123456789 in it")
-    best = float("inf")
+def _best_of_interleaved(
+    first: _SecretIndex, second: _SecretIndex, text: str, repeats: int
+) -> Tuple[float, float]:
+    """The minimum of ``repeats`` runs per index, the two taken in alternation.
+
+    A run that the machine deschedules is slow whatever the code does, and the
+    minimum drops it. Alternating the indexes keeps a stretch of busy machine from
+    landing on only one of them.
+    """
+    for index in (first, second):
+        index.mask_values("a warm up text with 0123456789 in it")
+    best = [float("inf"), float("inf")]
     for _ in range(repeats):
-        started = time.perf_counter()
-        index.mask_values(text)
-        best = min(best, time.perf_counter() - started)
-    return best
+        for position, index in enumerate((first, second)):
+            started = time.perf_counter()
+            index.mask_values(text)
+            best[position] = min(best[position], time.perf_counter() - started)
+    return best[0], best[1]
 
 
 #: A loose shape is tried once per different length it has with a first character,
@@ -86,6 +96,7 @@ def _best_of(index: _SecretIndex, text: str, repeats: int) -> float:
 def test_two_thousand_values_cost_about_what_twenty_cost(suffix, bound):
     # Twenty values (forty branches) are past the few that keep one alternation.
     text = _prose(7, 200_000)
-    few = _best_of(_index_of(20, suffix), text, repeats=5)
-    many = _best_of(_index_of(2_000, suffix), text, repeats=3)
+    few, many = _best_of_interleaved(
+        _index_of(20, suffix), _index_of(2_000, suffix), text, repeats=5
+    )
     assert many <= bound * few, (few, many, many / few)

@@ -82,6 +82,7 @@ affect.
 | `ash-version` | empty | Git tag, branch, or commit of ASH to install. When empty, the job installs the ASH of the commit it was called at: a caller of a release tag gets that release, and a caller of `@main` gets that commit of main. The job resolves the value to one commit before it installs anything, and every step uses that commit; the job summary names it. A value that starts with `-` or holds a space, that names nothing in `ash-repo`, or that is both a branch and a tag on different commits fails the job. Every run installs it again. |
 | `ash-repo` | empty | Repository (`owner/repo`) to install ASH from. When empty, the job uses the repository the workflow file comes from. A value other than that repository needs `ash-version` too. The owner and the name may hold letters, digits, `.`, `_`, and `-`; any other form fails the job. |
 | `ash-mode` | `local` | Value of `--mode`. `container` builds ASH's image on the runner and scans inside it; see [Run ASH in a container](../run-in-a-container.md). |
+| `runner` | `ubuntu-latest` | Runner label for the scan job and the reporting job. Pass `ubuntu-24.04-arm` where your repository has hosted arm64 runners and you want their shorter queue; this repository's own scan does. |
 | `scan-timeout-minutes` | `30` | Minutes the scan job may run before it is cancelled. The pull-request-head informational workflow passes `50`: it runs the pull request's own ASH verbose, and its report phase renders every suppressed finding, which outgrew the 30-minute default. |
 | `config` | empty | Path to an ASH config file, passed as `--config` and as `ASH_CONFIG`. When empty, ASH finds the config in the checkout. |
 | `config-ref` | empty | Commit, branch, or tag of the scanned repository to read the `config` file from, instead of the checkout. Needs `config`. The workflow writes the file under `$RUNNER_TEMP` and passes it as `--config`, and the tool config files it names by a relative path (`config_file`, and opengrep's and semgrep's `config`) come from the same commit. ASH treats it as the operator's config only while `$RUNNER_TEMP` is outside every git checkout and outside the scanned directory, as it is on GitHub-hosted runners; on a self-hosted runner, keep `$RUNNER_TEMP` outside them. A config that `extends` another file fails, and so does one at that commit that is missing, unless `config-ref-missing` is `defaults`. A value that starts with `-` or holds a space fails the job before git reads it. |
@@ -197,8 +198,8 @@ git gives it before printing it, and fails the step on one that does not.
 
 ### What the workflow does {#steps}
 
-The workflow runs two jobs on `ubuntu-latest`; neither the runner nor the timeouts are
-inputs. The scan job, `SAST, SCA, and IaC Scan`, has a 30-minute timeout and holds only
+The workflow runs two jobs on the runner its `runner` input names, `ubuntu-latest` by
+default; the timeouts are not inputs, apart from `scan-timeout-minutes`. The scan job, `SAST, SCA, and IaC Scan`, has a 30-minute timeout and holds only
 `contents: read`, so nothing it runs, ASH and the scanners included, holds a token that can
 write.
 
@@ -295,9 +296,10 @@ To upload on every trigger, set `collect-sarif-report: false` and add a job that
 
 - downloads the artifact that the scan job uploaded in the same workflow run, and uploads
   `reports/ash.ghas.sarif` from it with category `ash`;
-- takes two optional inputs: `artifact-id`, the scan workflow's `artifact-id` output,
-  which names exactly the artifact that scan uploaded, and `artifact-name`, the name to
-  download by when `artifact-id` is empty, `ash_output` by default;
+- takes three optional inputs: `artifact-id`, the scan workflow's `artifact-id` output,
+  which names exactly the artifact that scan uploaded, `artifact-name`, the name to
+  download by when `artifact-id` is empty, `ash_output` by default, and `runner`, the
+  runner label for the upload job, `ubuntu-latest` by default;
 - skips `merge_group` events;
 - declares `contents: read` and `security-events: write`, which the calling job must grant.
 

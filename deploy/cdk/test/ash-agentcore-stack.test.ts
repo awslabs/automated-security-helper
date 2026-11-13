@@ -130,34 +130,36 @@ describe('AgentCore runtime contract', () => {
     expect(buildSpec).toContain('--no-stateless-http');
   });
 
-  test('the runtime resolves the contradiction between its own two defaults', () => {
+  test('the runtime sets no stateless fallback', () => {
     /*
-     * AshVersion defaults to a release whose `ash mcp` has no --stateless-http,
-     * and McpStatelessHttp defaults to true. The entrypoint refuses that pair and
-     * exits 65, so this template could not deploy with the values it ships --
-     * the symptom being a health-check timeout that names no cause.
+     * AshVersion defaults to DEFAULT_ASH_VERSION and McpStatelessHttp defaults to
+     * true. Through v3.7.1 the default release's `ash mcp` had no --stateless-http,
+     * so the runtime set ASH_MCP_STATELESS_FALLBACK=warn to let that pair start
+     * stateful. The default release now has the flag, so the pair starts stateless
+     * on its own and the fallback is gone: a runtime that still set it would keep
+     * a stateful downgrade path for anyone pinning an older AshVersion by hand,
+     * where exit 65 is the right answer.
      *
-     * Both defaults are individually correct, so the resolution is a third value.
-     * Asserted here rather than in the entrypoint's own default because only this
-     * target has measured evidence that stateful works: see the header of
-     * ash-agentcore-stack.ts. The behavioral proof that the pair now starts is in
+     * The behavioral proof that the shipped pair starts is in
      * ash-container-scripts.test.ts, which runs the real entrypoint against a fake
-     * ash with v3.7.0's option set.
+     * ash that has the option.
      */
+    const environment = new Capture();
     template.hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
-      EnvironmentVariables: Match.objectLike({
-        ASH_MCP_STATELESS_FALLBACK: 'warn',
-      }),
+      EnvironmentVariables: environment,
     });
+    const variables = environment.asObject();
+    expect(variables).toHaveProperty('ASH_MCP_STATELESS');
+    expect(Object.keys(variables)).not.toContain('ASH_MCP_STATELESS_FALLBACK');
   });
 
   test('the parameter defaults this stack ships are the ones that needed resolving', () => {
     // AshVersion is the packaged release, which `cz bump` moves at every release,
     // so it is read from DEFAULT_ASH_VERSION rather than written out: a literal
-    // here turned every release bump red. The fallback above goes at the first
-    // release with --stateless-http, and
-    // tests/unit/deploy/test_agentcore_stateless_fallback_tripwire.py fails at
-    // that bump until it is gone.
+    // here turned every release bump red. The fallback the runtime used to set
+    // went at the first release with --stateless-http, and
+    // tests/unit/deploy/test_agentcore_stateless_fallback_tripwire.py now holds
+    // it out.
     const parameters = template.toJSON().Parameters;
     expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe(DEFAULT_ASH_VERSION);
     expect(parameters[ASH_PARAMETER_NAMES.mcpStatelessHttp].Default).toBe('true');

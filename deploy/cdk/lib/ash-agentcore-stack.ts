@@ -333,48 +333,6 @@ export class AshAgentCoreStack extends Stack {
       environmentVariables: {
         ...config.mcpEnvironment(),
         /*
-         * Resolves the contradiction between this stack's own two defaults.
-         *
-         * `AshVersion` defaults to `DEFAULT_ASH_VERSION`, the packaged release.
-         * At v3.7.0 and v3.7.1 that release's `ash mcp` has no
-         * `--stateless-http`; `McpStatelessHttp` defaults to `true`. The
-         * entrypoint refuses that pair and exits 65, so the shipped one-click
-         * template could not deploy without an adopter changing a parameter, and
-         * the symptom was a health-check timeout that named no cause.
-         *
-         * `warn` starts the server stateful and says so on stderr. It is set HERE
-         * and not in the entrypoint's default, and not in ash-runtime-config.ts
-         * where the other MCP variables live, because AgentCore is the only target
-         * where stateful was measured to work: a live runtime completed
-         * initialize, tools/list and tools/call, with controls proving sessions
-         * were genuinely enforced. See "WHY `McpStatelessHttp` DEFAULTS TO `true`"
-         * at the top of this file for that measurement and for the residual
-         * hazard, which is a client adopting the rotating session id AgentCore
-         * returns and being refused on its third call.
-         *
-         * Everything else keeps the refusal, Fargate included: behind a load
-         * balancer that may route consecutive requests to different replicas,
-         * nothing here excuses running stateful.
-         *
-         * This is maintainer decision D6's second option, taken because the first
-         * -- pointing `DEFAULT_ASH_VERSION` at a ref whose `ash mcp` accepts the
-         * flag -- needs a release that does not exist yet.
-         *
-         * WHEN IT GOES: at the first release that has the
-         * flag. `cz bump` moves `DEFAULT_ASH_VERSION` to each new release, and
-         * the first release after 3.7.1 has `--stateless-http` (this tree's `ash
-         * mcp` does). From that release the shipped defaults start stateless
-         * without this line, and on such an ASH the line is inert: the entrypoint
-         * passes the flag and does not warn ("the fallback is inert where the
-         * option exists" in ash-container-scripts.test.ts). Kept, it would only
-         * serve an adopter who sets `AshVersion` to v3.7.0 or v3.7.1 by hand, with
-         * a stateful server and a warning instead of exit 65, and exit 65 is what
-         * such an adopter should get. tests/unit/deploy/
-         * test_agentcore_stateless_fallback_tripwire.py fails at that bump until
-         * this line is deleted and the templates are re-synthesized.
-         */
-        ASH_MCP_STATELESS_FALLBACK: 'warn',
-        /*
          * The two statements only this target can make; see "HOST CHECKING IS AN
          * EXPLICIT DECISION" on MCP_ENTRYPOINT_SCRIPT. Host is on AgentCore's
          * restricted-header list, so no allowlist can name it and the platform is

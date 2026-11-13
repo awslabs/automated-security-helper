@@ -148,6 +148,20 @@ GITHUB_REPO_SLUG = "awslabs/automated-security-helper"
 #: python and link checks still apply.
 HISTORICAL_DOCS = frozenset({"CHANGELOG.md"})
 
+#: Directories of such records, one file per release. The curated notes of a release
+#: (.github/release-notes/<tag>.md) are the changelog's ``## Unreleased`` body moved
+#: into a file at the release bump, where they name options, variables and files of
+#: the code at that release and of the programs ASH wraps. They are held to the same
+#: checks as the changelog they came from: the 3.8.0 bump moved them out of a skipped
+#: file into an unskipped one and failed lint on text that had not changed.
+HISTORICAL_DOC_DIRS = (".github/release-notes/",)
+
+
+def is_historical_doc(rel: str) -> bool:
+    """Whether ``rel`` (a repository-relative path) is a record of a past release."""
+    return rel in HISTORICAL_DOCS or rel.startswith(HISTORICAL_DOC_DIRS)
+
+
 #: Template placeholder the version manager renders (scripts/version_template_manager.py).
 VERSION_PLACEHOLDER = "{{VERSION}}"
 
@@ -3484,7 +3498,7 @@ def check_cli(
     every_option = all_option_names(cli)
     findings: list[Finding] = []
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         plugin_rows = plugin_written_rows(page)
         samples = output_samples(page)
@@ -4406,7 +4420,7 @@ def check_env_vars(
     )
 
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         via_config = {
             name
@@ -6209,7 +6223,7 @@ def check_mcp_contract(
     bad: dict[str, str] = {}
     seen: set[tuple[str, int, str]] = set()
     for page in pages:
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         for span in error_type_spans(page, is_mcp_page(page.rel), contract.tools):
             spans_checked += 1
@@ -7868,7 +7882,7 @@ def check_option_tables(
     keys: frozenset[str] | None = None
     findings: list[Finding] = []
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         for table in page.tables:
             if table.marker is None:
@@ -8422,7 +8436,7 @@ def check_report_files(
     known = output_files(code, models)
     findings: list[Finding] = []
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         own = page_reporter_files(page) | documented_plugin_files(page, known.plugins)
         for number, line in page.prose:
@@ -8504,7 +8518,7 @@ def check_scanner_names(
     findings: list[Finding] = []
     column_count = cell_count = name_count = other_count = 0
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         for table in page.tables:
             headers = _header_cells(table)
@@ -10215,7 +10229,7 @@ def check_install_commands(
     findings: list[Finding] = []
     pages = load_pages(files, root)
     for page in pages:
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         rules = InstallRules(root, code, page, forms, version, counts)
         located: list[tuple[int, str]] = []

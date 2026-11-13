@@ -204,7 +204,13 @@ def test_a_value_is_redacted_when_the_products_redaction_cannot_be_imported(
 
     value = "canary-" + secrets.token_hex(16)
     other = "sentinel-" + secrets.token_hex(16)
-    monkeypatch.setenv(CANARY, value)
+    # The fallback replaces every environment value of four characters or
+    # more wherever it appears, so a short host value (a port, a year) that
+    # happens to occur inside the sentinel's random hex would redact the
+    # sentinel too. The probe runs over a one-variable environment so the
+    # only value in play is the canary's.
+    monkeypatch.setattr(os, "environ", {CANARY: value})
+    monkeypatch.setattr(env_assertions, "_VALUES_AT_START", ())
     monkeypatch.delattr(config_validator, "_redact_for_test_reports")
     monkeypatch.delattr(config_validator, "_printed_forms")
     env_assertions._folded_printed_forms.cache_clear()
