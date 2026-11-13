@@ -211,7 +211,9 @@ def test_container_image_installs_the_cdk_and_symbols_extras():
     lines = [
         line
         for line in text.splitlines()
-        if re.search(r"^RUN uv pip install --system .*\*\.whl", line)
+        # The RUN sets UV_NO_CACHE=1 for this one install (an image layer has no
+        # use for uv's cache), so an environment assignment may precede `uv`.
+        if re.search(r"^RUN (?:[A-Z_]+=\S+ )*uv pip install --system .*\*\.whl", line)
     ]
 
     assert len(lines) == 1, lines

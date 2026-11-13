@@ -184,7 +184,7 @@ class TestTheFormulaInstallsTheLockedDependencies:
         body = match["body"]
         assert "--scanners cdk-nag" in body
         assert "assert_includes %w[PASSED FAILED], status" in body
-        assert '"ash exited 2" : "ash exited 0"' in body
+        assert '"ashx exited 2" : "ashx exited 0"' in body
 
     def test_the_keg_keeps_rpath_install_names(self) -> None:
         """After the build, Homebrew rewrites every dylib ID in the keg to the
