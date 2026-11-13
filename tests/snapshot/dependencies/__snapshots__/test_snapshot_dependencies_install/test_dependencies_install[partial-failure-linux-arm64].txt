@@ -6,7 +6,7 @@ $ ash dependencies install --bin-path bin
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: linux, architecture: arm64
-INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Loaded 2 converters, 15 scanners, and 15 reporters
 Installing dependencies for converter plugin: archive
 Installing dependencies for converter plugin: jupyter
 Running command: uv tool install --with jupyter nbconvert>=7.16.0,<8.0.0
@@ -92,9 +92,9 @@ Installing dependencies for reporter plugin: yaml
 │ zizmor         │ scanner   │ zizmor          │    1 │      0 │ INSTALLED       │ bin/zizmor      │
 └────────────────┴───────────┴─────────────────┴──────┴────────┴─────────────────┴─────────────────┘
 ╭──────────────────────────────────── Installation Incomplete ─────────────────────────────────────╮
-│ Commands run: 16 (1 failed)                                                                      │
-│ Tools verified on PATH: 14 -- actionlint, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov,        │
-│ detect-secrets, gitleaks, jupyter, opengrep, semgrep, syft, trivy, zizmor                        │
+│ Commands run: 15 (1 failed)                                                                      │
+│ Tools verified on PATH: 13 -- actionlint, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov,        │
+│ detect-secrets, gitleaks, jupyter, opengrep, syft, trivy, zizmor                                 │
 │ No install path on this platform: detect-secrets, npm-audit                                      │
 │ Install ran but tool not found on PATH: bandit, grype                                            │
 │                                                                                                  │

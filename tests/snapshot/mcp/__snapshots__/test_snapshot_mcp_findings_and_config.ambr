@@ -106,13 +106,6 @@
           'dependencies_satisfied': True,
           'enabled': True,
           'installs_on_first_scan': False,
-          'name': 'semgrep',
-          'version': '<SEMGREP_VERSION>',
-        }),
-        dict({
-          'dependencies_satisfied': True,
-          'enabled': True,
-          'installs_on_first_scan': False,
           'name': 'syft',
           'version': None,
         }),
@@ -1907,14 +1900,6 @@
         'name': 'opengrep',
         'offline_strategy': 'cache_flags',
         'version': None,
-      }),
-      'semgrep': dict({
-        'dependencies_satisfied': True,
-        'enabled': True,
-        'installs_on_first_scan': False,
-        'name': 'semgrep',
-        'offline_strategy': 'cache_flags',
-        'version': '<SEMGREP_VERSION>',
       }),
       'snyk_code': dict({
         'dependencies_satisfied': True,

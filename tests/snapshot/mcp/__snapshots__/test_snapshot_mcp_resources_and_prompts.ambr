@@ -124,6 +124,23 @@
     'timestamp': None,
   })
 # ---
+# name: test_error_response_for_each_category[plugin_module_refused][response]
+  dict({
+    'context': dict({
+      'error_category': 'plugin_module_refused',
+    }),
+    'error': 'example plugin_module_refused error',
+    'error_category': 'plugin_module_refused',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Review the ash_plugin_modules entries in the config file or the config content sent',
+      'Remove the entries a scan refuses',
+    ]),
+    'timestamp': None,
+  })
+# ---
 # name: test_error_response_for_each_category[resource_exhausted][response]
   dict({
     'context': dict({
@@ -203,8 +220,7 @@
       dict({
         'content': dict({
           'text': '''
-            Please analyze these ASH security scan results in the source_dir:
-            <TMP>/cwd and provide:
+            Please analyze these ASH security scan results in this session's source directory (the tree delivered with set_source_git or set_source_zip_finalize, or the server's working directory for the local client that started it over stdio) and provide:
             
             1. **Summary**: Brief overview of the security scan results
             2. **Key Findings**: Most important security issues discovered
@@ -234,9 +250,9 @@
       dict({
         'content': dict({
           'text': '''
-            Please run an ASH security scan of the following directory: <TMP>/cwd
+            Please run an ASH security scan of this session's source directory (the tree delivered with set_source_git or set_source_zip_finalize, or the server's working directory for the local client that started it over stdio)
             
-            The scan should be done using the `run_ash_scan` MCP tool from the ASH MCP server.
+            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server, called with no source_dir: the tool resolves that directory itself and refuses to guess when nothing was delivered.
             
             Once the scan has started, an ID will be returned. Using that scan ID, call the
             `get_scan_progress` MCP tool with the scan ID to monitor until completion.
@@ -293,7 +309,7 @@
           'text': '''
             Please run an ASH security scan of the following directory: /work/project
             
-            The scan should be done using the `run_ash_scan` MCP tool from the ASH MCP server.
+            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
             
             Once the scan has started, an ID will be returned. Using that scan ID, call the
             `get_scan_progress` MCP tool with the scan ID to monitor until completion.
@@ -338,7 +354,7 @@
 # name: test_text_resource[exit-codes][contents]
   list([
     dict({
-      'content': '{"0": "success", "1": "scan errors / scanner failures", "2": "actionable findings above threshold", "3": "invalid config", "4": "workspace definition or policy error"}',
+      'content': '{"0": "success", "1": "scan errors / scanner failures", "2": "actionable findings at or above threshold", "3": "invalid config or refused input", "4": "workspace definition or policy error", "5": "usage error", "commands": {"ash dependencies install": {"2": "a --tool name that matches no plugin, or names a plugin of a type that --plugin-type leaves out; or a --plugin-type that is none of converter, scanner and reporter"}}}',
       'mime_type': 'text/plain',
     }),
   ])
@@ -349,14 +365,24 @@
       'content': '''
         ASH (Automated Security Helper) Usage Guide
         
-        ASH is a security scanning orchestrator that runs multiple security tools:
+        ASH is a security scanning orchestrator that runs multiple security tools.
         
-        🔍 **What ASH Scans For:**
-        • Python security issues (Bandit)
-        • Multi-language security patterns (Opengrep)
-        • Hardcoded secrets and credentials (detect-secrets)
-        • Infrastructure as Code issues (Checkov)
-        • CDK security problems (cdk-nag)
+        🔍 **Built-in scanners:**
+        • actionlint
+        • bandit
+        • cdk-nag
+        • cfn-guard
+        • cfn-lint
+        • cfn-nag
+        • checkov
+        • detect-secrets
+        • gitleaks
+        • grype
+        • npm-audit
+        • opengrep
+        • syft
+        • trivy
+        • zizmor
         
         📁 **Supported File Types:**
         • Python (.py)
@@ -367,10 +393,9 @@
         • And many more...
         
         ⚙️ **Local Mode Benefits:**
-        • Fast execution (Python-only scanners)
         • No Docker required
         • Good for development and CI/CD
-        • Covers most common security issues
+        • A scanner runs only when its tool is installed; list_scanners says which are
         
         🎯 **Best Practices:**
         • Run scans early and often
@@ -391,13 +416,27 @@
         
         ASH version <ASH_VERSION>
         
-        ASH is installed and ready to perform security scans in local mode.
-        Local mode includes these scanners:
-        • Bandit (Python security issues)
-        • Opengrep (Multi-language security patterns; serves the retired semgrep scanner name)
-        • detect-secrets (Hardcoded secrets detection)
-        • Checkov (Infrastructure as Code security)
-        • cdk-nag (CDK security issues)
+        ASH is installed and scans run in local mode. Whether each scanner's tool is
+        installed is not checked here.
+        Built-in scanners:
+        • actionlint
+        • bandit
+        • cdk-nag
+        • cfn-guard
+        • cfn-lint
+        • cfn-nag
+        • checkov
+        • detect-secrets
+        • gitleaks
+        • grype
+        • npm-audit
+        • opengrep
+        • syft
+        • trivy
+        • zizmor
+        
+        A scanner runs only when its tool is installed. Call the list_scanners tool for
+        each scanner's version and whether its dependencies are met.
   
       ''',
       'mime_type': 'text/plain',

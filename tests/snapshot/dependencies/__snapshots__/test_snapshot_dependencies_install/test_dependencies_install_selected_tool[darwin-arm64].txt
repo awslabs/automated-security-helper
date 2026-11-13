@@ -6,7 +6,10 @@ $ ash dependencies install --bin-path bin -t scanner --tool grype --tool bandit
 ╰─────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: darwin, architecture: arm64
-INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Loaded 2 converters, 15 scanners, and 15 reporters
+Installing dependencies for scanner plugin: bandit
+Running command: uv tool install bandit[sarif,toml]>=1.7.8,<2.0.0
+Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: grype
 Running command: python3 -c import sys; from pathlib import Path; from automated_security_helper.utils.download_utils import install_pinned_tool; install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])) grype darwin arm64 <WORKSPACE>/bin
 Command succeeded with exit code: 0

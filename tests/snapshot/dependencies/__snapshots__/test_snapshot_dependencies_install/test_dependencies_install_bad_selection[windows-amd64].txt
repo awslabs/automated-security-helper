@@ -6,12 +6,12 @@ $ ash dependencies install --bin-path bin --tool grype --tool gryp
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: windows, architecture: amd64
-INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Loaded 2 converters, 15 scanners, and 15 reporters
 ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
 │ Unknown tool(s): gryp                                                                            │
 │ Available: actionlint, archive, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, csv,     │
 │ cyclonedx, detect-secrets, flat-json, github-ghas, gitlab-cyclonedx, gitlab-sast, gitleaks,      │
-│ grype, html, junitxml, jupyter, markdown, npm-audit, ocsf, opengrep, sarif, semgrep, spdx, syft, │
-│ text, trivy, unused-suppressions, yaml, zizmor                                                   │
+│ grype, html, junitxml, jupyter, markdown, npm-audit, ocsf, opengrep, sarif, spdx, syft, text,    │
+│ trivy, unused-suppressions, yaml, zizmor                                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 2]

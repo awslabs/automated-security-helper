@@ -6,10 +6,9 @@ $ ash dependencies install --bin-path bin -t scanner --tool grype --tool bandit
 ╰─────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: unknown, architecture: unknown
-INFO     Loaded 2 converters, 16 scanners, and 15 reporters
-Installing dependencies for scanner plugin: grype
-Installing dependencies for scanner plugin: semgrep
-Running command: uv tool install semgrep>=1.125.0,<2.0.0
+INFO     Loaded 2 converters, 15 scanners, and 15 reporters
+Installing dependencies for scanner plugin: bandit
+Running command: uv tool install bandit[sarif,toml]>=1.7.8,<2.0.0
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: grype
                        Dependency installation results
