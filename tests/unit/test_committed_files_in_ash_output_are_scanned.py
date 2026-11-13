@@ -269,7 +269,7 @@ def _tool_scanner(kind: str, context):
         return BanditScanner(context=context, config=BanditScannerConfig()), (
             "bandit.sarif"
         )
-    if kind in ("semgrep", "opengrep"):
+    if kind == "opengrep":
         scanner = patterns._grep_scanner(kind, context)
         # Both are off by default on Windows, where the executor leaves a disabled
         # scanner unscanned and keeps no raw results. The tool is stubbed below, so
@@ -319,7 +319,7 @@ def _skipped_by_tool(kind: str, values, source: Path, relative: str) -> bool:
     absolute = os.path.join(os.path.abspath(source), *relative.split("/"))
     if kind == "bandit":
         return any(_bandit_excludes(v, absolute) for v in values)
-    if kind in ("semgrep", "opengrep"):
+    if kind == "opengrep":
         return any(patterns._gitignore_excludes(v, relative) for v in values)
     if kind == "grype":
         return any(patterns._doublestar_excludes(v, f"./{relative}") for v in values)
@@ -334,14 +334,12 @@ def _skipped_by_tool(kind: str, values, source: Path, relative: str) -> bool:
 _UNTRACKED_NAMED = "sub/.ash/ash_output/ash.log"
 
 #: The scanners whose tool is told to skip such a directory: every one here.
-_TOLD_TO_SKIP = frozenset(
-    {"bandit", "semgrep", "opengrep", "grype", "checkov", "ferret-scan"}
-)
+_TOLD_TO_SKIP = frozenset({"bandit", "opengrep", "grype", "checkov", "ferret-scan"})
 
 
 @pytest.mark.parametrize("ignore_suppressions", [False, True])
 @pytest.mark.parametrize(
-    "kind", ["bandit", "semgrep", "opengrep", "grype", "checkov", "ferret-scan"]
+    "kind", ["bandit", "opengrep", "grype", "checkov", "ferret-scan"]
 )
 def test_each_tool_reads_the_committed_files_in_this_runs_output_dir(
     tmp_path, monkeypatch, kind, ignore_suppressions

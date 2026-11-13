@@ -141,7 +141,7 @@ def _scan(tmp_path: Path, sandbox: str, *, scanners: str, env_extra: dict, extra
 
 
 def _semgrep_row(output: Path) -> dict:
-    row = output / "scanners" / "semgrep" / "source" / "ASH.ScanResults.json"
+    row = output / "scanners" / "opengrep" / "source" / "ASH.ScanResults.json"
     assert row.exists(), f"no semgrep result at {row}"
     return json.loads(row.read_text())
 
@@ -158,7 +158,7 @@ def _source(tmp_path: Path) -> Path:
     ["off", pytest.param("bwrap", marks=pytest.mark.requires_userns)],
 )
 def test_a_semgrep_run_with_a_rejected_rule_file_fails_the_scan(tmp_path, sandbox):
-    _require("semgrep")
+    _require("opengrep")
     if sandbox != "off":
         _require_bwrap()
     _source(tmp_path)
@@ -167,7 +167,7 @@ def test_a_semgrep_run_with_a_rejected_rule_file_fails_the_scan(tmp_path, sandbo
     result, output = _scan(
         tmp_path,
         sandbox,
-        scanners="semgrep",
+        scanners="opengrep",
         env_extra={"SEMGREP_RULES_CACHE_DIR": str(rules)},
         extra=["--fail-on-findings"],
     )
@@ -185,7 +185,7 @@ def test_a_semgrep_run_with_a_rejected_rule_file_fails_the_scan(tmp_path, sandbo
 
 @pytest.mark.requires_userns
 def test_an_offline_sandboxed_scan_reads_the_operators_rule_cache(tmp_path):
-    _require("semgrep")
+    _require("opengrep")
     _require_bwrap()
     _source(tmp_path)
     rules = _rules(tmp_path, RULE)
@@ -193,7 +193,7 @@ def test_an_offline_sandboxed_scan_reads_the_operators_rule_cache(tmp_path):
     result, output = _scan(
         tmp_path,
         "bwrap",
-        scanners="semgrep",
+        scanners="opengrep",
         env_extra={"SEMGREP_RULES_CACHE_DIR": str(rules)},
         extra=["--fail-on-findings"],
     )
@@ -207,14 +207,14 @@ def test_an_offline_sandboxed_scan_reads_the_operators_rule_cache(tmp_path):
 
 def test_an_offline_unsandboxed_scan_reads_the_rule_cache(tmp_path):
     """Control: the same rules and source without a sandbox report the finding."""
-    _require("semgrep")
+    _require("opengrep")
     _source(tmp_path)
     rules = _rules(tmp_path, RULE)
 
     result, output = _scan(
         tmp_path,
         "off",
-        scanners="semgrep",
+        scanners="opengrep",
         env_extra={"SEMGREP_RULES_CACHE_DIR": str(rules)},
         extra=["--fail-on-findings"],
     )
@@ -269,7 +269,7 @@ def _notebook_scan(tmp_path: Path, sandbox: str):
     _result, output = _scan(
         tmp_path,
         sandbox,
-        scanners="semgrep",
+        scanners="opengrep",
         env_extra={
             "SEMGREP_RULES_CACHE_DIR": str(rules),
             "PYTHONPATH": str(probe_dir),
@@ -289,7 +289,7 @@ def _notebook_scan(tmp_path: Path, sandbox: str):
 
 @pytest.mark.requires_userns
 def test_nbconvert_runs_inside_the_sandbox(tmp_path):
-    _require("semgrep")
+    _require("opengrep")
     _require("jupyter-nbconvert")
     _require_bwrap()
     host = os.readlink("/proc/self/ns/net")
@@ -311,7 +311,7 @@ def test_nbconvert_runs_inside_the_sandbox(tmp_path):
 
 def test_without_a_sandbox_nbconvert_runs_on_the_host(tmp_path):
     """Control: the probe works, and without a sandbox it reports the host."""
-    _require("semgrep")
+    _require("opengrep")
     _require("jupyter-nbconvert")
     host = os.readlink("/proc/self/ns/net")
 
