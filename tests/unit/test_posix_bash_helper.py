@@ -16,6 +16,8 @@ import pytest
 
 from tests.utils import posix_bash
 
+pytestmark = pytest.mark.unit
+
 
 class _Nt:
     name = "nt"

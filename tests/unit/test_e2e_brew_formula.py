@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 FORMULA = REPO / "Formula" / "ash.rb"
 SCRIPT = REPO / "scripts" / "e2e" / "brew_formula.py"

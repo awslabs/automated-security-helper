@@ -17,6 +17,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "packaging" / "msix" / "verify-on-windows.ps1"
 LAUNCHER = REPO_ROOT / "packaging" / "msix" / "AshLauncher.cs"

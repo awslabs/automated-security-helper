@@ -23,9 +23,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from tests.utils.helpers import github_yaml_files
+
+pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[2]
 

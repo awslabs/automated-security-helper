@@ -52,6 +52,8 @@ from tests.utils.helpers import (
     github_yaml_files,
 )
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _TRACKED = re.compile(

@@ -36,6 +36,8 @@ import yaml
 
 from tests.utils.posix_bash import bash_path, run_bash, write_lf
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-native-packages.yml"
 GATE_SCRIPT = REPO_ROOT / ".github" / "scripts" / "assert-workflow-gate.py"

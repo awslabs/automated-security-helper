@@ -23,6 +23,8 @@ import pytest
 from detect_secrets import SecretsCollection
 from detect_secrets.settings import default_settings
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SECRET_SCANNED = (

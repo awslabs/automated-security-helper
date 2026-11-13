@@ -39,6 +39,8 @@ import pytest
 
 from tests.utils.helpers import iter_repo_files
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 ROOTS = ("tests", "scripts", ".github")
 SKIP_DIRS = frozenset({"__pycache__", "node_modules", ".venv", "test_data"})

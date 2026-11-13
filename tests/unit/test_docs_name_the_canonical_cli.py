@@ -25,6 +25,8 @@ import pytest
 
 from tests.utils.helpers import iter_repo_files
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 DOCS = REPO / "docs" / "content"
 

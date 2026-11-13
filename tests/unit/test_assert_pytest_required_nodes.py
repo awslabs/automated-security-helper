@@ -20,6 +20,8 @@ from types import ModuleType
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / ".github" / "scripts" / "assert-pytest-required-nodes.py"
 WORKFLOW = REPO / ".github" / "workflows" / "ash-iac-drift.yml"

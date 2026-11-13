@@ -39,6 +39,8 @@ from automated_security_helper.core.resource_management.scan_tracking import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 FIXTURES = (
     Path(__file__).resolve().parents[2] / "editors" / "vscode" / "test" / "fixtures"
 )
