@@ -20,6 +20,8 @@ import sys
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = pytest.mark.unit
 
 #: Module trees that must stay OUT of `ash --version`. Each one names a root
@@ -94,11 +96,18 @@ print(
 
 
 def _version_run_report() -> dict:
+    # importing_this_checkout routes the child at this checkout (and exits 86 if
+    # ASH still resolves from elsewhere), so the budget measured is this tree's,
+    # not an installed copy's — and the child-launch scan in
+    # tests/unit/test_child_processes_import_this_checkout.py requires every -c
+    # child that imports ASH to go through it.
     completed = subprocess.run(  # nosec B603 - fixed argv, no shell
         [
             sys.executable,
             "-c",
-            _HARNESS.format(forbidden=FORBIDDEN_AT_VERSION_TIME),
+            importing_this_checkout(
+                _HARNESS.format(forbidden=FORBIDDEN_AT_VERSION_TIME)
+            ),
         ],
         capture_output=True,
         text=True,
