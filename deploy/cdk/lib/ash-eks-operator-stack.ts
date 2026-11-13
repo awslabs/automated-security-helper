@@ -1589,7 +1589,11 @@ export class AshEksOperatorStack extends Stack {
       // Matches ash-image-build.ts. cdk-nag's AwsSolutions-L1 fails any runtime it
       // does not consider current, so this tracks that file rather than pinning
       // independently and drifting into a finding.
-      runtime: lambda.Runtime.PYTHON_3_14,
+      // Spelled out because the pinned aws-cdk-lib predates the PYTHON_3_15 constant;
+      // inline code is allowed for Python runtimes, hence the option.
+      runtime: new lambda.Runtime('python3.15', lambda.RuntimeFamily.PYTHON, {
+        supportsInlineCode: true,
+      }),
       handler: 'index.handler',
       code: lambda.Code.fromInline(ASH_OPERATOR_APPLIER),
       role: installerRole,

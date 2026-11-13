@@ -2218,7 +2218,7 @@ sarif:
           fullDescription:
             markdown: null
             properties: null
-            text: "Lodash versions 4.0.0 through 4.17.22 are vulnerable to prototype\
+            text: "Lodash versions <ASH_VERSION> through 4.17.22 are vulnerable to prototype\
               \ pollution in the _.unset\_and _.omit\_functions. An attacker can pass\
               \ crafted paths which cause Lodash to delete methods from global prototypes.\n\
               \nThe issue permits deletion of properties but does not allow overwriting\
@@ -2227,7 +2227,7 @@ sarif:
           help:
             markdown: "**Vulnerability CVE-2025-13465**\n| Severity | Package | Fixed\
               \ Version | Link |\n| --- | --- | --- | --- |\n|MEDIUM|lodash|4.17.23|[CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)|\n\
-              \nLodash versions 4.0.0 through 4.17.22 are vulnerable to prototype\
+              \nLodash versions <ASH_VERSION> through 4.17.22 are vulnerable to prototype\
               \ pollution in the _.unset\_and _.omit\_functions. An attacker can pass\
               \ crafted paths which cause Lodash to delete methods from global prototypes.\n\
               \nThe issue permits deletion of properties but does not allow overwriting\
@@ -2235,7 +2235,7 @@ sarif:
             properties: null
             text: "Vulnerability CVE-2025-13465\nSeverity: MEDIUM\nPackage: lodash\n\
               Fixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)\n\
-              Lodash versions 4.0.0 through 4.17.22 are vulnerable to prototype pollution\
+              Lodash versions <ASH_VERSION> through 4.17.22 are vulnerable to prototype pollution\
               \ in the _.unset\_and _.omit\_functions. An attacker can pass crafted\
               \ paths which cause Lodash to delete methods from global prototypes.\n\
               \nThe issue permits deletion of properties but does not allow overwriting\

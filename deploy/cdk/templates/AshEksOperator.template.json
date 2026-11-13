@@ -311,7 +311,7 @@
       "Arn"
      ]
     },
-    "Runtime": "python3.14",
+    "Runtime": "python3.15",
     "Timeout": 600,
     "TracingConfig": {
      "Mode": "Active"

@@ -201,13 +201,15 @@ Assert-NativeSuccess -What 'pip install' -ExitCode $LASTEXITCODE
 # has to be edited when that changes, and the failure when it is not edited is silent
 # (the new name simply never reaches PATH).
 #
-# Minus one name, on purpose. `ash` is the v3 command, kept in the wheel as a deprecated
+# Minus two names, on purpose. `ash` is the v3 command, kept in the wheel as a deprecated
 # alias for pip, Homebrew and the container, and this package does not shim it: on
 # Windows `ash` is the name MSYS2 and Git for Windows give the Almquist shell, which is
 # why the v4 command is `ashx`. The venv still holds Scripts\ash.exe; nothing puts it on
-# PATH. packaging/assert-package-contents.py (DEPRECATED_SCRIPTS_NOT_EXPOSED) and
-# packaging/msix/msix.py (NOT_EXPOSED_SCRIPTS) carry the same one-name set.
-$notExposed = @('ash')
+# PATH. `agentic-security-harness` is the product-name alias added for pip, Homebrew and
+# the container; the Windows packages do not expose it. packaging/assert-package-contents.py
+# (DEPRECATED_SCRIPTS_NOT_EXPOSED), packaging/msix/msix.py (NOT_EXPOSED_SCRIPTS) and
+# packaging/winget/validate-manifests.py carry the same two-name set.
+$notExposed = @('ash', 'agentic-security-harness')
 $enumerate = Join-Path ([System.IO.Path]::GetTempPath()) ("ash-eps-" + [guid]::NewGuid().ToString('N') + ".py")
 Set-Content -LiteralPath $enumerate -Encoding ASCII -Value @'
 from importlib.metadata import distribution

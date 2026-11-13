@@ -1,4 +1,4 @@
-$ ash report --format bedrock-summary-reporter --log-level ERROR
+$ ashx report --format bedrock-summary-reporter --log-level ERROR
 [exit 5]
 
 [stderr]

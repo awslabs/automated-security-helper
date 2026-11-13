@@ -31,7 +31,7 @@ The MCP server did not start. The plugin starts it with `uvx`, which needs uv on
 uvx --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ashx mcp
 ```
 
-When the server starts, it waits for a client; Ctrl+C stops it. If ASH is already installed, the server command can be `ashx` with the argument `mcp` instead. Desktop apps often see a shorter PATH than a shell, so an absolute path to `uvx` or `ash` can fix a server that starts in a terminal and not in the agent.
+When the server starts, it waits for a client; Ctrl+C stops it. If ASH is already installed, the server command can be `ashx` with the argument `mcp` instead. Desktop apps often see a shorter PATH than a shell, so an absolute path to `uvx` or `ashx` can fix a server that starts in a terminal and not in the agent.
 
 ## Scanners are MISSING
 

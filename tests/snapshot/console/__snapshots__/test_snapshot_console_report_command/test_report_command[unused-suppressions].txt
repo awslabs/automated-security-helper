@@ -1,4 +1,4 @@
-$ ash report --format unused-suppressions --log-level ERROR
+$ ashx report --format unused-suppressions --log-level ERROR
 [exit 0]
 {
   "summary": {

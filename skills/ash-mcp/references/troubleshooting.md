@@ -23,7 +23,7 @@ The MCP server did not start. The plugin starts it with `uvx`, which needs uv on
 
 **Symptom:** `check_installation` returns failure or `installed: false`, or `run_ash_scan` errors with "command not found."
 
-`installed: false` means no enabled built-in scanner has its tool available, so a scan would run nothing. `ready: false` with `installed: true` means some scanners will not run: `missing_dependencies` names them, and a scan reports them as not run. On the server's host, `ash dependencies install` installs the tools ASH can install itself.
+`installed: false` means no enabled built-in scanner has its tool available, so a scan would run nothing. `ready: false` with `installed: true` means some scanners will not run: `missing_dependencies` names them, and a scan reports them as not run. On the server's host, `ashx dependencies install` installs the tools ASH can install itself.
 
 **Fix:** The MCP server needs ASH on its PATH. The standard install via `uvx`:
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network and starts the MCP server, which waits for a client" -->
@@ -31,7 +31,7 @@ The MCP server did not start. The plugin starts it with `uvx`, which needs uv on
 uvx --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ashx mcp
 ```
 
-When the server starts, it waits for a client; Ctrl+C stops it. If ASH is already installed, the server command can be `ashx` with the argument `mcp` instead. Desktop apps often see a shorter PATH than a shell, so an absolute path to `uvx` or `ash` can fix a server that starts in a terminal and not in the agent.
+When the server starts, it waits for a client; Ctrl+C stops it. If ASH is already installed, the server command can be `ashx` with the argument `mcp` instead. Desktop apps often see a shorter PATH than a shell, so an absolute path to `uvx` or `ashx` can fix a server that starts in a terminal and not in the agent.
 
 ## Scanners are MISSING
 

@@ -53,6 +53,12 @@ on:
       - "LICENSE"
       - "NOTICE"
       - ".gitignore"
+      # The guide the hook stages into the wheel. PKG-INFO and .git are read by the
+      # hook's existence tests; a push never changes either, but the measurement
+      # lists them as inputs, so the filter names them rather than carry an exemption.
+      - "docs/content/docs/genai-steering-guide.md"
+      - "PKG-INFO"
+      - ".git/**"
       # The shared e2e contract the Flatpak, MSIX, Chocolatey and winget legs judge their
       # scans with, and the N-1 helpers they build the upgrade source from.
       - "scripts/e2e/**"

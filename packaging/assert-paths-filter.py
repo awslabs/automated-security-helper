@@ -20,9 +20,11 @@ The measured layer builds the wheel in this process with hatchling's own PEP 517
 entry point, the one `uv build` calls, under sys.addaudithook. Every file the
 build opens for reading inside the repository is an input, however the hook
 spelled the path. Every process the build starts must be one this script can
-attribute (only the hook's `git rev-parse --abbrev-ref HEAD`, run by the git that
-`shutil.which("git")` finds outside the repository and given no environment of its
-own; it reads .git and nothing a paths entry can name). Any other subprocess,
+attribute (only the hook's `git rev-parse --abbrev-ref HEAD`, given no environment,
+and `git rev-parse --show-prefix HEAD`, given an environment with no GIT_* variable
+but GIT_CEILING_DIRECTORIES and safe.directory config entries; both run by the git
+that `shutil.which("git")` finds outside the repository, and both read .git and
+nothing a paths entry can name). Any other subprocess,
 os.system, exec, spawn or fork is an error, because what a child process reads
 cannot be seen from here. Processes are seen through their audit events and
 through _posixsubprocess.fork_exec, which this script wraps during the build
@@ -569,7 +571,49 @@ ATTRIBUTED_COMMANDS = {
         "hatch_build.py records the branch name in ASH_INSTALLED_REVISION; git "
         "reads only .git, which is not a file in the tree"
     ),
+    ("git", "rev-parse", "--show-prefix", "HEAD"): (
+        "hatch_build.py records the commit id in ASH_INSTALLED_REVISION; git "
+        "reads only .git, which is not a file in the tree"
+    ),
 }
+
+# The commands above that the hook runs with an environment of its own: it copies
+# the caller's, drops every GIT_* variable (git exports GIT_DIR to the hooks that
+# pre-commit builds inside) and keeps GIT_CEILING_DIRECTORIES plus the caller's
+# safe.directory setting. An environment is accepted for these only when it has
+# exactly that shape, so the build cannot point git at another repository or
+# hand it a config that names a file.
+ENV_FILTERED_COMMANDS = {("git", "rev-parse", "--show-prefix", "HEAD")}
+_GIT_ENV_KEPT = {"GIT_CEILING_DIRECTORIES", "GIT_CONFIG_COUNT"}
+
+
+def _git_environment_filtered(env: object) -> bool:
+    """Whether `env` holds no GIT_* variable but the ones the hook forwards."""
+    if isinstance(env, dict):
+        items = [(os.fsdecode(k), os.fsdecode(v)) for k, v in env.items()]
+    elif isinstance(env, (list, tuple)):
+        items = []
+        for entry in env:
+            name, _, value = os.fsdecode(entry).partition("=")
+            items.append((name, value))
+    else:
+        return False
+    values = dict(items)
+    for name, value in items:
+        if not name.startswith("GIT_") or name in _GIT_ENV_KEPT:
+            continue
+        index = re.fullmatch(r"GIT_CONFIG_(KEY|VALUE)_\d+", name)
+        if index is None:
+            return False
+        # Only the safe.directory entry is forwarded; its key names no file.
+        if index.group(1) == "KEY" and value != "safe.directory":
+            return False
+        if index.group(1) == "VALUE":
+            key_name = name.replace("VALUE", "KEY")
+            if values.get(key_name) != "safe.directory":
+                return False
+    return values.get("GIT_CONFIG_COUNT", "0").isdigit()
+
 
 # Set to a list while a measured build runs; the audit hook appends to it.
 _recording: list[tuple[Any, ...]] | None = None
@@ -827,7 +871,11 @@ def _attributed(
 ) -> bool:
     """Whether a started process is an ATTRIBUTED_COMMANDS entry run by real git."""
     key = (os.path.basename(argv[0]), *argv[1:]) if argv else ()
-    if key not in ATTRIBUTED_COMMANDS or env is not None:
+    if key not in ATTRIBUTED_COMMANDS:
+        return False
+    if env is not None and not (
+        key in ENV_FILTERED_COMMANDS and _git_environment_filtered(env)
+    ):
         return False
     if not program or git is None or _inside(git, repo):
         return False
@@ -1742,6 +1790,55 @@ def self_test() -> int:
                 "build_extra": (
                     'subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], '
                     "env=dict(os.environ), capture_output=True, check=False)"
+                ),
+            },
+            "error: subprocess.Popen ['git', 'rev-parse'",
+        ),
+        (
+            "measured: the hook reads the commit id with its GIT_* variables dropped",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    'subprocess.run(["git", "rev-parse", "--show-prefix", "HEAD"], '
+                    "env={k: v for k, v in os.environ.items() "
+                    'if not k.startswith("GIT_")}, capture_output=True, check=False)'
+                ),
+            },
+            "ok",
+        ),
+        (
+            "measured: the hook runs the commit-id command with GIT_DIR set",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    'subprocess.run(["git", "rev-parse", "--show-prefix", "HEAD"], '
+                    'env=dict(os.environ, GIT_DIR="/nonexistent"), '
+                    "capture_output=True, check=False)"
+                ),
+            },
+            "error: subprocess.Popen ['git', 'rev-parse'",
+        ),
+        (
+            "measured: the hook forwards a config entry other than safe.directory",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    'subprocess.run(["git", "rev-parse", "--show-prefix", "HEAD"], '
+                    'env=dict(os.environ, GIT_CONFIG_COUNT="1", '
+                    'GIT_CONFIG_KEY_0="core.worktree", GIT_CONFIG_VALUE_0="/x"), '
+                    "capture_output=True, check=False)"
+                ),
+            },
+            "error: subprocess.Popen ['git', 'rev-parse'",
+        ),
+        (
+            "measured: the branch-name command still takes no environment",
+            {
+                "layers": MEASURED,
+                "build_extra": (
+                    'subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], '
+                    "env={k: v for k, v in os.environ.items() "
+                    'if not k.startswith("GIT_")}, capture_output=True, check=False)'
                 ),
             },
             "error: subprocess.Popen ['git', 'rev-parse'",

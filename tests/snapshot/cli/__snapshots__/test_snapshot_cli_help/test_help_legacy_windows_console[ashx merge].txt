@@ -29,7 +29,7 @@
 │                                                                           scan's own            │
 │                                                                           configuration asks    │
 │                                                                           for.                  │
-│    --config              -c                          <str>                The operator's config │
+│    --config             -c                           <str>                The operator's config │
 │                                                                           file. Its values      │
 │                                                                           replace the shards'   │
 │                                                                           for the settings a    │

@@ -370,7 +370,13 @@ class CustomBuildHook(BuildHookInterface):
         .dockerignore. The artifact gate in .github/scripts/assert-artifact-contents.py
         pins the path, so a released wheel or sdist without it fails CI.
         """
-        packaged = ASH_REPO_ROOT.joinpath(*GENAI_GUIDE_PACKAGE_PATH.split("/"))
+        # The package directory is a constant first argument so that
+        # packaging/assert-paths-filter.py can read which part of the checkout this
+        # reaches; a path built only from a starred argument has no readable prefix
+        # and that check refuses it.
+        packaged = ASH_REPO_ROOT.joinpath(
+            "automated_security_helper", *GENAI_GUIDE_PACKAGE_PATH.split("/")[1:]
+        )
         if GENAI_GUIDE_SOURCE.is_file():
             packaged.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(GENAI_GUIDE_SOURCE, packaged)
