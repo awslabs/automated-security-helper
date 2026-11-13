@@ -69,8 +69,8 @@ def _job() -> tuple[ga.Workflow, dict[str, Any]]:
     return workflow, workflow.jobs[JOB_ID]
 
 
-#: `tests/integration` as a pytest argument of its own. The job's separate docs
-#: examples step runs `tests/integration/docs`, which is not this path.
+#: `tests/integration` as a pytest argument of its own. The separate docs-examples
+#: job runs `tests/integration/docs`, which is not this path.
 _SUITE_PATH = re.compile(r"tests/integration(?=[\s\\]|$)")
 
 

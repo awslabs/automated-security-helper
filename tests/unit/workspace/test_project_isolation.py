@@ -1275,15 +1275,27 @@ class TestPluginManagerSingletonState:
         ``tests/utils/helpers.py``, and the drift would be invisible: the sweep
         would simply go back to reading other workers' scratch trees and start
         raising ``FileNotFoundError`` again, intermittently, on one leg.
+
+        The fixture writes one level down, into this worker's own subtree of
+        the root (``scratch_worker_root``: the per-worker level is what keeps a
+        child pytest's collection walk off the other workers' teardowns). The
+        exclusion is by prefix, so the extra level stays covered; this pins
+        both halves, the prefix and the level.
         """
-        from tests.utils.helpers import get_ash_temp_path
+        from tests.utils.helpers import get_ash_temp_path, scratch_worker_root
 
         created = get_ash_temp_path()
         try:
-            assert created.parent == ASH_TEST_TEMP_ROOT, (
-                f"the fixture writes to {created.parent} but the sweep excludes "
-                f"{ASH_TEST_TEMP_ROOT}; the exclusion no longer covers the race"
+            assert created.parent == scratch_worker_root(), (
+                f"the fixture writes to {created.parent} but the per-worker "
+                f"subtree is {scratch_worker_root()}; the two have drifted"
             )
+            assert created.parent.parent == ASH_TEST_TEMP_ROOT, (
+                f"the fixture writes under {created.parent.parent} but the sweep "
+                f"excludes {ASH_TEST_TEMP_ROOT}; the exclusion no longer covers "
+                "the race"
+            )
+            assert created.resolve().is_relative_to(ASH_TEST_TEMP_ROOT.resolve())
             assert ASH_TEST_TEMP_ROOT.resolve().is_relative_to(
                 Path(__file__).resolve().parents[3]
             ), "the temp root is outside the repository, so nothing would sweep it"

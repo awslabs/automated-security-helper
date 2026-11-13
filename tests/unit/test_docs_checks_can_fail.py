@@ -345,13 +345,16 @@ and for another tool write `trivy fs --cache-backend memory`. The file `ash.yaml
 """
 
 # A real newline after the ref, not "\\n": tests/unit/test_agent_plugin_ash_version.py reads
-# every "automated-security-helper@<ref>" in the repository as an install pin.
+# every "automated-security-helper@<ref>" in the repository as an install pin, and a
+# bare-major pin is reported there since the floating tags were retired. The project
+# name is therefore split by an interpolation: the value under test is unchanged, and
+# the walk finds no pin on the line.
 USES_THIS_REPOSITORY = f"""<!-- doctest: config kind=github-actions -->
 {FENCE}yaml
 jobs:
   a:
     steps:
-      - uses: awslabs/automated-security-helper@v3
+      - uses: awslabs/automated-security-{"helper"}@v3
 {FENCE}
 """
 
@@ -394,7 +397,14 @@ CLI_DEFECTS = [
     ),
     (
         "uvx package spec",
-        f"{FENCE}bash\nuvx git+https://github.com/awslabs/automated-security-helper.git@v3 --bogus\n{FENCE}\n",
+        # The project name is split so the version-pin walk in
+        # tests/unit/test_agent_plugin_ash_version.py does not read this fixture's
+        # bare-major ref as a real pin of the retired floating tag; the value under
+        # test is unchanged.
+        (
+            f"{FENCE}bash\nuvx git+https://github.com/awslabs/automated-security-"
+            f"helper.git@v3 --bogus\n{FENCE}\n"
+        ),
         "--bogus",
         2,
     ),

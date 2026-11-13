@@ -58,7 +58,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-create-release.yml"
 JOB = "create-release-pr"
 NOTES_V380 = REPO_ROOT / ".github" / "release-notes" / "v3.8.0.md"
 
-# The same skip idiom as tests/unit/test_floating_major_tag_workflow.py, for the
+# The same skip idiom as tests/unit/test_ash_bash_entrypoint_build_failure.py, for the
 # same reason: on a Windows runner `bash` is the WSL stub, and the steps under test
 # only ever run on ubuntu-latest.
 _REQUIRES_BASH = [

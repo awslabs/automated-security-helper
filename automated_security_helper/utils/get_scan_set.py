@@ -3274,6 +3274,84 @@ def get_changed_files(
     return [Path(_git_text(name)) for name in result.stdout.split(b"\0") if name]
 
 
+def get_staged_files(cwd: Optional[Path] = None) -> Optional[List[Path]]:
+    """The files staged in the index, from ``git diff --cached``, or None.
+
+    The staged scope of ``--mode precommit --staged``: what a commit made now
+    would contain, which ``--changed-files-only``'s ``<base_ref>...HEAD`` diff
+    cannot see (``workspace/execution.py`` records why). Read with
+    ``--diff-filter=ACMR``: added, copied, modified and renamed entries, and no
+    deletions, because a deleted file cannot be scanned. For a rename or a copy,
+    ``--name-only`` prints the post-image name, so the new path is what gets
+    scanned. The ``-z`` and ``core.quotepath=false`` handling, the trailing
+    ``--`` and the decoding are :func:`get_changed_files`'s, for the same
+    reasons.
+
+    Args:
+        cwd: Directory to run git from (must be inside the target repository).
+            Defaults to the current working directory.
+
+    Returns:
+        A list of :class:`~pathlib.Path` objects relative to the repository
+        root, empty when nothing is staged, or ``None`` when the list could not
+        be read (git missing, not a repository, a timeout). The caller decides
+        what ``None`` means: a scan asked for ``--staged`` refuses to run
+        rather than silently scanning everything.
+    """
+    git = _git_executable()
+    if git is None:
+        ASH_LOGGER.warning(GIT_NOT_INSTALLED, extra=NO_MARKUP)
+        return None
+    try:
+        result = subprocess.run(
+            git_argv(  # nosec B603 B607
+                "-c",
+                "core.quotepath=false",
+                "-c",
+                "diff.relative=false",
+                "diff",
+                "--cached",
+                "--name-only",
+                "--diff-filter=ACMR",
+                "-z",
+                "--",
+                program=git,
+            ),
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            cwd=cwd,
+            env=_layout_environ(cwd),
+        )
+    except FileNotFoundError as error:
+        ASH_LOGGER.warning(_why_git_did_not_start(error, cwd), extra=NO_MARKUP)
+        return None
+    except subprocess.TimeoutExpired:
+        ASH_LOGGER.warning(
+            "git diff --cached timed out after 30 seconds", extra=NO_MARKUP
+        )
+        return None
+    except OSError as error:
+        shown = Path(cwd).as_posix() if cwd is not None else "the working directory"
+        why = _missing_directory_clause(cwd) or (
+            f"git could not be started in {shown}: {error}"
+        )
+        ASH_LOGGER.warning(why, extra=NO_MARKUP)
+        return None
+
+    if result.returncode != 0:
+        ASH_LOGGER.warning(
+            "git diff --cached failed (rc=%d); the staged file list could not be read",
+            result.returncode,
+            extra=NO_MARKUP,
+        )
+        return None
+
+    # Every name ends in NUL, so the last entry is empty; nothing is stripped,
+    # since a leading or trailing space is part of a name.
+    return [Path(_git_text(name)) for name in result.stdout.split(b"\0") if name]
+
+
 def changed_paths_within(candidates: Iterable[Path], scope: Path) -> Set[Path]:
     """The paths in *candidates* that hold something inside *scope*.
 
@@ -3678,6 +3756,7 @@ def scan_set(
     workspace_output_dir: Optional[str] = None,
     links_not_scanned: Optional[List[Dict[str, str]]] = None,
     filter_anywhere: bool = False,
+    restrict_to: Optional[Iterable[str]] = None,
 ) -> list[str]:
     """Get list of files not matching .gitignore underneath source path.
 
@@ -3738,6 +3817,16 @@ def scan_set(
             (``PluginContext.workspace_output_dir``). Left unstated (None), a call
             of a run that has a record in *output* takes the run's, as for
             *honor_ignore_files*.
+        restrict_to: When given, source-relative POSIX paths the scan set is
+            limited to (``--staged``): a walked file outside it is left out of
+            the returned list AND of the recorded ``ash-scan-set-files-list.txt``,
+            so every later call that reads the run's list back gets the
+            restricted one. Applied after the ignore files, so the per-ignore-file
+            exclusion counts still describe what the ignore files removed. A call
+            that reads the run's recorded list back returns it as written and
+            does not apply this again; a call that has to rebuild the list
+            without this argument (a scanner whose read-back failed) rebuilds it
+            unrestricted, which over-scans and never under-reports.
         links_not_scanned: When given, extended with ``{"path", "reason"}`` for
             each file link left out of the scan set because its target leaves
             *source* (:func:`_left_out_as_a_link_leaving_the_tree`): the path below
@@ -3894,6 +3983,32 @@ def scan_set(
             output,
             extra=NO_MARKUP,
         )
+
+    if restrict_to is not None and not imported:
+        # After the ignore-file accounting, so the exclusion counts above still
+        # say what the ignore files removed, and before the write below, so the
+        # recorded list is the restricted one and every read-back returns it.
+        wanted = {str(entry) for entry in restrict_to}
+        source_absolute = os.path.abspath(source)
+        kept_entries = [
+            entry
+            for entry in ashscanset_list
+            if os.path.relpath(os.path.abspath(entry), source_absolute).replace(
+                os.sep, "/"
+            )
+            in wanted
+        ]
+        left_out = len(ashscanset_list) - len(kept_entries)
+        if left_out:
+            ASH_LOGGER.info(
+                "Limiting the scan set to %d of %d files (--staged): %d "
+                "non-staged files are not scanned this run.",
+                len(kept_entries),
+                len(ashscanset_list),
+                left_out,
+                extra=NO_MARKUP,
+            )
+        ashscanset_list = kept_entries
 
     if output and not imported and (run_id is not None or write_lists):
         # One step: scanners that run in threads each reach this point with their

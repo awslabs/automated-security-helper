@@ -207,7 +207,7 @@ actionable findings.
   with a GitLab SAST report, with pip, uvx, own-image, and Nix mode variants.
 - [Run ASH in Jenkins, CodeBuild, Azure Pipelines, CircleCI, and other CI systems](../how-to/ci/other-ci.md):
   the recipe as plain shell, with pip and uvx variants, and one section per system. Each
-  system also has a Nix mode section; Nix mode is on `main` only, not in any release.
+  system also has a Nix mode section.
 - [Read scan results](../how-to/read-results.md): what each report file is for.
 - [Choose scanners](../how-to/choose-scanners.md): turn scanners on and off.
 - [Scale to large repositories](../how-to/scale-large-repos.md): split a scan across runners.

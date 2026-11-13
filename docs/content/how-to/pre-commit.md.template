@@ -48,16 +48,59 @@ Do not ignore all of `.ash/`: an ASH config file can live there, as `.ash/.ash.y
 
 ## What the hook runs {#behavior}
 
-The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
+The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommit mode:
 
 - runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
   `--add-scanners` adds others to that set; `--only-scanners` replaces the set and runs
   exactly what it names; `--exclude-scanners` removes names, whichever source added them.
   The deprecated `--scanners` behaves like `--add-scanners` here. See
   [Choosing the scanners](#scanner-selection).
-- scans the whole repository on every run, not only the staged files. A commit that touches
-  one file is still blocked by a finding in a file committed earlier.
+- with `--staged` (which the hook passes), scans the staged files instead of the whole
+  repository, so a one-file commit pays for one file. See
+  [Staged-file scope](#staged-scope).
 - prints simplified output and writes the usual reports to `.ash/ash_output/`.
+
+## Staged-file scope (`--staged`) {#staged-scope}
+
+`--staged` reads the staged file list from `git diff --cached` (added, copied, modified
+and renamed entries; a rename is scanned at its new path; a deleted file cannot be
+scanned and is not listed) and makes it the scan's target set:
+
+- bandit and checkov are handed the staged files instead of the tree; the scanners that
+  pick their own files (detect-secrets, cdk-nag, npm-audit) read the same staged list.
+  For Terraform, checkov also reads a staged file's same-directory `.tf`/`.tfvars`
+  siblings, so same-directory `variables.tf` defaults and `locals` still resolve;
+  nothing recurses into subdirectories, so a local module that lives in one is read
+  only when its own files are staged.
+- a scanner none of whose files are staged is skipped, with a log line saying so.
+- converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
+  when nothing staged matches them.
+- suppressions and `ignore_paths` resolve against the same scan root as a whole-repository
+  run, so a suppression that matches a finding in a full scan matches it here too.
+- findings in files that are not staged are out of scope by definition: the hook judges
+  the commit, not the repository. The reports are filtered to the staged files, so even
+  what a tool read for context (the Terraform siblings above, or the large-commit
+  fallback below) never adds findings. Keep a whole-repository scan in CI for the rest.
+- a commit staging more files than one command line can carry (about 500) makes bandit
+  and checkov fall back to scanning the directory, with a log line: the reports still
+  hold staged-file findings only, and what degrades is the time win.
+- with nothing staged, the scan logs that and exits 0 without starting any scanner.
+
+What the tools read is the working-tree copy of each staged file. Under the
+pre-commit framework the two are identical, because it stashes unstaged changes
+around the hooks; a direct `ash --mode precommit --staged` run after `git add -p`,
+or after editing a file it had staged, scans content that differs from what the
+commit will contain.
+
+`--staged` works only with `--mode precommit`; any other mode refuses it (exit 5).
+Without the flag, a precommit scan still covers the whole repository: on every ASH v3
+release the flag is opt-in, the hooks in this repository pass it for you, and it is
+planned to become the precommit default in ASH v4.
+
+This is not what `--changed-files-only` does. `--changed-files-only` scans everything
+and only filters the reports against a `<base_ref>...HEAD` diff afterwards, so it saves
+no scan time and cannot see staged-but-uncommitted content; `--staged` is the scan-time
+scope built for the hook.
 
 The hook's environment includes the `cdk` extra that cdk-nag needs. cdk-nag and npm-audit
 also need Node.js and npm on `PATH`, but only when the repository has files they scan:
@@ -288,9 +331,9 @@ pre-commit run --hook-stage manual ash-full-scan --all-files
 
 ## Run the hook in Nix mode {#nix}
 
-!!! warning "Nix mode is on `main` only"
-    Nix mode is not in any release: v3.7.x rejects `--mode nix`. This recipe works with an
-    ASH installed from `main` or from a source checkout, not with a released `rev`.
+!!! note "Nix mode needs a current release"
+    Nix mode is in the latest release; v3.7.x and older reject `--mode nix`. This recipe
+    runs the ASH on `PATH`, so install that release or newer, or use a source checkout.
 
 `.pre-commit-hooks.yaml` defines no Nix hook: `ash` and `ash-simple-scan` run precommit
 mode and `ash-full-scan` runs container mode, and ASH takes one `--mode` per run. To scan
@@ -305,22 +348,22 @@ repos:
     hooks:
       - id: ash-nix
         name: ASH scan in Nix mode
-        entry: env ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main ash scan --mode nix --no-progress
+        entry: ash scan --mode nix --no-progress
         language: system
         pass_filenames: false
         stages: [manual]
 ```
 
-<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix, an ASH from main and the network" -->
+<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix and the network" -->
 ```bash
-uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}'
 pre-commit run --hook-stage manual ash-nix --all-files
 ```
 
 This is a different hook from `ash`: it runs the scanners of a normal scan, not the five
 of precommit mode, so it takes longer and belongs on `manual` or `pre-push`. It uses the
-installation on `PATH`, so install ASH with the `cdk` extra for cdk-nag. A `main` install
-cannot find a release tag that contains `flake.nix`, so the hook's `entry` sets
-`ASH_NIX_FLAKE_REF` itself through `env`. The hook then finds `flake.nix` on a `pre-push`
-or from an IDE or GUI client as well, where a variable exported in your shell may not be set.
+installation on `PATH`, so install ASH with the `cdk` extra for cdk-nag. An installed
+release finds `flake.nix` at its own release tag with nothing set, so the hook works on a
+`pre-push` and from an IDE or GUI client as well, where a variable exported in your shell
+may not be set.
 [Install ASH](install.md#nix-mode) covers Nix mode's requirements.

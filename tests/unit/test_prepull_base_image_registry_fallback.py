@@ -116,7 +116,7 @@ FALLBACK_REPO = "docker.io/library/python"
 ID_PINNED = "sha256:" + "1" * 64
 ID_OTHER = "sha256:" + "2" * 64
 
-# Same mechanism and both conditions as tests/unit/test_floating_major_tag_workflow.py, so
+# Same mechanism and both conditions as tests/unit/test_ash_bash_entrypoint_build_failure.py, so
 # there is one skip idiom for this reason rather than two that can drift. On a GitHub Windows
 # runner `bash` resolves to C:\Windows\System32\bash.exe, the WSL launcher stub, which is on
 # PATH whether or not a distribution is installed; a which() guard alone therefore passes and

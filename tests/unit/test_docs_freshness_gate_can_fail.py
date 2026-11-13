@@ -1010,7 +1010,13 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
 
     The expected templates come from scripts/version_template_manager.py's own
     target list, so a page that gains or loses a template changes this test's
-    expectation without an edit here.
+    expectation without an edit here. Only MARKDOWN targets are expected: the
+    corpus is the markdown the docs checks read, and a non-markdown target (the
+    GitHub Actions example workflow, version-pinned with a template since the
+    floating tag retired) is no doc page -- its template-and-rendered-file
+    agreement is tests/unit/test_version_template_round_trip.py's to enforce.
+    The non-markdown set is pinned below so a new one is a decision, not an
+    accident that silently shrinks this corpus check.
     """
     spec = importlib.util.spec_from_file_location(
         "_ash_version_template_manager",
@@ -1020,11 +1026,14 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
     manager_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(manager_module)
     targets = manager_module.VersionTemplateManager(REPO_ROOT).target_files
-    expected = {
-        f"{target}.template"
-        for target in targets
-        if (REPO_ROOT / f"{target}.template").is_file()
+    with_template = {
+        target for target in targets if (REPO_ROOT / f"{target}.template").is_file()
     }
+    non_markdown = {t for t in with_template if not t.endswith(".md")}
+    assert non_markdown == {"examples/GitHubActions/ash-repo-scan.yml"}, sorted(
+        non_markdown
+    )
+    expected = {f"{target}.template" for target in with_template - non_markdown}
     assert "README.md.template" in expected, sorted(expected)
     assert len(expected) > 1, sorted(expected)
 

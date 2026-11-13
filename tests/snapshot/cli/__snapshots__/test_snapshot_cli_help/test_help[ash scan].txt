@@ -124,6 +124,30 @@
 │                                                              setting the ASH_CONFIG environment  │
 │                                                              variable before running ASH.        │
 │                                                              [env var: ASH_CONFIG]               │
+│ --staged                                                     With --mode precommit only: scan    │
+│                                                              the staged files (git diff          │
+│                                                              --cached, without deletions; a      │
+│                                                              rename's new path) instead of the   │
+│                                                              whole tree, so a commit pays for    │
+│                                                              what it stages. What the tools read │
+│                                                              is the working-tree copy of each    │
+│                                                              staged file; under the pre-commit   │
+│                                                              framework the two are identical,    │
+│                                                              because it stashes unstaged changes │
+│                                                              around the hooks. Suppressions and  │
+│                                                              ignore paths apply exactly as in a  │
+│                                                              whole-tree scan; findings in files  │
+│                                                              that are not staged are out of      │
+│                                                              scope. With nothing staged the scan │
+│                                                              exits 0 without starting any        │
+│                                                              scanner. Unlike                     │
+│                                                              --changed-files-only, which only    │
+│                                                              filters the reports after scanning  │
+│                                                              everything, --staged saves the scan │
+│                                                              time. Any other --mode refuses it   │
+│                                                              (exit 5). Planned to become the     │
+│                                                              precommit default in ASH v4.        │
+│                                                              [env var: ASH_STAGED]               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Reports ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --output-dir                                              <str>  The directory to output results │

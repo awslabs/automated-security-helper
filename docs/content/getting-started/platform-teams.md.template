@@ -213,7 +213,8 @@ ASH_CONFIG=/etc/ash/ash.yaml ash scan --source-dir . --output-dir ../ash-results
 ```
 
 Pin to a release tag, or to a full commit SHA for a reference that cannot move; do not
-use `@v3`, which moves with each release ([Choose a version to pin](../how-to/install.md#choose-a-version-to-pin)).
+use `@v3`, the retired floating tag, which is frozen at v3.8.0 and never moves to a
+newer release ([Choose a version to pin](../how-to/install.md#choose-a-version-to-pin)).
 To roll out a new version, change the tag in one place and run the same command with
 `--force`. Without the image, the scanners' tools come from the runner and from ASH's own
 environment instead of from one artifact, so keep the runner images that hold them on the
@@ -221,8 +222,8 @@ same schedule as the ASH tag; the image route keeps both in one artifact. For on
 jobs, `uvx` runs the same pinned reference without installing it; the
 [GitHub Actions reusable workflow](../how-to/ci/github-actions.md) does this.
 
-Nix mode (`ash --mode nix`) is not in any release: v3.7.x rejects `--mode nix`, and it
-exists on `main` only. Do not plan a fleet rollout on it until a release contains it. See
+Nix mode (`ash --mode nix`) is in the latest release; v3.7.x and older reject
+`--mode nix`, so a fleet rollout on it needs a release newer than those everywhere. See
 [Nix mode](../how-to/install.md#nix-mode).
 
 ## 5. Plan content database refresh

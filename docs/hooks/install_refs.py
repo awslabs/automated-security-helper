@@ -1,30 +1,38 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""mkdocs hook: the install commands of each docs version install that version.
+"""mkdocs hook: every docs version's install commands install a release.
 
 The pages that pin an install command to the current release are rendered from a
 `.template` sibling by scripts/version_template_manager.py at each release, and the
 rendered page is committed. (No release number is written out in this file: the tree
-walk in tests/unit/test_agent_plugin_ash_version.py would report it as a stale pin.) That is right for a release's docs and
-wrong for the site's `main` version, which describes unreleased code: a reader who
-copies its install command should get main.
+walk in tests/unit/test_agent_plugin_ash_version.py would report it as a stale pin.)
+That is what a reader should install from every version of the site, the `main`
+version included: its pages describe unreleased code, but a reader who copies an
+install command should get the latest release, not main. (The `main` version used to
+rewrite its install commands to install main; its readers were advised to install an
+unreleased branch, which is why it no longer does.) So the `main` version's pages are
+served as committed, pinning the current release, and only a release build renders
+anything here.
 
-So when mike builds `main`, this builds each of the manager's target pages under
-docs_dir from its template with the manager's branch renderer, which turns
-`@v{{VERSION}}` into `@main` and `{{RELEASE}}` into the current release number (what
-an install of main reports). When mike builds a release, it renders the template with
-that release's version, as the manager does at bump time; at a release tag that is the
-committed page. Any other build, such as a pull request's or `mkdocs serve`, is left
-alone: the committed pages are what the docs checks and the docs-example runner read,
-so they never change here. The version comes from extra.docs_version, which mike sets
-(see mkdocs.yml); the names of the development version and of a release come from
-scripts/docs_versions.py, so the two cannot disagree about which build is which.
+When mike builds a release, this builds each of the manager's target pages under
+docs_dir from its template with that release's version, as the manager does at bump
+time; at a release tag that is the committed page. The `main` version's build keeps
+the committed pages but still checks that every version-pinned page has its template,
+so a deleted template fails on the next push to main instead of on the next release.
+Any other build, a pull request's and `mkdocs serve`'s included, is left alone: the
+committed pages are what the docs checks and the docs-example runner read. The
+version comes from extra.docs_version, which mike sets (see mkdocs.yml); the names of
+the development version and of a release come from scripts/docs_versions.py, so the
+two cannot disagree about which build is which.
 
-config.extra.install_ref is set to the ref the rewritten install commands use (`main`,
-or `v` and the release number), and left unset when nothing is rewritten. docs/overrides/main.html says
-so in the unreleased notice only when it is set, so the notice cannot claim it of a
-build this hook did not touch.
+config.extra.install_ref is set to the ref this build's install commands pin: `v` and
+the release number, on a release build and on the `main` version's build (whose
+committed pages pin the current release, which scripts/docs_versions.py check
+enforces). It is left unset on any other build, whose pages this hook has not
+vouched for. docs/overrides/main.html names it in the unreleased notice when it is
+set, and docs/overrides/partials/ash-snippet-builder.html renders its snippets with
+it.
 """
 
 from __future__ import annotations
@@ -58,6 +66,10 @@ def _root(config) -> Path:
     return Path(config.config_file_path).parent
 
 
+def _manager(config):
+    return _load(_root(config), MANAGER).VersionTemplateManager(_root(config))
+
+
 def _kind(config) -> tuple[str, str | None]:
     """The version being built, and "branch", "release" or None for any other build."""
     versions = _load(_root(config), DOCS_VERSIONS)
@@ -72,7 +84,7 @@ def _kind(config) -> tuple[str, str | None]:
 def on_config(config):
     version, kind = _kind(config)
     if kind == "branch":
-        config.extra["install_ref"] = version
+        config.extra["install_ref"] = f"v{_manager(config).packaged_release()}"
     elif kind == "release":
         config.extra["install_ref"] = f"v{version}"
     return config
@@ -85,7 +97,6 @@ def on_files(files, config):
     root = _root(config)
     manager = _load(root, MANAGER).VersionTemplateManager(root)
     docs_dir = Path(config.docs_dir).resolve()
-    release = manager.packaged_release()
     for target in manager.target_files:
         page = (root / target).resolve()
         if not page.is_relative_to(docs_dir):
@@ -96,13 +107,11 @@ def on_files(files, config):
         template = root / (target + manager.template_suffix)
         if not template.is_file():
             raise PluginError(
-                f"{target} is a version-pinned page with no {template.name}, so the "
-                f"{version} docs cannot render its install commands"
+                f"{target} is a version-pinned page with no {template.name}, so a "
+                f"release's docs could not render its install commands"
             )
+        if kind != "release":
+            continue  # main: the committed page stands, pinning the current release
         text = template.read_text(encoding="utf-8")
-        file.content_string = (
-            manager.render_for_branch(text, version, release)
-            if kind == "branch"
-            else manager.render(text, version)
-        )
+        file.content_string = manager.render(text, version)
     return files
