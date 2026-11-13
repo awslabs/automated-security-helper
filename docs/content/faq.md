@@ -89,7 +89,7 @@ ASH respects `.gitignore` files. You can also configure ignore paths in your `.a
 ### How do I run specific scanners?
 ```bash
 # Run only specific scanners
-ashx --scanners bandit,semgrep
+ashx --scanners bandit,opengrep
 
 # Exclude specific scanners
 ashx --exclude-scanners cfn-nag,cdk-nag
@@ -155,9 +155,9 @@ ashx --config-overrides 'global_settings.severity_threshold=LOW'
 ## Scanners and Tools
 
 ### What security scanners are included in ASH v3?
-ASH v3 integrates multiple open-source security tools. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments:
+ASH integrates multiple open-source security tools. Tools like Bandit and Checkov are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments:
 - Bandit (Python SAST) - Managed via UV tool isolation (auto-installed: `bandit>=1.7.0,<2.0.0`)
-- Semgrep (Multi-language SAST) - Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0,<2.0.0`)
+- Opengrep (Multi-language SAST) - Pinned binary installed and SHA256-verified by ASH. The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to opengrep, so existing configs that set `scanners.semgrep` keep working (shared options apply to opengrep; semgrep-only options are dropped with a warning)
 - detect-secrets (Secret detection) - Included with ASH
 - Checkov (IaC scanning) - Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`)
 - cfn_nag (CloudFormation scanning) - Requires separate installation
@@ -203,7 +203,7 @@ ashx --mode local --fail-on-findings
 ## Advanced Usage
 
 ### How do I run ASH in an offline/air-gapped environment?
-Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment. The `--offline-semgrep-rulesets` flag keeps its historical name but now feeds the opengrep rules cache.
 
 ### Can I use ASH programmatically?
 Yes, ASH v3 can be used programmatically in Python:

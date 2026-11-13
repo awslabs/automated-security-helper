@@ -8,12 +8,12 @@ ASH v3 offers multiple installation methods to fit your workflow. Choose the opt
 - Python 3.10 or later
 - UV package manager (automatically installed with ASH)
 
-ASH v3 uses UV's tool isolation system to automatically manage most scanner dependencies (Bandit, Checkov, Semgrep). For full scanner coverage in local mode, the following additional non-Python tools are recommended:
+ASH uses UV's tool isolation system to automatically manage most scanner dependencies (Bandit and Checkov). For full scanner coverage in local mode, the following additional non-Python tools are recommended:
 - Ruby with cfn-nag (`gem install cfn-nag`)
 - Node.js/npm (for npm audit support)
 - Grype and Syft (for SBOM and vulnerability scanning)
 
-**Note**: Tools like Bandit, Checkov, and Semgrep are automatically installed via UV tool management when needed, so you don't need to install them manually. ASH uses sensible default version constraints with the flexibility to override through configuration.
+**Note**: Bandit and Checkov are automatically installed via UV tool management when needed, so you don't need to install them manually. ASH uses sensible default version constraints with the flexibility to override through configuration. The opengrep binary is installed and SHA256-verified by ASH itself; it also serves the retired `semgrep` scanner name.
 
 ### For Container Mode
 - Any OCI-compatible container runtime (Docker, Podman, Finch, etc.)

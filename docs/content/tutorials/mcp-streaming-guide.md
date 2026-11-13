@@ -88,7 +88,7 @@ Your security scan progresses through these phases:
 3. **Scanning** (25-85%): Individual security scanners are running
    - detect-secrets (finding hardcoded secrets)
    - bandit (Python security issues)
-   - semgrep (code patterns and vulnerabilities)
+   - opengrep (code patterns and vulnerabilities)
    - checkov (infrastructure security)
    - And others based on your project type
 4. **Generating Reports** (85-95%): Creating output files and summaries
@@ -99,7 +99,7 @@ Your security scan progresses through these phases:
 During the scanning phase, you'll see updates like:
 
 - "Running bandit scanner..." (Python security analysis)
-- "Running semgrep scanner..." (Pattern-based vulnerability detection)
+- "Running opengrep scanner..." (Pattern-based vulnerability detection)
 - "Running detect-secrets scanner..." (Credential scanning)
 - "Found 3 new security issues in current file..."
 - "Completed infrastructure security checks..."
@@ -118,7 +118,7 @@ Here's a typical workflow using streaming scans:
    ```
    "How is my security scan progressing?"
    ```
-   Response: "Your scan is 45% complete. Currently running semgrep scanner. Found 2 security issues so far."
+   Response: "Your scan is 45% complete. Currently running opengrep scanner. Found 2 security issues so far."
 
 3. **Check multiple scans:**
    ```

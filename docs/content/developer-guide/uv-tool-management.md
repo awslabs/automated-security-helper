@@ -6,7 +6,7 @@ ASH v3 uses UV's tool isolation system to manage security scanner dependencies a
 
 The UV tool management system in ASH provides:
 
-- **Automatic tool installation**: Tools like Checkov, Semgrep, and Bandit are installed automatically when needed
+- **Automatic tool installation**: Tools like Checkov and Bandit are installed automatically when needed
 - **Version constraints**: Ensures compatible tool versions with sensible defaults
 - **Isolation**: Tools run in isolated environments without dependency conflicts
 - **Fallback mechanisms**: Graceful fallback to pre-installed tools when UV is unavailable
@@ -70,7 +70,10 @@ Scanners that use UV tool management:
 |---------|----------------------------|-------------------|
 | Bandit | `>=1.7.0,<2.0.0` | `uv tool install bandit>=1.7.0,<2.0.0` |
 | Checkov | `>=3.2.0,<4.0.0` | `uv tool install checkov>=3.2.0,<4.0.0` |
-| Semgrep | `>=1.125.0,<2.0.0` | `uv tool install semgrep>=1.125.0,<2.0.0` |
+
+The opengrep scanner is not UV-managed: ASH installs its pinned binary and verifies
+its SHA256. The semgrep scanner was removed in v4; the name `semgrep` is an alias
+that resolves to opengrep.
 
 Each upper bound is enforced by the scanner, not advisory: a constraint without it
 resolves to the next major version, which the scanner deliberately excludes.
@@ -224,7 +227,6 @@ Pre-install tools to avoid automatic installation:
 # Install specific versions
 uv tool install bandit>=1.7.0,<2.0.0
 uv tool install checkov>=3.2.0,<4.0.0
-uv tool install semgrep>=1.125.0,<2.0.0
 
 # List installed tools
 uv tool list

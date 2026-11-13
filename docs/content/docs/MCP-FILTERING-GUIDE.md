@@ -61,8 +61,7 @@ Filter results to include only specific security scanners.
 
 **Available scanners:**
 - `bandit` - Python SAST
-- `semgrep` - Multi-language SAST
-- `opengrep` - Open-source Semgrep rules
+- `opengrep` - Multi-language SAST (Semgrep rule syntax)
 - `checkov` - Infrastructure as Code scanner
 - `cdk-nag` - AWS CDK security scanner
 - `cfn-nag` - CloudFormation security scanner
@@ -71,16 +70,18 @@ Filter results to include only specific security scanners.
 - `detect-secrets` - Secret detection
 - `syft` - SBOM generator
 
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so filters naming `semgrep` match opengrep results.
+
 **Examples:**
 ```python
 # Single scanner
 scanners = "bandit"
 
 # Multiple scanners
-scanners = "bandit,semgrep,checkov"
+scanners = "bandit,opengrep,checkov"
 
 # SAST tools only
-scanners = "bandit,semgrep"
+scanners = "bandit,opengrep"
 
 # Dependency scanners only
 scanners = "grype,npm-audit"
@@ -159,7 +160,7 @@ bandit_only = await get_scan_results(output_dir=".ash/ash_output", scanners="ban
 
 # SAST tools only
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output", scanners="bandit,semgrep,opengrep"
+    output_dir=".ash/ash_output", scanners="bandit,opengrep"
 )
 
 # Infrastructure scanners
@@ -200,7 +201,7 @@ critical_status = await get_scan_results(
 sast_summary = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
-    scanners="bandit,semgrep",
+    scanners="bandit,opengrep",
     severities="critical,high",
     actionable_only=True,
 )
@@ -301,7 +302,7 @@ if status["summary_stats"]["critical"] > 0:
 ```python
 # Compare SAST vs dependency findings
 sast = await get_scan_results(
-    output_dir=".ash/ash_output", filter_level="summary", scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", filter_level="summary", scanners="bandit,opengrep"
 )
 
 dependencies = await get_scan_results(
@@ -382,7 +383,7 @@ When using content filters (`scanners`, `severities`, or `actionable_only`), the
 ```json
 {
   "_content_filters": {
-    "scanners": ["bandit", "semgrep"],
+    "scanners": ["bandit", "opengrep"],
     "severities": ["critical", "high"],
     "actionable_only": true
   }

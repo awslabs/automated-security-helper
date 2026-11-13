@@ -138,7 +138,7 @@ global_settings:
 scanners:
   bandit:
     enabled: true
-  semgrep:
+  opengrep:
     enabled: true
 reporters:
   markdown:
@@ -166,7 +166,7 @@ ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reas
 
 ```bash
 # Run only specific scanners
-ashx --scanners bandit,semgrep
+ashx --scanners bandit,opengrep
 
 # Exclude specific scanners
 ashx --exclude-scanners cfn-nag,cdk-nag

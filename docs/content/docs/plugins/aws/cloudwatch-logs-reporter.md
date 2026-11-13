@@ -121,7 +121,7 @@ Results are published as structured JSON logs:
     "high": 5,
     "medium": 6,
     "low": 2,
-    "scanners_executed": ["bandit", "semgrep", "checkov"],
+    "scanners_executed": ["bandit", "opengrep", "checkov"],
     "scan_duration": 45.2
   }
 }

@@ -84,7 +84,7 @@ ASH runs all nine scanners by default. To run only a subset, edit `.ash/.ash.yam
 
 For result-time filtering by scanner:
 
-- **Python issues** → `scanners="bandit,semgrep"`
+- **Python issues** → `scanners="bandit,opengrep"` (the semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to opengrep)
 - **Secrets only** → `scanners="detect-secrets"`
 - **IaC review** → `scanners="checkov,cfn_nag,cdk-nag"`
 - **Dependencies** → `scanners="grype,npm-audit"`

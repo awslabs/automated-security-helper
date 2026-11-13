@@ -41,13 +41,13 @@ ashx merge --results <file-or-directory> --results <file-or-directory> \
 
 ### What Sharding Splits, and What That Costs
 
-Sharding partitions the **scanner** set, not the file set. Scanners are handed a directory and most of them walk it themselves, so a file-level split would be honored by some scanners and ignored by the rest — and because merging does not deduplicate, every shard's semgrep findings would then appear once per shard. Partitioning the scanner set is honored by every scanner instead, without any scanner knowing that sharding exists.
+Sharding partitions the **scanner** set, not the file set. Scanners are handed a directory and most of them walk it themselves, so a file-level split would be honored by some scanners and ignored by the rest — and because merging does not deduplicate, every shard's opengrep findings would then appear once per shard. Partitioning the scanner set is honored by every scanner instead, without any scanner knowing that sharding exists.
 
 That choice has consequences worth knowing before you pick a shard count:
 
-1. **There is a ceiling at the number of scanners.** Today that is ten built-in scanners (bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft) plus any scanner plugins you have added. A shard count above the number of scanners leaves the surplus shards with nothing to run. They still start, produce a valid empty report and merge correctly, so this is wasteful rather than wrong.
-2. **Balance is by scanner count, not scanner cost.** Scanners are dealt round-robin over a sorted list, so shard sizes differ by at most one. Their runtimes do not: a shard holding semgrep finishes long after a shard holding syft.
-3. **One slow scanner still sets the wall clock.** semgrep and checkov dominate ASH's runtime, so separating those two onto different executors is where most of the improvement comes from. Total time cannot fall below the slowest single scanner, and beyond roughly four shards there is very little left to win.
+1. **There is a ceiling at the number of scanners.** Today that is nine built-in scanners (bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, syft) plus any scanner plugins you have added. A shard count above the number of scanners leaves the surplus shards with nothing to run. They still start, produce a valid empty report and merge correctly, so this is wasteful rather than wrong.
+2. **Balance is by scanner count, not scanner cost.** Scanners are dealt round-robin over a sorted list, so shard sizes differ by at most one. Their runtimes do not: a shard holding opengrep finishes long after a shard holding syft.
+3. **One slow scanner still sets the wall clock.** opengrep and checkov dominate ASH's runtime, so separating those two onto different executors is where most of the improvement comes from. Total time cannot fall below the slowest single scanner, and beyond roughly four shards there is very little left to win.
 
 ### The Merge Owns the Verdict
 
@@ -873,7 +873,7 @@ workflows:
 
 2. **Use specific scanners for faster CI runs**:
    ```bash
-   ashx --mode local --scanners bandit,semgrep,detect-secrets
+   ashx --mode local --scanners bandit,opengrep,detect-secrets
    ```
 
 3. **Generate CI-friendly reports**:

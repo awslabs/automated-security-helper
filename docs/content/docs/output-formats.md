@@ -388,7 +388,7 @@ reporters:
                     ┌─────────────────────┐
                     │  Scanner outputs     │
                     │  (bandit, checkov,   │
-                    │   semgrep, ...)      │
+                    │   opengrep, ...)     │
                     └─────────┬───────────┘
                               │
                               ▼

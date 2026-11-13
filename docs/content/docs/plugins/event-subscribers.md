@@ -372,7 +372,7 @@ def conditional_handler(**kwargs):
     remaining_count = kwargs.get("remaining_count", 0)
 
     # Only notify for critical scanners or when all complete
-    critical_scanners = ["bandit", "semgrep", "checkov"]
+    critical_scanners = ["bandit", "opengrep", "checkov"]
 
     if scanner in critical_scanners or remaining_count == 0:
         print(f"Important: {scanner} completed!")
@@ -448,7 +448,7 @@ The built-in scan completion logger provides enhanced logging that shows remaini
 
 ```
 INFO: Completed scanner: bandit
-INFO: Remaining scanners (2): semgrep, checkov
+INFO: Remaining scanners (2): opengrep, checkov
 ```
 
 Your custom event subscribers will receive the same event data and can provide additional functionality like notifications, metrics collection, or integration with external systems.

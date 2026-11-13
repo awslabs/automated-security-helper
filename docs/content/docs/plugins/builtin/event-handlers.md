@@ -23,7 +23,7 @@ ASH includes built-in event handlers that respond to scan lifecycle events.
 
 **Example Output**:
 ```
-INFO: Remaining scanners (2): semgrep, checkov
+INFO: Remaining scanners (2): opengrep, checkov
 INFO: All scanners completed!
 ```
 
@@ -52,8 +52,8 @@ To update suppression expiration dates, modify your ASH configuration file
 
 The offline mode validation system has been enhanced with emoji-prefixed logging:
 
-- `Semgrep offline mode: Found 150 rule files in cache`
-- `Semgrep is running in offline mode but no rule cache was found. Set $SEMGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files.`
+- `Opengrep offline mode: Found 150 rule files in cache`
+- `Opengrep is running in offline mode but no rule cache was found. Set $OPENGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files.`
 - `Grype offline mode: Cache directory validated with 5 files`
 - `Grype offline mode: Database is 45 days old, past the 120h bound grype enforces online; consider updating`
 

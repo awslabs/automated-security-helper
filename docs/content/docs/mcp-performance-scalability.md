@@ -180,7 +180,7 @@ scanners:
     enabled: true      # Fast Python scanner
   detect-secrets:
     enabled: true      # Fast secrets detection
-  semgrep:
+  opengrep:
     enabled: false     # Disable slower scanners for speed
   checkov:
     enabled: false

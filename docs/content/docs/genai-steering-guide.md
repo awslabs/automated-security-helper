@@ -320,7 +320,7 @@ else:
     ├── bandit/
     │   └── source/
     │       └── ASH.ScanResults.json
-    ├── semgrep/
+    ├── opengrep/
     │   └── source/
     │       └── ASH.ScanResults.json
     └── [other scanners]/
@@ -871,10 +871,10 @@ scanners:
       ignore_nosec: false
       config_file: .ash/bandit.yaml
   
-  semgrep:
+  opengrep:
     enabled: true
     options:
-      config: auto  # or specific ruleset like 'p/security-audit'
+      config: p/ci  # or another ruleset like 'p/security-audit'
   
   checkov:
     enabled: true
@@ -1358,14 +1358,14 @@ actionable_critical = await get_scan_results(
 
 # Specific scanners
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output", scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", scanners="bandit,opengrep"
 )
 
 # Combined filtering - actionable high-priority SAST findings
 high_priority_sast = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
-    scanners="bandit,semgrep",
+    scanners="bandit,opengrep",
     severities="critical,high",
     actionable_only=True,
 )
@@ -1378,10 +1378,11 @@ high_priority_sast = await get_scan_results(
 - **Confidence Levels**: HIGH, MEDIUM, LOW
 - **Common False Positives**: `B101` (assert usage in tests), `B404`/`B603` (subprocess usage)
 
-### Semgrep (Multi-language SAST)
+### Opengrep (Multi-language SAST)
 - **Rule ID Format**: `category.subcategory.rule-name` (e.g., `python.lang.security.audit.dangerous-system-call`)
-- **Rulesets**: `p/security-audit`, `p/ci`, `p/owasp-top-ten`
+- **Rulesets**: `p/security-audit`, `p/ci`, `p/owasp-top-ten` (Semgrep rule syntax)
 - **Custom Rules**: Can be added via configuration
+- **Alias**: The semgrep scanner was removed in v4; the name `semgrep` resolves to opengrep
 
 ### Checkov (IaC Scanner)
 - **Rule ID Format**: `CKV_###` (e.g., `CKV_AWS_1`)
@@ -1404,7 +1405,7 @@ high_priority_sast = await get_scan_results(
 
 1. **Use Specific Scanners**:
    ```bash
-   ashx --scanners bandit,semgrep --exclude-scanners grype,npm-audit
+   ashx --scanners bandit,opengrep --exclude-scanners grype,npm-audit
    ```
 
 2. **Ignore Unnecessary Paths**:

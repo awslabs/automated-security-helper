@@ -88,7 +88,7 @@ rather than optional.
 **An offline image stops passing once its databases are past their bound.** ASH reads
 each database's own build time after the scan and exits 1 when it is too old: grype's
 database 5 days (120h) after it was built, which is grype's own default, and the
-offline semgrep and opengrep rulesets 30 days after they were downloaded (the build
+offline opengrep rulesets 30 days after they were downloaded (the build
 records that time in `.ash-rules-fetched-at`). This applies in offline mode exactly
 as online; before it, an offline scan with a weeks-old database exited 0 with no
 warning.

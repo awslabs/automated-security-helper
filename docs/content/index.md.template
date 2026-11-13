@@ -26,12 +26,12 @@ ASH (Automated Security Helper) is a security scanning tool designed to help you
 
 ## Built-In Scanners
 
-ASH v3 integrates multiple open-source security tools as scanners. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments without affecting your project dependencies:
+ASH integrates multiple open-source security tools as scanners. Tools like Bandit and Checkov are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments without affecting your project dependencies:
 
 | Scanner                                                       | Type      | Languages/Frameworks                                                                         | Installation (Local Mode)                                               |
 |---------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
 | [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Managed via UV tool isolation (auto-installed: `bandit>=1.7.0,<2.0.0`)        |
-| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0,<2.0.0`)     |
+| [Opengrep](https://github.com/opengrep/opengrep)              | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Pinned binary installed and SHA256-verified by ASH; also serves the `semgrep` alias |
 | [detect-secrets](https://github.com/Yelp/detect-secrets)      | Secrets   | All text files                                                                               | Included with ASH                                                       |
 | [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`) |
 | [cfn_nag](https://github.com/stelligent/cfn_nag)              | IaC       | CloudFormation                                                                               | `gem install cfn-nag`                                                   |
@@ -224,7 +224,7 @@ ASH respects `.gitignore` files. You can also configure ignore paths in your `.a
 <details>
 <summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment. The `--offline-semgrep-rulesets` flag keeps its historical name but now feeds the opengrep rules cache.
 </details>
 
 <details>

@@ -98,7 +98,7 @@ Example response:
       "finding_count": 0,
       "severity_counts": {}
     },
-    "semgrep": {
+    "opengrep": {
       "status": "running",
       "target_type": "source"
     },

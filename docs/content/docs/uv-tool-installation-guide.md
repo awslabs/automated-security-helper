@@ -8,7 +8,8 @@ ASH now supports explicit UV tool installation for Python-based security scanner
 
 - **Bandit** - Python source code security analyzer
 - **Checkov** - Infrastructure as Code (IaC) security scanner
-- **Semgrep** - Static analysis tool for finding bugs and security issues
+
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, which is not UV-managed (ASH installs its pinned binary and verifies its SHA256).
 
 The enhanced installation system provides:
 
@@ -44,19 +45,6 @@ scanners:
       install_timeout: 300             # Installation timeout in seconds
       frameworks: ["all"]
       offline: false
-```
-
-### Semgrep Scanner Configuration
-
-```yaml
-scanners:
-  semgrep:
-    enabled: true
-    options:
-      tool_version: ">=1.125.0"        # Version constraint for installation
-      install_timeout: 300             # Installation timeout in seconds
-      config: "auto"
-      metrics: "auto"
 ```
 
 ## Installation Workflow
@@ -116,7 +104,6 @@ Each scanner has sensible default version constraints:
 
 - **Bandit**: `>=1.7.0,<2.0.0` (SARIF and TOML support)
 - **Checkov**: `>=3.2.0,<4.0.0` (Improved stability)
-- **Semgrep**: `>=1.125.0` (Enhanced performance)
 
 ## Offline Mode Support
 
@@ -156,8 +143,8 @@ export ASH_OFFLINE=true
 # Enable UV offline mode (for tool execution)
 export UV_OFFLINE=1
 
-# Specify Semgrep rules cache directory
-export SEMGREP_RULES_CACHE_DIR=/path/to/cached/rules
+# Specify the opengrep rules cache directory
+export OPENGREP_RULES_CACHE_DIR=/path/to/cached/rules
 ```
 
 ## Error Handling and Troubleshooting
@@ -218,7 +205,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 - Install tools system-wide:
   ```bash
-  pip install bandit checkov semgrep
+  pip install bandit checkov
   ```
 - Disable offline mode temporarily
 
@@ -340,8 +327,6 @@ scanners:
     enabled: true
   checkov:
     enabled: true
-  semgrep:
-    enabled: true
 ```
 
 ### Advanced Configuration with Version Control
@@ -362,13 +347,6 @@ scanners:
       tool_version: ">=3.2.5,<3.3.0"
       install_timeout: 300
       frameworks: ["terraform", "cloudformation"]
-
-  semgrep:
-    enabled: true
-    options:
-      tool_version: ">=1.125.0,<2.0.0"
-      install_timeout: 450
-      config: "p/security-audit"
 ```
 
 ### Offline Mode Configuration
@@ -382,7 +360,7 @@ scanners:
       offline: true
       frameworks: ["terraform"]
 
-  semgrep:
+  opengrep:
     enabled: true
     options:
       offline: true
@@ -402,7 +380,6 @@ scanners:
   run: |
     uv tool install "bandit>=1.7.0,<2.0.0"
     uv tool install "checkov>=3.2.0,<4.0.0"
-    uv tool install "semgrep>=1.125.0,<2.0.0"
 
 - name: Run ASH Security Scan
   run: |

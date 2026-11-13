@@ -112,24 +112,24 @@ print("✓ Single scanner filter: bandit only")
 #### Test 2.2: Multiple Scanners
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output", scanners="bandit,semgrep,checkov"
+    output_dir="/path/to/.ash/ash_output", scanners="bandit,opengrep,checkov"
 )
 
 # Verify only specified scanners are included
 if "scanner_reports" in result:
     for scanner in result["scanner_reports"].keys():
-        assert scanner in ["bandit", "semgrep", "checkov"]
+        assert scanner in ["bandit", "opengrep", "checkov"]
 
 # Verify filter metadata
 assert "_content_filters" in result
-assert set(result["_content_filters"]["scanners"]) == {"bandit", "semgrep", "checkov"}
-print("✓ Multiple scanner filter: bandit, semgrep, checkov")
+assert set(result["_content_filters"]["scanners"]) == {"bandit", "opengrep", "checkov"}
+print("✓ Multiple scanner filter: bandit, opengrep, checkov")
 ```
 
 #### Test 2.3: Case Insensitivity
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output", scanners="BANDIT,Semgrep"
+    output_dir="/path/to/.ash/ash_output", scanners="BANDIT,Opengrep"
 )
 
 # Should work with any case
@@ -222,13 +222,13 @@ print(f"✓ Minimal + severity filter: {size_kb:.2f}KB")
 ```python
 result = await mcp_ash_get_scan_results(
     output_dir="/path/to/.ash/ash_output",
-    scanners="bandit,semgrep",
+    scanners="bandit,opengrep",
     severities="critical,high",
 )
 
 # Verify both filters applied
 assert "_content_filters" in result
-assert set(result["_content_filters"]["scanners"]) == {"bandit", "semgrep"}
+assert set(result["_content_filters"]["scanners"]) == {"bandit", "opengrep"}
 assert set(result["_content_filters"]["severities"]) == {"critical", "high"}
 print("✓ Scanner + severity filter")
 ```

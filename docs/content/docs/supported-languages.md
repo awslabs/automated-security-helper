@@ -13,8 +13,7 @@ ASH is a **meta-scanner** — it orchestrates established open-source security t
 | **detect-secrets** | All (language-agnostic) | Hardcoded secrets, API keys, tokens, and credentials in any file type |
 | **Grype** | Container images, SBOMs | Known vulnerabilities (CVEs) in OS packages and application libraries |
 | **npm-audit** | JavaScript/TypeScript (npm, pnpm, yarn) | Known vulnerabilities in npm dependency trees |
-| **OpenGrep** | Python, JavaScript, TypeScript, Java, Go, Ruby, C#, Kotlin, Scala, PHP, and more | SAST rules from the Semgrep/OpenGrep registry: injection flaws, authentication bugs, insecure configurations |
-| **Semgrep** | Same as OpenGrep | SAST rules (overlaps with OpenGrep; ASH uses both for broader rule coverage) |
+| **OpenGrep** | Python, JavaScript, TypeScript, Java, Go, Ruby, C#, Kotlin, Scala, PHP, and more | SAST rules from the Semgrep/OpenGrep registry: injection flaws, authentication bugs, insecure configurations. Also serves the retired `semgrep` scanner name |
 | **Syft** | All (language-agnostic) | Software Bill of Materials (SBOM) generation — inventories all packages and dependencies |
 
 ## Coverage Notes
@@ -22,7 +21,7 @@ ASH is a **meta-scanner** — it orchestrates established open-source security t
 - **IaC coverage** is strongest through Checkov, which supports Terraform (HCL), CloudFormation, Kubernetes, Docker, Helm, Serverless Framework, ARM templates, Bicep, Ansible, and more.
 - **Secret detection** via detect-secrets is file-format agnostic — it scans any text file regardless of language.
 - **Container scanning** via Grype works on built images or on SBOMs produced by Syft, covering OS-level and application-level packages.
-- **SAST coverage** via OpenGrep/Semgrep draws from thousands of community rules. The exact language support depends on rule availability in the registry.
+- **SAST coverage** via OpenGrep draws from thousands of community rules written in the Semgrep rule syntax. The exact language support depends on rule availability in the registry. The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to OpenGrep.
 
 ## Adding More Scanners
 

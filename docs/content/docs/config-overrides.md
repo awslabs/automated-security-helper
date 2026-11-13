@@ -165,6 +165,8 @@ ashx config update --set 'global_settings.ignore_paths+=[{"path": "build/", "rea
 ashx config update --set 'scanners.semgrep.enabled=false' --dry-run
 ```
 
+The `scanners.semgrep` key resolves through the v4 alias to the opengrep scanner, so this override disables opengrep.
+
 #### Validate Configuration
 
 Validate your configuration file:

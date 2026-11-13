@@ -173,7 +173,6 @@ how to refresh it. This happens in online and offline mode alike.
 | --- | --- | --- | --- | --- |
 | `grype-db` | grype | 120h (5 days) | grype's own default, `db.max-allowed-built-age` | `built` in `grype db status -o json` |
 | `trivy-db` | trivy-repo | 24h | trivy's own rule: a database is current until its `NextUpdate`, which the published database sets 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
-| `semgrep-offline-rules` | semgrep (offline only) | 720h (30 days) | ASH's own choice; semgrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$SEMGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
 | `opengrep-offline-rules` | opengrep (offline only) | 720h (30 days) | ASH's own choice; opengrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$OPENGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
 
 A database whose build time cannot be read is treated as stale, because an
@@ -304,13 +303,11 @@ scanners:
       confidence_level: high     # all | low | medium | high (lowercase)
       severity_threshold: MEDIUM # ALL | LOW | MEDIUM | HIGH | CRITICAL (uppercase)
 
-  semgrep:
+  opengrep:
     enabled: true
     options:
       config: 'p/ci'        # Ruleset, directory, or URL passed to --config
       exclude_rule: []      # Rule IDs to skip
-      tool_version: null    # Version constraint (e.g., '>=1.125.0')
-      install_timeout: 300  # Timeout in seconds for tool installation
 
   detect-secrets:
     enabled: true
@@ -375,7 +372,7 @@ a scanner unbounded:
 
 ```yaml
 scanners:
-  semgrep:
+  opengrep:
     options:
       scan_timeout: 3600  # An hour for a large repository
   syft:
@@ -621,21 +618,20 @@ If you have been using Bandit separately and have an existing configuration file
 
 ### Semgrep
 
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so existing configs that set `scanners.semgrep` keep working (shared options apply to opengrep; semgrep-only options are dropped with a warning). A config such as:
+
 ```yaml
 scanners:
   semgrep:
     enabled: true
     options:
-      config: 'p/ci'        # Ruleset, directory of YAML rules, or URL, passed to --config
-      exclude: ['*-converted.py', '*_report_result.txt']  # Paths to skip
-      exclude_rule: []      # Rule IDs to skip (singular; 'exclude_rules' is not a field)
-      severity: []          # Report only findings from rules of these severities
-      metrics: 'auto'       # How usage metrics are sent to the Semgrep server
-      offline: false        # Use locally cached rules only
-      scan_timeout: 1800    # Seconds before the semgrep invocation is killed
-      tool_version: null    # Version constraint (e.g., '>=1.125.0')
-      install_timeout: 300  # Timeout in seconds for tool installation
+      config: 'p/ci'        # Shared option: carries over to opengrep
+      exclude_rule: []      # Shared option: carries over to opengrep
+      tool_version: null    # Semgrep-only: dropped with a warning
+      install_timeout: 300  # Semgrep-only: dropped with a warning
 ```
+
+folds onto `scanners.opengrep`. See the [built-in scanner reference](plugins/builtin/scanners.md#opengrep) for the opengrep options.
 
 ### Detect-Secrets
 
@@ -712,11 +708,10 @@ If you have been using Syft separately and have an existing configuration file y
 
 ASH v3 uses UV's tool isolation system to automatically manage scanner dependencies. This provides several benefits:
 
-- **Automatic Installation**: Tools like Bandit, Checkov, and Semgrep are automatically installed when needed
+- **Automatic Installation**: Tools like Bandit and Checkov are automatically installed when needed
 - **Version Constraints**: ASH ensures compatible tool versions with sensible defaults:
   - **Bandit**: `>=1.7.0` (enhanced SARIF support and security fixes)
   - **Checkov**: `>=3.2.0,<4.0.0` (improved stability, avoiding potential breaking changes)
-  - **Semgrep**: `>=1.125.0` (comprehensive rule support and performance improvements)
 - **Isolation**: Tools run in isolated environments without affecting your project dependencies
 - **Retry Logic**: Automatic retry with exponential backoff for network issues
 - **Comprehensive Logging**: Detailed installation and execution logging for troubleshooting
@@ -728,7 +723,7 @@ Each UV-managed scanner supports these configuration options:
 
 ```yaml
 scanners:
-  checkov:  # or bandit, semgrep
+  checkov:  # or bandit
     enabled: true
     options:
       tool_version: ">=3.2.0,<4.0.0"  # Override default version constraint
@@ -758,7 +753,6 @@ If you encounter UV tool installation issues:
    ```bash
    uv tool install bandit>=1.7.0,<2.0.0
    uv tool install checkov>=3.2.0,<4.0.0
-   uv tool install semgrep>=1.125.0,<2.0.0
    ```
 5. **Increase timeout** for slow networks:
    ```yaml
@@ -775,7 +769,6 @@ For more detailed information about UV tool management, see the [UV Tool Managem
 
 - **Bandit**: Automatically installed via `uv tool install bandit>=1.7.0,<2.0.0` (default version constraint)
 - **Checkov**: Automatically installed via `uv tool install checkov>=3.2.0,<4.0.0` (default version constraint) with fallback to `uv tool run`
-- **Semgrep**: Automatically installed via `uv tool install semgrep>=1.125.0,<2.0.0` (default version constraint) with fallback to `uv tool run`
 
 ### Version Constraint Configuration
 
@@ -784,13 +777,13 @@ Each UV-managed scanner can specify version constraints in two ways:
 1. **Default Constraints**: Built-in version constraints ensure compatibility and stability
 2. **Custom Constraints**: Override defaults via configuration options (where supported)
 
-For scanners that support custom version constraints (like Semgrep and Checkov), you can specify them in your configuration:
+For scanners that support custom version constraints (like Bandit and Checkov), you can specify them in your configuration:
 
 ```yaml
 scanners:
-  semgrep:
+  bandit:
     options:
-      tool_version: ">=1.130.0,<2.0.0"  # Custom version constraint
+      tool_version: ">=1.8.0,<2.0.0"  # Custom version constraint
   checkov:
     options:
       tool_version: ">=3.3.0"  # Custom version constraint
@@ -807,7 +800,6 @@ If you encounter issues with UV tool management:
    ```bash
    uv tool install bandit>=1.7.0,<2.0.0
    uv tool install checkov>=3.2.0,<4.0.0
-   uv tool install semgrep>=1.125.0,<2.0.0
    ```
 
 ## Advanced Configuration

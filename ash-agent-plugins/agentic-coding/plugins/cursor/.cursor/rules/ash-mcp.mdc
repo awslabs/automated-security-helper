@@ -1,5 +1,5 @@
 ---
-description: Run security scans with the ASH (Automated Security Helper) MCP server. Use this skill whenever the user asks to scan for vulnerabilities, run a security check, find CVEs, audit dependencies, check for secrets, run SAST or SCA, scan IaC (Terraform/CloudFormation/Kubernetes), check for hardcoded credentials, or mentions ASH, Bandit, Semgrep, Checkov, Grype, Syft, or detect-secrets. Also trigger when the user wants to find security issues, harden a codebase, or asks "is my code secure". Do NOT trigger for code review without security context, performance audits, or test writing.
+description: Run security scans with the ASH (Automated Security Helper) MCP server. Use this skill whenever the user asks to scan for vulnerabilities, run a security check, find CVEs, audit dependencies, check for secrets, run SAST or SCA, scan IaC (Terraform/CloudFormation/Kubernetes), check for hardcoded credentials, or mentions ASH, Bandit, Opengrep, Semgrep, Checkov, Grype, Syft, or detect-secrets. Also trigger when the user wants to find security issues, harden a codebase, or asks "is my code secure". Do NOT trigger for code review without security context, performance audits, or test writing.
 alwaysApply: false
 ---
 
@@ -89,7 +89,7 @@ ASH runs all nine scanners by default. To run only a subset, edit `.ash/.ash.yam
 
 For result-time filtering by scanner:
 
-- **Python issues** → `scanners="bandit,semgrep"`
+- **Python issues** → `scanners="bandit,opengrep"` (the semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to opengrep)
 - **Secrets only** → `scanners="detect-secrets"`
 - **IaC review** → `scanners="checkov,cfn_nag,cdk-nag"`
 - **Dependencies** → `scanners="grype,npm-audit"`

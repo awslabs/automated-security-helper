@@ -271,8 +271,8 @@ class MyScanner(ScannerPluginBase):
 ### Built-in UV Tool Scanners
 
 The following built-in scanners use UV tool integration:
+- **Bandit**: Python static analysis
 - **Checkov**: Infrastructure-as-Code scanning
-- **Semgrep**: Static Application Security Testing
 
 ## Scanner Plugin Best Practices
 

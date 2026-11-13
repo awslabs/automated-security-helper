@@ -123,7 +123,7 @@ ashx scan --cli-json-input file://scan-params.json --strategy sequential
 ```json
 {
   "source_dir": "./src",
-  "scanners": ["bandit", "semgrep"],
+  "scanners": ["bandit", "opengrep"],
   "strategy": "sequential",
   "offline": true,
   "config_overrides": ["global_settings.severity_threshold=LOW"]
@@ -198,7 +198,7 @@ ashx [options]
 | `--fail-on-findings`          | Exit with non-zero code if findings are found           | From config           |                         |
 | `--ignore-suppressions`       | Ignore all suppression rules and report all findings    | `False`               |                         |
 | `--offline`                   | Run in offline mode (container mode only)               | `False`               |                         |
-| `--offline-semgrep-rulesets`  | Semgrep rulesets for offline mode                       | `p/ci`                |                         |
+| `--offline-semgrep-rulesets`  | Rulesets for the offline opengrep rules cache (the flag keeps its historical name) | `p/ci`                |                         |
 | `--build/--no-build`, `-b/-B` | Whether to build the ASH container image                | `True`                |                         |
 | `--run/--no-run`, `-r/-R`     | Whether to run the ASH container image                  | `True`                |                         |
 | `--build-target`              | Container build target: `non-root` or `ci`              | `non-root`            |                         |
@@ -380,9 +380,9 @@ ashx --source-dir . --output-dir "./shard-${SHARD_INDEX}" \
   --shard-index "${SHARD_INDEX}" --shard-count 3
 ```
 
-Each shard scans the whole tree with a disjoint subset of the **scanners**, not a subset of the files. Scanners are handed a directory and most of them walk it themselves, so a file-level split would be honored by roughly a third of them and ignored by the rest: every shard's semgrep would scan the whole repository, and because merging deliberately does not deduplicate, an n-shard run would report every semgrep finding n times. That is a wrong report, not merely a slow one. Partitioning the scanner set instead is honored by every scanner without any scanner knowing that sharding exists.
+Each shard scans the whole tree with a disjoint subset of the **scanners**, not a subset of the files. Scanners are handed a directory and most of them walk it themselves, so a file-level split would be honored by roughly a third of them and ignored by the rest: every shard's opengrep would scan the whole repository, and because merging deliberately does not deduplicate, an n-shard run would report every opengrep finding n times. That is a wrong report, not merely a slow one. Partitioning the scanner set instead is honored by every scanner without any scanner knowing that sharding exists.
 
-The partition is a pure function of the scanner names, the index, and the count — names are deduplicated, lowercased, sorted, then dealt round-robin — so executors never coordinate and every shard computes the same partition on its own. It is taken over every *registered* scanner, before the enabled and dependency filters. Partitioning the post-filter set instead would make the split depend on which tools happen to be installed on each runner, so a runner missing semgrep would shift every later scanner onto a different shard than its siblings computed, running some scanners twice and others not at all. As it stands, a tool missing on one runner is reported `MISSING` by the shard that owns it, which is a visible failure rather than a silent gap.
+The partition is a pure function of the scanner names, the index, and the count — names are deduplicated, lowercased, sorted, then dealt round-robin — so executors never coordinate and every shard computes the same partition on its own. It is taken over every *registered* scanner, before the enabled and dependency filters. Partitioning the post-filter set instead would make the split depend on which tools happen to be installed on each runner, so a runner missing opengrep would shift every later scanner onto a different shard than its siblings computed, running some scanners twice and others not at all. As it stands, a tool missing on one runner is reported `MISSING` by the shard that owns it, which is a visible failure rather than a silent gap.
 
 Each shard records the scanners it was assigned in its own `ash_aggregated_results.json`. That record is what `ashx merge` verifies coverage from, which is also why merge refuses a results file produced without these flags.
 
@@ -392,7 +392,7 @@ A shard that owned only `syft` and `grype` finds nothing and exits 0. Five such 
 
 #### What sharding does and does not buy
 
-Balance is by scanner count, not by scanner cost. `semgrep` and `checkov` dominate ASH's runtime, so a shard holding semgrep finishes long after a shard holding syft: wall clock is bounded by the slowest single scanner, and counts above about four buy very little. Nothing models or measures per-scanner cost.
+Balance is by scanner count, not by scanner cost. `opengrep` and `checkov` dominate ASH's runtime, so a shard holding opengrep finishes long after a shard holding syft: wall clock is bounded by the slowest single scanner, and counts above about four buy very little. Nothing models or measures per-scanner cost.
 
 A `--shard-count` above the number of scanners leaves the surplus shards with nothing assigned. They run, produce a valid empty report, and merge correctly, so this is wasteful rather than wrong. It is allowed on purpose, so that a pipeline can parameterize its shard count without knowing how many scanners are registered — ASH ships ten built-in scanners, and any scanner plugins you register count too.
 
@@ -871,7 +871,7 @@ ashx build-image [options]
 |------------------------------|--------------------------------------------|------------|----------------------|
 | `--build-target`             | Container build target: `non-root` or `ci` | `non-root` |                      |
 | `--offline`                  | Build for offline use                      | `False`    |                      |
-| `--offline-semgrep-rulesets` | Semgrep rulesets for offline mode          | `p/ci`     |                      |
+| `--offline-semgrep-rulesets` | Rulesets for the offline opengrep rules cache (historical name) | `p/ci`     |                      |
 | `--oci-runner`, `-o`         | OCI runner to use. Unset by default; ASH uses the first of `finch`, `docker`, `nerdctl`, `podman` found on `PATH`                          | first found   | `OCI_RUNNER`         |
 | `--debug`, `-d`              | Enable debug logging                       | `False`    | `ASH_DEBUG`          |
 | `--verbose`, `-v`            | Enable verbose logging                     | `False`    | `ASH_VERBOSE`        |
@@ -1267,7 +1267,7 @@ A vulnerability database only describes the advisories published before it was
 built. Measured with grype 0.111.0 under ASH's offline settings, a database built
 10 days earlier scanned with exit 0 and no warning. ASH now reads each content
 database's own build time after its scanner runs and exits 1 when it is past the
-declared bound (grype 120h, trivy 24h, the offline semgrep and opengrep rulesets
+declared bound (grype 120h, trivy 24h, the offline opengrep rulesets
 30 days):
 
 ```console

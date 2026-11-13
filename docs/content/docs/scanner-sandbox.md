@@ -47,13 +47,13 @@ it needs.
 - `/tmp` and `$HOME` are private and empty. Your real home directory is not visible.
   The tool locations a scanner needs (ASH's bin directory, uv's tool and Python
   directories, the scanner's declared caches) are mounted at their usual paths.
-- Tool caches (uv's cache, grype's and trivy's databases, semgrep's settings) are
+- Tool caches (uv's cache, grype's and trivy's databases, opengrep's settings) are
   writable only where the writes are thrown away: under bwrap (bubblewrap 0.8+ and
   Linux 5.11+) through an overlay, so writes succeed but are discarded when the
   scanner exits. firejail, Landlock, sandbox-exec, and bwrap without overlay support
   mount them read-only, because a write in place would change what later runs,
   sandboxed or not, read; uv hard-links its cache into the tool environments it
-  builds. There, uv and the scanners that have to write a cache (semgrep, opengrep,
+  builds. There, uv and the scanners that have to write a cache (opengrep,
   npm-audit) get a private, empty one under the results directory, removed after the
   spawn, so uv starts from an empty cache: online it downloads what it runs, offline
   it has nothing cached.
@@ -75,7 +75,7 @@ it needs.
   directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no).
 - The environment is filtered to an allowlist: locale, `PATH`, TLS and proxy settings,
   ASH's and uv's own variables, and the prefixes the scanner declares (`GRYPE_`,
-  `SEMGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,
+  `OPENGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,
   `AUTH`, `CREDENTIAL`, `API_KEY` or `SESSION`, and any value carrying
   `user:password@` in a URL, is dropped unless the scanner names that exact variable
   (snyk-code names `SNYK_TOKEN`). Cloud credentials and tokens are not passed in.
@@ -117,8 +117,7 @@ it needs.
 |---------|--------------------|--------|---------|
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
-| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
-| opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
+| opengrep | yes (registry rules, `p/ci`) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
 | grype | yes (database update) | grype database cache; on macOS, `~/Library/Caches/grype` | single binary |
 | syft | no | syft cache | single binary |
 | trivy | yes (database update) | trivy cache; on macOS, `~/Library/Caches/trivy` | single binary |
@@ -250,7 +249,7 @@ The sandbox is for three cases.
    rule pack that runs code.
 2. Scanned content that exploits a scanner. Scanners parse untrusted input and some
    execute it on purpose: tool configuration files committed to the repository
-   (`trivy.yaml`, `.semgrep.yml`, `.checkov.yaml`, `.npmrc`, `.bandit`) change what a
+   (`trivy.yaml`, opengrep rule files, `.checkov.yaml`, `.npmrc`, `.bandit`) change what a
    scanner does, plugin systems `eval` code found in the tree, and parser bugs give
    code execution or path traversal on write.
 3. Exfiltration. Code running in any of the above reading credentials (`~/.ssh`,
@@ -400,7 +399,8 @@ library only) that restricts itself and then `exec`s the scanner:
   shared memory objects of your user from, `/dev/shm`. bwrap gives each scanner its
   own.
 - `io_uring_setup` fails with ENOSYS rather than EACCES, so runtimes that use io_uring
-  when it exists (semgrep-core) fall back to ordinary syscalls instead of aborting.
+  when it exists (opengrep's bundled core, a fork of semgrep-core) fall back to
+  ordinary syscalls instead of aborting.
 - ABI 6 (Linux 6.12) scoping blocks abstract Unix sockets and signals to processes
   outside the sandbox. Below ABI 6 those are not restricted, and the log says so.
 - `/proc` is readable, but Landlock denies `ptrace`-mode access from a sandboxed
@@ -449,7 +449,7 @@ to start an app, and launchd starts it outside the sandbox. The keychain files
 themselves (`/Library/Keychains` and `~/Library/Keychains`) are denied after every
 file rule.
 
-semgrep's core runs `/usr/bin/security` only to read the system root certificates,
+opengrep's bundled core runs `/usr/bin/security` only to read the system root certificates,
 through OCaml's ca-certs. For a scanner that declares this need
 (`SandboxRequirements.system_trust_roots`), ASH exports the same certificates before
 the spawn, outside the sandbox, with the same command (`security find-certificate -a

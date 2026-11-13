@@ -8,6 +8,10 @@ ASH v4 renames the command to `ashx`. Replace `ash` with `ashx` in scripts, CI j
 
 `ash` still works as a deprecated alias for pip-based installs (pip, pipx, `uv tool install`), Homebrew and the container. It prints one warning line on stderr, then runs the same command with the same exit codes, so existing pipelines keep passing while you migrate. The deb and rpm packages ship only `ashx`, because `ash` is the Almquist shell on many distributions (BusyBox, Alpine, MSYS2).
 
+## Semgrep scanner removed in v4
+
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so existing configs that set `scanners.semgrep` keep working (shared options such as `config` and `exclude_rule` apply to opengrep; semgrep-only options such as `tool_version` and `install_timeout` are dropped with a warning). `--scanners semgrep` and `--exclude-scanners semgrep` resolve to opengrep with a log line. The `--offline-semgrep-rulesets` flag and the `OFFLINE_SEMGREP_RULESETS` build argument keep their names and feed the opengrep rules cache (`OPENGREP_RULES_CACHE_DIR`); the container no longer installs the semgrep Python tool.
+
 ## Migration Steps
 
 1. **Install ASH v3** using one of the installation methods from the [Installation Guide](./installation-guide.md)

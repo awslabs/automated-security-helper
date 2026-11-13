@@ -154,7 +154,7 @@ scanners:
 
 ```bash
 # Use Snyk Code alongside other ASH scanners
-uv run ashx --scanners snyk-code,bandit,semgrep
+uv run ashx --scanners snyk-code,bandit,opengrep
 ```
 
 ### CI/CD Integration

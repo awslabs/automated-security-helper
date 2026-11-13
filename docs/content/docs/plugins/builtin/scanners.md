@@ -1,6 +1,6 @@
 # Built-in Security Scanners
 
-ASH includes 10 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
+ASH includes nine built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
 
 > For detailed visual diagrams of the built-in scanner architecture and workflows, see [Built-in Scanner Diagrams](scanners-diagrams.md).
 
@@ -16,7 +16,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Grype](#grype)**                   | Container vulnerability scanner | Container images, SBOMs         | CVE database matching                      |
 | **[NPM Audit](#npm-audit)**           | Node.js dependency scanner      | package.json, package-lock.json | NPM vulnerability database                 |
 | **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
-| **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
+| **[Semgrep](#semgrep)**               | Alias of [Opengrep](#opengrep)  | See Opengrep                    | Removed in v4; the name resolves to Opengrep |
 | **[Syft](#syft)**                     | SBOM generator                  | Container images, filesystems   | Software inventory generation              |
 
 ## Scanner Details
@@ -211,7 +211,7 @@ scanners:
 
 ### Opengrep
 
-**Purpose**: Open source fork of Semgrep. Static analysis with extensive rule library covering security, correctness, and performance.
+**Purpose**: Open source fork of Semgrep. Static analysis with extensive rule library covering security, correctness, and performance. Opengrep also serves the retired `semgrep` scanner name: configs and flags that name `semgrep` resolve to this scanner.
 
 **Configuration**:
 ```yaml
@@ -245,27 +245,7 @@ platform with no digest is refused rather than installed unverified.
 
 ### Semgrep
 
-**Purpose**: Static analysis with extensive rule library covering security, correctness, and performance.
-
-**Configuration**:
-```yaml
-scanners:
-  semgrep:
-    enabled: true
-    options:
-      config: "p/ci"        # p/ci, p/security, p/owasp-top-10, a directory, or a URL
-      scan_timeout: 1800    # Seconds before the invocation is killed
-      exclude: ["test/", "*.min.js"]
-      exclude_rule: []      # Rule IDs to skip
-```
-
-**Key Checks**:
-- OWASP Top 10 vulnerabilities
-- Language-specific security issues
-- Code quality and maintainability
-- Custom organizational rules
-
-**Dependencies**: Managed via `uv tool run` (automatically downloaded when needed)
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the [Opengrep](#opengrep) scanner, so existing configs that set `scanners.semgrep` keep working (shared options apply to opengrep; semgrep-only options are dropped with a warning). See the [Opengrep](#opengrep) section for configuration and options.
 
 ---
 
@@ -300,7 +280,7 @@ Choose scanners based on your technology stack:
 
 ```bash
 # Python projects
-ashx --scanners bandit,detect-secrets,semgrep
+ashx --scanners bandit,detect-secrets,opengrep
 
 # Infrastructure projects
 ashx --scanners checkov,cfn-nag,cdk-nag
@@ -309,7 +289,7 @@ ashx --scanners checkov,cfn-nag,cdk-nag
 ashx --scanners grype,syft,checkov
 
 # Node.js projects
-ashx --scanners npm-audit,detect-secrets,semgrep
+ashx --scanners npm-audit,detect-secrets,opengrep
 ```
 
 ### Performance Optimization
@@ -317,7 +297,7 @@ ashx --scanners npm-audit,detect-secrets,semgrep
 ```yaml
 # Optimize for speed
 scanners:
-  semgrep:
+  opengrep:
     options:
       scan_timeout: 60      # Give up quickly rather than waiting the 1800s default
       config: "p/ci"        # A narrower ruleset than a full audit pack
@@ -349,7 +329,7 @@ scanners:
 ashx dependencies --check --scanner bandit
 
 # Install missing tools
-pip install bandit semgrep detect-secrets
+pip install bandit detect-secrets
 ```
 
 **Performance issues**:

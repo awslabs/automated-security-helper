@@ -21,7 +21,6 @@ flowchart TD
     D --> J[Grype]
     D --> K[NPM Audit]
     D --> L[Opengrep]
-    D --> M[Semgrep]
     D --> N[Syft]
 
     E --> O[SARIF Results]
@@ -32,7 +31,6 @@ flowchart TD
     J --> O
     K --> O
     L --> O
-    M --> O
     N --> O
 
     O --> P[Results Aggregator]
@@ -97,7 +95,6 @@ flowchart LR
     B --> H[Grype]
     B --> I[NPM Audit]
     B --> J[Opengrep]
-    B --> K[Semgrep]
     B --> L[Syft]
 
     C -.-> M[bandit Python package]
@@ -108,7 +105,6 @@ flowchart LR
     H -.-> R[grype binary]
     I -.-> S[Node.js & npm]
     J -.-> T[opengrep binary]
-    K -.-> U[semgrep Python package]
     L -.-> V[syft binary]
 
     H -.-> L
@@ -133,12 +129,12 @@ flowchart TD
     F --> J[Max Workers]
 
     G --> K[Bandit Config]
-    G --> L[Semgrep Config]
+    G --> L[Opengrep Config]
     G --> M[Checkov Config]
     G --> N[Other Scanner Configs]
 
     K --> O[Bandit Scanner]
-    L --> P[Semgrep Scanner]
+    L --> P[Opengrep Scanner]
     M --> Q[Checkov Scanner]
     N --> R[Other Scanners]
 ```
@@ -156,7 +152,6 @@ flowchart TD
     A --> F[Container Analysis]
 
     B --> G[Bandit]
-    B --> H[Semgrep]
     B --> I[Opengrep]
 
     C --> J[NPM Audit]
@@ -192,7 +187,6 @@ flowchart TD
     D --> J[CFN-Nag]
     D --> K[Checkov]
 
-    E --> L[Semgrep]
     E --> M[Opengrep]
     E --> N[Detect-Secrets]
 
@@ -238,7 +232,7 @@ sequenceDiagram
 
     par Parallel Execution
         WP->>W1: Run Bandit Scanner
-        WP->>W2: Run Semgrep Scanner
+        WP->>W2: Run Opengrep Scanner
         WP->>W3: Run Checkov Scanner
     end
 

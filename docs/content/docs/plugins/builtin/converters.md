@@ -154,7 +154,7 @@ Converters automatically prepare files for scanner consumption:
 
 ```bash
 # Archives are extracted, then contents scanned
-ashx project.zip --scanners bandit,semgrep
+ashx project.zip --scanners bandit,opengrep
 
 # Jupyter notebooks converted to Python, then scanned
 ashx analysis.ipynb --scanners bandit,detect-secrets

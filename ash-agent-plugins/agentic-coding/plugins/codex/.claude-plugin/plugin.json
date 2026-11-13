@@ -1,14 +1,26 @@
 {
-  "name": "ash",
-  "version": "1.0.0",
-  "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
   "author": {
     "name": "AWS Labs",
     "url": "https://github.com/awslabs/automated-security-helper"
   },
+  "description": "Run ASH (Automated Security Helper) security scans via MCP \u2014 Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
   "homepage": "https://github.com/awslabs/automated-security-helper",
-  "repository": "https://github.com/awslabs/automated-security-helper",
-  "license": "Apache-2.0",
+  "interface": {
+    "capabilities": [
+      "Read"
+    ],
+    "category": "Security",
+    "defaultPrompt": [
+      "Scan this project for security vulnerabilities",
+      "Run an ASH security audit and prioritize findings",
+      "Check the dependencies for known CVEs"
+    ],
+    "developerName": "AWS Labs",
+    "displayName": "ASH Security Scanner",
+    "longDescription": "Run ASH (Automated Security Helper) security scans via MCP \u2014 Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
+    "shortDescription": "Run security scans via ASH MCP",
+    "websiteURL": "https://github.com/awslabs/automated-security-helper"
+  },
   "keywords": [
     "security-scan",
     "vulnerability-scan",
@@ -17,25 +29,14 @@
     "sca",
     "checkov",
     "bandit",
+    "opengrep",
     "semgrep",
     "grype"
   ],
-  "skills": "./skills/",
+  "license": "Apache-2.0",
   "mcpServers": "./.mcp.json",
-  "interface": {
-    "displayName": "ASH Security Scanner",
-    "shortDescription": "Run security scans via ASH MCP",
-    "longDescription": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
-    "developerName": "AWS Labs",
-    "category": "Security",
-    "capabilities": [
-      "Read"
-    ],
-    "websiteURL": "https://github.com/awslabs/automated-security-helper",
-    "defaultPrompt": [
-      "Scan this project for security vulnerabilities",
-      "Run an ASH security audit and prioritize findings",
-      "Check the dependencies for known CVEs"
-    ]
-  }
+  "name": "ash",
+  "repository": "https://github.com/awslabs/automated-security-helper",
+  "skills": "./skills/",
+  "version": "1.0.0"
 }

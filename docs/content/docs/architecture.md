@@ -4,7 +4,7 @@ This page explains how ASH is put together — the execution model, how plugins 
 
 ## Overview
 
-ASH is a plugin-based security scanning orchestrator. It does not itself analyze code — it drives a collection of third-party scanners (Bandit, Semgrep, Checkov, Grype, cfn-nag, and others), normalizes their heterogeneous output into SARIF, and hands the aggregated results to a pluggable set of reporters.
+ASH is a plugin-based security scanning orchestrator. It does not itself analyze code — it drives a collection of third-party scanners (Bandit, Opengrep, Checkov, Grype, cfn-nag, and others), normalizes their heterogeneous output into SARIF, and hands the aggregated results to a pluggable set of reporters.
 
 Three design choices shape the rest of the system:
 

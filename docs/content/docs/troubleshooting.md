@@ -4,40 +4,7 @@ Common issues you may hit while running ASH, with the cause and fix for each. Fo
 
 ## Semgrep Login Prompt During Scan
 
-**Symptom**
-
-`ashx` pauses mid-scan with a prompt like:
-
-```
-Enter your Semgrep registry token, or hit ENTER to skip login:
-```
-
-The scan hangs or fails in CI because stdin is not interactive.
-
-**Cause**
-
-Semgrep is trying to authenticate to the Semgrep App registry to fetch rulesets. This happens when registry-hosted rules (e.g. `p/ci`, `p/owasp-top-ten`) are in use and no token is configured.
-
-**Fix**
-
-Provide a token via the `SEMGREP_APP_TOKEN` environment variable:
-
-```bash
-export SEMGREP_APP_TOKEN=your-token-here
-ashx --mode local
-```
-
-Or run in offline mode with pre-cached rulesets:
-
-```bash
-ashx --mode container --offline
-```
-
-Or disable the Semgrep scanner if you don't need it:
-
-```bash
-ashx --config-overrides 'scanners.semgrep.enabled=false'
-```
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so existing configs that set `scanners.semgrep` keep working (shared options apply to opengrep; semgrep-only options are dropped with a warning). Opengrep fetches its rulesets without a registry account, so there is no login prompt. If you still see one, an ASH version before v4 is running.
 
 ## cfn-nag Fails Because Ruby Is Missing
 

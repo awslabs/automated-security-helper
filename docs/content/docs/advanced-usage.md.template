@@ -113,7 +113,7 @@ ashx --mode container --offline
 
 An offline image's databases are frozen at build time, and ASH fails a scan whose
 database is past its bound: grype's 5 days (120h) after it was built, the offline
-semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the image
+opengrep rulesets 30 days after they were downloaded. Rebuild the image
 (`ashx build-image --offline`) at least that often. To scan with an older image
 anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the scan
 then passes and every report names the stale database. See
@@ -127,7 +127,7 @@ Offline mode is decided when each scanner runs, from these sources in order:
    environment, or an image built with `ashx build-image --offline`. It applies to
    every scanner, and no scanner option turns it off.
 2. A scanner's own `options.offline: true` (checkov, grype, npm-audit, opengrep,
-   semgrep, syft, trivy-repo). It runs that one scanner offline while the rest of the
+   syft, trivy-repo). It runs that one scanner offline while the rest of the
    scan stays online.
 
 `options.offline: false` is the default and means "follow ASH's offline mode". It does
@@ -135,17 +135,17 @@ not put a scanner back online during an `--offline` scan; `ashx config init` wri
 `offline: false` for every scanner that has the option, so a generated config would
 otherwise undo the flag.
 
-#### Seeding the semgrep and opengrep rule cache
+#### Seeding the opengrep rule cache
 
-Offline, semgrep and opengrep read their rules only from a local cache: the directory
-named by `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR`, which must contain
-at least one `.yaml` or `.yml` rule file. If the variable is unset or the directory
-has no rule files, that scanner is reported MISSING and the scan exits 1. ASH does not
-fall back to downloading the rules.
+Offline, opengrep reads its rules only from a local cache: the directory named by
+`OPENGREP_RULES_CACHE_DIR`, which must contain at least one `.yaml` or `.yml` rule
+file. If the variable is unset or the directory has no rule files, the scanner is
+reported MISSING and the scan exits 1. ASH does not fall back to downloading the
+rules.
 
 For the container, build the image with `--offline`. The build downloads each ruleset
-in `--offline-semgrep-rulesets` (space-separated, default `p/ci`) into
-`/deps/.semgrep` and `/deps/.opengrep` and sets both variables:
+in `--offline-semgrep-rulesets` (space-separated, default `p/ci`; the flag keeps its
+historical name) into `/deps/.opengrep` and sets `OPENGREP_RULES_CACHE_DIR`:
 
 ```bash
 ashx build-image --offline --offline-semgrep-rulesets "p/ci p/python"
@@ -157,20 +157,17 @@ them. ASH reads that file to hold the rules to their 30-day bound; without it, i
 falls back to the oldest rule file's modification time, which a copy resets.
 
 ```bash
-export SEMGREP_RULES_CACHE_DIR="$HOME/.cache/ash/semgrep"
 export OPENGREP_RULES_CACHE_DIR="$HOME/.cache/ash/opengrep"
-mkdir -p "$SEMGREP_RULES_CACHE_DIR" "$OPENGREP_RULES_CACHE_DIR"
+mkdir -p "$OPENGREP_RULES_CACHE_DIR"
 for ruleset in p/ci; do
-  curl -sSf "https://semgrep.dev/c/${ruleset}" -o "$SEMGREP_RULES_CACHE_DIR/$(basename "$ruleset").yml"
+  curl -sSf "https://semgrep.dev/c/${ruleset}" -o "$OPENGREP_RULES_CACHE_DIR/$(basename "$ruleset").yml"
 done
-cp "$SEMGREP_RULES_CACHE_DIR"/*.yml "$OPENGREP_RULES_CACHE_DIR/"
-date -u +%Y-%m-%dT%H:%M:%SZ | tee "$SEMGREP_RULES_CACHE_DIR/.ash-rules-fetched-at" \
-  > "$OPENGREP_RULES_CACHE_DIR/.ash-rules-fetched-at"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$OPENGREP_RULES_CACHE_DIR/.ash-rules-fetched-at"
 
 ashx --mode local --offline
 ```
 
-Copy the cache directories to the air-gapped host and export the same two variables
+Copy the cache directory to the air-gapped host and export the same variable
 there. Repeat the download at least every 30 days, or the scan fails as stale.
 
 ## Customizing Scan Phases
@@ -250,6 +247,8 @@ ashx --config-overrides 'scanners.semgrep.options.rules=["p/ci", "p/owasp-top-te
 ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so overrides on `scanners.semgrep` keep working (shared options apply to opengrep; semgrep-only options are dropped with a warning).
+
 ## Working with Suppressions
 
 ### Adding Suppressions via Config Overrides
@@ -327,7 +326,7 @@ results = run_ash_scan(
     output_dir="/path/to/output",
     mode=RunMode.local,
     strategy=Strategy.parallel,
-    scanners=["bandit", "semgrep"],
+    scanners=["bandit", "opengrep"],
     config_overrides=["scanners.bandit.enabled=true"],
 )
 

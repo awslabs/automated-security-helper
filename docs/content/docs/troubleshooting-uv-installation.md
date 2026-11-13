@@ -16,7 +16,6 @@ uv tool list
 # Check specific tool installation
 uv tool run bandit --version
 uv tool run checkov --version
-uv tool run semgrep --version
 ```
 
 ### Enable Debug Logging
@@ -77,7 +76,7 @@ pacman -S uv
 **Option D: Use pre-installed tools**
 ```bash
 # Install tools system-wide as fallback
-pip install bandit checkov semgrep
+pip install bandit checkov
 ```
 
 ### 2. Installation Timeout
@@ -123,7 +122,6 @@ ashx --mode local
 # Pre-install before running ASH
 uv tool install bandit
 uv tool install checkov
-uv tool install semgrep
 ```
 
 ### 3. Version Constraint Issues
@@ -169,7 +167,6 @@ tool_version: ">=1.7.0"
 # List available versions
 pip index versions bandit
 pip index versions checkov
-pip index versions semgrep
 ```
 
 ### 4. Offline Mode Issues
@@ -184,7 +181,6 @@ Offline mode is enabled (ASH_OFFLINE=true) but tool 'bandit' is not available
 # Check if tools are pre-installed
 which bandit
 which checkov
-which semgrep
 
 # Check UV tool installation
 uv tool list
@@ -197,7 +193,6 @@ uv tool list
 # Install tools before enabling offline mode
 uv tool install bandit
 uv tool install checkov
-uv tool install semgrep
 
 # Then enable offline mode
 export ASH_OFFLINE=true
@@ -205,7 +200,7 @@ export ASH_OFFLINE=true
 
 **Option B: Install tools system-wide**
 ```bash
-pip install bandit checkov semgrep
+pip install bandit checkov
 ```
 
 **Option C: Use UV cache in offline mode**
@@ -302,7 +297,6 @@ pip install --trusted-host pypi.org --trusted-host pypi.python.org bandit
 # Download packages on a machine with internet
 uv tool install bandit
 uv tool install checkov
-uv tool install semgrep
 
 # Copy UV cache to offline machine
 tar -czf uv-cache.tar.gz $(uv cache dir)
@@ -425,17 +419,7 @@ echo $PATH | grep -o '[^:]*uv[^:]*'
 
 #### Semgrep Issues
 
-**Symptoms:**
-```
-Semgrep rules download failed in offline mode
-```
-
-**Solution:**
-```bash
-# Pre-download rules for offline use
-export SEMGREP_RULES_CACHE_DIR=/path/to/rules/cache
-semgrep --config=auto --download-rules
-```
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so existing configs that set `scanners.semgrep` keep working (shared options apply to opengrep; semgrep-only options are dropped with a warning). Opengrep is not a UV-managed tool: ASH installs its pinned binary itself. For offline rule caching, see [Seeding the opengrep rule cache](advanced-usage.md#seeding-the-opengrep-rule-cache).
 
 ## Advanced Troubleshooting
 
@@ -505,7 +489,6 @@ ashx --scanner bandit --dry-run
     curl -LsSf https://astral.sh/uv/install.sh | sh
     uv tool install bandit
     uv tool install checkov
-    uv tool install semgrep
 ```
 
 ### 2. Health Checks
@@ -520,7 +503,6 @@ uv --version || exit 1
 echo "Checking tool installations..."
 uv tool run bandit --version || exit 1
 uv tool run checkov --version || exit 1
-uv tool run semgrep --version || exit 1
 
 echo "All tools are ready!"
 ```

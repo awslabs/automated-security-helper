@@ -26,7 +26,7 @@ async def get_scan_results(
   - `"full"` (default): Return all results including raw_results, validation_checkpoints, etc.
   - `"summary"`: Return only summary data (metadata, findings counts, scanner summaries)
   - `"minimal"`: Return only basic scan status and completion info
-- `scanners` (str, optional): Comma-separated list of scanner names to include (e.g., "bandit,semgrep"). If not specified, includes all scanners.
+- `scanners` (str, optional): Comma-separated list of scanner names to include (e.g., "bandit,opengrep"). If not specified, includes all scanners. The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner.
 - `severities` (str, optional): Comma-separated list of severity levels to include (e.g., "critical,high,medium"). Options: critical, high, medium, low, info, suppressed. If not specified, includes all severities.
 - `actionable_only` (bool): If True, exclude suppressed findings from results. This filters out findings that have been marked as false positives or accepted risks. Default is False.
 
@@ -163,7 +163,7 @@ actionable_summary = await get_scan_results(
 # Filter by specific scanners and severities
 filtered_results = await get_scan_results(
     output_dir="/path/to/.ash/ash_output",
-    scanners="bandit,semgrep",
+    scanners="bandit,opengrep",
     severities="critical,high",
     actionable_only=True,
 )
@@ -251,7 +251,7 @@ async def get_scan_summary(
           "low": 10
         }
       },
-      "semgrep": {
+      "opengrep": {
         "status": "PASSED",
         "findings_count": 234,
         "by_severity": {
@@ -381,9 +381,9 @@ async def get_scan_result_paths(
         "size_bytes": 45678
       }
     },
-    "semgrep": {
+    "opengrep": {
       "source": {
-        "path": "/Users/user/project/.ash/ash_output/scanners/semgrep/source/ASH.ScanResults.json",
+        "path": "/Users/user/project/.ash/ash_output/scanners/opengrep/source/ASH.ScanResults.json",
         "exists": true,
         "size_bytes": 234567
       }
@@ -481,7 +481,7 @@ Use `scanners` parameter to include only specific scanners:
 ```python
 # Get results from specific scanners only
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output", scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", scanners="bandit,opengrep"
 )
 ```
 
@@ -502,7 +502,7 @@ All filters can be combined for precise control:
 # Get actionable critical/high findings from SAST scanners only
 results = await get_scan_results(
     output_dir=".ash/ash_output",
-    scanners="bandit,semgrep",
+    scanners="bandit,opengrep",
     severities="critical,high",
     actionable_only=True,
     filter_level="summary",

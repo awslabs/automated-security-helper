@@ -139,7 +139,7 @@ progress = await mcp_get_scan_progress(scan_id="550e8400-e29b-41d4-a716-44665544
       "finding_count": 0,
       "severity_counts": {}
     },
-    "semgrep": {
+    "opengrep": {
       "status": "running",
       "target_type": "source"
     },
