@@ -55,6 +55,10 @@ SUPERSEDING = {
     "ash-actions-pinned.yml",
     "ash-agent-plugins-drift.yml",
     "ash-cdk-extra-drift.yml",
+    # The approval a superseded run would have left gets dismissed by the newer
+    # push anyway (the ruleset dismisses stale reviews), so cancelling loses
+    # nothing and frees the runner for the new head's run.
+    "ash-dependabot-auto-merge.yml",
     "ash-docs-ci-runners.yml",
     "ash-iac-drift.yml",
     "ash-install-methods.yml",
