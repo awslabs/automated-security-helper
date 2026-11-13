@@ -2053,6 +2053,72 @@ class WorkspaceExecutionConfig(RedactedSection):
         return max(1, min(4, cpu_count or 1))
 
 
+class PrecommitModeConfig(RedactedSection):
+    """Scanner selection for ``ash scan --mode precommit``.
+
+    Precommit mode starts from a fixed default set
+    (``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,
+    cdk-nag, npm-audit). These two keys change that selection from the config
+    file, so a repository can state once what its hook runs instead of every
+    committer spelling flags in ``.pre-commit-config.yaml``.
+
+    Precedence, lowest to highest (``run_ash_scan._selected_scanners`` applies
+    it): the mode default; then ``only_scanners`` (replaces the default) and
+    ``add_scanners`` (adds to it); then the command line, where
+    ``--only-scanners`` replaces everything this section and the mode give, and
+    ``--add-scanners`` (or the deprecated ``--scanners``) adds to it.
+    ``--exclude-scanners`` applies after all of them: an excluded name wins over
+    any inclusion. Read only by ``--mode precommit``; other modes ignore this
+    section.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    only_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "The whole scanner selection for precommit mode: run exactly "
+                "these scanners instead of the mode's default set. The command "
+                "line's --only-scanners replaces this list; --add-scanners and "
+                "the deprecated --scanners add to it; --exclude-scanners "
+                "removes names from it. Cannot be set together with "
+                "add_scanners."
+            )
+        ),
+    ] = []
+
+    add_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanner names precommit mode runs in addition to its default "
+                "set. The command line's --only-scanners replaces this list "
+                "too; --exclude-scanners removes names from the result. Cannot "
+                "be set together with only_scanners."
+            )
+        ),
+    ] = []
+
+    @model_validator(mode="after")
+    def _refuse_only_with_add(self) -> "PrecommitModeConfig":
+        """Both keys at once are refused rather than resolved to either reading.
+
+        ``only_scanners`` already states the whole selection, so an
+        ``add_scanners`` beside it either repeats names or smuggles additions
+        into a list that says "exactly these". The same pair of flags is
+        refused on the command line for the same reason.
+        """
+        if self.only_scanners and self.add_scanners:
+            raise ValueError(
+                "precommit.only_scanners and precommit.add_scanners cannot be "
+                "set together: only_scanners already states the whole "
+                "selection. Put every name in only_scanners, or drop it and "
+                "keep add_scanners."
+            )
+        return self
+
+
 class ContentDbStalenessOverride(RedactedSection):
     """One content database held to a different staleness policy, until a fixed date.
 
@@ -2710,6 +2776,19 @@ class AshConfig(RedactedSection):
             ),
         ),
     ] = WorkspaceExecutionConfig()
+
+    precommit: Annotated[
+        PrecommitModeConfig,
+        Field(
+            description=(
+                "Scanner selection for --mode precommit: only_scanners replaces "
+                "the mode's default set, add_scanners adds to it. The command "
+                "line's --only-scanners replaces both; --add-scanners and the "
+                "deprecated --scanners add; --exclude-scanners applies last. "
+                "Other modes ignore this section."
+            ),
+        ),
+    ] = PrecommitModeConfig()
 
     # `extends` and `patch` are read by the config loader (config/config_sources.py)
     # and removed before validation, so a loaded config always has both as None.
