@@ -2782,7 +2782,8 @@ class AshConfig(RedactedSection):
         Field(
             description=(
                 "Scanner selection for --mode precommit: only_scanners replaces "
-                "the mode's default set, add_scanners adds to it. The command "
+                "the mode's default set, add_scanners adds to it; setting both "
+                "keys at once is refused. The command "
                 "line's --only-scanners replaces both; --add-scanners and the "
                 "deprecated --scanners add; --exclude-scanners applies last. "
                 "Other modes ignore this section."
