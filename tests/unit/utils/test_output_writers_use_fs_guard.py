@@ -376,6 +376,11 @@ _CONTAINER_STATE_DIR = (
     "the user's ASH state directory, written relative to its own descriptor opened "
     "with O_NOFOLLOW: a staging file created exclusively, renamed within it"
 )
+_VERDICT_STORE_DIR = (
+    "the user's tool-verdict store under the ASH state directory, written relative "
+    "to its own descriptor opened with O_NOFOLLOW after the ownership and mode "
+    "checks: a staging file created at 0600, renamed within the directory"
+)
 _CONTAINER_ENV_DIR = (
     "a new mode 0700 mkdtemp directory outside the source and output directories "
     "(the function refuses one inside either), the file created with O_EXCL at 0600"
@@ -454,6 +459,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (f"{_ASH}/interactions/container_leftovers.py", "record_env_dir", "os.rename"): (
         1,
         _CONTAINER_STATE_DIR,
+    ),
+    (f"{_ASH}/utils/pre_installed_tool.py", "_persist_verdict", "os.open"): (
+        1,
+        _VERDICT_STORE_DIR,
+    ),
+    (f"{_ASH}/utils/pre_installed_tool.py", "_persist_verdict", "os.replace"): (
+        1,
+        _VERDICT_STORE_DIR,
     ),
     (f"{_ASH}/interactions/run_ash_container.py", "_write_env_file", "os.open"): (
         1,

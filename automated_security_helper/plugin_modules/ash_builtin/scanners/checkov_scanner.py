@@ -707,6 +707,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # First, while use_uv_tool still says what construction set: the
         # tool-version probe, which construction leaves to this point.
         self.resolve_deferred_tool_version()
+        # A copy on PATH an earlier validation of this instance verified and
+        # chose to run directly is honored while it still exists: re-running
+        # selection from here skipped the use_uv_tool branch (that decision
+        # set the flag False) and fell to the consolidated resolver, whose
+        # answer flipped the scan back through uv and spent a cold version
+        # probe doing it, so the verified copy never ran.
+        if self._honored_verified_pre_installed():
+            return True
         if not self._validate_uv_tool_availability():
             # UV missing: the resolver's direct binary, verified first. The
             # resolver probes under this scanner's own offline mode, as every uv

@@ -311,6 +311,12 @@ _ALLOWED_SIZED_READS = {
     "shown of the probe's output goes through _verify's reviewed excerpt",
     (
         "utils/pre_installed_tool.py",
+        "_answer_from_the_store",
+    ): "bounded+1 read of ASH's own persisted verdict record on a regular-file "
+    "descriptor opened without following links, refused over the cap; parsed "
+    "as JSON, never shown as text (the hit log line carries no record field)",
+    (
+        "utils/pre_installed_tool.py",
         "find_tool_interpreter",
     ): "shebang line of the probed copy, parsed for an interpreter name; "
     "not tool output",

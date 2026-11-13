@@ -74,6 +74,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="output_formats"></a>`output_formats` | list of one of `aggregated`, `text`, `flat-json`, `yaml`, `csv`, `html`, `dict`, `junitxml`, `markdown`, `sarif`, `asff`, `ocsf`, `cyclonedx`, `spdx`, `custom`, `github-ghas`, `gitlab-sast`, `gitlab-cyclonedx`, `unused-suppressions`, `aws-security-hub`, `bedrock-summary-reporter`, `cloudwatch-logs`, `s3` | `[]` | Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list. |
 | <a id="mcp-resource-management"></a>`mcp-resource-management` | [section](#section-mcp-resource-management) | see the section | Configuration for MCP server resource management and limits. Also accepted as `mcp_resource_management`. |
 | <a id="workspace"></a>`workspace` | [section](#section-workspace) | see the section | Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision. |
+| <a id="precommit"></a>`precommit` | [section](#section-precommit) | see the section | Scanner selection for --mode precommit: only_scanners replaces the mode's default set, add_scanners adds to it; setting both keys at once is refused. The command line's --only-scanners replaces both; --add-scanners and the deprecated --scanners add; --exclude-scanners applies last. Other modes ignore this section. |
 | <a id="extends"></a>`extends` | string, list of string, or null | `null` | Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused. Read when the file is loaded and not written back when a config is saved. |
 | <a id="patch"></a>`patch` | list of mapping of string to any or null | `null` | RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list. Read when the file is loaded and not written back when a config is saved. |
 
@@ -254,6 +255,18 @@ A key not listed here is an error when the configuration is loaded.
 |-----|------|---------|-------------|
 | <a id="workspace.max_parallel_projects"></a>`max_parallel_projects` | integer or null, at least 1, at most 64 | `null` | Maximum number of projects scanned concurrently. Unset means min(4, cpu_count). This is an outer bound over each project's own scanner thread pool, not a replacement for it. |
 | <a id="workspace.project_timeout"></a>`project_timeout` | number or null, greater than 0 | `null` | Seconds to allow a single project. Unset means no limit. On timeout that project is recorded as failed and the remaining projects still complete. |
+
+### <a id="section-precommit"></a>`precommit`
+
+Scanner selection for `ash scan --mode precommit`.
+
+A key not listed here is an error when the configuration is loaded.
+
+<!-- doctest: options of=precommit -->
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| <a id="precommit.only_scanners"></a>`only_scanners` | list of string | `[]` | The whole scanner selection for precommit mode: run exactly these scanners instead of the mode's default set. The command line's --only-scanners replaces this list; --add-scanners and the deprecated --scanners add to it; --exclude-scanners removes names from it. Cannot be set together with add_scanners. |
+| <a id="precommit.add_scanners"></a>`add_scanners` | list of string | `[]` | Scanner names precommit mode runs in addition to its default set. The command line's --only-scanners replaces this list too; --exclude-scanners removes names from the result. Cannot be set together with only_scanners. |
 
 ## Plugin sections
 

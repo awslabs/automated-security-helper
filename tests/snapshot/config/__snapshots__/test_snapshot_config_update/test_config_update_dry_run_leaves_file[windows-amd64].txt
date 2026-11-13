@@ -420,6 +420,9 @@ output_formats: []
 workspace:
   max_parallel_projects: null
   project_timeout: null
+precommit:
+  only_scanners: []
+  add_scanners: []
 
 Dry run mode: No changes were written to the file
 [exit code: 0]
