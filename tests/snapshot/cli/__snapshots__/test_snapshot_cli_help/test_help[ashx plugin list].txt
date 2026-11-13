@@ -1,7 +1,7 @@
 
  Usage: ashx plugin list [OPTIONS]
 
- The `plugin list` command lists all available plugins.
+ The `plugin list` command lists what a scan with this configuration loads, on or off.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --include-plugin-config      --no-include-plugin-config             Whether to include the       │
@@ -53,12 +53,10 @@
 │                                                                     detected tool version and    │
 │                                                                     whether its dependencies are │
 │                                                                     satisfied (Yes/No/Unknown).  │
-│                                                                     Off by default, so the fast  │
-│                                                                     listing is unchanged;        │
-│                                                                     enabling it instantiates     │
-│                                                                     each scanner and runs its    │
-│                                                                     dependency check, which      │
-│                                                                     takes longer.                │
+│                                                                     Off by default; enabling it  │
+│                                                                     checks each scanner's        │
+│                                                                     dependencies and probes its  │
+│                                                                     version, which takes longer. │
 │ --color                      --no-color                  -C         Enable/disable colorized     │
 │                                                                     output                       │
 │                                                                     [default: color]             │

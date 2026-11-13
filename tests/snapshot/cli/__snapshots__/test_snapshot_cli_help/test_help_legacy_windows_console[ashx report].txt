@@ -4,15 +4,26 @@
  Generate a report from ASH scan results using the specified reporter plugin.
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --format                                <str>                       Report format to generate   │
-│                                                                     (reporter plugin name).     │
-│                                                                     Defaults to 'markdown'.     │
-│                                                                     Examples values:            │
-│                                                                     aggregated, text,           │
-│                                                                     flat-json, yaml, csv, html, │
-│                                                                     dict, junitxml, markdown,   │
-│                                                                     sarif, asff, ocsf,          │
-│                                                                     cyclonedx, spdx, custom     │
+│ --format                                <str>                       Report format to generate:  │
+│                                                                     a reporter's name. Defaults │
+│                                                                     to 'markdown'. Values:      │
+│                                                                     text, flat-json, yaml, csv, │
+│                                                                     html, junitxml, markdown,   │
+│                                                                     sarif, ocsf, cyclonedx,     │
+│                                                                     spdx, github-ghas,          │
+│                                                                     gitlab-sast,                │
+│                                                                     gitlab-cyclonedx,           │
+│                                                                     unused-suppressions. With   │
+│                                                                     the AWS plugin module       │
+│                                                                     (ash_aws_plugins) in        │
+│                                                                     ash_plugin_modules, also,   │
+│                                                                     once enabled:               │
+│                                                                     aws-security-hub,           │
+│                                                                     bedrock-summary-reporter,   │
+│                                                                     cloudwatch-logs, s3. A      │
+│                                                                     reporter another module     │
+│                                                                     there adds is named the     │
+│                                                                     same way.                   │
 │                                                                     [default: markdown]         │
 │ --output-dir                            <str>                       The directory to output     │
 │                                                                     results to                  │
@@ -65,5 +76,7 @@
 │                                      overrides environment variables. Run with                  │
 │                                      --generate-cli-skeleton for a template.                    │
 │ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every  │
-│                                      parameter of this command with its default, and exit.      │
+│                                      parameter of this command with its default, or null where  │
+│                                      it is required or an environment variable backs it, and    │
+│                                      exit.                                                      │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

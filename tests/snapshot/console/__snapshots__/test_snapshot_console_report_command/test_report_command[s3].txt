@@ -1,4 +1,4 @@
-$ ash report --format s3 --log-level ERROR
+$ ashx report --format s3 --log-level ERROR
 [exit 5]
 
 [stderr]
