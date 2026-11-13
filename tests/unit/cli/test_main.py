@@ -17,6 +17,22 @@ def cli_runner():
     return CliRunner()
 
 
+def test_a_probe_group_built_from_ash_typer_group_has_only_its_own_commands():
+    """The lazy subcommands belong to AshRootTyperGroup (the real app's class).
+
+    Tests build probe groups from AshTyperGroup to measure the usage-error
+    behavior; a probe must report exactly the commands it registered, so the
+    lazy names must not read as its commands, must not parse as subcommands,
+    and its --help must not import the engine.
+    """
+    from automated_security_helper.cli.main import _LAZY_SUBCOMMANDS, AshTyperGroup
+
+    probe = AshTyperGroup(name="probe")
+    assert not set(_LAZY_SUBCOMMANDS) & set(probe.commands)
+    assert "report" not in probe.commands
+    assert probe.commands.get("report") is None
+
+
 def test_main_app_commands():
     """The click tree `ash` parses with carries every expected command.
 

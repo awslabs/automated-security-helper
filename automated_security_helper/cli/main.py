@@ -363,16 +363,12 @@ class AshTyperGroup(TyperGroup):
     and then dropped: ``ash --source-dir /elsewhere scan`` scanned the working
     directory, and ``ash --output-dir out report`` read the default output directory.
 
-    Its ``commands`` mapping is a ``_LazyCommands``, so the subcommands in
-    ``_LAZY_SUBCOMMANDS`` resolve on first access rather than at import
-    (``ash --version`` imports none of them); everything that reads the mapping
-    -- ``get_command``, ``list_commands``, the docs generator, the help
-    snapshots -- sees the full command set.
+    This class carries the error-code and option-forwarding behavior only. The
+    lazy subcommand resolution lives on ``AshRootTyperGroup`` below, which is the
+    class the real ``app`` is built with: tests build probe groups from THIS class
+    to measure the usage-error behavior, and a probe must report exactly the
+    commands it registered, not ash's.
     """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.commands = _LazyCommands(self.commands)
 
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
         # Kept so a refusal below can name the spelling the operator typed: once
@@ -565,9 +561,32 @@ class AshTyperGroup(TyperGroup):
         return tokens
 
 
+class AshRootTyperGroup(AshTyperGroup):
+    """``AshTyperGroup`` plus the lazily resolved subcommands, for ``app`` only.
+
+    Its ``commands`` mapping is a ``_LazyCommands``, so the subcommands in
+    ``_LAZY_SUBCOMMANDS`` resolve on first access rather than at import
+    (``ash --version`` imports none of them); everything that reads the mapping
+    -- ``get_command``, ``list_commands``, the docs generator, the help
+    snapshots -- sees the full command set.
+
+    A separate class, not ``AshTyperGroup.__init__``, because ``_LazyCommands``
+    reads the module-level tables and ``_built_lazy_command`` builds with the
+    root ``app``'s settings: on any other group built from ``AshTyperGroup``
+    (tests build probes from it to measure the usage-error behavior) the lazy
+    names would read as commands the group never registered, a positional
+    ``report`` would parse as a subcommand, and the probe's ``--help`` would
+    import the whole engine.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.commands = _LazyCommands(self.commands)
+
+
 app = typer.Typer(
     name="ash",
-    cls=AshTyperGroup,
+    cls=AshRootTyperGroup,
     help="Automated Security Helper, the agentic security harness · one workflow for your scanners.",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
