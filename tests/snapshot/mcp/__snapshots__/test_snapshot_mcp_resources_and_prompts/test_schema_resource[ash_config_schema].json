@@ -631,6 +631,14 @@
           "description": "RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list.",
           "title": "Patch"
         },
+        "precommit": {
+          "$ref": "#/$defs/PrecommitModeConfig",
+          "default": {
+            "add_scanners": [],
+            "only_scanners": []
+          },
+          "description": "Scanner selection for --mode precommit: only_scanners replaces the mode's default set, add_scanners adds to it; setting both keys at once is refused. The command line's --only-scanners replaces both; --add-scanners and the deprecated --scanners add; --exclude-scanners applies last. Other modes ignore this section."
+        },
         "project_name": {
           "default": "ash-scan",
           "description": "Name of the project being scanned",
@@ -5379,6 +5387,32 @@
         "name"
       ],
       "title": "PluginDependency",
+      "type": "object"
+    },
+    "PrecommitModeConfig": {
+      "additionalProperties": false,
+      "description": "Scanner selection for ``ash scan --mode precommit``.\n\nPrecommit mode starts from a fixed default set\n(``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,\ncdk-nag, npm-audit). These two keys change that selection from the config\nfile, so a repository can state once what its hook runs instead of every\ncommitter spelling flags in ``.pre-commit-config.yaml``.\n\nPrecedence, lowest to highest (``run_ash_scan._selected_scanners`` applies\nit): the mode default; then ``only_scanners`` (replaces the default) and\n``add_scanners`` (adds to it); then the command line, where\n``--only-scanners`` replaces everything this section and the mode give, and\n``--add-scanners`` (or the deprecated ``--scanners``) adds to it.\n``--exclude-scanners`` applies after all of them: an excluded name wins over\nany inclusion. Read only by ``--mode precommit``; other modes ignore this\nsection.",
+      "properties": {
+        "add_scanners": {
+          "default": [],
+          "description": "Scanner names precommit mode runs in addition to its default set. The command line's --only-scanners replaces this list too; --exclude-scanners removes names from the result. Cannot be set together with only_scanners.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Add Scanners",
+          "type": "array"
+        },
+        "only_scanners": {
+          "default": [],
+          "description": "The whole scanner selection for precommit mode: run exactly these scanners instead of the mode's default set. The command line's --only-scanners replaces this list; --add-scanners and the deprecated --scanners add to it; --exclude-scanners removes names from it. Cannot be set together with add_scanners.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Only Scanners",
+          "type": "array"
+        }
+      },
+      "title": "PrecommitModeConfig",
       "type": "object"
     },
     "ReporterConfigSegment": {

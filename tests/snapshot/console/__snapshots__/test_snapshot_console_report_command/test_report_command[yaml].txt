@@ -211,6 +211,9 @@ ash_config:
     task_count_warning_threshold: 15
     thread_pool_max_workers: 4
   output_formats: []
+  precommit:
+    add_scanners: []
+    only_scanners: []
   project_name: ash-scan
   reporters:
     csv:
