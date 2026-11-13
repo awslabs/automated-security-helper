@@ -290,7 +290,7 @@ def _built_lazy_command(name: str) -> Any:
     )
 
 
-class _LazyCommands(dict):
+class _LazyCommands(dict[str, Any]):
     """The root group's ``commands`` mapping, with the lazy names in it.
 
     click and typer reach subcommands through this mapping (``get_command`` is
