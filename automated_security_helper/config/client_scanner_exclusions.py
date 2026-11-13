@@ -86,6 +86,13 @@ on a finding's path after the fact:
   a directory excludes everything under it (``glob_excludes``). ferret-scan is
   given its ``exclude_patterns`` joined with commas, so an entry holding a
   comma was several patterns to it and is matched as each of them.
+* guarddog ``excluded_paths``: ASH's own path glob. A file it matches is not
+  given to GuardDog; the pattern is matched against the whole path of the file
+  relative to the source directory, with ``**`` standing for directories
+  (``utils/suppression_matcher.file_path_matches``). It is matched here by that
+  same function, not with the glob of the entries above, which also matches a
+  pattern against a directory or a run of directories in the path: ``vendor``
+  leaves out no file for GuardDog, so it hides no finding here.
 * trivy and trivy-repo ``ignore_file``: the file lists finding IDs. Each
   unexpired ID becomes an entry that matches a finding of that scanner with
   that rule ID, compared exactly as trivy compares them (an ``AVD-`` prefix on
@@ -181,7 +188,9 @@ from typing_extensions import Self
 
 from automated_security_helper.core.exceptions import ScannerError
 
-ExclusionKind = Literal["bandit", "checkov", "glob", "trivy-ignore-file"]
+ExclusionKind = Literal[
+    "bandit", "checkov", "glob", "guarddog-path", "trivy-ignore-file"
+]
 
 T = TypeVar("T")
 
@@ -220,6 +229,7 @@ SCANNER_EXCLUSION_OPTIONS: Tuple[ScannerExclusionOption, ...] = (
     ),
     ScannerExclusionOption("syft", "exclude", "glob"),
     ScannerExclusionOption("ferret-scan", "exclude_patterns", "glob"),
+    ScannerExclusionOption("guarddog", "excluded_paths", "guarddog-path"),
     ScannerExclusionOption("trivy-repo", "ignore_file", "trivy-ignore-file"),
     ScannerExclusionOption("trivy", "ignore_file", "trivy-ignore-file"),
 )
@@ -300,6 +310,12 @@ class ClientScannerExclusion(BaseModel):
             return placed is not None and any(
                 glob_excludes(pattern, placed) for pattern in self._globs()
             )
+        if self.kind == "guarddog-path":
+            from automated_security_helper.utils.suppression_matcher import (
+                file_path_matches,
+            )
+
+            return placed is not None and file_path_matches(placed, self.pattern)
         if not rule_id or not _same_trivy_id(rule_id, self.pattern):
             return False
         if not self.paths:
@@ -644,15 +660,28 @@ class _EvaluationWorker:
         """
         self.last_search_seconds = 0.0
         connection = self._started()
-        began = time.monotonic()
         try:
             connection.send((function, args))
-            # The search is timed from here: ``_started`` has waited for a
-            # worker that is running (its package import is behind it), and the
-            # request is pickled and written. Neither is regular-expression
-            # time, and a first search charged them failed a small
-            # scan_timeout on a pattern that finishes at once.
-            began = time.monotonic()
+        except OSError:
+            # The pipe itself failed under the write, so the worker cannot be
+            # reached (or trusted to be in step) and is replaced. Any other
+            # exception out of ``send`` is the request failing to pickle, which
+            # writes nothing (the request is pickled whole before a byte moves):
+            # it raises above as itself, with the worker idle and in step, as
+            # the class docstring promises.
+            self.close(graceful=False)
+            raise ScannerError(
+                f"The evaluation of a regular expression from {source} could "
+                "not be handed to its worker (the request pipe failed), so the "
+                "scan fails rather than guess at an answer."
+            ) from None
+        # The search is timed from here: ``_started`` has waited for a
+        # worker that is running (its package import is behind it), and the
+        # request is pickled and written. Neither is regular-expression
+        # time, and a first search charged them failed a small
+        # scan_timeout on a pattern that finishes at once.
+        began = time.monotonic()
+        try:
             if not connection.poll(wait):
                 raise EvaluationTimedOut(
                     f"A regular expression from {source} did not finish matching "
@@ -665,11 +694,21 @@ class _EvaluationWorker:
         except EvaluationTimedOut:
             self.close(graceful=False)
             raise
-        except (EOFError, OSError):
+        except ScannerError:
+            raise
+        except Exception:
+            # EOFError and OSError are the pipe ending under the read. Anything
+            # else is the answer itself failing to rebuild in this process:
+            # unpickling an exception the child sent runs its class's
+            # constructor, and one that cannot be rebuilt (a TypeError or
+            # AttributeError out of recv) would otherwise escape as itself,
+            # not as the documented ScannerError. Either way the stream can no
+            # longer be trusted to be in step, so the worker is closed.
             self.close(graceful=False)
             raise ScannerError(
                 f"The evaluation of a regular expression from {source} ended without "
-                "an answer, so the scan fails rather than guess at one."
+                "an answer this process could read, so the scan fails rather than "
+                "guess at one."
             ) from None
         finally:
             self.last_search_seconds = time.monotonic() - began

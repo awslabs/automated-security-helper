@@ -180,6 +180,12 @@ class TestAFileBodyIsNotCommands:
         with pytest.raises(checker.PinEnumerationError, match="Dockerfile:6.*'git'"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
+    def test_a_here_string_does_not_hide_the_next_instruction(self, tmp_path):
+        # Red before: the quote after <<< was kept as if it named a marker, so the
+        # <<'Z' inside the string opened a body that swallowed the install below.
+        body = "RUN cat <<< \"a <<'Z' b\" > /x\n" + f"RUN apt-get install -y {CURL}\n"
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (4,))}
+
     def test_a_shell_marker_after_a_file_marker_is_told_apart(self, tmp_path):
         """Control: the bodies are told apart in the order the shell reads them."""
         # The two bodies hold different parameters, so the order they are matched to
@@ -847,6 +853,12 @@ class TestTheMarkerScanDirectly:
             ("cat > /x <<EOF", [("EOF", False)]),
             ("cat <<-EOF >> /x", [("EOF", False)]),
             ("cat > /a <<'A'; cat > /b <<B", [("A", True), ("B", False)]),
+            # A here-STRING's text is a string, not a marker name, so a ``<<``
+            # inside it is blanked with the rest of the string. Read as a marker
+            # it swallowed everything after it as one body.
+            ('cat <<< "a << b" > /x', []),
+            ("cat <<<'a << b' > /x", []),
+            ("cat <<< \"a\"; cat > /x <<'EOF'", [("EOF", True)]),
         ],
     )
     def test_the_marker_is_judged_by_its_own_command(self, line, expected):
@@ -1003,6 +1015,41 @@ class TestASkipCommentAboveARun:
         """Control: a shell runs its body, so it is not a file the comment can drop."""
         body = "# apt-pin-check: skip\nRUN bash <<EOF\napt-get install -y git\nEOF\n"
         with pytest.raises(checker.PinEnumerationError, match="Dockerfile:4.*'git'"):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_later_run_that_only_touches_the_file_keeps_the_skip(self, tmp_path):
+        # Red before: any later command that so much as named the file read as
+        # running it, so a skip above a motd that sed later edits was refused.
+        body = (
+            "# apt-pin-check: skip\n"
+            + self.MOTD
+            + "RUN sed -i 's/vim/nano/' /etc/motd"
+            + f" && apt-get install -y {CURL}\n"
+        )
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (7,))}
+
+    def test_a_later_run_that_executes_the_file_refuses_the_skip(self, tmp_path):
+        """Control: a skipped body a later instruction clearly runs must be read."""
+        body = "# apt-pin-check: skip\n" + self.MOTD + "RUN sh /etc/motd\n"
+        with pytest.raises(checker.PinEnumerationError, match="apt-pin-check: skip"):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    @pytest.mark.parametrize(
+        "run_line",
+        [
+            "RUN timeout 300 sh /etc/motd\n",
+            "RUN xargs sh /etc/motd\n",
+        ],
+    )
+    def test_a_later_run_through_an_unmodeled_wrapper_refuses_the_skip(
+        self, tmp_path, run_line
+    ):
+        # Red before: the skip turned off the fail-closed fallback for the whole
+        # body, so a file run through a wrapper the check does not model was
+        # accepted and its installs would have shipped untraced. Only commands
+        # that merely touch the file (the sed case above) keep the skip.
+        body = "# apt-pin-check: skip\n" + self.MOTD + run_line
+        with pytest.raises(checker.PinEnumerationError, match="apt-pin-check: skip"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
 

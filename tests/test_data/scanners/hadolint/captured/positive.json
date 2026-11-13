@@ -1,0 +1,106 @@
+[
+  {
+    "code": "DL3007",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "warning",
+    "line": 2,
+    "message": "Using latest is prone to errors if the image will ever update. Pin the version explicitly to a release tag"
+  },
+  {
+    "code": "DL3015",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "info",
+    "line": 3,
+    "message": "Avoid additional packages by specifying `--no-install-recommends`"
+  },
+  {
+    "code": "DL3008",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "warning",
+    "line": 3,
+    "message": "Pin versions in apt get install. Instead of `apt-get install <package>` use `apt-get install <package>=<version>`"
+  },
+  {
+    "code": "DL3009",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "info",
+    "line": 3,
+    "message": "Delete the apt lists (/var/lib/apt/lists) after installing something"
+  },
+  {
+    "code": "DL3003",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "warning",
+    "line": 4,
+    "message": "Use WORKDIR to switch to a directory"
+  },
+  {
+    "code": "SC2086",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "info",
+    "line": 4,
+    "message": "Double quote to prevent globbing and word splitting."
+  },
+  {
+    "code": "SC2006",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "style",
+    "line": 5,
+    "message": "Use $(...) notation instead of legacy backticks `...`."
+  },
+  {
+    "code": "DL4000",
+    "column": 1,
+    "file": "Dockerfile",
+    "level": "error",
+    "line": 6,
+    "message": "MAINTAINER is deprecated"
+  },
+  {
+    "code": "DL1000",
+    "column": 1,
+    "file": "services/Dockerfile.broken",
+    "level": "error",
+    "line": 3,
+    "message": "unexpected 'N'\nexpecting '#', '\\', ADD, ARG, CMD, COPY, ENTRYPOINT, ENV, EXPOSE, FROM, HEALTHCHECK, LABEL, MAINTAINER, ONBUILD, RUN, SHELL, STOPSIGNAL, USER, VOLUME, WORKDIR, a pragma, at least one space, or end of input"
+  },
+  {
+    "code": "DL3013",
+    "column": 1,
+    "file": "services/api.Dockerfile",
+    "level": "warning",
+    "line": 2,
+    "message": "Pin versions in pip. Instead of `pip install <package>` use `pip install <package>==<version>` or `pip install --requirement <requirements file>`"
+  },
+  {
+    "code": "DL3042",
+    "column": 1,
+    "file": "services/api.Dockerfile",
+    "level": "warning",
+    "line": 2,
+    "message": "Avoid use of cache directory with pip. Use `pip install --no-cache-dir <package>`"
+  },
+  {
+    "code": "DL3002",
+    "column": 1,
+    "file": "services/api.Dockerfile",
+    "level": "warning",
+    "line": 3,
+    "message": "Last USER should not be root"
+  },
+  {
+    "code": "DL3066",
+    "column": 1,
+    "file": "services/api.Dockerfile",
+    "level": "info",
+    "line": 3,
+    "message": "Non-numeric user-id may not be resolvable by host system"
+  }
+]

@@ -1,0 +1,5 @@
+# Inert test fixture for the GuardDog scanner's max_hits option. Never built,
+# installed or run; see many_hits.py.
+[project]
+name = "ash-guarddog-hit-limit-fixture"
+version = "0.0.1"

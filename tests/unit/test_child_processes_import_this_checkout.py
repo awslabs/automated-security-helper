@@ -349,8 +349,12 @@ ALLOWED: Dict[str, str] = {
     "::fake_git.install::unread-script#1@setattr": _STAND_IN_GIT,
     "tests/unit/docs/test_page_claims.py::_container_scan::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
     "tests/unit/docs/test_page_claims.py"
+    "::_container_scan::unread-script#1@_wrapper_command": _STAND_IN_CONTAINER_RUNTIME,
+    "tests/unit/docs/test_page_claims.py"
+    "::_interrupt_scan::unread-script#1@_wrapper_command": _STAND_IN_CONTAINER_RUNTIME,
+    "tests/unit/docs/test_page_claims.py"
     "::test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is"
-    ".scan::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
+    ".scan::unread-script#1@_wrapper_command": _STAND_IN_CONTAINER_RUNTIME,
     "tests/unit/docs/test_page_claims.py"
     "::test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is"
     "::stdin#1@scan": (
@@ -364,11 +368,27 @@ ALLOWED: Dict[str, str] = {
         "child itself is routed by _ash_environment"
     ),
     "tests/unit/docs/test_page_claims.py"
+    "::test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_host"
+    "::unread-script#1@_wrapper_command": (
+        "the script is a stand-in container or nix runtime (stdlib only); the ash "
+        "child itself is routed by _ash_environment"
+    ),
+    "tests/unit/docs/test_page_claims.py"
     "::test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is"
-    "::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
+    "::unread-script#1@_wrapper_command": _STAND_IN_CONTAINER_RUNTIME,
     "tests/unit/docs/test_page_claims.py"
     "::test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own"
     "::unread-script#1@_ash+cwd": _STAND_IN_CONTAINER_RUNTIME,
+    "tests/unit/docs/test_page_claims.py"
+    "::test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own"
+    "::unread-script#1@_wrapper_command": _STAND_IN_CONTAINER_RUNTIME,
+    "tests/unit/docs/test_page_claims.py"
+    "::test_ctrl_c_ends_ash_build_image_with_exit_code_130"
+    "::unread-script#1@_wrapper_command": (
+        "OCI_RUNNER_WRAPPER names a stand-in container runtime script that "
+        "imports the standard library only; the build runs in a child the "
+        "test watches for exit 130"
+    ),
     "tests/unit/docs/test_page_claims.py"
     "::test_ctrl_c_ends_ash_build_image_with_exit_code_130"
     "::stdin#1@_run_interrupted": (
@@ -564,9 +584,20 @@ ALLOWED: Dict[str, str] = {
     ),
     "tests/unit/docs/test_page_claims.py"
     "::test_the_ci_variables_do_not_choose_the_image_stage.build_target"
-    "::unread-script#1@setenv": (
+    "::unread-script#1@_wrapper_command": (
         "OCI_RUNNER_WRAPPER names a stand-in container runtime script that "
         "imports the standard library only; ASH runs in this process"
+    ),
+    "tests/unit/plugin_modules/ash_guarddog_plugins/test_guarddog_scanner.py"
+    "::_run_bootstrap::unread-code#1@run": (
+        "runs the scanner's own _HIT_LIMIT_BOOTSTRAP code with a planted "
+        "stand-in guarddog package first on PYTHONPATH; the child imports that "
+        "stand-in and the standard library, never ASH"
+    ),
+    "tests/unit/utils/test_third_party_licenses.py::_run_probe::unread-script#1@run": (
+        "runs the license table's own version probe over a planted site; the "
+        "probes import the standard library and the probed distribution only, "
+        "never ASH"
     ),
 }
 

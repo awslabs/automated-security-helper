@@ -115,6 +115,7 @@
           (cfnGuardFor system) # its rules are seeded by the shellHook below
           pkgs.gitleaks
           pkgs.grype
+          pkgs.hadolint # community scanner; runs when its module is listed
           pkgs.nodejs # provides `npm audit`
           semgrep
           pkgs.syft

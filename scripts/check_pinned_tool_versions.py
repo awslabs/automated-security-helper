@@ -198,7 +198,17 @@ GEM = "gem"  # GEM_PINS: a RubyGems release
 # THIRD_PARTY_LICENSES with bundled_in: a library another pinned wheel carries, whose
 # version is that wheel's. Listed and held, never looked up (see BUNDLED below).
 BUNDLED_LIBRARY = "bundled-library"
-PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM, BUNDLED_LIBRARY)
+# THIRD_PARTY_LICENSES with none of the above, held to one version by a Dockerfile
+# ``ARG <TOOL>_VERSION=``: a dependency of a uv tool, such as the pygit2 GuardDog needs
+DOCKERFILE_ARG = "dockerfile-arg"
+PIN_KINDS = (
+    RELEASE_BINARY,
+    UV_TOOL,
+    RULES_BUNDLE,
+    GEM,
+    BUNDLED_LIBRARY,
+    DOCKERFILE_ARG,
+)
 
 # The gem CFN_NAG_GEM_VERSION is the version of; see assets/Gemfile.
 CFN_NAG_GEM = "cfn-nag"
@@ -329,8 +339,11 @@ def _license_project(tool: str, entry: Any) -> str:
     )
 
 
-def enumerate_pins(pins: Any) -> list[Pin]:
+def enumerate_pins(pins: Any, dockerfile: Path = DOCKERFILE) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
+
+    A license entry that no table names is a pin only when ``dockerfile`` has an
+    ``ARG <TOOL>_VERSION=`` for it.
 
     Raises:
         PinEnumerationError: when a pin cannot be attributed to an upstream, when
@@ -419,6 +432,11 @@ def enumerate_pins(pins: Any) -> list[Pin]:
             continue
         elif tool in gems:
             continue
+        elif entry is not None and _dockerfile_args(tool, dockerfile):
+            version = entry.version
+            kind = DOCKERFILE_ARG
+            pinned_in.append(f"Dockerfile ARG {_arg_stem(tool)}_VERSION")
+            project = _license_project(tool, entry)
         else:
             # Only a license entry names it, so the version a bump changes is kept
             # somewhere this script does not read, and its steps would leave it out.
@@ -427,7 +445,8 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                 f"THIRD_PARTY_LICENSES[{tool!r}] records {recorded}, but {tool} is "
                 "not in TOOL_VERSIONS or RULES_BUNDLES and has no distribution, so this "
                 "script cannot tell what a bump of it changes. Give it a kind in "
-                "PIN_KINDS, with its own steps in bump_steps."
+                "PIN_KINDS, with its own steps in bump_steps, or pin it with a "
+                f"Dockerfile ARG {_arg_stem(tool)}_VERSION."
             )
 
         if entry is not None:
@@ -496,7 +515,7 @@ _VERSION_RE = re.compile(
 )
 
 
-def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
+def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, int, str]]:
     """A sortable key for a release version, numeric part compared as numbers.
 
     ``v0.69.10`` sorts after ``v0.69.9``, ``1.2`` equals ``1.2.0``, and a final
@@ -504,7 +523,11 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
     post-release (``1.2.3.post1``, also spelled ``rev`` or ``r``) sorts after
     the final release it follows: read as a pre-release, a PyPI post-release
     was reported as ``ahead`` of the pin for the same numbers instead of
-    ``outdated``. Build metadata after ``+`` is ignored, as SemVer says it must be.
+    ``outdated``. Its number is compared as a number, not as text, which read
+    ``post10`` as older than ``post9``, the same misreport class for the
+    releases this key exists to order; PEP 440 reads the spellings (``post``,
+    ``rev``, ``r``, and a bare one as 0) as one, so only the number counts.
+    Build metadata after ``+`` is ignored, as SemVer says it must be.
 
     Raises:
         ValueError: for a string with no leading numeric version, or with a
@@ -518,10 +541,11 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
         release = release[:-1]
     suffix = match.group(2).split("+", 1)[0].lstrip("-.")
     if not suffix:
-        return release, (1, "")
+        return release, (1, 0, "")
     if _POST_RELEASE_RE.match(suffix):
-        return release, (2, suffix)
-    return release, (0, suffix)
+        digits = "".join(ch for ch in suffix if ch.isdigit())
+        return release, (2, int(digits or "0"), "")
+    return release, (0, 0, suffix)
 
 
 # PEP 440's post-release spellings, after the separator is stripped.
@@ -1063,6 +1087,27 @@ def _uv_tool_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     return _license_steps(pins, pin.tool, latest)
 
 
+def _dockerfile_arg_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """A dependency held by a Dockerfile ARG: its license entry and what it carries.
+
+    The ARG itself is named for every kind, after these. A library entry whose
+    ``bundled_in`` names this tool records what the pinned wheel bundles, so a new
+    wheel can change it.
+    """
+    steps = _license_steps(pins, pin.tool, latest)
+    carried = sorted(
+        tool
+        for tool, entry in pins.THIRD_PARTY_LICENSES.items()
+        if getattr(entry, "bundled_in", None) and pin.tool in entry.bundled_in
+    )
+    if carried:
+        steps.append(
+            f"{', '.join(carried)}: bundled_in names {pin.tool}; re-read what the "
+            "new wheel bundles and update each entry"
+        )
+    return steps
+
+
 def _bundle_version_name(pins: Any, tool: str) -> str | None:
     """The module-level name ``RULES_BUNDLES[tool]`` takes its ``version=`` from.
 
@@ -1155,17 +1200,32 @@ def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     """A bundled library has no bump of its own: its version is its wheel's.
 
     The checker never reports one as outdated (it is held), so these steps are
-    reached only when a bump of the wheel changes what it bundles. They say which
-    entry follows the wheel rather than naming an upstream release to fetch.
+    reached only when a bump of the wheel changes what it bundles. They say
+    which values follow the wheel, each ``_THIRD_PARTY_HASHES`` entry by name,
+    rather than naming an upstream release to look up: the library's own
+    project is never fetched (no ``gh api`` here), since the wheel sets the
+    version.
     """
-    return [
+    steps = [
         (
-            f"{pin.tool} is bundled by {pin.project} and is not pinned on its own: after "
-            f"a {pin.project} bump, read the version of {pin.tool} the new wheel carries "
-            f'and set THIRD_PARTY_LICENSES["{pin.tool}"].version to it, with its commit '
-            "and license-file digests taken from that release"
+            f"{pin.tool} is bundled by {pin.project} and is not pinned on its own: "
+            f"after a bump of {pin.project}, read the version of {pin.tool} the new "
+            f'wheel carries and set THIRD_PARTY_LICENSES["{pin.tool}"].version to it'
         )
     ]
+    for key in getattr(pins, "_THIRD_PARTY_HASHES", {}):
+        if key == f"{pin.tool} commit" or key.startswith(f"{pin.tool}/"):
+            steps.append(
+                f'_THIRD_PARTY_HASHES["{key}"] -> the value for the release the '
+                "new wheel bundles"
+            )
+    entry = pins.THIRD_PARTY_LICENSES.get(pin.tool)
+    for f in entry.files if entry is not None else ():
+        if not f.url:
+            steps.append(
+                f"{f.name}: confirm the release the new wheel bundles still carries it"
+            )
+    return steps
 
 
 # One function per kind in PIN_KINDS; a test keeps the two in step.
@@ -1175,6 +1235,7 @@ _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     RULES_BUNDLE: _rules_bundle_steps,
     GEM: _gem_steps,
     BUNDLED_LIBRARY: _bundled_library_steps,
+    DOCKERFILE_ARG: _dockerfile_arg_steps,
 }
 
 
@@ -1413,6 +1474,13 @@ _NEVER_RUNS_A_FILE = frozenset(
         "touch file readlink realpath basename dirname sha256sum md5sum cmp diff dd"
     ).split()
 )
+# For a ``# apt-pin-check: skip`` body only: the commands beyond _NEVER_RUNS_A_FILE
+# that edit, sign or validate a file in place without running it (``sed -i`` of a
+# motd, ``gpg --dearmor`` of a key, ``nginx -t -c`` of a config). The fail-closed
+# fallback in ``_follow_a_file`` stays on for every other program, so a wrapper it
+# does not model (``timeout 300 sh x.sh``, ``xargs sh x.sh``) still counts as
+# running the file and the skip is refused rather than failing open.
+_ONLY_TOUCHES_A_FILE = frozenset({"sed", "gpg", "nginx"})
 # The commands that put a file under a second name or path, whose last word is the new
 # one: ``mv x.sh inst``, ``cp x.sh /usr/local/bin/inst``, ``ln -s x.sh inst``.
 _GIVES_A_FILE_ANOTHER_NAME = frozenset({"mv", "cp", "ln", "install"})
@@ -1475,6 +1543,51 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     return [(name, is_file) for name, is_file, _ in _scan_markers(line)]
 
 
+def _quotes_blanked(text: str) -> str:
+    """``text`` with the inside of quoted strings blanked, marker names kept.
+
+    A ``<<`` inside a quoted string (``python -c "print(1 << shift)"``, an awk or
+    sed program) is data, not a here-document; read as a marker it swallowed the
+    rest of the instruction as one body and every later check went quiet. The
+    quoted characters are replaced with spaces, one for one, so every offset
+    into the text stays where it was. A quote that spells a marker's own name
+    (``<<'EOF'``) is kept as written, since the marker regex reads it. Escaped
+    quotes inside a double-quoted string are not followed; the blanked span then
+    ends at the escaped quote, which can leave part of the string unblanked but
+    never blanks a marker.
+    """
+    out = list(text)
+    i = 0
+    while i < len(text):
+        quote = text[i]
+        if quote not in "'\"":
+            i += 1
+            continue
+        before = i - 1
+        while before >= 0 and text[before] in " \t":
+            before -= 1
+        if before >= 0 and text[before] == "-":
+            before -= 1
+        # A marker's name follows exactly ``<<``; after ``<<<`` the quote is a
+        # here-STRING's text, which is blanked like any other string, or the
+        # ``<< b`` inside ``cat <<< "a << b"`` would read as opening a body.
+        if (
+            before >= 1
+            and text[before - 1 : before + 1] == "<<"
+            and (before < 2 or text[before - 2] != "<")
+        ):
+            end = text.find(quote, i + 1)
+            i = end + 1 if end != -1 else len(text)
+            continue
+        end = text.find(quote, i + 1)
+        if end == -1:
+            break
+        for inside in range(i + 1, end):
+            out[inside] = " "
+        i = end + 1
+    return "".join(out)
+
+
 def _command_segments(cleaned: str) -> list[tuple[int, int, str]]:
     """The commands of a line as (start, end, the separator that ended the command)."""
     segments: list[tuple[int, int, str]] = []
@@ -1495,7 +1608,7 @@ def _scan_markers(line: str) -> list[tuple[str, bool, set[str]]]:
     cleaned = _ARITHMETIC.sub(" ", line)
     segments = _command_segments(cleaned)
     markers: list[tuple[str, bool, set[str]]] = []
-    for match in _HEREDOC_MARKER.finditer(cleaned):
+    for match in _HEREDOC_MARKER.finditer(_quotes_blanked(cleaned)):
         first = next(
             (i for i, (_, stop, _) in enumerate(segments) if match.start() < stop),
             len(segments) - 1,
@@ -1585,9 +1698,17 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
 
 
 def _follow_a_file(
-    pipelines: list[list[str]], files: set[str]
+    pipelines: list[list[str]], files: set[str], *, certain_only: bool = False
 ) -> tuple[bool, set[str]]:
     """Whether a command of the pipelines runs one of the files, by its name or path.
+
+    ``certain_only`` (a ``# apt-pin-check: skip`` body) keeps the fail-closed
+    fallback below (any unlisted program that names the file runs it) and takes
+    out of it only ``_ONLY_TOUCHES_A_FILE``: a command that merely edits or
+    checks the file (``sed -i``, ``gpg --dearmor``, ``nginx -t -c``) must not
+    read as running it, but a wrapper this does not model (``timeout 300 sh
+    x.sh``, ``xargs sh x.sh``) still must, since a skipped body that is in fact
+    executed would otherwise ship its installs untraced.
 
     Also the names the files have at the end of the pipelines (the files' own names and
     any ``mv`` or ``cp`` gave them), for the instructions that come after: a file moved
@@ -1644,7 +1765,11 @@ def _follow_a_file(
                     tails = [w.strip("(){}").rsplit("/", 1)[-1] for w in words]
                     after_tee = words[tails.index("tee") + 1 :]
                     wanted |= _base_names(w for w in after_tee if not w.startswith("-"))
-            elif program not in _NEVER_RUNS_A_FILE and (named | piped) & wanted:
+            elif (
+                program not in _NEVER_RUNS_A_FILE
+                and not (certain_only and program in _ONLY_TOUCHES_A_FILE)
+                and (named | piped) & wanted
+            ):
                 return True, wanted
             fed.extend(words)
     return False, wanted
@@ -1723,6 +1848,10 @@ class _RunBlock:
     # file body, the names of the files the instruction writes it to.
     instruction: int = 0
     files: frozenset[str] = frozenset()
+    # A file body under a ``# apt-pin-check: skip`` comment: not a script, so its
+    # lines are not read as commands -- unless a later instruction RUNS the file,
+    # which is refused rather than left untraced (``_file_bodies_a_later_run_runs``).
+    skipped: bool = False
     # Not a RUN: the ``cp`` a ``COPY --from`` instruction amounts to, kept only so the
     # file bodies a later RUN runs can be followed through it. It is not returned.
     copy: bool = False
@@ -1778,13 +1907,33 @@ def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
             )
             names = set(block.files)
             for when, at in callers:
-                runs, names = _follow_a_file(pipelines_of(at), names)
+                # For a skipped body the commands that only touch the file
+                # (``sed -i`` of a motd) do not count as running it; every
+                # other command that names it still does, fail closed, so a
+                # wrapper this check does not model cannot hide that the body
+                # is executed.
+                runs, names = _follow_a_file(
+                    pipelines_of(at), names, certain_only=block.skipped
+                )
                 if runs:
+                    if block.skipped:
+                        # The skip comment says the body is not a script, and
+                        # this instruction runs it: left skipped, its installs
+                        # would ship untraced, so the contradiction is refused
+                        # rather than failing open.
+                        raise PinEnumerationError(
+                            f"The Dockerfile's line {result[at].lines[0][0]} runs "
+                            f"{' or '.join(sorted(block.files))}, whose body (line "
+                            f"{block.lines[0][0]}) is marked '# apt-pin-check: "
+                            "skip'. A body a later instruction runs is a script "
+                            "this check must read: remove the skip comment, or "
+                            "stop running the file."
+                        )
                     result[index] = replace(block, file_content=False)
                     runs_at[index] = when
                     changed = True
                     break
-    return [block for block in result if not block.copy]
+    return [block for block in result if not block.copy and not block.skipped]
 
 
 def _copy_as_command(lines: list[tuple[int, str]]) -> str:
@@ -1858,13 +2007,14 @@ def _run_blocks(text: str) -> list[_RunBlock]:
             continue
         if current is not None and terminators:
             if line == terminators[0][0]:
-                if terminators[0][1] and file_body and not run_skips_bodies:
+                if terminators[0][1] and file_body:
                     blocks.append(
                         _RunBlock(
                             file_body,
                             file_content=True,
                             instruction=instruction,
                             files=frozenset(terminators[0][2]),
+                            skipped=run_skips_bodies,
                         )
                     )
                 file_body = []
@@ -1908,8 +2058,15 @@ def _run_blocks(text: str) -> list[_RunBlock]:
             continue
         blocks.append(_RunBlock(current, instruction=instruction))
         current = None
-    if file_body and not run_skips_bodies:
-        blocks.append(_RunBlock(file_body, file_content=True, instruction=instruction))
+    if file_body:
+        blocks.append(
+            _RunBlock(
+                file_body,
+                file_content=True,
+                instruction=instruction,
+                skipped=run_skips_bodies,
+            )
+        )
     if current:
         blocks.append(_RunBlock(current, instruction=instruction))
     return _file_bodies_a_later_run_runs(blocks)
@@ -2041,7 +2198,7 @@ def _xargs_input(shell: str, install: re.Match[str]) -> str:
     pipeline_start = ends[first - 1].end() if first else 0
     after = _COMMAND_END.search(text, install.end())
     stage_end = after.start() if after else len(text)
-    if _HEREDOC_MARKER.search(text, pipeline_start, stage_end):
+    if _HEREDOC_MARKER.search(_quotes_blanked(text), pipeline_start, stage_end):
         return "a here-document"
     if _XARGS_STDIN_FILE.search(text, own_start, stage_end):
         return "a file or a here-string"

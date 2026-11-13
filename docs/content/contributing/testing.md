@@ -102,7 +102,7 @@ default run does not. To run the suite the way the `integration-test` CI job doe
 
 <!-- doctest: illustrative reason="runs the integration suite in a checkout of this repository" -->
 ```bash
-uv run pytest tests/integration tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
+uv run pytest tests/integration \
   --ignore=tests/integration/docs --run-integration --run-slow -n 0
 ```
 
