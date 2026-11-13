@@ -149,6 +149,10 @@
          <lastmod>2026-11-13</lastmod>
     </url>
     <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/how-to/aidlc-workflows/</loc>
+         <lastmod>2026-11-13</lastmod>
+    </url>
+    <url>
          <loc>https://awslabs.github.io/automated-security-helper/latest/how-to/choose-scanners/</loc>
          <lastmod>2026-11-13</lastmod>
     </url>
@@ -218,6 +222,26 @@
     </url>
     <url>
          <loc>https://awslabs.github.io/automated-security-helper/latest/how-to/ci/other-ci/</loc>
+         <lastmod>2026-11-13</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/personas/</loc>
+         <lastmod>2026-11-13</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/personas/developer/</loc>
+         <lastmod>2026-11-13</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/personas/sdlc-aidlc/</loc>
+         <lastmod>2026-11-13</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/personas/security-analyst/</loc>
+         <lastmod>2026-11-13</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/personas/security-reviewer/</loc>
          <lastmod>2026-11-13</lastmod>
     </url>
     <url>
