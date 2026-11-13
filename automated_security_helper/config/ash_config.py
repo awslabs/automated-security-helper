@@ -2845,7 +2845,9 @@ class AshConfig(RedactedSection):
         The direct dump is a JSON document for a ``.json`` path, as
         render_config_file writes one; a JSON path whose dump has to write
         references is refused. The whole text is built before the file is
-        opened, so a dump that fails leaves an existing file as it was.
+        opened, and it is then written to a staged file beside the target that
+        replaces it in one step, so a dump that fails, and a write cut short
+        (a full disk, a kill), leave an existing file as it was.
         """
         from automated_security_helper.config.config_sources import is_json_file
         from automated_security_helper.config.config_writer import (
@@ -2903,14 +2905,10 @@ class AshConfig(RedactedSection):
                     # cannot write.
                     data = without_env_scalars(data)
                 text = yaml.dump(data, Dumper=_ConfigDumper, indent=2)
-            with open(config_path, mode="w", encoding="utf-8") as f:
-                f.write(text)
+            _replace_with_staged(config_path, text)
             return
         render = render_config_file_as_written if as_written else render_config_file
-        config_path.write_text(
-            render(config_path, self, [SCHEMA_COMMENT]),
-            encoding="utf-8",
-        )
+        _replace_with_staged(config_path, render(config_path, self, [SCHEMA_COMMENT]))
 
     def __repr_args__(self):
         """The fields as pydantic's repr shows them, except that a config whose
@@ -4149,6 +4147,55 @@ def _write_checked(
             # Raised outside the handlers, as unparsed_config_reason's
             # docstring asks, so the refusal carries no chained error.
             raise _left_unchanged(replace_refusal, config_path)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    _sync_directory(target.parent)
+
+
+def _replace_with_staged(config_path: Path, text: str) -> None:
+    """Write *text* as the whole of *config_path* through a staged file.
+
+    The text goes to a file beside the target, is synced, and replaces the
+    target in one os.replace, so a write cut short (a full disk, a kill)
+    leaves an existing file as it was, where a write on the file itself
+    would have truncated it. The staged file takes the earlier file's owner,
+    group and mode; a new file gets the mode a plain create gives it. A
+    symlinked config stays a link, with the new bytes in its target. A
+    failure at any step removes the staged file and raises the system's own
+    error; a config mounted as one file, whose entry cannot be replaced, is
+    refused in words that say so, with the file untouched."""
+    target = Path(os.path.realpath(config_path))
+    try:
+        earlier_status: Optional[os.stat_result] = target.stat()
+    except FileNotFoundError:
+        earlier_status = None
+    if earlier_status is not None and not os.access(target, os.W_OK):
+        raise PermissionError(errno.EACCES, "Permission denied", str(config_path))
+    descriptor, staged = _staged_beside(
+        target, 0o666 if earlier_status is None else 0o600
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            if earlier_status is not None:
+                kept_mode = _give_earlier_owner_and_mode(
+                    handle.fileno(), earlier_status
+                )
+            handle.write(text.encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if earlier_status is not None and not hasattr(os, "fchmod"):
+            os.chmod(staged, kept_mode)
+        try:
+            os.replace(staged, target)
+        except OSError as error:
+            if error.errno != errno.EBUSY:
+                raise
+            raise OSError(
+                errno.EBUSY,
+                f"{config_path} is mounted as a single file, so it cannot be "
+                "replaced; it is unchanged",
+            ) from None
     except BaseException:
         staged.unlink(missing_ok=True)
         raise
