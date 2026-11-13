@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../../install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3360,19 +3361,19 @@ runs the full set. See <a href="../../pre-commit/#with-ci">Pre-commit and CI tog
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nt">jobs</span><span class="p">:</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">ash</span><span class="p">:</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0</span>
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="nt">permissions</span><span class="p">:</span>
 </span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">      </span><span class="nt">checks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">      </span><span class="nt">pull-requests</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">      </span><span class="nt">ash-args</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--fail-on-incomplete-scanners --no-allow-stale-content-db</span>
 </span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">      </span><span class="nt">collect-sarif-report</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="nt">sarif</span><span class="p">:</span>
 </span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="nt">needs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
 </span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">    </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ !cancelled() &amp;&amp; needs.ash.outputs.artifact-id != &#39;&#39; }}</span>
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@main</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0</span>
 </span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="nt">permissions</span><span class="p">:</span>
 </span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">      </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">      </span><span class="nt">security-events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
@@ -3393,10 +3394,10 @@ repository has files it scans, and the incomplete-scan gate fails the job with e
 code 1.</p>
 <p>ASH's zizmor scanner reports each <code>uses:</code> line that names a tag as <code>zizmor/unpinned-uses</code> at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
-commit. <code>git ls-remote https://github.com/awslabs/automated-security-helper refs/heads/main</code>
-prints the commit that <code>main</code> names. Replace the <code>main</code> after each <code>@</code>, and the
+commit. <code>git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.8.0</code>
+prints the commit that <code>v3.8.0</code> names. Replace the <code>v3.8.0</code> after each <code>@</code>, and the
 <code>ash-version</code> value, with that SHA, and end each <code>uses:</code> line with the comment
-<code># main</code>.</p>
+<code># v3.8.0</code>.</p>
 <p>A pull request scan reads the configuration in the branch it scans, so the branch can change
 the gate. The workflow passes the <code>fail-on-findings</code> choice on the command line, and the
 <code>ash-args</code> line above does the same for incomplete scans and stale content databases, so the
@@ -3709,12 +3710,12 @@ run builds one; see <a href="../../run-in-a-container/">Run ASH in a container</
 <code>with:</code> entries as they are. The <code>ash-args</code> line is the gate, so leave it in place.</p>
 <!-- doctest: config kind=other reason="two entries to add to the with: block of the call in Call the reusable workflows, not a workflow on their own" -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">ash-mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">container</span>
 </span></code></pre></div>
 <p>The <code>install-*</code> inputs only matter in local mode, where they download scanner tools onto
 the runner. In container mode the scanners run inside the image, so the example sets none
-of them. The inputs a workflow accepts depend on its version: the workflow at <code>main</code>
+of them. The inputs a workflow accepts depend on its version: the workflow at <code>v3.8.0</code>
 defines only <code>install-grype</code>, <code>install-syft</code>, and <code>install-opengrep</code>, all defaulting to
 <code>false</code>, and a caller that passes an input the referenced workflow does not define fails
 before any job starts. Check the workflow file at the tag you pin before adding one.</p>
@@ -3823,7 +3824,7 @@ job summary:</p>
 </span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="nt">security-events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span><span class="w"> </span><span class="c1"># private repositories only</span>
 </span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">    </span><span class="nt">env</span><span class="p">:</span>
-</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">      </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">      </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
 </span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 </span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1</span><span class="w"> </span><span class="c1"># v7.0.1</span>
 </span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
@@ -3952,7 +3953,7 @@ the install and scan steps of the job above:</p>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9</span><span class="w"> </span><span class="c1"># v6.1.0</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span>
 </span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ash/bin</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-${{ runner.os }}-${{ runner.arch }}-main</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.8.0</span>
 </span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install scanner tools</span>
 </span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="nt">working-directory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ runner.temp }}</span>
 </span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
@@ -4070,20 +4071,21 @@ its file on both events.</p>
 <p>Code scanning already shows a pull request only the alerts on lines it changed, so for the
 SARIF upload alone you do not need this option.</p>
 <h2 id="nix">Run in Nix mode<a class="headerlink" href="#nix" title="Permanent link">&para;</a></h2>
-<div class="admonition warning">
-<p class="admonition-title">Nix mode is on <code>main</code> only</p>
-<p>Nix mode is not in any release: v3.7.x rejects <code>--mode nix</code>, and the reusable
-workflows' <code>ash-mode</code> input takes <code>local</code> or <code>container</code>, not <code>nix</code>. Write the steps
-yourself, as below, and install ASH from <code>main</code>. Pin a commit SHA instead of <code>main</code>
-when you need to know which code ran.</p>
+<div class="admonition note">
+<p class="admonition-title">Write the Nix job yourself</p>
+<p>The reusable workflows' <code>ash-mode</code> input takes <code>local</code> or <code>container</code>, not <code>nix</code>,
+so write the steps yourself, as below. Nix mode is in the latest release; v3.7.x
+and older reject <code>--mode nix</code>.</p>
 </div>
 <p>Nix mode (<code>--mode nix</code>) runs the scan inside a Nix shell whose scanner tools come from
 ASH's <code>flake.nix</code>, so the job installs neither Ruby nor the scanner binaries. The job
 needs Nix on the runner, and ASH installed with the <code>cdk</code> extra: Nix mode does not install
 ASH, and cdk-nag runs on the Python environment ASH is installed in. ASH passes
-<code>nix-command</code> and <code>flakes</code> on each invocation. A <code>main</code> install cannot find a release tag
-that contains <code>flake.nix</code>, so <code>ASH_NIX_FLAKE_REF</code> points the scan at <code>main</code>'s flake.</p>
-<!-- doctest: config kind=github-actions runner=none reason="installs ASH from main, which the runner cannot swap for the pull request's build" -->
+<code>nix-command</code> and <code>flakes</code> on each invocation. The installed release resolves its flake
+to its own release tag, so the job sets no <code>ASH_NIX_FLAKE_REF</code>; set it only to scan with
+a different flake, such as when running ASH from <code>main</code> or a fork
+(<a href="../../install/#nix-mode">Nix mode</a>).</p>
+<!-- doctest: config kind=github-actions runner=none reason="installs a released ASH, which the runner cannot swap for the pull request's build" -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH (Nix mode)</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">on</span><span class="p">:</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">pull_request</span><span class="p">:</span>
@@ -4092,45 +4094,43 @@ that contains <code>flake.nix</code>, so <code>ASH_NIX_FLAKE_REF</code> points t
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nt">jobs</span><span class="p">:</span>
 </span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">ash-nix</span><span class="p">:</span>
 </span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">env</span><span class="p">:</span>
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="nt">ASH_NIX_FLAKE_REF</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github:awslabs/automated-security-helper/main</span>
-</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
-</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1</span><span class="w"> </span><span class="c1"># v7.0.1</span>
-</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">          </span><span class="nt">persist-credentials</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24</span><span class="w"> </span><span class="c1"># v31.11.1</span>
-</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa</span><span class="w"> </span><span class="c1"># v10.3.1</span>
-</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">          </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">latest</span>
-</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install ASH</span>
-</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">          </span><span class="no">token=&quot;$(od -An -N16 -tx1 /dev/urandom | tr -d &#39; \n&#39;)&quot;</span>
-</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">          </span><span class="no">if [ &quot;${#token}&quot; -ne 32 ]; then</span>
-</span><span id="__span-5-23"><a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="w">            </span><span class="no">echo &quot;::error::no random token could be read for stop-commands, so the command did not run&quot;</span>
-</span><span id="__span-5-24"><a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="w">            </span><span class="no">exit 1</span>
-</span><span id="__span-5-25"><a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="w">          </span><span class="no">fi</span>
-</span><span id="__span-5-26"><a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="w">          </span><span class="no">printf &#39;::stop-commands::%s\n&#39; &quot;${token}&quot;</span>
-</span><span id="__span-5-27"><a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="w">          </span><span class="no">status=0</span>
-</span><span id="__span-5-28"><a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="w">          </span><span class="no">uv tool install &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39; \</span>
-</span><span id="__span-5-29"><a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="w">            </span><span class="no">2&gt;&amp;1 || status=$?</span>
-</span><span id="__span-5-30"><a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="w">          </span><span class="no">printf &#39;\n::%s::\n&#39; &quot;${token}&quot;</span>
-</span><span id="__span-5-31"><a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="w">          </span><span class="no">exit &quot;${status}&quot;</span>
-</span><span id="__span-5-32"><a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Scan in Nix mode</span>
-</span><span id="__span-5-33"><a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-</span><span id="__span-5-34"><a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a><span class="w">          </span><span class="no">token=&quot;$(od -An -N16 -tx1 /dev/urandom | tr -d &#39; \n&#39;)&quot;</span>
-</span><span id="__span-5-35"><a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a><span class="w">          </span><span class="no">if [ &quot;${#token}&quot; -ne 32 ]; then</span>
-</span><span id="__span-5-36"><a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a><span class="w">            </span><span class="no">echo &quot;::error::no random token could be read for stop-commands, so the command did not run&quot;</span>
-</span><span id="__span-5-37"><a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a><span class="w">            </span><span class="no">exit 1</span>
-</span><span id="__span-5-38"><a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a><span class="w">          </span><span class="no">fi</span>
-</span><span id="__span-5-39"><a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a><span class="w">          </span><span class="no">printf &#39;::stop-commands::%s\n&#39; &quot;${token}&quot;</span>
-</span><span id="__span-5-40"><a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a><span class="w">          </span><span class="no">status=0</span>
-</span><span id="__span-5-41"><a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a><span class="w">          </span><span class="no">{</span>
-</span><span id="__span-5-42"><a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a><span class="w">            </span><span class="no">export PATH=&quot;$(uv tool dir --bin):${PATH}&quot;</span>
-</span><span id="__span-5-43"><a id="__codelineno-5-43" name="__codelineno-5-43" href="#__codelineno-5-43"></a><span class="w">            </span><span class="no">ash scan --mode nix --no-progress \</span>
-</span><span id="__span-5-44"><a id="__codelineno-5-44" name="__codelineno-5-44" href="#__codelineno-5-44"></a><span class="w">              </span><span class="no">--fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db</span>
-</span><span id="__span-5-45"><a id="__codelineno-5-45" name="__codelineno-5-45" href="#__codelineno-5-45"></a><span class="w">          </span><span class="no">} 2&gt;&amp;1 || status=$?</span>
-</span><span id="__span-5-46"><a id="__codelineno-5-46" name="__codelineno-5-46" href="#__codelineno-5-46"></a><span class="w">          </span><span class="no">printf &#39;\n::%s::\n&#39; &quot;${token}&quot;</span>
-</span><span id="__span-5-47"><a id="__codelineno-5-47" name="__codelineno-5-47" href="#__codelineno-5-47"></a><span class="w">          </span><span class="no">exit &quot;${status}&quot;</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1</span><span class="w"> </span><span class="c1"># v7.0.1</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">          </span><span class="nt">persist-credentials</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24</span><span class="w"> </span><span class="c1"># v31.11.1</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa</span><span class="w"> </span><span class="c1"># v10.3.1</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">          </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">latest</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install ASH</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">          </span><span class="no">token=&quot;$(od -An -N16 -tx1 /dev/urandom | tr -d &#39; \n&#39;)&quot;</span>
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">          </span><span class="no">if [ &quot;${#token}&quot; -ne 32 ]; then</span>
+</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">            </span><span class="no">echo &quot;::error::no random token could be read for stop-commands, so the command did not run&quot;</span>
+</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">            </span><span class="no">exit 1</span>
+</span><span id="__span-5-23"><a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="w">          </span><span class="no">fi</span>
+</span><span id="__span-5-24"><a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="w">          </span><span class="no">printf &#39;::stop-commands::%s\n&#39; &quot;${token}&quot;</span>
+</span><span id="__span-5-25"><a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="w">          </span><span class="no">status=0</span>
+</span><span id="__span-5-26"><a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="w">          </span><span class="no">uv tool install &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39; \</span>
+</span><span id="__span-5-27"><a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="w">            </span><span class="no">2&gt;&amp;1 || status=$?</span>
+</span><span id="__span-5-28"><a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="w">          </span><span class="no">printf &#39;\n::%s::\n&#39; &quot;${token}&quot;</span>
+</span><span id="__span-5-29"><a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="w">          </span><span class="no">exit &quot;${status}&quot;</span>
+</span><span id="__span-5-30"><a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Scan in Nix mode</span>
+</span><span id="__span-5-31"><a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+</span><span id="__span-5-32"><a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a><span class="w">          </span><span class="no">token=&quot;$(od -An -N16 -tx1 /dev/urandom | tr -d &#39; \n&#39;)&quot;</span>
+</span><span id="__span-5-33"><a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a><span class="w">          </span><span class="no">if [ &quot;${#token}&quot; -ne 32 ]; then</span>
+</span><span id="__span-5-34"><a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a><span class="w">            </span><span class="no">echo &quot;::error::no random token could be read for stop-commands, so the command did not run&quot;</span>
+</span><span id="__span-5-35"><a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a><span class="w">            </span><span class="no">exit 1</span>
+</span><span id="__span-5-36"><a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a><span class="w">          </span><span class="no">fi</span>
+</span><span id="__span-5-37"><a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a><span class="w">          </span><span class="no">printf &#39;::stop-commands::%s\n&#39; &quot;${token}&quot;</span>
+</span><span id="__span-5-38"><a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a><span class="w">          </span><span class="no">status=0</span>
+</span><span id="__span-5-39"><a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a><span class="w">          </span><span class="no">{</span>
+</span><span id="__span-5-40"><a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a><span class="w">            </span><span class="no">export PATH=&quot;$(uv tool dir --bin):${PATH}&quot;</span>
+</span><span id="__span-5-41"><a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a><span class="w">            </span><span class="no">ash scan --mode nix --no-progress \</span>
+</span><span id="__span-5-42"><a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a><span class="w">              </span><span class="no">--fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db</span>
+</span><span id="__span-5-43"><a id="__codelineno-5-43" name="__codelineno-5-43" href="#__codelineno-5-43"></a><span class="w">          </span><span class="no">} 2&gt;&amp;1 || status=$?</span>
+</span><span id="__span-5-44"><a id="__codelineno-5-44" name="__codelineno-5-44" href="#__codelineno-5-44"></a><span class="w">          </span><span class="no">printf &#39;\n::%s::\n&#39; &quot;${token}&quot;</span>
+</span><span id="__span-5-45"><a id="__codelineno-5-45" name="__codelineno-5-45" href="#__codelineno-5-45"></a><span class="w">          </span><span class="no">exit &quot;${status}&quot;</span>
 </span></code></pre></div>
 <p><code>cachix/install-nix-action</code> is the action ASH's own install-methods workflow uses for its
 Nix legs. Exit codes and the output directory are the same as in local mode, so the report

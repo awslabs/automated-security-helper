@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../../how-to/install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3374,9 +3375,9 @@ official installer:</p>
 prints a version number.</p>
 <h2 id="2-install-ash">2. Install ASH<a class="headerlink" href="#2-install-ash" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
 </span></code></pre></div>
-<p>This installs ASH <code>main</code> from GitHub, with the <code>cdk</code> extra that the
+<p>This installs ASH <code>v3.8.0</code> from GitHub, with the <code>cdk</code> extra that the
 cdk-nag scanner needs, into its own environment. <code>--python 3.12</code> keeps uv from
 choosing a Python newer than ASH's dependencies support; uv downloads 3.12 if you do
 not have it. ASH is not published on PyPI: the PyPI project named

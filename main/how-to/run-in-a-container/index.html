@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3631,8 +3632,8 @@ with <code>--no-run</code>, it logs no warning. <code>./ash</code> and <code>Inv
 image in CI instead of building per run. With <code>ASH_IMAGE_NAME</code> set, <code>ash build-image</code> tags
 the image with your registry's name:</p>
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span>registry.example.com/security/ash:main
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>main<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span>registry.example.com/security/ash:3.8.0
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>v3.8.0<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--container-uid<span class="w"> </span><span class="m">1001</span><span class="w"> </span>--container-gid<span class="w"> </span><span class="m">1001</span>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>docker<span class="w"> </span>push<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ASH_IMAGE_NAME</span><span class="s2">&quot;</span>
 </span></code></pre></div>
@@ -3642,10 +3643,10 @@ when it is not present.</p>
 <p>To build without ASH installed, build the Dockerfile from a clone. The clone is the build
 context, so the image contains exactly the ref it cloned:</p>
 <!-- doctest: illustrative reason="needs a container runtime and network access" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>git<span class="w"> </span>clone<span class="w"> </span>--depth<span class="w"> </span><span class="m">1</span><span class="w"> </span>--branch<span class="w"> </span>main<span class="w"> </span>https://github.com/awslabs/automated-security-helper.git
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>git<span class="w"> </span>clone<span class="w"> </span>--depth<span class="w"> </span><span class="m">1</span><span class="w"> </span>--branch<span class="w"> </span>v3.8.0<span class="w"> </span>https://github.com/awslabs/automated-security-helper.git
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">cd</span><span class="w"> </span>automated-security-helper
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>docker<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>non-root<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">UID</span><span class="o">=</span><span class="m">1001</span><span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">GID</span><span class="o">=</span><span class="m">1001</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span>--tag<span class="w"> </span>registry.example.com/security/ash:main<span class="w"> </span>.
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span>--tag<span class="w"> </span>registry.example.com/security/ash:3.8.0<span class="w"> </span>.
 </span></code></pre></div>
 <p>Build arguments:</p>
 <!-- doctest: options of=dockerfile -->

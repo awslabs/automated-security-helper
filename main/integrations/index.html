@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../how-to/install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3310,7 +3311,7 @@ one of them.</p>
 <tr>
 <td>Nix</td>
 <td>Scan inside <code>nix develop</code> with <code>--mode nix</code></td>
-<td>Not in any release; see the note below</td>
+<td>Supported; see the note below</td>
 <td><a href="../how-to/install/#nix-mode">Nix mode</a></td>
 </tr>
 <tr>
@@ -3328,10 +3329,10 @@ one of them.</p>
 </tbody>
 </table>
 <div class="admonition note">
-<p class="admonition-title">Nix mode is not in a release</p>
-<p>Released 3.7.x rejects <code>--mode nix</code>. Nix mode exists on <code>main</code> only, so use
-a source checkout or an install from <code>main</code>. The install guide has the
-steps and the <code>ASH_NIX_FLAKE_REF</code> setting for installs of <code>main</code>.</p>
+<p class="admonition-title">Nix mode needs a current release</p>
+<p>Nix mode is in the latest release; v3.7.x and older reject <code>--mode nix</code>, so
+install a newer release or use a source checkout. The install guide has the
+steps and the <code>ASH_NIX_FLAKE_REF</code> setting.</p>
 </div>
 <h2 id="surfaces-and-backends">Surfaces and backends<a class="headerlink" href="#surfaces-and-backends" title="Permanent link">&para;</a></h2>
 <p>Which backend each surface can use, and where its guide is. A dash means the
@@ -3347,7 +3348,7 @@ guide does not document that combination.</p>
 <tbody>
 <tr>
 <td>Local scan</td>
-<td>Any installed <code>ash</code> (uv tool, uvx, pipx, pip, Homebrew), the container, or Nix (<code>main</code> only)</td>
+<td>Any installed <code>ash</code> (uv tool, uvx, pipx, pip, Homebrew), the container, or Nix</td>
 <td><a href="../getting-started/local/">Run ASH locally</a>, <a href="../how-to/run-in-a-container/">Run in a container</a></td>
 </tr>
 <tr>

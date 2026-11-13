@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="./#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3428,7 +3429,7 @@ scan exits 1. See <a href="#extras">Extras</a>.</p>
 <tr>
 <td><a href="#nix-mode">Nix mode</a></td>
 <td>you use Nix</td>
-<td>not in any release; install from <code>main</code> or use a source checkout</td>
+<td>supported</td>
 </tr>
 <tr>
 <td><a href="#homebrew">Homebrew</a></td>
@@ -3468,7 +3469,7 @@ scan exits 1. See <a href="#extras">Extras</a>.</p>
 <p>Open a new terminal so that uv's directory is on your <code>PATH</code>, then install ASH. The
 command is the same in a POSIX shell and in PowerShell:</p>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ash<span class="w"> </span>--version
 </span></code></pre></div>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>awslabs/automated-security-helper v3.8.0
@@ -3480,15 +3481,15 @@ MSYS2 ship an unrelated shell named <code>ash</code> that can come first on your
 <p>To move to another version, run the same command with the new tag and add <code>--force</code>.</p>
 <h2 id="run-without-installing-uvx">Run without installing: uvx<a class="headerlink" href="#run-without-installing-uvx" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uvx<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span>--from<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span><span class="w"> </span>ash<span class="w"> </span>--version
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uvx<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span>--from<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span><span class="w"> </span>ash<span class="w"> </span>--version
 </span></code></pre></div>
 <p>uvx builds the environment once and reuses it, so later runs start quickly. Every
 command needs the full <code>uvx --from</code> specification, so you may want a shell alias:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">alias</span><span class="w"> </span><span class="nv">ash</span><span class="o">=</span><span class="s2">&quot;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39; ash&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">alias</span><span class="w"> </span><span class="nv">ash</span><span class="o">=</span><span class="s2">&quot;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39; ash&quot;</span>
 </span></code></pre></div>
 <h2 id="install-with-pipx">Install with pipx<a class="headerlink" href="#install-with-pipx" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pipx<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span>python3.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pipx<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span>python3.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
 </span></code></pre></div>
 <p>Install pipx itself from your package manager, for example <code>apt install pipx</code> on
 Ubuntu, or with <code>uv tool install pipx</code>. On systems whose Python is marked as
@@ -3507,7 +3508,7 @@ virtual environment.</p>
 <p><!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python3.12<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>~/.venvs/ash
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>.<span class="w"> </span>~/.venvs/ash/bin/activate
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
 </span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>ash<span class="w"> </span>--version
 </span></code></pre></div></p>
 </div>
@@ -3516,7 +3517,7 @@ virtual environment.</p>
 <p><!-- doctest: illustrative reason="Windows only; installs ASH from GitHub over the network" -->
 <div class="language-powershell highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">py</span> <span class="p">-</span><span class="n">3</span><span class="p">.</span><span class="n">12</span> <span class="n">-m</span> <span class="n">venv</span> <span class="nv">$HOME</span><span class="p">\.</span><span class="n">venvs</span><span class="p">\</span><span class="n">ash</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="p">&amp;</span> <span class="nv">$HOME</span><span class="p">\.</span><span class="n">venvs</span><span class="p">\</span><span class="n">ash</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">Activate</span><span class="p">.</span><span class="n">ps1</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">pip</span> <span class="n">install</span> <span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">pip</span> <span class="n">install</span> <span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">ash</span> <span class="p">-</span><span class="n">-version</span>
 </span></code></pre></div></p>
 </div>
@@ -3603,6 +3604,10 @@ before upgrading a <code>v3</code> or <code>&lt;4</code> pin.</p>
 <p><code>main</code> reports the same version number as the latest release until the next release
 is made, so <code>ash --version</code> does not tell the two apart. Pin a commit SHA instead of
 <code>@main</code> when you need to know which code you ran.</p>
+<p>In <a href="#nix-mode">Nix mode</a>, an install of <code>main</code> resolves its flake to the latest
+release's tag, because that is the version it reports. Set
+<code>ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main</code>, or the commit you
+pinned, so the scanner toolchain matches the code.</p>
 <h2 id="container-image">Container image<a class="headerlink" href="#container-image" title="Permanent link">&para;</a></h2>
 <p>No ASH image is published. <code>ash --mode container</code> builds an image with every scanner
 on your machine and scans inside it; it rebuilds the image on every run unless you
@@ -3624,23 +3629,33 @@ In a scan of one directory, ASH resolves that config on the host before the shel
 A file that is missing, cannot be read, does not parse, or is not a valid config stops the
 scan with exit code 3 before the previous run's output is cleared, and that includes the
 file <code>ASH_CONFIG</code> names when <code>--config</code> names a valid one.</p>
-<p>Nix mode is not in any release: v3.7.x rejects <code>--mode nix</code>. Use it from a source
-checkout or from an install of <code>main</code>:</p>
+<p>Nix mode is in the latest release; v3.7.x and older reject <code>--mode nix</code>, so install a
+newer release:</p>
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network and scans in a Nix shell" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--mode<span class="w"> </span>nix
+</span></code></pre></div>
+<p>Which flake supplies the shell's tools:</p>
 <ul>
 <li>From a source checkout, ASH uses that checkout's <code>flake.nix</code>.</li>
-<li>An install of <code>main</code> looks for the flake at the release tag that matches its version
-  number. Until a release contains <code>flake.nix</code>, that fails with an error saying
-  <code>flake.nix</code> does not exist. Set <code>ASH_NIX_FLAKE_REF</code> to a flake reference that has
-  it: a checkout, written <code>path:</code> followed by its absolute path, or a branch or commit,
-  such as <code>github:awslabs/automated-security-helper/main</code>.</li>
+<li>An installed ASH looks for the flake at the release tag matching the version it
+  reports, which releases newer than v3.7.x ship, so a release install needs nothing
+  set.</li>
+<li>Set <code>ASH_NIX_FLAKE_REF</code> to scan with a different flake: a checkout, written <code>path:</code>
+  followed by its absolute path, or a branch, tag or commit of this repository or a
+  fork. An install of <code>main</code> reports the latest release's version number and so
+  resolves to that release's flake, not <code>main</code>'s; set
+  <code>ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main</code>, or a matching
+  commit, so the scanner toolchain matches the code you run (see
+  <a href="#install-from-main">Install from main</a>).</li>
 </ul>
 <h2 id="homebrew">Homebrew<a class="headerlink" href="#homebrew" title="Permanent link">&para;</a></h2>
 <p>The repository is a Homebrew tap: its formula is <code>Formula/ash.rb</code>. Add the tap and
 install the formula by its full name:</p>
 <!-- doctest: illustrative reason="installs ASH with Homebrew over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>brew<span class="w"> </span>tap<span class="w"> </span>awslabs/automated-security-helper<span class="w"> </span>https://github.com/awslabs/automated-security-helper.git
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>brew<span class="w"> </span>install<span class="w"> </span>awslabs/automated-security-helper/ash
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>ash<span class="w"> </span>--version
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>brew<span class="w"> </span>tap<span class="w"> </span>awslabs/automated-security-helper<span class="w"> </span>https://github.com/awslabs/automated-security-helper.git
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>brew<span class="w"> </span>install<span class="w"> </span>awslabs/automated-security-helper/ash
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>ash<span class="w"> </span>--version
 </span></code></pre></div>
 <p>Naming the formula in full installs it from a tap you have not trusted, and Homebrew
 trusts that one formula as it installs it. To install it by its short name,
@@ -3668,9 +3683,9 @@ installed <code>ash</code>. Homebrew is not available on Windows, and Linux on a
 <h2 id="uninstall">Uninstall<a class="headerlink" href="#uninstall" title="Permanent link">&para;</a></h2>
 <p>Remove ASH with the tool that installed it:</p>
 <!-- doctest: illustrative reason="removes software from the reader's machine" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>uninstall<span class="w"> </span>automated-security-helper
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>pipx<span class="w"> </span>uninstall<span class="w"> </span>automated-security-helper
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>brew<span class="w"> </span>uninstall<span class="w"> </span>ash
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>uninstall<span class="w"> </span>automated-security-helper
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>pipx<span class="w"> </span>uninstall<span class="w"> </span>automated-security-helper
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>brew<span class="w"> </span>uninstall<span class="w"> </span>ash
 </span></code></pre></div>
 <p>For a pip install, delete the virtual environment. After <code>brew uninstall</code>, remove the tap
 with <code>brew untap awslabs/automated-security-helper</code>.</p>

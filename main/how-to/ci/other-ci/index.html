@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../../install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3353,7 +3354,7 @@ the full set. See <a href="../../pre-commit/#with-ci">Pre-commit and CI together
 <!-- doctest: illustrative reason="installs ASH and scanner tools from the network" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python3<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/ash-venv&quot;</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/ash-venv/bin/pip&quot;</span><span class="w"> </span>install<span class="w"> </span>--quiet<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="s2">&quot;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="s2">&quot;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/ash-venv/bin:</span><span class="nv">$PATH</span><span class="s2">&quot;</span>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ash<span class="w"> </span>dependencies<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--tool<span class="w"> </span>actionlint<span class="w"> </span>--tool<span class="w"> </span>cfn-guard<span class="w"> </span>--tool<span class="w"> </span>cfn-nag<span class="w"> </span>--tool<span class="w"> </span>gitleaks<span class="w"> </span><span class="se">\</span>
@@ -3372,7 +3373,7 @@ the virtual environment form unless you take the extra step in their sections:</
 <!-- doctest: illustrative reason="installs ASH and scanner tools from the network" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>uvx<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span>--from<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span>ash<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="o">}</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="o">(</span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ash<span class="w"> </span>dependencies<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
@@ -3474,11 +3475,10 @@ build image, running <code>ash scan --mode local</code> inside it. Nothing is in
 <a href="../../run-in-a-container/">Run ASH in a container</a> and
 <a href="../../../getting-started/platform-teams/">Roll out ASH across repositories</a>.</p>
 <h2 id="nix">Nix mode<a class="headerlink" href="#nix" title="Permanent link">&para;</a></h2>
-<div class="admonition warning">
-<p class="admonition-title">Nix mode is on <code>main</code> only</p>
-<p>Nix mode is not in any release: v3.7.x rejects <code>--mode nix</code>. Install ASH from <code>main</code>, as
-below, or from a source checkout. Pin a commit SHA instead of <code>main</code> when you need to
-know which code ran.</p>
+<div class="admonition note">
+<p class="admonition-title">Nix mode needs a current release</p>
+<p>Nix mode is in the latest release; v3.7.x and older reject <code>--mode nix</code>. Install
+that release, as below, or use a source checkout.</p>
 </div>
 <p>Nix mode (<code>--mode nix</code>) runs the scan inside a Nix shell whose scanner tools come from
 ASH's <code>flake.nix</code>, so the build host does not need the <code>ash dependencies install</code> step or
@@ -3491,17 +3491,17 @@ the Ruby packages the <a href="#recipe">recipe</a> uses for cfn-nag. The host ne
 <li>Node.js is supplied by the flake. Network access is still needed for the scanners'
   databases and rules.</li>
 </ul>
-<p>An install of <code>main</code> looks for <code>flake.nix</code> at the release tag that matches its version
-number, and no release has one, so set <code>ASH_NIX_FLAKE_REF</code> to a flake reference that does:</p>
-<!-- doctest: illustrative reason="installs ASH from main and needs Nix and the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_NIX_FLAKE_REF</span><span class="o">=</span>github:awslabs/automated-security-helper/main
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nv">ash_exit</span><span class="o">=</span><span class="m">0</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>ash<span class="w"> </span>scan<span class="w"> </span>--mode<span class="w"> </span>nix<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--fail-on-findings<span class="w"> </span>--fail-on-incomplete-scanners<span class="w"> </span>--no-allow-stale-content-db<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="o">||</span><span class="w"> </span><span class="nv">ash_exit</span><span class="o">=</span><span class="nv">$?</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>tar<span class="w"> </span>-czf<span class="w"> </span>ash-output.tar.gz<span class="w"> </span>.ash/ash_output
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nb">exit</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ash_exit</span><span class="s2">&quot;</span>
+<p>An installed release looks for <code>flake.nix</code> at its own release tag, so the recipe sets
+no <code>ASH_NIX_FLAKE_REF</code>; set it only to scan with a different flake, such as when
+running ASH from <code>main</code> or a fork (<a href="../../install/#nix-mode">Nix mode</a>):</p>
+<!-- doctest: illustrative reason="installs ASH from GitHub and needs Nix and the network" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">ash_exit</span><span class="o">=</span><span class="m">0</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>ash<span class="w"> </span>scan<span class="w"> </span>--mode<span class="w"> </span>nix<span class="w"> </span>--no-progress<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--fail-on-findings<span class="w"> </span>--fail-on-incomplete-scanners<span class="w"> </span>--no-allow-stale-content-db<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="o">||</span><span class="w"> </span><span class="nv">ash_exit</span><span class="o">=</span><span class="nv">$?</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>tar<span class="w"> </span>-czf<span class="w"> </span>ash-output.tar.gz<span class="w"> </span>.ash/ash_output
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="nb">exit</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ash_exit</span><span class="s2">&quot;</span>
 </span></code></pre></div>
 <p>From a source checkout of ASH, leave <code>ASH_NIX_FLAKE_REF</code> unset: ASH uses that checkout's
 <code>flake.nix</code>. The exit codes and the output directory are the same as in local mode, so
@@ -3531,7 +3531,7 @@ Ruby:</p>
 <div class="language-groovy highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">pipeline</span><span class="w"> </span><span class="o">{</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="n">agent</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="n">label</span><span class="w"> </span><span class="s1">&#39;linux&#39;</span><span class="w"> </span><span class="o">}</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="n">environment</span><span class="w"> </span><span class="o">{</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="n">INSTALL_SPEC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="n">INSTALL_SPEC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="o">}</span>
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="n">stages</span><span class="w"> </span><span class="o">{</span>
 </span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="n">stage</span><span class="o">(</span><span class="s1">&#39;ASH&#39;</span><span class="o">)</span><span class="w"> </span><span class="o">{</span>
@@ -3570,7 +3570,7 @@ from <a href="../../run-in-a-container/#own-image">Build and host your own image
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nt">env</span><span class="p">:</span>
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">variables</span><span class="p">:</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
 </span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nt">phases</span><span class="p">:</span>
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="nt">install</span><span class="p">:</span>
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="nt">runtime-versions</span><span class="p">:</span>
@@ -3607,7 +3607,7 @@ mode, as above, does not.</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">pool</span><span class="p">:</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">vmImage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">variables</span><span class="p">:</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nt">steps</span><span class="p">:</span>
 </span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UsePythonVersion@0</span>
 </span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="nt">inputs</span><span class="p">:</span>
@@ -3669,7 +3669,7 @@ mode, as above, does not.</p>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">docker</span><span class="p">:</span>
 </span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cimg/python:3.12-node</span>
 </span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
 </span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 </span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">checkout</span>
 </span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span>
@@ -3680,12 +3680,12 @@ mode, as above, does not.</p>
 </span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">            </span><span class="no">&quot;$HOME/ash-venv/bin/pip&quot; install --quiet &quot;$INSTALL_SPEC&quot;</span>
 </span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">            </span><span class="no">echo &#39;export PATH=&quot;$HOME/ash-venv/bin:$PATH&quot;&#39; &gt;&gt; &quot;$BASH_ENV&quot;</span>
 </span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">restore_cache</span><span class="p">:</span>
-</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-main-{{ arch }}</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-v3.8.0-{{ arch }}</span>
 </span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span>
 </span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install scanner tools</span>
 </span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="w">          </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">(cd &quot;$(mktemp -d)&quot; &amp;&amp; ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)</span>
 </span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">save_cache</span><span class="p">:</span>
-</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-main-{{ arch }}</span>
+</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="w">          </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-v3.8.0-{{ arch }}</span>
 </span><span id="__span-8-24"><a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="w">          </span><span class="nt">paths</span><span class="p">:</span>
 </span><span id="__span-8-25"><a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ash/bin</span>
 </span><span id="__span-8-26"><a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span>

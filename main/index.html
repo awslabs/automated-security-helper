@@ -131,10 +131,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../.">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../.">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="how-to/install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -569,7 +570,6 @@ SOFTWARE.
 
 
 
-
 <div class="ash-builder" data-ash-builder>
   <div class="ash-builder__pickers" data-ash-builder-pickers hidden>
     <div class="ash-builder__group">
@@ -604,7 +604,7 @@ SOFTWARE.
         
         <button type="button" aria-pressed="false" data-ash-backend="container">Container <span class="ash-builder__tag">build it yourself</span></button>
         
-        <button type="button" aria-pressed="false" data-ash-backend="nix">Nix <span class="ash-builder__tag">main only</span></button>
+        <button type="button" aria-pressed="false" data-ash-backend="nix">Nix</button>
         
         <button type="button" aria-pressed="false" data-ash-backend="brew">Homebrew</button>
         
@@ -622,9 +622,9 @@ SOFTWARE.
       
       <div class="ash-builder__block">
         <div class="ash-terminal__comment"># Shell</div>
-        <div class="ash-builder__code"><pre tabindex="0"><code>uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
+        <div class="ash-builder__code"><pre tabindex="0"><code>uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
 ash dependencies install
-ash scan --mode local</code></pre><button class="ash-copy" type="button" data-ash-copy="uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
+ash scan --mode local</code></pre><button class="ash-copy" type="button" data-ash-copy="uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
 ash dependencies install
 ash scan --mode local" aria-label="Copy Local scan with uv tool: Shell"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
       </div>
@@ -639,9 +639,9 @@ ash scan --mode local" aria-label="Copy Local scan with uv tool: Shell"><span cl
       
       <div class="ash-builder__block">
         <div class="ash-terminal__comment"># Shell</div>
-        <div class="ash-builder__code"><pre tabindex="0"><code>alias ash=&#34;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39; ash&#34;
+        <div class="ash-builder__code"><pre tabindex="0"><code>alias ash=&#34;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39; ash&#34;
 ash dependencies install
-ash scan --mode local</code></pre><button class="ash-copy" type="button" data-ash-copy="alias ash=&#34;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39; ash&#34;
+ash scan --mode local</code></pre><button class="ash-copy" type="button" data-ash-copy="alias ash=&#34;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39; ash&#34;
 ash dependencies install
 ash scan --mode local" aria-label="Copy Local scan with uvx: Shell"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
       </div>
@@ -656,9 +656,9 @@ ash scan --mode local" aria-label="Copy Local scan with uvx: Shell"><span class=
       
       <div class="ash-builder__block">
         <div class="ash-terminal__comment"># Shell</div>
-        <div class="ash-builder__code"><pre tabindex="0"><code>pipx install --python python3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
+        <div class="ash-builder__code"><pre tabindex="0"><code>pipx install --python python3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
 ash dependencies install
-ash scan --mode local</code></pre><button class="ash-copy" type="button" data-ash-copy="pipx install --python python3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
+ash scan --mode local</code></pre><button class="ash-copy" type="button" data-ash-copy="pipx install --python python3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
 ash dependencies install
 ash scan --mode local" aria-label="Copy Local scan with pipx: Shell"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
       </div>
@@ -675,11 +675,11 @@ ash scan --mode local" aria-label="Copy Local scan with pipx: Shell"><span class
         <div class="ash-terminal__comment"># Shell</div>
         <div class="ash-builder__code"><pre tabindex="0"><code>python3.12 -m venv ~/.venvs/ash
 . ~/.venvs/ash/bin/activate
-pip install &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
+pip install &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
 ash dependencies install
 ash scan --mode local</code></pre><button class="ash-copy" type="button" data-ash-copy="python3.12 -m venv ~/.venvs/ash
 . ~/.venvs/ash/bin/activate
-pip install &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
+pip install &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
 ash dependencies install
 ash scan --mode local" aria-label="Copy Local scan with pip: Shell"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
       </div>
@@ -700,21 +700,19 @@ ash scan --mode local" aria-label="Copy Local scan with pip: Shell"><span class=
       <p class="ash-builder__links"><a href="how-to/run-in-a-container/">Run ASH in a container</a> <span aria-hidden="true">·</span> <a href="how-to/install/#container-image">Container image</a></p>
     </section>
     
-    <section class="ash-builder__panel" aria-labelledby="builder-local-nix" data-ash-panel="local-nix" data-ash-pick-for="local" data-ash-backends-for="nix" data-ash-title="Local scan in Nix mode" data-ash-caveat="Nix mode is not in any release: it works from main or a source checkout only.">
+    <section class="ash-builder__panel" aria-labelledby="builder-local-nix" data-ash-panel="local-nix" data-ash-pick-for="local" data-ash-backends-for="nix" data-ash-title="Local scan in Nix mode">
       <h3 class="ash-builder__title" id="builder-local-nix">Local scan in Nix mode</h3>
-      <p class="ash-builder__note">Installs ASH from main, then scans inside a Nix shell. Needs Nix with flakes enabled.</p>
-      <p class="ash-builder__caveat">Nix mode is not in any release: it works from main or a source checkout only.</p>
+      <p class="ash-builder__note">Installs ASH, then scans inside a Nix shell whose scanner tools come from the release's flake. Needs Nix with flakes enabled.</p>
+      
       
       <div class="ash-builder__block">
         <div class="ash-terminal__comment"># Shell</div>
-        <div class="ash-builder__code"><pre tabindex="0"><code>uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
-export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main
-ash scan --mode nix</code></pre><button class="ash-copy" type="button" data-ash-copy="uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;
-export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main
+        <div class="ash-builder__code"><pre tabindex="0"><code>uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
+ash scan --mode nix</code></pre><button class="ash-copy" type="button" data-ash-copy="uv tool install --python 3.12 &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;
 ash scan --mode nix" aria-label="Copy Local scan in Nix mode: Shell"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
       </div>
       
-      <p class="ash-builder__links"><a href="how-to/install/#nix-mode">Nix mode</a> <span aria-hidden="true">·</span> <a href="how-to/install/#install-from-main">Install from main</a></p>
+      <p class="ash-builder__links"><a href="how-to/install/#nix-mode">Nix mode</a> <span aria-hidden="true">·</span> <a href="getting-started/local/">Run ASH locally</a></p>
     </section>
     
     <section class="ash-builder__panel" aria-labelledby="builder-local-brew" data-ash-panel="local-brew" data-ash-pick-for="local" data-ash-backends-for="brew" data-ash-title="Local scan with Homebrew">
@@ -745,11 +743,11 @@ ash scan --mode local" aria-label="Copy Local scan with Homebrew: Shell"><span c
         <div class="ash-terminal__comment"># .pre-commit-config.yaml</div>
         <div class="ash-builder__code"><pre tabindex="0"><code>repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: main
+    rev: v3.8.0
     hooks:
       - id: ash</code></pre><button class="ash-copy" type="button" data-ash-copy="repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: main
+    rev: v3.8.0
     hooks:
       - id: ash" aria-label="Copy pre-commit hook: .pre-commit-config.yaml"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
       </div>
@@ -773,12 +771,12 @@ pre-commit run ash --all-files" aria-label="Copy pre-commit hook: Shell"><span c
         <div class="ash-terminal__comment"># .pre-commit-config.yaml</div>
         <div class="ash-builder__code"><pre tabindex="0"><code>repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: main
+    rev: v3.8.0
     hooks:
       - id: ash-full-scan
         stages: [manual]</code></pre><button class="ash-copy" type="button" data-ash-copy="repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: main
+    rev: v3.8.0
     hooks:
       - id: ash-full-scan
         stages: [manual]" aria-label="Copy pre-commit full-scan hook: .pre-commit-config.yaml"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
@@ -792,10 +790,10 @@ pre-commit run ash --all-files" aria-label="Copy pre-commit hook: Shell"><span c
       <p class="ash-builder__links"><a href="how-to/pre-commit/#full-scan">The ash-full-scan hook</a></p>
     </section>
     
-    <section class="ash-builder__panel" aria-labelledby="builder-pc-na" data-ash-panel="pc-na" data-ash-pick-for="precommit" data-ash-backends-for="nix" data-ash-title="pre-commit: not offered for Nix" data-ash-caveat="Nix mode is not in any release: it works from main or a source checkout only.">
+    <section class="ash-builder__panel" aria-labelledby="builder-pc-na" data-ash-panel="pc-na" data-ash-pick-for="precommit" data-ash-backends-for="nix" data-ash-title="pre-commit: not offered for Nix">
       <h3 class="ash-builder__title" id="builder-pc-na">pre-commit: not offered for Nix</h3>
-      <p class="ash-builder__note">There is no pre-commit snippet for this backend. The pre-commit guide has a Nix recipe for main, and a hook that runs an ASH you already installed.</p>
-      <p class="ash-builder__caveat">Nix mode is not in any release: it works from main or a source checkout only.</p>
+      <p class="ash-builder__note">There is no pre-commit snippet for this backend. The pre-commit guide has a Nix hook that runs an ASH you already installed.</p>
+      
       
       <p class="ash-builder__links"><a href="how-to/pre-commit/">Run ASH with pre-commit</a> <span aria-hidden="true">·</span> <a href="how-to/pre-commit/#nix">Run the hook in Nix mode</a> <span aria-hidden="true">·</span> <a href="integrations/">Integrations overview</a></p>
     </section>
@@ -816,19 +814,19 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
-      ash-version: main
+      ash-version: v3.8.0
       ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
   sarif:
     needs: ash
     if: ${{ !cancelled() &amp;&amp; needs.ash.outputs.artifact-id != &#39;&#39; }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0
     permissions:
       contents: read
       security-events: write</code></pre><button class="ash-copy" type="button" data-ash-copy="name: ASH
@@ -840,19 +838,19 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
-      ash-version: main
+      ash-version: v3.8.0
       ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
   sarif:
     needs: ash
     if: ${{ !cancelled() &amp;&amp; needs.ash.outputs.artifact-id != &#39;&#39; }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0
     permissions:
       contents: read
       security-events: write" aria-label="Copy GitHub Actions: reusable workflows: GitHub Actions workflow"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
@@ -877,20 +875,20 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
       ash-mode: container
-      ash-version: main
+      ash-version: v3.8.0
       ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
   sarif:
     needs: ash
     if: ${{ !cancelled() &amp;&amp; needs.ash.outputs.artifact-id != &#39;&#39; }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0
     permissions:
       contents: read
       security-events: write</code></pre><button class="ash-copy" type="button" data-ash-copy="name: ASH
@@ -902,20 +900,20 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
       ash-mode: container
-      ash-version: main
+      ash-version: v3.8.0
       ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
   sarif:
     needs: ash
     if: ${{ !cancelled() &amp;&amp; needs.ash.outputs.artifact-id != &#39;&#39; }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@main
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0
     permissions:
       contents: read
       security-events: write" aria-label="Copy GitHub Actions: container mode: GitHub Actions workflow"><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M184,66H40a6,6,0,0,0-6,6V216a6,6,0,0,0,6,6H184a6,6,0,0,0,6-6V72A6,6,0,0,0,184,66Zm-6,144H46V78H178ZM222,40V184a6,6,0,0,1-12,0V46H72a6,6,0,0,1,0-12H216A6,6,0,0,1,222,40Z"/></svg></span></button></div>
@@ -924,10 +922,10 @@ jobs:
       <p class="ash-builder__links"><a href="how-to/ci/github-actions/#reusable">Run ASH in GitHub Actions</a> <span aria-hidden="true">·</span> <a href="how-to/run-in-a-container/">Run ASH in a container</a></p>
     </section>
     
-    <section class="ash-builder__panel" aria-labelledby="builder-gha-na" data-ash-panel="gha-na" data-ash-pick-for="gha" data-ash-backends-for="nix" data-ash-title="GitHub Actions: not offered for Nix" data-ash-caveat="Nix mode is not in any release: it works from main or a source checkout only.">
+    <section class="ash-builder__panel" aria-labelledby="builder-gha-na" data-ash-panel="gha-na" data-ash-pick-for="gha" data-ash-backends-for="nix" data-ash-title="GitHub Actions: not offered for Nix">
       <h3 class="ash-builder__title" id="builder-gha-na">GitHub Actions: not offered for Nix</h3>
-      <p class="ash-builder__note">The reusable workflow takes local or container for ash-mode and installs ASH on the runner. The GitHub Actions guide has a Nix recipe for main.</p>
-      <p class="ash-builder__caveat">Nix mode is not in any release: it works from main or a source checkout only.</p>
+      <p class="ash-builder__note">The reusable workflow takes local or container for ash-mode and installs ASH on the runner. The GitHub Actions guide has a Nix recipe.</p>
+      
       
       <p class="ash-builder__links"><a href="how-to/ci/github-actions/#nix">Run in Nix mode</a> <span aria-hidden="true">·</span> <a href="how-to/ci/other-ci/">Other CI systems</a> <span aria-hidden="true">·</span> <a href="integrations/">Integrations overview</a></p>
     </section>
@@ -943,7 +941,7 @@ jobs:
   stage: test
   image: python:3.12
   variables:
-    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#34;
+    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#34;
   before_script:
     - apt-get update -o Acquire::Retries=3 &amp;&amp; apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - python -m venv /opt/ash
@@ -978,7 +976,7 @@ ash-gate:
   stage: test
   image: python:3.12
   variables:
-    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#34;
+    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#34;
   before_script:
     - apt-get update -o Acquire::Retries=3 &amp;&amp; apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - python -m venv /opt/ash
@@ -1026,7 +1024,7 @@ ash-gate:
   stage: test
   image: python:3.12
   variables:
-    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#34;
+    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#34;
   before_script:
     - apt-get update -o Acquire::Retries=3 &amp;&amp; apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - pip install --quiet uv
@@ -1060,7 +1058,7 @@ ash-gate:
   stage: test
   image: python:3.12
   variables:
-    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#34;
+    INSTALL_SPEC: &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#34;
   before_script:
     - apt-get update -o Acquire::Retries=3 &amp;&amp; apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - pip install --quiet uv
@@ -1159,12 +1157,12 @@ ash-gate:
       <p class="ash-builder__links"><a href="how-to/ci/gitlab-ci/#use-your-own-ash-image">Use your own ASH image</a> <span aria-hidden="true">·</span> <a href="how-to/run-in-a-container/#own-image">Build and host your own image</a></p>
     </section>
     
-    <section class="ash-builder__panel" aria-labelledby="builder-gl-na" data-ash-panel="gl-na" data-ash-pick-for="gitlab" data-ash-backends-for="nix brew" data-ash-title="GitLab CI: not offered for Nix or Homebrew" data-ash-caveat="Nix mode is not in any release: it works from main or a source checkout only.">
+    <section class="ash-builder__panel" aria-labelledby="builder-gl-na" data-ash-panel="gl-na" data-ash-pick-for="gitlab" data-ash-backends-for="nix brew" data-ash-title="GitLab CI: not offered for Nix or Homebrew">
       <h3 class="ash-builder__title" id="builder-gl-na">GitLab CI: not offered for Nix or Homebrew</h3>
-      <p class="ash-builder__note">The GitLab guide documents the pip, uvx, and own-image forms. Its Nix mode is covered in the other CI systems guide.</p>
-      <p class="ash-builder__caveat">Nix mode is not in any release: it works from main or a source checkout only.</p>
+      <p class="ash-builder__note">The GitLab guide documents the pip, uvx, and own-image forms here, and has its own Nix mode section.</p>
       
-      <p class="ash-builder__links"><a href="how-to/ci/gitlab-ci/">Run ASH in GitLab CI</a> <span aria-hidden="true">·</span> <a href="how-to/ci/other-ci/#nix">Nix mode in CI</a> <span aria-hidden="true">·</span> <a href="integrations/">Integrations overview</a></p>
+      
+      <p class="ash-builder__links"><a href="how-to/ci/gitlab-ci/">Run ASH in GitLab CI</a> <span aria-hidden="true">·</span> <a href="how-to/ci/gitlab-ci/#nix">Nix mode in GitLab CI</a> <span aria-hidden="true">·</span> <a href="integrations/">Integrations overview</a></p>
     </section>
     
     <section class="ash-builder__panel" aria-labelledby="builder-ci-pip" data-ash-panel="ci-pip" data-ash-pick-for="otherci" data-ash-backends-for="uvtool pipx pip" data-ash-title="Other CI systems: shell recipe, pip">
@@ -1176,14 +1174,14 @@ ash-gate:
         <div class="ash-terminal__comment"># Shell</div>
         <div class="ash-builder__code"><pre tabindex="0"><code>python3 -m venv &#34;$HOME/ash-venv&#34;
 &#34;$HOME/ash-venv/bin/pip&#34; install --quiet \
-  &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#34;
+  &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#34;
 export PATH=&#34;$HOME/ash-venv/bin:$PATH&#34;
 (cd &#34;$(mktemp -d)&#34; &amp;&amp; ash dependencies install \
   --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
 ash scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db</code></pre><button class="ash-copy" type="button" data-ash-copy="python3 -m venv &#34;$HOME/ash-venv&#34;
 &#34;$HOME/ash-venv/bin/pip&#34; install --quiet \
-  &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#34;
+  &#34;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#34;
 export PATH=&#34;$HOME/ash-venv/bin:$PATH&#34;
 (cd &#34;$(mktemp -d)&#34; &amp;&amp; ash dependencies install \
   --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
@@ -1203,7 +1201,7 @@ ash scan --mode local --no-progress \
         <div class="ash-terminal__comment"># Shell</div>
         <div class="ash-builder__code"><pre tabindex="0"><code>ash() {
   uvx --python 3.12 --from \
-    &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39; \
+    &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39; \
     ash &#34;$@&#34;
 }
 (cd &#34;$(mktemp -d)&#34; &amp;&amp; ash dependencies install \
@@ -1211,7 +1209,7 @@ ash scan --mode local --no-progress \
 ash scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db</code></pre><button class="ash-copy" type="button" data-ash-copy="ash() {
   uvx --python 3.12 --from \
-    &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39; \
+    &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39; \
     ash &#34;$@&#34;
 }
 (cd &#34;$(mktemp -d)&#34; &amp;&amp; ash dependencies install \
@@ -1223,10 +1221,10 @@ ash scan --mode local --no-progress \
       <p class="ash-builder__links"><a href="how-to/ci/other-ci/#recipe">The recipe</a> <span aria-hidden="true">·</span> <a href="how-to/install/#run-without-installing-uvx">Run without installing: uvx</a></p>
     </section>
     
-    <section class="ash-builder__panel" aria-labelledby="builder-ci-na" data-ash-panel="ci-na" data-ash-pick-for="otherci" data-ash-backends-for="container nix brew" data-ash-title="Other CI systems: not offered here" data-ash-caveat="Nix mode is not in any release: it works from main or a source checkout only.">
+    <section class="ash-builder__panel" aria-labelledby="builder-ci-na" data-ash-panel="ci-na" data-ash-pick-for="otherci" data-ash-backends-for="container nix brew" data-ash-title="Other CI systems: not offered here">
       <h3 class="ash-builder__title" id="builder-ci-na">Other CI systems: not offered here</h3>
       <p class="ash-builder__note">The shell recipe covers pip and uvx. Container mode in CI builds an image on every fresh host, and the guide explains the alternatives. Nix mode has its own section.</p>
-      <p class="ash-builder__caveat">Nix mode is not in any release: it works from main or a source checkout only.</p>
+      
       
       <p class="ash-builder__links"><a href="how-to/ci/other-ci/#modes">Local mode or container mode</a> <span aria-hidden="true">·</span> <a href="how-to/ci/other-ci/#nix">Nix mode in CI</a> <span aria-hidden="true">·</span> <a href="integrations/">Integrations overview</a></p>
     </section>
@@ -1270,7 +1268,7 @@ ash scan --mode local --no-progress \
     &#34;ash&#34;: {
       &#34;command&#34;: &#34;uvx&#34;,
       &#34;args&#34;: [
-        &#34;--from=git+https://github.com/awslabs/automated-security-helper@main&#34;,
+        &#34;--from=git+https://github.com/awslabs/automated-security-helper@v3.8.0&#34;,
         &#34;ash&#34;,
         &#34;mcp&#34;
       ]
@@ -1281,7 +1279,7 @@ ash scan --mode local --no-progress \
     &#34;ash&#34;: {
       &#34;command&#34;: &#34;uvx&#34;,
       &#34;args&#34;: [
-        &#34;--from=git+https://github.com/awslabs/automated-security-helper@main&#34;,
+        &#34;--from=git+https://github.com/awslabs/automated-security-helper@v3.8.0&#34;,
         &#34;ash&#34;,
         &#34;mcp&#34;
       ]
@@ -1293,10 +1291,10 @@ ash scan --mode local --no-progress \
       <p class="ash-builder__links"><a href="how-to/mcp-server/#start-the-server-with-uvx-instead-of-an-installed-ash">Start the server with uvx</a> <span aria-hidden="true">·</span> <a href="how-to/agent-plugins/#choose-your-platform">Setup for 16 agent platforms</a></p>
     </section>
     
-    <section class="ash-builder__panel" aria-labelledby="builder-mcp-na" data-ash-panel="mcp-na" data-ash-pick-for="mcp" data-ash-backends-for="container nix" data-ash-title="MCP server: not offered for a container or Nix" data-ash-caveat="Nix mode is not in any release: it works from main or a source checkout only.">
+    <section class="ash-builder__panel" aria-labelledby="builder-mcp-na" data-ash-panel="mcp-na" data-ash-pick-for="mcp" data-ash-backends-for="container nix" data-ash-title="MCP server: not offered for a container or Nix">
       <h3 class="ash-builder__title" id="builder-mcp-na">MCP server: not offered for a container or Nix</h3>
       <p class="ash-builder__note">The docs run the server over stdio from an installed ash or uvx. A containerized server is covered for the AWS deployments, over streamable HTTP.</p>
-      <p class="ash-builder__caveat">Nix mode is not in any release: it works from main or a source checkout only.</p>
+      
       
       <p class="ash-builder__links"><a href="how-to/mcp-server/#run-in-a-container">Run the server in a container</a> <span aria-hidden="true">·</span> <a href="how-to/deploy-on-aws/#targets">Deploy ASH on AWS</a> <span aria-hidden="true">·</span> <a href="integrations/">Integrations overview</a></p>
     </section>

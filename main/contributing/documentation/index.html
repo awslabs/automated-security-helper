@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../../how-to/install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -4782,13 +4783,13 @@ branch lists them for the version selector in the site header.</p>
 <ul>
 <li>Every push to <code>main</code> publishes the version <code>main</code>, titled "main (unreleased)". Its
   pages say that they describe unreleased code, and link to the latest release. Its
-  <a href="../releases/#version-pinned-pages">version-pinned pages</a> are built from their
-  templates with <code>main</code> for the version, so their install commands install <code>main</code>
-  (<code>@main</code>, <code>git clone --branch main</code>, <code>rev: main</code>), and the notice says so. Where a
+  <a href="../releases/#version-pinned-pages">version-pinned pages</a> are served as committed,
+  so their install commands pin the current release, and the notice says so: a reader
+  of the <code>main</code> docs is advised to install the latest release, never <code>main</code>. Where a
   template needs the release number itself, as in a sample of <code>ash --version</code> output,
-  it writes <code>{{RELEASE}}</code>, which stays the current release number. The static checks
-  report <code>{{RELEASE}}</code> written as the ref of an install command anywhere but a table
-  row or a <code>text</code> block, so the <code>main</code> version cannot install a release.</li>
+  it writes <code>{{RELEASE}}</code>; the ref of an install command is written <code>v{{VERSION}}</code>,
+  the placeholder the release tooling moves, and the static checks report
+  <code>{{RELEASE}}</code> written as such a ref anywhere but a table row or a <code>text</code> block.</li>
 <li>Running the docs workflow by hand on a release tag <code>vX.Y.Z</code> publishes the version <code>X.Y.Z</code> (see
   <a href="../releases/#the-documentation-site">Releases and versions</a>). The newest release also
   gets the <code>latest</code> alias. <code>latest/</code> is a full copy of it rather than a redirect, and
@@ -4839,10 +4840,10 @@ of the branch: a stylesheet, a sitemap, a page no version has, and an old page f
   unreleased one, and no page carries the other;</li>
 <li><code>latest/</code> is a copy of 0.0.1, and the other versions name <code>latest/</code> as canonical;</li>
 <li>the version-pinned pages of each release pin that release and no other. On <code>main</code>,
-  outside tables and <code>text</code> blocks, they pin no release, and every install-command form
-  that a page uses in 0.0.1 names <code>main</code> on that page, from <code>@main</code> to
-  <code>refs/heads/main</code>. The committed pages pin the current version, which is neither 0.0.1
-  nor 0.0.0, so this fails unless every build rendered the pages from their templates;</li>
+  outside tables and <code>text</code> blocks, they pin exactly the current release, in every
+  install-command form that a page uses in 0.0.1. The committed pages pin the current
+  version, which is neither 0.0.1 nor 0.0.0, so this fails unless every release build
+  rendered the pages from their templates;</li>
 <li>the root redirects every page of <code>latest/</code>, the old page redirects to its place under
   <code>latest/</code>, and the stand-ins are gone.</li>
 </ul>
@@ -4850,8 +4851,8 @@ of the branch: a stylesheet, a sitemap, a page no version has, and an old page f
 and redirects it checked. <code>tests/unit/test_docs_versions.py</code> plants each defect the
 check exists for (a missing setting in <code>mkdocs.yml</code>, a template without the notices,
 aliases that are not copies, a root left unversioned, an older release that takes
-<code>latest</code>, pinned pages left as committed) on a small site, and requires the check to
-report it.</p>
+<code>latest</code>, a release's pinned pages left unrendered, a committed page pinning the wrong
+release) on a small site, and requires the check to report it.</p>
 <h2 id="what-a-failure-means">What a failure means<a class="headerlink" href="#what-a-failure-means" title="Permanent link">&para;</a></h2>
 <p>Each static finding is one line: the file and line, the check in brackets, and the
 problem. Runner failures name the page, the line of the block, the command, the exit

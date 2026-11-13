@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../../how-to/install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3527,13 +3528,12 @@ the version from the installed package's metadata before it looks at <code>pypro
 </span></code></pre></div>
 <p>The docs site renders these templates as well, through the mkdocs hook
 <code>docs/hooks/install_refs.py</code>. When it builds a release's docs it renders them with that
-release's version, which gives the committed page. When it builds the <code>main</code> version it
-renders them with <code>main</code>: <code>v{{VERSION}}</code> becomes <code>main</code>, so <code>@v{{VERSION}}</code> becomes
-<code>@main</code>, <code>git clone --branch v{{VERSION}}</code> becomes <code>git clone --branch main</code> and
-<code>rev: v{{VERSION}}</code> becomes <code>rev: main</code>; <code>refs/tags/v{{VERSION}}</code> becomes <code>refs/heads/main</code>;
-and a bare <code>{{VERSION}}</code> becomes <code>main</code>. <code>{{RELEASE}}</code> becomes the current release number,
-which is what an install of <code>main</code> reports. Any other build, such as <code>mkdocs serve</code>, shows
-the committed pages.</p>
+release's version, which gives the committed page. Every other build, the <code>main</code>
+version's and <code>mkdocs serve</code>'s included, shows the committed pages, whose install
+commands pin the current release: the <code>main</code> docs describe unreleased code, but their
+reader is advised to install the latest release, not <code>main</code>. The hook still fails a
+<code>main</code> build whose version-pinned page has no template, so a deleted template is caught
+on the next push to <code>main</code> rather than at the next release.</p>
 <p>So write every sentence around <code>{{VERSION}}</code> to read correctly with either a release or
 <code>main</code> in its place ("installs ASH <code>v{{VERSION}}</code>", not "installs the <code>v{{VERSION}}</code>
 release"), and use <code>{{RELEASE}}</code> only where the number has to stay a release number. Never

@@ -129,10 +129,11 @@ SOFTWARE.
             <span data-ash-notice="unreleased">
       These docs describe the main branch, which is ahead of the latest release, so a
       feature described here may not be in a release yet.
-      The install commands in this version of the docs install
-      <code>main</code>, not a release.
-      To install a release,
-      <a href="../../../..">read the docs for the latest release</a>.
+      The install commands on these pages install the latest release,
+      <code>v3.8.0</code>, not main:
+      <a href="../../../..">read the latest release's docs</a> for what they
+      install. To run what these pages describe,
+      <a href="../../install/#install-from-main">install from main</a>.
     </span>
           </div>
           
@@ -3241,7 +3242,7 @@ needs GitLab Ultimate.</p>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python:3.12</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">variables</span><span class="p">:</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">before_script</span><span class="p">:</span>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apt-get update -o Acquire::Retries=3 &amp;&amp; apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python -m venv /opt/ash</span>
@@ -3448,7 +3449,7 @@ above; set its <code>needs</code> to <code>ash-scan-uvx</code> when this job rep
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python:3.12</span>
 </span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">variables</span><span class="p">:</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
 </span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">before_script</span><span class="p">:</span>
 </span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apt-get update -o Acquire::Retries=3 &amp;&amp; apt-get install -y -o Acquire::Retries=3 --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev</span>
 </span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pip install --quiet uv</span>
@@ -3478,10 +3479,10 @@ above; set its <code>needs</code> to <code>ash-scan-uvx</code> when this job rep
 lives in the job's shell, so it covers every <code>ash</code> call in <code>before_script</code> and <code>script</code>. Use
 the pip recipe when you want a plain <code>ash</code> executable on <code>PATH</code>.</p>
 <h2 id="nix">Run in Nix mode<a class="headerlink" href="#nix" title="Permanent link">&para;</a></h2>
-<div class="admonition warning">
-<p class="admonition-title">Nix mode is on <code>main</code> only</p>
-<p>Nix mode is not in any release: v3.7.x rejects <code>--mode nix</code>. The job below installs
-ASH from <code>main</code>. Pin a commit SHA instead when you need to know which code ran.</p>
+<div class="admonition note">
+<p class="admonition-title">Nix mode needs a current release</p>
+<p>Nix mode is in the latest release; v3.7.x and older reject <code>--mode nix</code>. The job
+below installs that release.</p>
 </div>
 <p>Nix mode (<code>--mode nix</code>) runs the scan inside a Nix shell whose scanner tools come from
 ASH's <code>flake.nix</code>, so the job needs no <code>apt-get</code> packages for the scanners and no
@@ -3489,36 +3490,36 @@ ASH's <code>flake.nix</code>, so the job needs no <code>apt-get</code> packages 
 and git; set the CI/CD variable <code>NIX_IMAGE</code> to an image that has them. ASH passes
 <code>nix-command</code> and <code>flakes</code> on each invocation, so you do not have to enable them in
 <code>nix.conf</code>. Nix mode does not install ASH, and cdk-nag runs on the Python environment ASH
-is installed in, so install ASH with the <code>cdk</code> extra. A <code>main</code> install cannot find a
-release tag that contains <code>flake.nix</code>, so <code>ASH_NIX_FLAKE_REF</code> points the scan at <code>main</code>'s
-flake.</p>
-<!-- doctest: config kind=gitlab-ci runner=none reason="installs ASH from main, which the runner cannot swap for the pull request's wheel" -->
+is installed in, so install ASH with the <code>cdk</code> extra. The installed release resolves its
+flake to its own release tag, so the job sets no <code>ASH_NIX_FLAKE_REF</code>; set it only to scan
+with a different flake, such as when running ASH from <code>main</code> or a fork
+(<a href="../../install/#nix-mode">Nix mode</a>).</p>
+<!-- doctest: config kind=gitlab-ci runner=none reason="installs a released ASH, which the runner cannot swap for the pull request's wheel" -->
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">ash-scan-nix</span><span class="p">:</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">stage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">$NIX_IMAGE</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">variables</span><span class="p">:</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="nt">ASH_NIX_FLAKE_REF</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;github:awslabs/automated-security-helper/main&quot;</span>
-</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span><span class="nt">before_script</span><span class="p">:</span>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python -m venv /opt/ash</span>
-</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/opt/ash/bin/pip install --quiet &quot;$INSTALL_SPEC&quot;</span>
-</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">export PATH=&quot;/opt/ash/bin:$PATH&quot;</span>
-</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">  </span><span class="nt">script</span><span class="p">:</span>
-</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash_exit=0</span>
-</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">&gt;-</span>
-</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">      </span><span class="no">ash scan --mode nix --no-progress</span>
-</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">      </span><span class="no">--fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db</span>
-</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">      </span><span class="no">|| ash_exit=$?</span>
-</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">echo &quot;$ash_exit&quot; &gt; ash-exit-code.txt</span>
-</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">  </span><span class="nt">artifacts</span><span class="p">:</span>
-</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">    </span><span class="nt">when</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">always</span>
-</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="w">    </span><span class="nt">paths</span><span class="p">:</span>
-</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/</span>
-</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/ash_aggregated_results.json</span>
-</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-exit-code.txt</span>
-</span><span id="__span-8-24"><a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="w">    </span><span class="nt">reports</span><span class="p">:</span>
-</span><span id="__span-8-25"><a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a><span class="w">      </span><span class="nt">sast</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/ash.gl-sast-report.json</span>
-</span><span id="__span-8-26"><a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a><span class="w">      </span><span class="nt">junit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/ash.junit.xml</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&quot;</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="nt">before_script</span><span class="p">:</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python -m venv /opt/ash</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/opt/ash/bin/pip install --quiet &quot;$INSTALL_SPEC&quot;</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">export PATH=&quot;/opt/ash/bin:$PATH&quot;</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">  </span><span class="nt">script</span><span class="p">:</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash_exit=0</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">&gt;-</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">      </span><span class="no">ash scan --mode nix --no-progress</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">      </span><span class="no">--fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">      </span><span class="no">|| ash_exit=$?</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">echo &quot;$ash_exit&quot; &gt; ash-exit-code.txt</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">  </span><span class="nt">artifacts</span><span class="p">:</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">    </span><span class="nt">when</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">always</span>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">    </span><span class="nt">paths</span><span class="p">:</span>
+</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/</span>
+</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/ash_aggregated_results.json</span>
+</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-exit-code.txt</span>
+</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="w">    </span><span class="nt">reports</span><span class="p">:</span>
+</span><span id="__span-8-24"><a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="w">      </span><span class="nt">sast</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/ash.gl-sast-report.json</span>
+</span><span id="__span-8-25"><a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a><span class="w">      </span><span class="nt">junit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports/ash.junit.xml</span>
 </span></code></pre></div>
 <p>The report files, exit codes, and the <code>ash-gate</code> job from <a href="#add-the-jobs">Add the jobs</a> are
 the same as in local mode; set the gate job's <code>needs</code> to <code>ash-scan-nix</code> when this job
