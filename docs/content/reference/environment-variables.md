@@ -9,7 +9,7 @@
 
 This page is generated from the code that reads each variable by `scripts/generate_env_var_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH reads 157 environment variables: 59 of its own (`ASH_` prefix) and 98 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.
+ASH reads 165 environment variables: 61 of its own (`ASH_` prefix) and 104 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.
 
 Columns:
 
