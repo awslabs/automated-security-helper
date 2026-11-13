@@ -159,6 +159,23 @@ class TestAgainstRealGit:
         whole = staged_files_for_source(staged_repo)
         assert "proj/inside.py" in whole and "added.md" in whole
 
+    def test_a_symlinked_checkout_path_still_sees_the_staged_files(
+        self, staged_repo, tmp_path
+    ):
+        """The fail-open shape this guards: git prints real paths, so under a
+        source reached through a symlink (a symlinked home or worktree, macOS
+        /tmp) an unresolved source contained none of them, every relative_to
+        raised, the list came back empty, and --staged exited 0 with no scanner
+        run. The reader resolves the source, so the answer is the same through
+        the link as at the real path."""
+        link = tmp_path / "link-to-repo"
+        link.symlink_to(staged_repo, target_is_directory=True)
+
+        through_link = staged_files_for_source(link)
+
+        assert through_link == staged_files_for_source(staged_repo)
+        assert "added.md" in through_link
+
     def test_outside_a_repository_is_none(self, tmp_path):
         bare = tmp_path / "norepo"
         bare.mkdir()

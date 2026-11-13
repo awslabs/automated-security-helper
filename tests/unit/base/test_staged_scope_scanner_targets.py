@@ -35,6 +35,8 @@ def _scanner(
     patterns: Optional[Tuple[str, ...]] = None,
     style: Optional[str] = None,
     flag: str = "--file",
+    max_files: Optional[int] = None,
+    execute=None,
 ):
     class StagedStubScanner(ScannerPluginBase):
         offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -51,8 +53,12 @@ def _scanner(
             return True
 
         def _execute_scan(self, target, target_type, global_ignore_paths):
-            raise AssertionError("the tool must not be started by these tests")
+            if execute is None:
+                raise AssertionError("the tool must not be started by these tests")
+            return execute(self, target, target_type, global_ignore_paths)
 
+    if max_files is not None:
+        StagedStubScanner._STAGED_TARGET_MAX_FILES = max_files
     return StagedStubScanner(config=_Config(), context=plugin_context)
 
 
@@ -139,6 +145,134 @@ class TestFileListTargets:
         assert target.as_posix() in argv
 
 
+class TestScanSetFiltering:
+    """The staged targets honor the same filters as the whole-tree scan set:
+    a force-added ignored file and a staged symlink must never become a
+    file-target scanner's input."""
+
+    def test_a_staged_gitignored_file_is_not_a_target(self, plugin_context):
+        (plugin_context.source_dir / ".gitignore").write_text("ignored.py\n")
+        plugin_context.staged_files = ["app.py", "ignored.py"]
+        scanner = _scanner(plugin_context, patterns=("*.py",), style="positional")
+        target = _target_with(plugin_context, "app.py", "ignored.py")
+
+        files = scanner._staged_scope_paths(target, "source")
+
+        assert [f.name for f in files] == ["app.py"]
+
+    def test_a_staged_symlink_is_not_a_target(self, plugin_context, tmp_path):
+        outside = tmp_path / "outside.py"
+        outside.write_text("x = 1\n")
+        plugin_context.staged_files = ["link.py", "app.py"]
+        scanner = _scanner(plugin_context, patterns=("*.py",), style="positional")
+        target = _target_with(plugin_context, "app.py")
+        (target / "link.py").symlink_to(outside)
+
+        files = scanner._staged_scope_paths(target, "source")
+
+        assert [f.name for f in files] == ["app.py"]
+
+
+class TestArgvBound:
+    """Past the bound the staged files are not put on argv: a mass change must
+    not make the tool fail to start (ARG_MAX; ~32 KB on Windows). The scanner
+    falls back to the directory target instead."""
+
+    def test_more_files_than_the_bound_do_not_fit(self, plugin_context):
+        scanner = _scanner(plugin_context, patterns=("*.py",), style="positional")
+        many = [Path(f"/x/f{index}.py") for index in range(501)]
+        assert scanner._staged_targets_fit(many) is False
+
+    def test_argv_bytes_over_the_bound_do_not_fit(self, plugin_context):
+        scanner = _scanner(plugin_context, patterns=("*.py",), style="positional")
+        long_paths = [Path("/x/" + "a" * 300 + f"{index}.py") for index in range(100)]
+        assert scanner._staged_targets_fit(long_paths) is False
+
+    def test_a_small_set_fits(self, plugin_context):
+        scanner = _scanner(plugin_context, patterns=("*.py",), style="positional")
+        assert scanner._staged_targets_fit([Path("/x/a.py"), Path("/x/b.py")]) is True
+
+    def test_over_the_bound_scans_the_directory_target(self, plugin_context):
+        """The wiring: over the bound, _execute_scan sees no staged file list,
+        so _resolve_arguments keeps the directory target; under it, it sees the
+        list. The execute stub records what the scan was about to use and stops
+        the scan there; what it recorded is the assertion, not the scan's end."""
+        recorded = {}
+
+        def record_and_stop(scanner, target, target_type, global_ignore_paths):
+            recorded["staged"] = scanner._staged_scan_files
+            raise RuntimeError("recorded; the tool itself is not under test")
+
+        plugin_context.staged_files = ["a.py", "b.py"]
+        target = _target_with(plugin_context, "a.py", "b.py")
+
+        over = _scanner(
+            plugin_context,
+            patterns=("*.py",),
+            style="positional",
+            max_files=1,
+            execute=record_and_stop,
+        )
+        try:
+            over.scan(target=target, target_type="source")
+        except BaseException:
+            pass
+        assert recorded["staged"] is None
+
+        under = _scanner(
+            plugin_context,
+            patterns=("*.py",),
+            style="positional",
+            execute=record_and_stop,
+        )
+        try:
+            under.scan(target=target, target_type="source")
+        except BaseException:
+            pass
+        assert [f.name for f in recorded["staged"]] == ["a.py", "b.py"]
+
+
+class TestCheckovStagedShape:
+    """checkov's staged shape: skip on a commit with nothing it reads, widen
+    Terraform files to their directories (sibling variables/locals context,
+    and suppression matching against whole-tree results), mix --directory and
+    --file on the argv."""
+
+    def test_a_readme_only_commit_has_nothing_for_checkov(self, plugin_context):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+            CheckovScanner,
+        )
+
+        plugin_context.staged_files = ["README.md"]
+        scanner = CheckovScanner(context=plugin_context)
+        target = plugin_context.source_dir
+        (target / "README.md").write_text("docs\n")
+
+        assert scanner._staged_scope_paths(target, "source") == []
+
+    def test_terraform_files_widen_to_their_directory(self, plugin_context):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+            CheckovScanner,
+        )
+
+        plugin_context.staged_files = ["modules/a.tf", "modules/b.tf", "cfn.yaml"]
+        scanner = CheckovScanner(context=plugin_context)
+        target = _target_with(
+            plugin_context, "modules/a.tf", "modules/b.tf", "cfn.yaml"
+        )
+
+        staged = scanner._staged_scope_paths(target, "source")
+        assert staged == [target / "modules", target / "cfn.yaml"]
+
+        argv = scanner._staged_target_arguments(staged)
+        assert argv == [
+            "--directory",
+            (target / "modules").as_posix(),
+            "--file",
+            (target / "cfn.yaml").as_posix(),
+        ]
+
+
 class TestShippedDeclarations:
     """Drift guards: the two precommit scanners that take file targets declare
     the shapes this unit shipped; the scan-set readers declare none and ride the
@@ -152,11 +286,18 @@ class TestShippedDeclarations:
         assert BanditScanner.staged_scope_patterns == ("*.py",)
         assert BanditScanner.staged_target_style == "positional"
 
-    def test_checkov_takes_every_staged_file_behind_file_flags(self):
+    def test_checkov_takes_matching_staged_files_behind_file_flags(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
             CheckovScanner,
         )
 
-        assert CheckovScanner.staged_scope_patterns is None
+        patterns = CheckovScanner.staged_scope_patterns
+        assert patterns is not None, (
+            "checkov declares what it reads, so a commit staging none of it "
+            "skips checkov's startup"
+        )
+        for expected in ("*.tf", "*.tfvars", "*.yaml", "*.yml", "*.json", "*.bicep"):
+            assert expected in patterns
         assert CheckovScanner.staged_target_style == "per-file-flag"
         assert CheckovScanner.staged_target_flag == "--file"
+        assert CheckovScanner._STAGED_DIRECTORY_SUFFIXES == (".tf", ".tfvars")

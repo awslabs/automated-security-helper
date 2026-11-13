@@ -54,7 +54,11 @@
   their own files (detect-secrets, cdk-nag, npm-audit) and the converters read the same
   staged list, a scanner with nothing staged to scan is skipped with a log line, and a
   commit with nothing staged exits 0 without starting a scanner. Suppressions and ignore
-  paths resolve exactly as in a whole-repository scan. The `ash` and `ash-simple-scan`
+  paths resolve exactly as in a whole-repository scan, and the staged file targets are
+  filtered through the run's scan set, so ignored or force-added files and staged
+  symlinks are not scanned. The tools read the working-tree copy of each staged file;
+  under the pre-commit framework the two are identical, because it stashes unstaged
+  changes around the hooks. The `ash` and `ash-simple-scan`
   pre-commit hooks now pass `--staged`; on the plain CLI the flag is opt-in and any mode
   but `precommit` refuses it. It is planned to become the precommit default in ASH v4.
   Unlike `--changed-files-only`, which scans everything and filters only the reports,

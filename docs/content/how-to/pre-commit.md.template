@@ -74,6 +74,12 @@ scanned and is not listed) and makes it the scan's target set:
   the commit, not the repository. Keep a whole-repository scan in CI for the rest.
 - with nothing staged, the scan logs that and exits 0 without starting any scanner.
 
+What the tools read is the working-tree copy of each staged file. Under the
+pre-commit framework the two are identical, because it stashes unstaged changes
+around the hooks; a direct `ash --mode precommit --staged` run after `git add -p`,
+or after editing a file it had staged, scans content that differs from what the
+commit will contain.
+
 `--staged` works only with `--mode precommit`; any other mode refuses it (exit 5).
 Without the flag, a precommit scan still covers the whole repository: on every ASH v3
 release the flag is opt-in, the hooks in this repository pass it for you, and it is

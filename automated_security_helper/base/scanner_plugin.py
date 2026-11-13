@@ -948,9 +948,102 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         paths: List[Path] = []
         for relative in matching_staged_files(staged, self.staged_scope_patterns):
             candidate = root.joinpath(*PurePosixPath(relative).parts)
+            if candidate.is_symlink():
+                # The whole-tree walk leaves links out of the scan set (a link
+                # whose target leaves the tree is links_not_scanned), and
+                # is_file() follows them, so a staged link must never become a
+                # file target that reads whatever it points at.
+                ASH_LOGGER.debug(
+                    f"Leaving the staged link {relative} out of the file "
+                    "targets, as the scan set leaves links out."
+                )
+                continue
             if candidate.is_file():
                 paths.append(candidate)
-        return paths
+        if not paths:
+            return paths
+        return self._staged_targets_in_scan_set(paths, root)
+
+    def _staged_targets_in_scan_set(
+        self, candidates: List[Path], root: Path
+    ) -> List[Path]:
+        """``candidates``, less what the run's scan set leaves out.
+
+        The staged names come from git, and the run's recorded scan set is the
+        filtered view of the tree: the repository's ignore files, the config's
+        exclusions and the links that leave the tree are already applied to it,
+        and every scanner that picks its own files reads it back. A file-target
+        scanner has to honor the same filters, or a force-added gitignored file
+        (or one under ``ignore_paths``) is handed straight to its tool while the
+        docs say suppressions and ignores resolve as in a whole-tree run.
+
+        A scan set that cannot be read leaves the candidates as they are (the
+        symlink cut above still applied): over-scanning is the safe failure, and
+        the findings in an ignored file are still dropped by the SARIF step.
+        """
+        from automated_security_helper.utils.scan_output_dirs import scan_set_of
+
+        try:
+            allowed = {os.path.abspath(entry) for entry in scan_set_of(self.context)}
+        except Exception as exc:  # noqa: BLE001 - the filter must not fail the scan
+            ASH_LOGGER.warning(
+                f"Could not read the run's scan set to filter the staged file "
+                f"targets of {self.__class__.__name__}: {exc}. The staged files "
+                "are scanned as they are; findings the ignore paths cover are "
+                "still dropped after the scan."
+            )
+            return candidates
+        kept = [
+            candidate
+            for candidate in candidates
+            if os.path.abspath(candidate) in allowed
+        ]
+        left_out = len(candidates) - len(kept)
+        if left_out:
+            ASH_LOGGER.info(
+                f"{self.__class__.__name__}: {left_out} staged file(s) are not "
+                "in the scan set (ignored, excluded, or links) and are not "
+                "scanned under --staged."
+            )
+        return kept
+
+    #: The bounds past which the staged files are not put on the command line:
+    #: a mass reformat or a vendored-dependency drop can stage thousands of
+    #: files, and one argv has to carry them all (Windows bounds the whole line
+    #: at about 32,767 characters; Linux bounds it too). Past either bound the
+    #: scanner falls back to the directory target with a log line; the scan-set
+    #: restriction still scopes every scanner that reads the scan set back.
+    _STAGED_TARGET_MAX_FILES: ClassVar[int] = 500
+    _STAGED_TARGET_MAX_ARGV_BYTES: ClassVar[int] = 24576
+
+    def _staged_targets_fit(self, staged_targets: List[Path]) -> bool:
+        """Whether ``staged_targets`` fit on one command line, with headroom."""
+        if len(staged_targets) > self._STAGED_TARGET_MAX_FILES:
+            return False
+        flag_cost = (
+            len(self.staged_target_flag) + 1
+            if self.staged_target_style == "per-file-flag"
+            else 1
+        )
+        argv_bytes = sum(
+            len(Path(target).as_posix()) + flag_cost for target in staged_targets
+        )
+        return argv_bytes <= self._STAGED_TARGET_MAX_ARGV_BYTES
+
+    def _staged_target_arguments(self, staged_targets: List[Path]) -> List[str]:
+        """The argv segment that stands where the directory target went.
+
+        Overridable: checkov mixes ``--directory`` for the Terraform parent
+        directories with ``--file`` for everything else.
+        """
+        if self.staged_target_style == "per-file-flag":
+            arguments: List[str] = []
+            for staged_file in staged_targets:
+                arguments.extend(
+                    [self.staged_target_flag, Path(staged_file).as_posix()]
+                )
+            return arguments
+        return [Path(staged_file).as_posix() for staged_file in staged_targets]
 
     def _resolve_arguments(
         self, target: str | Path, results_file: str | Path | None = None
@@ -1007,13 +1100,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # N files instead of walking the tree. The paths are absolute under
             # the same scan root, so suppressions and the SARIF path handling
             # see the shapes a directory scan produces.
-            if self.staged_target_style == "per-file-flag":
-                for staged_file in staged_targets:
-                    args.extend([self.staged_target_flag, Path(staged_file).as_posix()])
-            else:
-                args.extend(
-                    Path(staged_file).as_posix() for staged_file in staged_targets
-                )
+            args.extend(self._staged_target_arguments(staged_targets))
         else:
             args.extend(
                 [
@@ -1878,7 +1965,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 self._post_scan(target=target, target_type=target_type)
                 return True
             if self.staged_target_style is not None:
-                self._staged_scan_files = staged_targets
+                if self._staged_targets_fit(staged_targets):
+                    self._staged_scan_files = staged_targets
+                else:
+                    # A mass change staged more than one command line can carry
+                    # (ARG_MAX; about 32 KB on Windows): the tool would fail to
+                    # start on exactly the big commits. The directory target
+                    # still covers every staged file, and the scan-set
+                    # restriction still scopes the scanners that read it back.
+                    self._plugin_log(
+                        f"--staged: {len(staged_targets)} staged files are more "
+                        "than one command line can carry; scanning the "
+                        "directory target instead.",
+                        target_type=target_type,
+                        level=logging.INFO,
+                        append_to_stream="stderr",
+                    )
 
         try:
             validated = self._pre_scan(

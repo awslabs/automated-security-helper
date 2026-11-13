@@ -310,6 +310,11 @@ class ScanOptions(BaseModel):
     # --mode precommit only: scan the staged files (git diff --cached) instead
     # of the whole tree. Validated in run_ash_scan before any mode runs.
     staged: bool = False
+    # The staged list the caller already read (source-relative POSIX paths),
+    # so a caller that read it to fast-exit on an empty set (the CLI) hands the
+    # same list to the scan instead of a second git read racing a `git add`.
+    # None with staged=True reads the list here; meaningless without staged.
+    staged_files: Optional[List[str]] = None
     # One shard of a split scan, or both None for an ordinary whole scan. Left
     # unvalidated here on purpose: ScanPhase._execute_phase is the single place
     # that refuses an unusable pair, so a second rule in this model could drift
@@ -6270,7 +6275,13 @@ def _run_local_mode(
                 staged_files_for_source,
             )
 
-            staged_files = staged_files_for_source(opts.source_dir)
+            # The CLI read the list already (its empty-set fast exit): the same
+            # list is scanned, not a second read racing a `git add` in between.
+            staged_files = (
+                opts.staged_files
+                if opts.staged_files is not None
+                else staged_files_for_source(opts.source_dir)
+            )
             if staged_files is None:
                 raise RuntimeError(
                     "--staged could not read the staged file list for "
@@ -7803,6 +7814,7 @@ def run_ash_scan(
     changed_files_only: bool = False,
     base_ref: str = "origin/main",
     staged: bool = False,
+    staged_files: List[str] | None = None,
     shard_index: int | None = None,
     shard_count: int | None = None,
     mode: RunMode = RunMode.local,
@@ -7892,6 +7904,7 @@ def run_ash_scan(
         changed_files_only=changed_files_only,
         base_ref=base_ref,
         staged=staged,
+        staged_files=staged_files,
         shard_index=shard_index,
         shard_count=shard_count,
         mode=mode,
@@ -7938,17 +7951,22 @@ def run_ash_scan(
     # Before any mode runs: --staged is the precommit scope and nothing else
     # applies it, so any other mode is refused rather than silently scanning
     # the whole tree (the CLI refuses it earlier with a usage error; this is
-    # the same contract for a library caller).
-    if opts.staged and opts.mode != RunMode.precommit:
+    # the same contract for a library caller). staged_files is the scope's
+    # data, so a caller that hands it to a mode that cannot read it is told
+    # too, instead of having it dropped without a word.
+    if (opts.staged or opts.staged_files is not None) and (
+        opts.mode != RunMode.precommit
+    ):
+        name = "staged" if opts.staged else "staged_files"
         raise ValueError(
-            "staged=True is supported only with mode=precommit: it scopes the "
+            f"{name} is supported only with mode=precommit: it scopes the "
             f"scan to the files git has staged, and mode={opts.mode.value!r} "
             "does not read that scope. Run with mode=RunMode.precommit, or "
-            "drop staged."
+            f"drop {name}."
         )
     if opts.staged and opts.workspace_plan is not None:
         raise ValueError(
-            "staged=True is not supported in workspace mode: the staged scope "
+            "staged is not supported in workspace mode: the staged scope "
             "is read for one source directory. Scan the project directly."
         )
     for name, value, workspace_ok in (

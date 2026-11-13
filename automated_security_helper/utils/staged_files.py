@@ -47,7 +47,13 @@ def staged_files_for_source(source_dir: Path) -> Optional[List[str]]:
         git_repository_root_problem,
     )
 
-    source = Path(source_dir).absolute()
+    # resolve(), not absolute(): git prints the repository root and the staged
+    # names as real paths, so under a checkout reached through a symlink (a
+    # symlinked home or worktree, macOS /tmp -> /private/tmp) an unresolved
+    # source never contains them, every relative_to below raises, and the list
+    # came back [] -- which the CLI read as "nothing staged" and exited 0 with
+    # no scanner run. changed_paths_within resolves for the same reason.
+    source = Path(source_dir).resolve()
     repo_root = git_repository_root(source)
     if repo_root is None:
         ASH_LOGGER.warning(
@@ -61,7 +67,9 @@ def staged_files_for_source(source_dir: Path) -> Optional[List[str]]:
 
     inside: List[str] = []
     for name in staged:
-        absolute = repo_root / name
+        # The root git prints is already resolved; resolved again so the
+        # containment test below can never depend on how the caller spelled it.
+        absolute = repo_root.resolve() / name
         try:
             relative = absolute.relative_to(source)
         except ValueError:

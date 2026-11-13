@@ -1266,14 +1266,17 @@ def run_ash_scan_cli_command(
             help=(
                 "With --mode precommit only: scan the staged files (git diff "
                 "--cached, without deletions; a rename's new path) instead of "
-                "the whole tree, so a commit pays for what it stages. "
-                "Suppressions and ignore paths apply exactly as in a whole-tree "
-                "scan; findings in files that are not staged are out of scope. "
-                "With nothing staged the scan exits 0 without starting any "
-                "scanner. Unlike --changed-files-only, which only filters the "
-                "reports after scanning everything, --staged saves the scan "
-                "time. Any other --mode refuses it (exit 5). Planned to become "
-                "the precommit default in ASH v4."
+                "the whole tree, so a commit pays for what it stages. What the "
+                "tools read is the working-tree copy of each staged file; under "
+                "the pre-commit framework the two are identical, because it "
+                "stashes unstaged changes around the hooks. Suppressions and "
+                "ignore paths apply exactly as in a whole-tree scan; findings "
+                "in files that are not staged are out of scope. With nothing "
+                "staged the scan exits 0 without starting any scanner. Unlike "
+                "--changed-files-only, which only filters the reports after "
+                "scanning everything, --staged saves the scan time. Any other "
+                "--mode refuses it (exit 5). Planned to become the precommit "
+                "default in ASH v4."
             ),
             envvar="ASH_STAGED",
         ),
@@ -1852,6 +1855,7 @@ def run_ash_scan_cli_command(
     # touching only files ASH does not scan still runs the hook), so it has to
     # cost one git call, not a scan. run_ash_scan applies the same scope for
     # callers that skip the CLI; an unreadable staged list is refused there too.
+    staged_for_scan = None
     if staged:
         from automated_security_helper.utils.staged_files import (
             staged_files_for_source,
@@ -1911,6 +1915,7 @@ def run_ash_scan_cli_command(
                 changed_files_only=changed_files_only,
                 base_ref=base_ref,
                 staged=staged,
+                staged_files=staged_for_scan,
                 shard_index=shard_index,
                 shard_count=shard_count,
                 mode=mode or RunMode.local,

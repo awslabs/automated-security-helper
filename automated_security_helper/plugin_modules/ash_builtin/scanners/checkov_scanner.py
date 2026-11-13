@@ -15,6 +15,7 @@ from typing import (
     Literal,
     Optional,
     Sequence,
+    Tuple,
 )
 from urllib.parse import quote, unquote
 
@@ -539,16 +540,88 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     #: --mode precommit --staged: checkov is handed each staged file as
-    #: ``--file <path>`` in place of ``--directory <target>``, so it parses N
-    #: files instead of walking the tree. No pattern list (None means any staged
-    #: file matches): checkov's ``--framework all`` reads too many file kinds for
-    #: a glob list to name without silently dropping coverage, and checkov
-    #: itself reports nothing for a file no framework reads. The --skip-path
-    #: values stay anchored at the directory target as before; the path
-    #: rewriting already matches file paths (rewrite_checkov_paths's
-    #: ``scanned_files``).
+    #: ``--file <path>`` -- and, for Terraform, the staged file's parent
+    #: directory as ``--directory`` (_staged_scope_paths below) -- in place of
+    #: ``--directory <target>``, so it parses what the commit stages instead of
+    #: walking the tree. The patterns name what checkov's frameworks read, so a
+    #: commit staging none of them (a README, a .py refactor) skips checkov's
+    #: startup entirely. The cost of a missing pattern is a skipped checkov run
+    #: on a commit it could have read, never a wrong finding: extend the list
+    #: when a framework's file kind is missing. The --skip-path values stay
+    #: anchored at the directory target as before; the path rewriting already
+    #: matches file paths (rewrite_checkov_paths's ``scanned_files``).
+    staged_scope_patterns: ClassVar[Optional[Tuple[str, ...]]] = (
+        # terraform / bicep / cloudformation / serverless / k8s / openapi /
+        # ansible / argo / azure pipelines / circleci / github actions / gitlab
+        # ci (json and yaml kinds are shared by most of these)
+        "*.tf",
+        "*.tfvars",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.template",
+        "*.bicep",
+        # dockerfile
+        "Dockerfile",
+        "Dockerfile.*",
+        "*.dockerfile",
+        # sca / supply chain manifests the sca frameworks read
+        "requirements*.txt",
+        "Pipfile",
+        "Pipfile.lock",
+        "setup.py",
+        "pyproject.toml",
+        "go.mod",
+        "go.sum",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "yarn.lock",
+        "Gemfile",
+        "Gemfile.lock",
+        "*.csproj",
+        "packages.config",
+        "composer.json",
+        "composer.lock",
+    )
     staged_target_style: ClassVar[Optional[str]] = "per-file-flag"
     staged_target_flag: ClassVar[str] = "--file"
+
+    #: The suffixes whose staged files are widened to their parent directory:
+    #: a Terraform file read alone loses the sibling variables.tf defaults,
+    #: locals and module sources, so a single-file scan changes findings and a
+    #: suppression written against a whole-tree result may stop matching.
+    _STAGED_DIRECTORY_SUFFIXES: ClassVar[Tuple[str, ...]] = (".tf", ".tfvars")
+
+    def _staged_scope_paths(self, target, target_type):
+        """The base selection, with staged Terraform files widened to their dirs.
+
+        After the base filtering (patterns, symlinks, the run's scan set), so a
+        directory is widened only for a Terraform file the scan set admits; the
+        widening itself brings the ignored siblings back into checkov's read,
+        which is what a directory scan of that module reads too, and the SARIF
+        step still drops the findings the ignore paths cover.
+        """
+        staged = super()._staged_scope_paths(target, target_type)
+        if not staged:
+            return staged
+        widened: List[Path] = []
+        for path in staged:
+            if path.suffix in self._STAGED_DIRECTORY_SUFFIXES or path.name.endswith(
+                ".tf.json"
+            ):
+                path = path.parent
+            if path not in widened:
+                widened.append(path)
+        return widened
+
+    def _staged_target_arguments(self, staged_targets):
+        """``--directory`` for the widened Terraform dirs, ``--file`` for files."""
+        arguments: List[str] = []
+        for staged_target in staged_targets:
+            flag = "--directory" if Path(staged_target).is_dir() else "--file"
+            arguments.extend([flag, Path(staged_target).as_posix()])
+        return arguments
 
     check_conf: str = "NOT_PROVIDED"
 
