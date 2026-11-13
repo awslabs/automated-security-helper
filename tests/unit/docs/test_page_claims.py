@@ -2216,7 +2216,8 @@ def _resolved_from_tier(tmp_path: Path, tier: str, document: Dict[str, Any]) -> 
     from automated_security_helper.config.resolve_config import resolve_config
 
     project = tmp_path / "project"
-    (project / ".git").mkdir(parents=True)
+    project.mkdir(parents=True)
+    _mark_git_checkout(project)
     if tier == "repository":
         (project / ".ash").mkdir()
         (project / ".ash" / ".ash.yaml").write_text(
@@ -3515,6 +3516,20 @@ def test_the_reports_that_show_justifications_carry_the_client_mark(
 # The gate
 # --------------------------------------------------------------------------- #
 
+
+def _wrapper_command(*parts: str) -> str:
+    """One ``OCI_RUNNER_WRAPPER`` value from argv parts, quoted for the platform.
+
+    A plain ``" ".join`` broke every container-mode cell when ``sys.executable``
+    or the test's temporary directory carried a space: ASH reads the value back
+    by splitting it (shlex's rules on POSIX, the Windows command-line rules on
+    Windows), so each platform gets the quoting its splitter reads.
+    """
+    if os.name == "nt":
+        return subprocess.list2cmdline(parts)
+    return shlex.join(parts)
+
+
 #: A fake container runtime. It records the command it was given, then writes the
 #: results an inner scan would have written into the directory mounted at /out. When
 #: the host hands the inner run an ID (``-e ASH_OUTER_RUN_ID``, with the value on the
@@ -3605,7 +3620,7 @@ def _container_scan(
             *args,
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
     if not record.is_file():
         return result, None
@@ -3916,7 +3931,7 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
                 "--no-progress",
             ],
             cwd=tmp_path,
-            OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+            OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
         )
 
     # A refusal must come before the image build, so only an allowed config skips it.
@@ -4178,7 +4193,7 @@ def test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_hos
         runtime.write_text(
             _RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
-        env["OCI_RUNNER_WRAPPER"] = " ".join([sys.executable, str(runtime)])
+        env["OCI_RUNNER_WRAPPER"] = _wrapper_command(sys.executable, str(runtime))
         mode_args = ["--mode", "container", "--oci-runner", sys.executable]
     else:
         mode_args = ["--mode", "nix"]
@@ -4404,7 +4419,7 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
         ],
         cwd=tmp_path,
         ASH_CONFIG=str(env_config),
-        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
     scans = [call for call in _runtime_calls(record) if "ash" in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -4601,7 +4616,7 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
             "--no-progress",
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
     scans = [call for call in _runtime_calls(record) if "ash" in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -7928,7 +7943,7 @@ def _interrupt_scan(
     if mode == "container":
         script, log = _interrupt_stand_in(tmp_path, "run", behavior, console)
         args += ["--mode", "container", "--no-build", "--oci-runner", sys.executable]
-        wrapper = " ".join([sys.executable, str(script)])
+        wrapper = _wrapper_command(sys.executable, str(script))
         return args, (log, "started"), {"OCI_RUNNER_WRAPPER": wrapper}, log
     script, log = _interrupt_stand_in(tmp_path, "develop", behavior)
     bin_dir = tmp_path / "bin"
@@ -8180,6 +8195,16 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
         )
     else:
         assert happened == ["started", "INT"], happened
+    if window_not_entered:
+        # Downgrading to the single-press branch here would GREEN the cell
+        # without its contract: the second press was withheld exactly because
+        # the kill-at-once window was never entered, which is also the
+        # regression this cell exists to catch. Say so instead of passing.
+        pytest.skip(
+            "ASH never entered the kill-at-once window on this runner, so the "
+            "second console Ctrl-C was withheld and the two-press contract was "
+            "not exercised; the single-press cells cover what did run"
+        )
     last_sign_of_life = max(at for _, at in events)
     if interrupts_sent == 1:
         # One press only: the documented single-press contract, that ASH stops the
@@ -8244,7 +8269,7 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
     args = ["build-image", "--oci-runner", sys.executable, "--offline"]
     if no_run:
         args.append("--no-run")
-    wrapper = " ".join([sys.executable, str(script)])
+    wrapper = _wrapper_command(sys.executable, str(script))
     result = _run_interrupted(
         tmp_path,
         args,
@@ -8529,7 +8554,8 @@ def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
     (session_dir / CONFIG_DIR_NAME).mkdir()
     scan_root = tmp_path / "scan-root"
     checkout = scan_root / "repo"
-    (checkout / ".git").mkdir(parents=True)
+    checkout.mkdir(parents=True)
+    _mark_git_checkout(checkout)
     files = {
         "missing": tmp_path / "absent.yaml",
         "unknown_key": tmp_path / "unknown-key.yaml",
@@ -8562,6 +8588,9 @@ def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
         pytest.param("workspace-delivery", 3, id="inside-the-mcp-workspace-root"),
         pytest.param("checkout", 3, id="in-a-git-checkout-under-an-allowed-root"),
         pytest.param("server-config", 0, id="control-a-config-the-server-wrote"),
+        pytest.param(
+            "plain-directory", 0, id="control-no-checkout-under-the-allowed-root"
+        ),
     ],
 )
 @pytest.mark.unit
@@ -8574,9 +8603,12 @@ def test_ash_mcp_refuses_a_profile_kept_where_a_scan_may_rewrite_it(
     does not load. The profile is the same valid file in each; only where it sits
     differs, so the exit code can come from the place and not from the file. It sits
     in a session workspace under ``ASH_MCP_WORKSPACE_ROOT``, where a client could
-    have delivered it, or in a directory holding a ``.git`` entry under
-    ``ASH_MCP_ALLOWED_ROOTS``. The control is the file the server itself writes
-    in a session's ``config/`` directory, which the page says is fine.
+    have delivered it, or in a git checkout (``_mark_git_checkout``) under
+    ``ASH_MCP_ALLOWED_ROOTS``. Two controls attribute the refusals: the file the
+    server itself writes in a session's ``config/`` directory, which the page says
+    is fine, and the same file in a plain directory under the allowed root, with
+    no checkout around it, so the checkout refusal is the checkout's and not the
+    root's.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         SESSION_CONFIG_FILENAME,
@@ -8592,9 +8624,11 @@ def test_ash_mcp_refuses_a_profile_kept_where_a_scan_may_rewrite_it(
         "workspace-delivery": session / "delivered",
         "checkout": checkout,
         "server-config": session / CONFIG_DIR_NAME,
+        "plain-directory": allowed / "plain",
     }
-    for directory in (workspace, allowed, session, checkout / ".git"):
+    for directory in (workspace, allowed, session, checkout):
         directory.mkdir(parents=True, exist_ok=True)
+    _mark_git_checkout(checkout)
     workspace.chmod(0o700)
     profile = places[kept_in] / (
         SESSION_CONFIG_FILENAME if kept_in == "server-config" else "profile.yaml"
@@ -12970,7 +13004,7 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
             _CI_ENV_RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
         monkeypatch.setenv(
-            "OCI_RUNNER_WRAPPER", " ".join([sys.executable, str(runtime)])
+            "OCI_RUNNER_WRAPPER", _wrapper_command(sys.executable, str(runtime))
         )
         result = container.run_ash_container(
             source_dir=str(source),
@@ -18123,7 +18157,10 @@ def _workflow_value(value: Any, inputs: Dict[str, Any], given: Dict[str, Any]) -
 
     The scan workflow's ``inputs`` step (the workflow-command refusal) writes each
     string input back out unchanged as ``<name with - as _>``, so a step reading
-    ``steps.inputs.outputs.artifact_name`` reads ``inputs.artifact-name``.
+    ``steps.inputs.outputs.artifact_name`` reads ``inputs.artifact-name``. An
+    input whose own name carries the underscore is looked up as written first,
+    so the mapping never turns a real name into a miss, and a name that resolves
+    to no input at all fails here instead of flowing on as None.
     """
     match = re.fullmatch(r"\$\{\{\s*inputs\.([\w-]+)\s*\}\}", str(value))
     if match:
@@ -18134,7 +18171,13 @@ def _workflow_value(value: Any, inputs: Dict[str, Any], given: Dict[str, Any]) -
         )
         if not passed:
             return value
-        name = passed[1].replace("_", "-")
+        name = passed[1]
+        if name not in given and name not in inputs:
+            name = name.replace("_", "-")
+        assert name in given or name in inputs, (
+            f"steps.inputs.outputs.{passed[1]} resolves to no workflow input: "
+            f"{name!r} is neither passed by the caller nor declared"
+        )
     return given.get(name, (inputs.get(name) or {}).get("default"))
 
 

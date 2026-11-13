@@ -515,7 +515,7 @@ _VERSION_RE = re.compile(
 )
 
 
-def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
+def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, int, str]]:
     """A sortable key for a release version, numeric part compared as numbers.
 
     ``v0.69.10`` sorts after ``v0.69.9``, ``1.2`` equals ``1.2.0``, and a final
@@ -523,7 +523,11 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
     post-release (``1.2.3.post1``, also spelled ``rev`` or ``r``) sorts after
     the final release it follows: read as a pre-release, a PyPI post-release
     was reported as ``ahead`` of the pin for the same numbers instead of
-    ``outdated``. Build metadata after ``+`` is ignored, as SemVer says it must be.
+    ``outdated``. Its number is compared as a number, not as text, which read
+    ``post10`` as older than ``post9``, the same misreport class for the
+    releases this key exists to order; PEP 440 reads the spellings (``post``,
+    ``rev``, ``r``, and a bare one as 0) as one, so only the number counts.
+    Build metadata after ``+`` is ignored, as SemVer says it must be.
 
     Raises:
         ValueError: for a string with no leading numeric version, or with a
@@ -537,10 +541,11 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
         release = release[:-1]
     suffix = match.group(2).split("+", 1)[0].lstrip("-.")
     if not suffix:
-        return release, (1, "")
+        return release, (1, 0, "")
     if _POST_RELEASE_RE.match(suffix):
-        return release, (2, suffix)
-    return release, (0, suffix)
+        digits = "".join(ch for ch in suffix if ch.isdigit())
+        return release, (2, int(digits or "0"), "")
+    return release, (0, 0, suffix)
 
 
 # PEP 440's post-release spellings, after the separator is stripped.
@@ -1082,21 +1087,6 @@ def _uv_tool_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     return _license_steps(pins, pin.tool, latest)
 
 
-def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
-    """What a change to a bundled library's pin changes: its license entry only.
-
-    The library has no download of its own. Its version is whatever the wheel that
-    carries it holds, so the entry follows that wheel and not the library's releases.
-    """
-    steps = [
-        (
-            f"{pin.tool} is bundled in {pin.project}: set its version to the one "
-            "that wheel carries, not to the library's own latest release"
-        )
-    ]
-    return steps + _license_steps(pins, pin.tool, latest)
-
-
 def _dockerfile_arg_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     """A dependency held by a Dockerfile ARG: its license entry and what it carries.
 
@@ -1531,6 +1521,44 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     return [(name, is_file) for name, is_file, _ in _scan_markers(line)]
 
 
+def _quotes_blanked(text: str) -> str:
+    """``text`` with the inside of quoted strings blanked, marker names kept.
+
+    A ``<<`` inside a quoted string (``python -c "print(1 << shift)"``, an awk or
+    sed program) is data, not a here-document; read as a marker it swallowed the
+    rest of the instruction as one body and every later check went quiet. The
+    quoted characters are replaced with spaces, one for one, so every offset
+    into the text stays where it was. A quote that spells a marker's own name
+    (``<<'EOF'``) is kept as written, since the marker regex reads it. Escaped
+    quotes inside a double-quoted string are not followed; the blanked span then
+    ends at the escaped quote, which can leave part of the string unblanked but
+    never blanks a marker.
+    """
+    out = list(text)
+    i = 0
+    while i < len(text):
+        quote = text[i]
+        if quote not in "'\"":
+            i += 1
+            continue
+        before = i - 1
+        while before >= 0 and text[before] in " \t":
+            before -= 1
+        if before >= 0 and text[before] == "-":
+            before -= 1
+        if before >= 1 and text[before - 1 : before + 1] == "<<":
+            end = text.find(quote, i + 1)
+            i = end + 1 if end != -1 else len(text)
+            continue
+        end = text.find(quote, i + 1)
+        if end == -1:
+            break
+        for inside in range(i + 1, end):
+            out[inside] = " "
+        i = end + 1
+    return "".join(out)
+
+
 def _command_segments(cleaned: str) -> list[tuple[int, int, str]]:
     """The commands of a line as (start, end, the separator that ended the command)."""
     segments: list[tuple[int, int, str]] = []
@@ -1551,7 +1579,7 @@ def _scan_markers(line: str) -> list[tuple[str, bool, set[str]]]:
     cleaned = _ARITHMETIC.sub(" ", line)
     segments = _command_segments(cleaned)
     markers: list[tuple[str, bool, set[str]]] = []
-    for match in _HEREDOC_MARKER.finditer(cleaned):
+    for match in _HEREDOC_MARKER.finditer(_quotes_blanked(cleaned)):
         first = next(
             (i for i, (_, stop, _) in enumerate(segments) if match.start() < stop),
             len(segments) - 1,
@@ -1779,6 +1807,10 @@ class _RunBlock:
     # file body, the names of the files the instruction writes it to.
     instruction: int = 0
     files: frozenset[str] = frozenset()
+    # A file body under a ``# apt-pin-check: skip`` comment: not a script, so its
+    # lines are not read as commands -- unless a later instruction RUNS the file,
+    # which is refused rather than left untraced (``_file_bodies_a_later_run_runs``).
+    skipped: bool = False
     # Not a RUN: the ``cp`` a ``COPY --from`` instruction amounts to, kept only so the
     # file bodies a later RUN runs can be followed through it. It is not returned.
     copy: bool = False
@@ -1836,11 +1868,24 @@ def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
             for when, at in callers:
                 runs, names = _follow_a_file(pipelines_of(at), names)
                 if runs:
+                    if block.skipped:
+                        # The skip comment says the body is not a script, and
+                        # this instruction runs it: left skipped, its installs
+                        # would ship untraced, so the contradiction is refused
+                        # rather than failing open.
+                        raise PinEnumerationError(
+                            f"The Dockerfile's line {result[at].lines[0][0]} runs "
+                            f"{' or '.join(sorted(block.files))}, whose body (line "
+                            f"{block.lines[0][0]}) is marked '# apt-pin-check: "
+                            "skip'. A body a later instruction runs is a script "
+                            "this check must read: remove the skip comment, or "
+                            "stop running the file."
+                        )
                     result[index] = replace(block, file_content=False)
                     runs_at[index] = when
                     changed = True
                     break
-    return [block for block in result if not block.copy]
+    return [block for block in result if not block.copy and not block.skipped]
 
 
 def _copy_as_command(lines: list[tuple[int, str]]) -> str:
@@ -1914,13 +1959,14 @@ def _run_blocks(text: str) -> list[_RunBlock]:
             continue
         if current is not None and terminators:
             if line == terminators[0][0]:
-                if terminators[0][1] and file_body and not run_skips_bodies:
+                if terminators[0][1] and file_body:
                     blocks.append(
                         _RunBlock(
                             file_body,
                             file_content=True,
                             instruction=instruction,
                             files=frozenset(terminators[0][2]),
+                            skipped=run_skips_bodies,
                         )
                     )
                 file_body = []
@@ -1964,8 +2010,15 @@ def _run_blocks(text: str) -> list[_RunBlock]:
             continue
         blocks.append(_RunBlock(current, instruction=instruction))
         current = None
-    if file_body and not run_skips_bodies:
-        blocks.append(_RunBlock(file_body, file_content=True, instruction=instruction))
+    if file_body:
+        blocks.append(
+            _RunBlock(
+                file_body,
+                file_content=True,
+                instruction=instruction,
+                skipped=run_skips_bodies,
+            )
+        )
     if current:
         blocks.append(_RunBlock(current, instruction=instruction))
     return _file_bodies_a_later_run_runs(blocks)
@@ -2097,7 +2150,7 @@ def _xargs_input(shell: str, install: re.Match[str]) -> str:
     pipeline_start = ends[first - 1].end() if first else 0
     after = _COMMAND_END.search(text, install.end())
     stage_end = after.start() if after else len(text)
-    if _HEREDOC_MARKER.search(text, pipeline_start, stage_end):
+    if _HEREDOC_MARKER.search(_quotes_blanked(text), pipeline_start, stage_end):
         return "a here-document"
     if _XARGS_STDIN_FILE.search(text, own_start, stage_end):
         return "a file or a here-string"

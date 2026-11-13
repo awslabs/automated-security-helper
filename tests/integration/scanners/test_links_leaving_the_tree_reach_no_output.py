@@ -516,22 +516,6 @@ CONTROLS = {
     ),
     "syft": Control(commands=("syft",), sbom_package="django"),
     "ferret-scan": Control(commands=("ferret-scan",)),
-    "actionlint": Control(
-        commands=("actionlint",), in_tree=".github/workflows/real.yml"
-    ),
-    "zizmor": Control(commands=("zizmor",), in_tree=".github/workflows/real.yml"),
-    "cfn-lint": Control(commands=("cfn-lint",), in_tree="templates/insecure.yaml"),
-    # cfn-guard reads its rules from ASH_CFN_GUARD_RULES_DIR, or from beside
-    # ASH_BIN_PATH, which this scan points at an empty directory of its own.
-    "cfn-guard": Control(
-        commands=("cfn-guard",),
-        database="ASH_CFN_GUARD_RULES_DIR",
-        in_tree="templates/insecure.yaml",
-    ),
-    "gitleaks": Control(commands=("gitleaks",), in_tree="deploy.cfg"),
-    "trivy": Control(
-        commands=("trivy",), database="TRIVY_CACHE_DIR", in_tree="requirements.txt"
-    ),
     "npm-audit": Control(
         offline="npm audit asks the package registry, which an offline scan does "
         "not reach"

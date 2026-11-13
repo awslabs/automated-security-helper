@@ -1409,7 +1409,9 @@ class TestBareBinaryAssets:
         assert get_tool_asset("grype", "linux", "amd64").archive is True
 
     def test_windows_arm64_is_refused_not_approximated(self):
-        with pytest.raises(ToolNotProvisionableError, match="publishes no release"):
+        with pytest.raises(
+            ToolNotProvisionableError, match="has no asset for windows/arm64"
+        ):
             get_tool_asset("hadolint", "windows", "arm64")
 
     def test_matching_pin_installs_the_bytes_verbatim(self, tmp_path):

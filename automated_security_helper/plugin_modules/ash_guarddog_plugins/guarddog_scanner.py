@@ -1169,11 +1169,22 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         the source the sandbox mounts read-only, and the temporary directory is
         often on another filesystem. Measured on a 2,035-file, 41.8 MB tree on
         tmpfs: 0.32 s to copy against 0.09 s to link, small beside a GuardDog run.
+
+        Each copy is created with ``fs_guard.open_for_write``: when the staging
+        tree is under the results directory (``_staging_parent``'s fallback), the
+        write is below the output directory, where the guard follows no link at
+        any component of the path; elsewhere it follows none at the file's name.
         """
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
         for source in files:
             destination = staging_dir / source.relative_to(root)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
+            with (
+                source.open("rb") as src,
+                open_for_write(destination, binary=True, mode=0o644) as out,
+            ):
+                shutil.copyfileobj(src, out)
 
     # ------------------------------------------------------------------
     # Running GuardDog
@@ -1364,17 +1375,21 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             timeout=timeout,
         )
 
-        def read(stream: str) -> str:
+        def read_whole_log(stream: str) -> str:
+            # A whole-file read, not a sized one: stdout is GuardDog's JSON
+            # document, parsed downstream, and stderr is excerpted only through
+            # tool_output_excerpt (redact, then cut), so no bound splits a value
+            # at a read edge here.
             log = invocation_dir / f"{self.__class__.__name__}.{stream}.log"
             try:
                 return log.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 return ""
 
-        stderr = read("stderr")
+        stderr = read_whole_log("stderr")
         if not stderr and isinstance(response, dict) and response.get("error"):
             stderr = str(response.get("error"))
-        return response, read("stdout"), stderr
+        return response, read_whole_log("stdout"), stderr
 
     @staticmethod
     def _failure(

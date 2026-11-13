@@ -681,11 +681,21 @@ class _EvaluationWorker:
         except EvaluationTimedOut:
             self.close(graceful=False)
             raise
-        except (EOFError, OSError):
+        except ScannerError:
+            raise
+        except Exception:
+            # EOFError and OSError are the pipe ending under the read. Anything
+            # else is the answer itself failing to rebuild in this process:
+            # unpickling an exception the child sent runs its class's
+            # constructor, and one that cannot be rebuilt (a TypeError or
+            # AttributeError out of recv) would otherwise escape as itself,
+            # not as the documented ScannerError. Either way the stream can no
+            # longer be trusted to be in step, so the worker is closed.
             self.close(graceful=False)
             raise ScannerError(
                 f"The evaluation of a regular expression from {source} ended without "
-                "an answer, so the scan fails rather than guess at one."
+                "an answer this process could read, so the scan fails rather than "
+                "guess at one."
             ) from None
         finally:
             self.last_search_seconds = time.monotonic() - began

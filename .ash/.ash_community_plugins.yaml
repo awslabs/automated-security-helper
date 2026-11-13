@@ -1417,6 +1417,16 @@ global_settings:
       line_start: 1612
       line_end: 1612
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/utils/python_installer.py
+      line_start: 116
+      line_end: 116
+      reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/interactions/run_ash_container.py
+      line_start: 4352
+      line_end: 4352
+      reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
     # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_community_plugins.yaml, the
@@ -1466,8 +1476,8 @@ global_settings:
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1174
-      line_end: 1174
+      line_start: 1175
+      line_end: 1175
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
@@ -1599,8 +1609,8 @@ global_settings:
     # (inBundle: true) in deploy/cdk/package-lock.json. The repository's own override
     # already pins the top-level minimatch to 11.x, but a bundled copy ships inside the
     # aws-cdk-lib tarball and no override reaches it. The advisory lists 11.0.1 as the
-    # only patched release (affected >= 7.0.0, < 11.0.1). Measured 2026-11-06: the latest
-    # aws-cdk-lib, 2.275.0, declares minimatch ^10.2.6 and bundles it, and main declares
+    # only patched release (affected >= 7.0.0, < 11.0.1). Measured 2026-11-13: the latest
+    # aws-cdk-lib, 2.277.0, declares minimatch ^10.2.6 and bundles it, and main declares
     # the same range, so no released aws-cdk-lib carries a fixed bundle yet. The version
     # is pinned in the entry, so a different bundled version reports again. trivy and
     # trivy-repo both report the CVE id as is, so one entry covers both.
@@ -1613,7 +1623,7 @@ global_settings:
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249): minimatch 10.2.5 bundled inside aws-cdk-lib
         (inBundle), so the repository's override, which pins the top-level minimatch to 11.x,
-        cannot reach it. Fix = aws-cdk-lib >= none released yet (2.275.0 declares minimatch
+        cannot reach it. Fix = aws-cdk-lib >= none released yet (2.277.0 declares minimatch
         ^10.2.6; the fix is minimatch 11.0.1). Revisit when a release bundles minimatch
         >=11.0.1.
     # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===

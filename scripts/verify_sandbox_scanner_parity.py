@@ -221,6 +221,12 @@ def run_scan(
                 f"ash scan --sandbox {mode} ran past {SCAN_TIMEOUT_SECONDS}s and was "
                 f"stopped with its scanners; log at {log}"
             ) from None
+        except BaseException:
+            # The scan runs in its own session, so a Ctrl-C or a CI cancel that
+            # reaches this script never reaches the scan: stop the whole tree
+            # before leaving, or the scanners keep writing after the wait is gone.
+            _stop_process_tree(process)
+            raise
     print(f"  exit {returncode}; log at {log}", flush=True)
     return returncode
 

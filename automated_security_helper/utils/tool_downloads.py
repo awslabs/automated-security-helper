@@ -295,10 +295,12 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # opengrep publishes no checksums file. Its five digests were obtained two ways on
 # 2026-11-10 and both agreed byte for byte: the `digest` field GitHub reports for
 # each asset of the v1.33.1 release (`gh api repos/opengrep/opengrep/releases/tags/
-# v1.33.1`) and sha256sum over each asset downloaded once. For v1.30.2 each asset's
-# `.sig` was also checked against the public key in its `.cert`; that check was not
-# repeated for v1.33.1 and is not made at install time (see the module docstring).
-# tests/unit/utils/test_pinned_tool_downloads.py
+# v1.33.1`) and sha256sum over each asset downloaded once. On 2026-11-13 each
+# pinned asset's `.sig` was also checked with openssl against the public key in
+# its `.cert`, and every certificate's identity is opengrep's rolling-release.yml
+# workflow at refs/heads/release-v1.33.1 with the GitHub Actions OIDC issuer, the
+# same check the v1.30.2 pins had; it is not made at install time (see the module
+# docstring). tests/unit/utils/test_pinned_tool_downloads.py
 # keeps nix/opengrep.nix's SRI copy of the four non-Windows digests equal to this one.
 #
 # uv publishes a `<asset>.sha256` beside each asset. Those two files were downloaded
@@ -1054,7 +1056,11 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         # over every aws-guard-rules-registry-* directory printed each installed
         # version, so the check passed as long as any of them was the pinned one,
         # and an unset ASH_CFN_GUARD_RULES_DIR raised KeyError, which read as a
-        # version mismatch; now it prints nothing and says why on stderr.
+        # version mismatch. With the variable unset or empty the probe now exits
+        # after saying so on stderr: globbing with an empty base would search a
+        # RELATIVE path, which could find a manifest from a lucky working
+        # directory. The directory name carries the pinned release, so a bundle
+        # bump moves the probe with it.
         version_probe=(
             "python3",
             "-c",
@@ -1062,8 +1068,10 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
                 "import glob, json, os, sys; "
                 "d = os.environ.get('ASH_CFN_GUARD_RULES_DIR'); "
                 "d or print('ASH_CFN_GUARD_RULES_DIR is not set', file=sys.stderr); "
+                "d or sys.exit(0); "
                 "[print(json.load(open(m))['version']) for m in glob.glob(os.path.join("
-                "d or '', 'aws-guard-rules-registry-1.0.2', '.ash-rules-manifest.json'))]"
+                f"d, 'aws-guard-rules-registry-{_CFN_GUARD_RULES_RELEASE}', "
+                "'.ash-rules-manifest.json'))]"
             ),
         ),
     ),

@@ -477,8 +477,9 @@ global_settings:
     # The copies our lockfiles resolve are overridden to 11.x in deploy/cdk and
     # deploy/cdk-constructs, so the only affected copy left is the one BUNDLED inside
     # aws-cdk-lib (`inBundle` lockfile entries). npm `overrides` cannot replace a
-    # bundled dependency, and every aws-cdk-lib release through 2.275.0 (the latest at
-    # 2026-11-03) bundles minimatch ^10. It is deploy tooling only: none of it ships in
+    # bundled dependency, and every aws-cdk-lib release through 2.277.0 (the latest at
+    # 2026-11-13, bundling minimatch ^10.2.6 per its registry metadata) bundles
+    # minimatch ^10. It is deploy tooling only: none of it ships in
     # the wheel or the container image. One npm-audit entry per lockfile; grype and
     # trivy each report the same bundled copy against deploy/cdk/package-lock.json
     # under their own id spellings, one entry per spelling. The transitive findings are
@@ -493,7 +494,7 @@ global_settings:
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
         deploy/cdk/package-lock.json. npm overrides cannot replace a bundled dependency and
-        no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.275.0 bundles ^10).
+        no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.277.0 bundles ^10.2.6).
         Deploy tooling only, not shipped in the wheel or the container image. Revisit when
         aws-cdk-lib rebundles; see the block comment above.
     - rule_id: "GHSA-g3hv-75wg-m249"
@@ -505,8 +506,8 @@ global_settings:
       reason: >-
         GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
         deploy/cdk-constructs/package-lock.json. npm overrides cannot replace a bundled
-        dependency and no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.275.0
-        bundles ^10). Dev dependency of the constructs package only, not shipped in the
+        dependency and no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.277.0
+        bundles ^10.2.6). Dev dependency of the constructs package only, not shipped in the
         wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
         comment above.
     - rule_id: "GHSA-g3hv-75wg-m249-minimatch"
@@ -3426,6 +3427,16 @@ global_settings:
       line_start: 1612
       line_end: 1612
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/utils/python_installer.py
+      line_start: 116
+      line_end: 116
+      reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/interactions/run_ash_container.py
+      line_start: 4352
+      line_end: 4352
+      reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 367
@@ -3463,8 +3474,8 @@ global_settings:
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1174
-      line_end: 1174
+      line_start: 1175
+      line_end: 1175
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
