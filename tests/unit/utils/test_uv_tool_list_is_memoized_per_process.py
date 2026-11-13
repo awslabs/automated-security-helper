@@ -12,7 +12,9 @@ and a failed listing memoizes nothing.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -93,8 +95,12 @@ def test_an_outside_install_is_seen_through_the_tools_dir_stamp(tmp_path, monkey
         runner.list_available_tools()
         assert len(spawns) == 1
 
-        # The outside install: a new entry under the tools directory.
+        # The outside install: a new entry under the tools directory. The
+        # mtime bump is explicit because a test-speed mkdir can land in the
+        # same filesystem timestamp granule as the first listing's stat; a
+        # real `uv tool install` takes far longer than one granule.
         (tools_dir / "semgrep").mkdir()
+        os.utime(tools_dir, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
         runner.list_available_tools()
         assert len(spawns) == 2
 
