@@ -462,7 +462,35 @@ DEFECTS = [
                 "{%- if true -%}",
             )
         },
-        "do not carry the unreleased notice and not the outdated one",
+        "carry a notice or an announce banner, and main has none",
+    ),
+    (
+        # The planted-defect direction for the removed banner: someone puts the
+        # unreleased notice back into the announce block.
+        "the template brings the unreleased notice back on main",
+        {
+            "template": _patched(
+                (REPO_ROOT / "docs/overrides/main.html").read_text(encoding="utf-8"),
+                "{% block outdated %}",
+                '{% block announce %}<span data-ash-notice="unreleased">'
+                "unreleased</span>{% endblock %}\n{% block outdated %}",
+            )
+        },
+        "carry a notice or an announce banner, and main has none",
+    ),
+    (
+        # Any announce text renders Material's banner, whatever markup it carries, so
+        # the check reads the banner itself and not only our attribute.
+        "the template puts some other announce banner on main",
+        {
+            "template": _patched(
+                (REPO_ROOT / "docs/overrides/main.html").read_text(encoding="utf-8"),
+                "{% block outdated %}",
+                "{% block announce %}Read the other docs.{% endblock %}\n"
+                "{% block outdated %}",
+            )
+        },
+        "carry a notice or an announce banner, and main has none",
     ),
 ]
 
@@ -667,6 +695,18 @@ def _text(out: Path, page: str) -> str:
     return dv.page_text((out / page / "index.html").read_bytes())
 
 
+def _html(out: Path, page: str) -> str:
+    return (out / page / "index.html").read_text(encoding="utf-8")
+
+
+def _assert_no_notice(html: str) -> None:
+    """An unreleased build's page has no notice of ours and no announce banner."""
+    assert "data-ash-notice" not in html
+    assert dv.ANNOUNCE_BANNER.search(html) is None
+    assert "These docs describe the main branch" not in html
+    assert "The install commands on these pages" not in html
+
+
 @pytest.mark.integration
 def test_the_main_build_serves_the_committed_release_pins(tmp_path):
     repo = _site(tmp_path)
@@ -689,11 +729,11 @@ def test_the_main_build_serves_the_committed_release_pins(tmp_path):
     assert f"git ls-remote {REPO_URL} refs/tags/v{COMMITTED_VERSION}" in text
     assert f"ash:{COMMITTED_VERSION}" in text
     assert "@main" not in text
-    # The notice names the ref the hook recorded for the main build.
-    notice = " ".join(text.split())
-    assert "The install commands on these pages install the latest release" in notice
-    assert f"the latest release, v{COMMITTED_VERSION} , not main" in notice
-    assert "To run what these pages describe, install from main" in notice
+    # The main build carries no notice and no announce banner.
+    _assert_no_notice(_html(out, PINNED_URL))
+    # Positive control: the release build still carries its own markup.
+    release = _html(_build(repo, tmp_path, "1.2.3"), PINNED_URL)
+    assert 'data-ash-notice="outdated"' in release, "the control saw no notice"
 
 
 def _install_forms():
@@ -1362,11 +1402,11 @@ def test_a_release_build_pins_that_release(tmp_path):
 @pytest.mark.integration
 def test_any_other_build_uses_the_committed_page(tmp_path):
     repo = _site(tmp_path)
-    text = _text(_build(repo, tmp_path, None), PINNED_URL)
+    out = _build(repo, tmp_path, None)
+    text = _text(out, PINNED_URL)
     assert _manager().release_pins(text) == {COMMITTED_VERSION}, text
-    # The hook did not vouch for this build, so the notice names no ref.
-    notice = " ".join(text.split())
-    assert "install the latest release, not main" in notice
+    # Any build that is not a release's carries no notice and no announce banner.
+    _assert_no_notice(_html(out, PINNED_URL))
 
 
 @pytest.mark.integration

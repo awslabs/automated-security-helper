@@ -30,9 +30,8 @@ config.extra.install_ref is set to the ref this build's install commands pin: `v
 the release number, on a release build and on the `main` version's build (whose
 committed pages pin the current release, which scripts/docs_versions.py check
 enforces). It is left unset on any other build, whose pages this hook has not
-vouched for. docs/overrides/main.html names it in the unreleased notice when it is
-set, and docs/overrides/partials/ash-snippet-builder.html renders its snippets with
-it.
+vouched for. docs/overrides/partials/ash-snippet-builder.html renders its snippets
+with it.
 """
 
 from __future__ import annotations
