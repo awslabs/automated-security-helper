@@ -1,0 +1,27 @@
+ASH presentation assets
+
+Open Sans
+Source: https://github.com/google/fonts/tree/main/ofl/opensans
+Input: OpenSans[wdth,wght].ttf
+Input SHA-256: 36643644f318a812aab2d2ed3bb98f8cf0872527f835fe9398d95fe6b9adb878
+License: SIL Open Font License 1.1; full notice beside each font.
+Export: normal width (wdth=100), variable weight 300-800, WOFF2.
+Subset: U+0000-017F and U+2000-206F.
+Name records retained: 0, 1, 2, 3, 4, 5, 6, 13, 14, 16, 17 (English 0x409).
+Tools: FontTools 4.66.1 and Brotli 1.2.0 (MIT development tools).
+Save and reopen the width-instantiated font before applying the subset.
+Output SHA-256: ffe4e928956596f5382bc281f60f2006a62830553739c512742b94f7d6175ad2
+The site and HTML reporter use the same font bytes and license notice.
+
+Anime.js 4.5.0
+Source: https://www.npmjs.com/package/animejs/v/4.5.0
+Upstream archive SHA-1: d0f6f5141cff15629ae02ce3c379a0846784e4d1
+License: MIT; full notice in animejs-MIT.txt and the module banner.
+Build: docs/ui-tests/vendor-motion.cjs with esbuild 0.28.2 (MIT development tool).
+Command: npm ci && npm run vendor:motion, from docs/ui-tests.
+Exports: createTimeline, createDrawable, createMotionPath, cubicBezier, stagger.
+The homepage loads the local module. Other pages and reports do not load it.
+
+Phosphor light icons
+Source: https://github.com/phosphor-icons/core
+License: MIT; full notice in docs/overrides/.icons/phosphor/LICENSE.txt.
