@@ -181,7 +181,9 @@ Floating major tags are retired. The `v3` tag used to be moved to the newest 3.x
 release by the tag workflow; it is now frozen at v3.8.0 and will not move again, and
 no floating tag is created for v4 or later majors. A reference to `@v3` still
 resolves, to v3.8.0, so existing consumers keep working, but it never picks up a
-newer release: pin a release tag, from the GitHub releases page, instead.
+newer release: pin a release tag, from the GitHub releases page, instead. Moving the
+frozen tag again, were that ever decided, is a maintainer's by-hand ref update
+through the GitHub API; no workflow touches it.
 
 The tag workflow only tags `main`. A patch release for an older version is built on a
 branch from that version's tag, outside the workflow: 3.7.1, for example, was built on

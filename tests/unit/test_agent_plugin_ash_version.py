@@ -189,10 +189,12 @@ _CASE_WRONG_PATTERNS = (_CASE_WRONG_V_REF, _CASE_WRONG_FLAKE_REF)
 # A release pin: exactly three numeric components.
 _SEMVER_PIN = re.compile(r"^\d+\.\d+\.\d+$")
 
-# A bare-major pin, the shape of the retired floating tag. `v3` is frozen at v3.8.0
-# and the docs now say so rather than offer it, but the tag still resolves and the
-# docs name it while explaining the retirement, so a bare major is a deliberate pin
-# shape rather than a truncated version.
+# A bare-major pin, the shape of the retired floating tag. It used to be accepted as
+# the documented alternative to a release pin. Floating tags are retired: v3 is
+# frozen at v3.8.0 and never updates, and no floating tag exists for later majors,
+# so a bare major now installs a frozen ASH at best and, for v4 on, a ref that
+# resolves to nothing -- the walk reports it like any pin that names no release.
+# The pattern stays so the classifier's controls can name the shape.
 _FLOATING_MAJOR_PIN = re.compile(r"^\d+$")
 
 # The pin shapes that are not versions and are not meant to be. Each is matched by an
@@ -408,7 +410,7 @@ def _pin_is_a_version_attempt(pin: str) -> bool:
 
 
 def _malformed_pins():
-    """Pins that claim to be a version and are not one."""
+    """Pins that claim to be a version and do not name a release."""
     malformed = []
     for path, number, pin, line in _version_pins():
         if not _pin_is_a_version_attempt(pin):
@@ -416,10 +418,13 @@ def _malformed_pins():
         # A pin ending a sentence keeps the period; strip one so `@v3.7.0.` in prose
         # is not reported as malformed. `3.0` is still `3.0` after this, and `""` is
         # still `""` -- an empty pin has no trailing period to lose, so it reaches the
-        # two patterns below and matches neither.
+        # pattern below and does not match.
         candidate = pin.rstrip(".")
-        if _SEMVER_PIN.match(candidate) or _FLOATING_MAJOR_PIN.match(candidate):
+        if _SEMVER_PIN.match(candidate):
             continue
+        # A bare major (_FLOATING_MAJOR_PIN) used to be accepted here. It is reported
+        # with the rest since the floating tags were retired: v3 is frozen at v3.8.0,
+        # and a later bare major resolves to nothing.
         malformed.append((path, number, pin, line))
     return malformed
 
@@ -597,8 +602,10 @@ class TestInstallRefsParseAsVersions:
                 f"  {path}:{number} pins {pin!r}\n      {line}"
                 for path, number, pin, line in malformed
             )
-            + "\n\nA pin must be three numeric components (3.7.0) or the documented "
-            "floating major tag (3). Fix the source file -- for README.md that is "
+            + "\n\nA pin must be three numeric components (3.7.0). A bare major such "
+            "as 3 is the retired floating tag: v3 is frozen at v3.8.0 and never "
+            "updates, and a later major resolves to nothing, so pin a release "
+            "instead. Fix the source file -- for README.md that is "
             "README.md.template, then regenerate with "
             "`python scripts/version_template_manager.py generate`; editing the "
             "generated file is overwritten by the next run. Prefer the "
@@ -662,13 +669,18 @@ class TestInstallRefsParseAsVersions:
         # The pin reads as `3.0` because the comma ends it.
         assert _INSTALL_REF_PIN.search(typo).group("pin") == "3.0"
 
-        # Two components is the typo's signature; a bare major and a full release are
-        # the two forms that must stay acceptable.
+        # Two components is the typo's signature; a full release is the one form
+        # that must stay acceptable.
         assert not _SEMVER_PIN.match("3.0") and not _FLOATING_MAJOR_PIN.match("3.0"), (
             "A two-component pin must not classify as a version; that is the shape "
             "`@v3.0,1` collapses to."
         )
-        assert _FLOATING_MAJOR_PIN.match("3"), "the documented @v3 floating tag"
+        # A bare major is the retired floating tag's shape: well-formed, recognized
+        # by its own pattern, and reported anyway because it names no release.
+        assert _FLOATING_MAJOR_PIN.match("3"), "the retired floating tag's shape"
+        assert not _SEMVER_PIN.match("3"), (
+            "a bare major must not read as a release pin, so the walk reports it"
+        )
         assert _SEMVER_PIN.match("3.0.1"), "a normal release pin"
 
         # Placeholders and shell expansions are not version attempts. Each has a name
@@ -699,20 +711,24 @@ class TestInstallRefsParseAsVersions:
             "and it must then fail to parse, which is what makes it get reported"
         )
 
-    @pytest.mark.parametrize("pin", ["v3.7.0", "x3.7.0", "3.0", "latest", "main"])
-    def test_a_pin_that_is_not_a_version_and_not_a_placeholder_is_reported(self, pin):
-        """The shapes the old digit test waved through.
+    @pytest.mark.parametrize(
+        "pin", ["v3.7.0", "x3.7.0", "3.0", "latest", "main", "3", "4"]
+    )
+    def test_a_pin_that_is_not_a_release_and_not_a_placeholder_is_reported(self, pin):
+        """The shapes the old digit test waved through, plus the retired bare majors.
 
         `v3.7.0` is the pin left by `@vv3.7.0` and `x3.7.0` by `@vx3.7.0`; both start
         with a letter, so `pin[:1].isdigit()` called them non-attempts and skipped
         them. `latest` and `main` are here as the general case: the old test exempted
-        every non-version, and the set of non-versions has no bound.
+        every non-version, and the set of non-versions has no bound. `3` and `4` are
+        bare majors, accepted while the floating tag was maintained and reported
+        since its retirement: v3 is frozen at v3.8.0, and `@v4` resolves to nothing.
         """
         assert _pin_is_a_version_attempt(pin), f"{pin!r} must be classified as a claim"
         candidate = pin.rstrip(".")
-        assert not (
-            _SEMVER_PIN.match(candidate) or _FLOATING_MAJOR_PIN.match(candidate)
-        ), f"{pin!r} must not parse as a version, so it gets reported"
+        assert not _SEMVER_PIN.match(candidate), (
+            f"{pin!r} must not read as a release pin, so it gets reported"
+        )
 
     def test_the_flake_shape_is_unreachable_by_the_at_v_patterns(self):
         """The blind spot, as a unit on the patterns rather than on the tree.

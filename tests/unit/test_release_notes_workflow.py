@@ -101,6 +101,14 @@ _REQUIRES_BASH = [
 
 _INTEGRATION_SHELL = [pytest.mark.integration, *_REQUIRES_BASH]
 
+
+def _requires_bash(func):
+    """Apply _REQUIRES_BASH to a single test, for classes that are not wholly skipped."""
+    for mark in reversed(_REQUIRES_BASH):
+        func = mark(func)
+    return func
+
+
 #: The release pull request's merge commit, as the workflow's env would carry it.
 MERGE_SHA = "5555555555555555555555555555555555555555"
 
@@ -511,11 +519,14 @@ def _run_release_step(
 
 class TestTheReleaseTargetsTheMergeCommit:
     """`--target main` is resolved when the release is created, so a pull request merged
-    in between puts the release tag past the release pull request's merge commit."""
+    in between puts the release tag past the release pull request's merge commit.
 
-    pytestmark = _REQUIRES_BASH
+    Only the test that runs the step's shell carries the bash skips: the two
+    YAML-reading unit tests below must keep running everywhere.
+    """
 
     @pytest.mark.integration
+    @_requires_bash
     def test_release_create_targets_the_merge_commit(self, tmp_path: Path):
         result = _run_release_step(_release_script(), tmp_path)
 
