@@ -23,7 +23,16 @@ import pytest
 
 from automated_security_helper.utils import pre_installed_tool as pit
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    # The store is POSIX-only: where the platform lacks the descriptor-relative
+    # primitives its checks rely on (Windows) it is never opened, and the
+    # portability tests cover that arm.
+    pytest.mark.skipif(
+        not pit._secure_store_open_supported(),
+        reason="the verdict store needs POSIX descriptor-relative opens",
+    ),
+]
 
 
 @pytest.fixture

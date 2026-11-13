@@ -14,7 +14,6 @@ open keeps refusing a symlinked directory and a foreign owner.
 from __future__ import annotations
 
 import os
-import sys
 
 import pytest
 
@@ -48,7 +47,9 @@ def test_reset_does_not_raise_when_the_posix_flags_are_absent(store_dir, monkeyp
     pit.reset_pre_installed_tool_cache()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory semantics")
+@pytest.mark.skipif(
+    not pit._secure_store_open_supported(), reason="POSIX directory semantics"
+)
 def test_open_returns_a_descriptor_for_a_real_directory(store_dir):
     fd = pit._open_verdict_store(create=True)
     assert fd is not None
@@ -59,7 +60,9 @@ def test_open_returns_a_descriptor_for_a_real_directory(store_dir):
         os.close(fd)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory semantics")
+@pytest.mark.skipif(
+    not pit._secure_store_open_supported(), reason="POSIX directory semantics"
+)
 def test_open_refuses_a_symlinked_store_directory(tmp_path, store_dir):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir(mode=0o700)
@@ -67,7 +70,9 @@ def test_open_refuses_a_symlinked_store_directory(tmp_path, store_dir):
     assert pit._open_verdict_store(create=False) is None
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory semantics")
+@pytest.mark.skipif(
+    not pit._secure_store_open_supported(), reason="POSIX directory semantics"
+)
 def test_open_tightens_a_lax_directory_of_ours(store_dir):
     store_dir.mkdir(mode=0o755)
     store_dir.chmod(0o755)
