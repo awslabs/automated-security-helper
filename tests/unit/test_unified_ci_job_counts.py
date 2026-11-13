@@ -601,8 +601,29 @@ def _runner_images(job: dict[str, Any]) -> set[str]:
     """The runner images a job runs on: its os axis, or the literal runs-on."""
     runs_on = str(job["runs-on"])
     if "matrix.os" in runs_on:
-        return {entry["os"] for entry in _cells(job)}
+        # The one override shape the workflow uses: a leg of one method on one axis
+        # image runs on another label (the finch legs on ubuntu-24.04). The image
+        # setup-uv keys its cache on is the label the leg runs on, not the axis value.
+        override = FINCH_LABEL_OVERRIDE.search(runs_on)
+        images = set()
+        for cell in _cells(job):
+            image = cell["os"]
+            if (
+                override
+                and cell.get(override["axis"]) == override["value"]
+                and image == override["os"]
+            ):
+                image = override["label"]
+            images.add(image)
+        return images
     return {runs_on}
+
+
+#: ``(matrix.<axis> == '<value>' && matrix.os == '<os>') && '<label>' || matrix.os``.
+FINCH_LABEL_OVERRIDE = re.compile(
+    r"\(matrix\.(?P<axis>[\w-]+) == '(?P<value>[^']+)' && "
+    r"matrix\.os == '(?P<os>[^']+)'\) && '(?P<label>[^']+)' \|\| matrix\.os"
+)
 
 
 SETUP_ASH_CALLERS = [
