@@ -15,6 +15,7 @@ from typing import (
     Literal,
     Optional,
     Sequence,
+    Tuple,
 )
 from urllib.parse import quote, unquote
 
@@ -537,6 +538,114 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: --mode precommit --staged: checkov is handed each staged file as
+    #: ``--file <path>`` -- and, for Terraform, the staged file's SAME-DIRECTORY
+    #: ``.tf``/``.tfvars`` siblings as extra ``--file`` entries
+    #: (_staged_scope_paths below; never a ``--directory``, which recurses) --
+    #: in place of ``--directory <target>``, so it parses what the commit
+    #: stages instead of walking the tree. The patterns name what checkov's
+    #: frameworks read, so a
+    #: commit staging none of them (a README, a .py refactor) skips checkov's
+    #: startup entirely. The cost of a missing pattern is a skipped checkov run
+    #: on a commit it could have read, never a wrong finding: extend the list
+    #: when a framework's file kind is missing. The --skip-path values stay
+    #: anchored at the directory target as before; the path rewriting already
+    #: matches file paths (rewrite_checkov_paths's ``scanned_files``).
+    staged_scope_patterns: ClassVar[Optional[Tuple[str, ...]]] = (
+        # terraform / bicep / cloudformation / serverless / k8s / openapi /
+        # ansible / argo / azure pipelines / circleci / github actions / gitlab
+        # ci (json and yaml kinds are shared by most of these)
+        "*.tf",
+        "*.tfvars",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.template",
+        "*.bicep",
+        # dockerfile
+        "Dockerfile",
+        "Dockerfile.*",
+        "*.dockerfile",
+        # sca / supply chain manifests the sca frameworks read
+        "requirements*.txt",
+        "Pipfile",
+        "Pipfile.lock",
+        "setup.py",
+        "pyproject.toml",
+        "go.mod",
+        "go.sum",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "yarn.lock",
+        "Gemfile",
+        "Gemfile.lock",
+        "*.csproj",
+        "packages.config",
+        "composer.json",
+        "composer.lock",
+    )
+    staged_target_style: ClassVar[Optional[str]] = "per-file-flag"
+    staged_target_flag: ClassVar[str] = "--file"
+
+    #: The name endings whose staged files pull in their SAME-DIRECTORY
+    #: Terraform siblings as extra ``--file`` entries: a Terraform file read
+    #: alone loses the sibling variables.tf defaults, locals and module sources,
+    #: so a single-file scan changes findings and a suppression written against
+    #: a whole-tree result may stop matching. Compared on the lowercased name,
+    #: as the staged pattern matching is (``Main.TF`` is Terraform to checkov).
+    #: Siblings only, never the directory itself: ``--directory`` walks
+    #: recursively, so a staged root main.tf became a full-tree scan and a
+    #: nested one scanned every subdirectory, which is the cost --staged exists
+    #: to avoid. A sibling's own findings are not the commit's: the engine
+    #: filters the results to the staged files before the reports.
+    _STAGED_TERRAFORM_SUFFIXES: ClassVar[Tuple[str, ...]] = (
+        ".tf",
+        ".tfvars",
+        ".tf.json",
+    )
+
+    def _is_staged_terraform(self, path: Path) -> bool:
+        return path.name.lower().endswith(self._STAGED_TERRAFORM_SUFFIXES)
+
+    def _staged_scope_paths(self, target, target_type):
+        """The base selection, plus the staged Terraform files' own-dir siblings.
+
+        After the base filtering (patterns, symlinks, the run's scan set), so
+        siblings are added only for a Terraform file the scan set admits, and
+        the siblings themselves go through the same scan-set filter and symlink
+        cut, so an ignored or linked sibling is not brought back in. Every
+        target stays a file, so nothing recurses and two staged files in one
+        directory cannot make checkov parse a file twice.
+        """
+        staged = super()._staged_scope_paths(target, target_type)
+        if not staged:
+            return staged
+        seen = set(staged)
+        sibling_candidates: List[Path] = []
+        for directory in sorted(
+            {p.parent for p in staged if self._is_staged_terraform(p)}
+        ):
+            try:
+                entries = sorted(directory.iterdir())
+            except OSError as error:
+                ASH_LOGGER.debug(
+                    f"Not reading {directory} for staged Terraform siblings: {error}"
+                )
+                continue
+            for sibling in entries:
+                if sibling in seen or sibling.is_symlink() or not sibling.is_file():
+                    continue
+                if self._is_staged_terraform(sibling):
+                    sibling_candidates.append(sibling)
+                    seen.add(sibling)
+        if not sibling_candidates:
+            return staged
+        return staged + self._staged_targets_in_scan_set(
+            sibling_candidates, Path(target)
+        )
+
     check_conf: str = "NOT_PROVIDED"
 
     # The absolute target of the scan in progress, set by _execute_scan and read

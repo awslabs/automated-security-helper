@@ -3937,6 +3937,7 @@ CONTAINER_ENV_NOT_PASSED = frozenset(
         "ASH_VERBOSE",
         "ASH_CHANGED_FILES_ONLY",
         "ASH_BASE_REF",
+        "ASH_STAGED",
         "ASH_BIN_PATH",
         "ASH_IN_CONTAINER",
         "ASH_IN_NIX",
