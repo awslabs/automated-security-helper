@@ -4797,7 +4797,8 @@ branch lists them for the version selector in the site header.</p>
   patch release for an older line is published without moving <code>latest</code>.</li>
 <li>A page of a release that is not the latest shows a notice saying so, with a link to
   the latest release.</li>
-<li>Any other tag, such as the floating <code>v3</code> or a prerelease, publishes nothing.</li>
+<li>Any other tag, such as a prerelease or the retired floating <code>v3</code> (frozen at
+  v3.8.0), publishes nothing.</li>
 </ul>
 <p>The deploy also manages the root of the branch. The root <code>index.html</code> redirects to
 <code>latest/</code>, or to <code>main/</code> until a release has been published, and every page path of

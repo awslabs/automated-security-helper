@@ -3425,7 +3425,8 @@ on each runner image or in each job:</p>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">ASH_CONFIG</span><span class="o">=</span>/etc/ash/ash.yaml<span class="w"> </span>ash<span class="w"> </span>scan<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--output-dir<span class="w"> </span>../ash-results
 </span></code></pre></div>
 <p>Pin to a release tag, or to a full commit SHA for a reference that cannot move; do not
-use <code>@v3</code>, which moves with each release (<a href="../../how-to/install/#choose-a-version-to-pin">Choose a version to pin</a>).
+use <code>@v3</code>, the retired floating tag, which is frozen at v3.8.0 and never moves to a
+newer release (<a href="../../how-to/install/#choose-a-version-to-pin">Choose a version to pin</a>).
 To roll out a new version, change the tag in one place and run the same command with
 <code>--force</code>. Without the image, the scanners' tools come from the runner and from ASH's own
 environment instead of from one artifact, so keep the runner images that hold them on the

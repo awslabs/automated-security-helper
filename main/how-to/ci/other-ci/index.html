@@ -3772,9 +3772,9 @@ and the step exits 2:</p>
   <code>sarif</code> job's <code>if:</code> has no status function, so that job is skipped when the scan fails;
   <a href="../github-actions/#sarif">Upload SARIF</a> shows the condition to use instead.</li>
 <li><a href="https://github.com/awslabs/automated-security-helper/blob/main/examples/GitHubActions/ash-repo-scan.yml">examples/GitHubActions/ash-repo-scan.yml</a>
-  calls the reusable workflow at the floating <code>v3</code> tag, with <code>ash-version: v3</code>, and uploads
-  SARIF from the scan job on pull requests only. To pin a release, upload SARIF on every
-  event, and install every default scanner's tool, follow
+  calls the reusable workflow at a pinned release tag, with <code>ash-version</code> naming the
+  same tag, and uploads SARIF from the scan job on pull requests only. To upload SARIF
+  on every event and install every default scanner's tool, follow
   <a href="../github-actions/">Run ASH in GitHub Actions</a>.</li>
 <li><a href="https://github.com/awslabs/automated-security-helper/tree/main/examples/AWSCodeBuild">examples/AWSCodeBuild/</a>
   installs the ASH release it ships in and scans in container mode, which needs

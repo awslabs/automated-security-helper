@@ -3453,9 +3453,10 @@ Set <code>ASH_IMAGE_NAME</code> to build and run an image under another name.</p
 slashes. Run from the top directory of a checkout of ASH, <code>ash build-image</code> and
 container-mode scans build that checkout whatever the revision says; to build another
 revision, run them from another directory.</p>
-<p>A branch, or the floating <code>v3</code> tag, is cloned again on every build, because it can have
-moved since the last one. A release tag or a commit ID is cloned once, and later builds
-take that clone from the build cache.</p>
+<p>A branch, or a tag that is not a release tag (such as the retired floating <code>v3</code>), is
+cloned again on every build, because it can have moved since the last one. A release
+tag or a commit ID is cloned once, and later builds take that clone from the build
+cache.</p>
 <h2 id="mounts">Mounts and network<a class="headerlink" href="#mounts" title="Permanent link">&para;</a></h2>
 <p>The container sees two host directories: the source directory at <code>/src</code> and the output
 directory at <code>/out</code>. Keep the two in separate directory trees, such as

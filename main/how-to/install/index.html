@@ -3573,7 +3573,7 @@ the install needs a C compiler.</p>
 <tbody>
 <tr>
 <td><code>@v3.8.0</code></td>
-<td>That release. The release process creates each version tag once and moves only the <code>v3</code> tag.</td>
+<td>That release. The release process creates each version tag once and never moves it.</td>
 </tr>
 <tr>
 <td>a full commit SHA</td>
@@ -3581,7 +3581,7 @@ the install needs a C compiler.</p>
 </tr>
 <tr>
 <td><code>@v3</code></td>
-<td>The latest 3.x release. It moves with each release.</td>
+<td>v3.8.0, forever. The retired floating tag: frozen there, it no longer moves with releases.</td>
 </tr>
 <tr>
 <td><code>@main</code></td>
@@ -3591,11 +3591,11 @@ the install needs a C compiler.</p>
 </table>
 <p>Release tags are lightweight and unsigned, and releases have no signed artifacts. If
 you need a reference that cannot change, pin a commit SHA.</p>
-<p>The <code>v3</code> tag moves to each new 3.x release, and a release is not always made from
-<code>main</code>: v3.7.1 is a backport made on a separate branch, outside <code>main</code>'s history. While
-<code>v3</code> points at a release like that, it lacks features of <code>main</code> that these docs
-describe. A 3.x release can also include breaking changes, so read the release notes
-before upgrading a <code>v3</code> or <code>&lt;4</code> pin.</p>
+<p>Floating major tags are retired: the <code>v3</code> tag used to move to each new 3.x release
+and is now frozen at v3.8.0, so a <code>v3</code> pin never receives updates again -- pin a
+release tag instead. A release is not always made from <code>main</code>: v3.7.1 is a backport
+made on a separate branch, outside <code>main</code>'s history. A 3.x release can also include
+breaking changes, so read the release notes before upgrading a <code>&lt;4</code> pin.</p>
 <h3 id="install-from-main">Install from main<a class="headerlink" href="#install-from-main" title="Permanent link">&para;</a></h3>
 <p>To use a feature that is on <code>main</code> before a release includes it, install from <code>main</code>:</p>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
