@@ -18,7 +18,11 @@ loosened, never the mode check); an overflow-uid-owned ``/`` passes inside a
 user namespace and is still rejected outside one; the refusals name the
 failing ancestor, its owning uid and its mode bits; and the uid_map parser
 reads literal ``/proc/self/uid_map`` texts right. Every ``stat`` is mocked and
-the namespace detection is a mocked seam, so no real namespace is needed.
+the namespace detection is a mocked seam, so no real namespace is needed. The
+``geteuid`` patches use ``raising=False``, which on Windows CREATES the seam
+the walk guards on, so the POSIX logic runs under the mocks on every platform;
+the product's own no-``geteuid`` pass-through (the "POSIX only" clause) has a
+test of its own.
 """
 
 from __future__ import annotations
@@ -75,7 +79,10 @@ def _walk(
         )
 
     with monkeypatch.context() as patched:
-        patched.setattr(tool_config_dir.os, "geteuid", lambda: ME)
+        # raising=False: Windows has no os.geteuid, so there the patch CREATES
+        # the seam the walk guards on, and the POSIX logic runs under the mocks
+        # on every platform. monkeypatch removes the attribute again on exit.
+        patched.setattr(tool_config_dir.os, "geteuid", lambda: ME, raising=False)
         patched.setattr(tool_config_dir.os, "stat", fake_stat)
         patched.setattr(
             tool_config_dir, "_user_namespace_overflow_uid", lambda: overflow_uid
@@ -99,10 +106,31 @@ def test_a_walk_over_own_and_root_owned_directories_passes(
         )
 
     with monkeypatch.context() as patched:
-        patched.setattr(tool_config_dir.os, "geteuid", lambda: ME)
+        # raising=False as in _walk: on Windows the patch creates the seam.
+        patched.setattr(tool_config_dir.os, "geteuid", lambda: ME, raising=False)
         patched.setattr(tool_config_dir.os, "stat", fake_stat)
         patched.setattr(tool_config_dir, "_user_namespace_overflow_uid", never)
         assert _changeable_by_others(Path("/work/tmp")) is None
+
+
+def test_without_geteuid_the_walk_passes_before_any_stat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Where ``os`` has no ``geteuid`` (Windows), the check has nothing to say.
+
+    This is the product's own guard, not a mock: with the attribute removed the
+    walk returns before any ``stat``, the module docstring's "POSIX only"
+    clause. ``raising=False`` makes the delete a no-op on Windows, where the
+    attribute is already absent.
+    """
+
+    def never_stat(*args, **kwargs):
+        raise AssertionError("stat ran although the POSIX guard should return first")
+
+    with monkeypatch.context() as patched:
+        patched.delattr(tool_config_dir.os, "geteuid", raising=False)
+        patched.setattr(tool_config_dir.os, "stat", never_stat)
+        assert _changeable_by_others(Path("/anywhere")) is None
 
 
 def test_a_nobody_owned_root_passes_inside_a_user_namespace(
