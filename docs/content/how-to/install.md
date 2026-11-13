@@ -38,7 +38,7 @@ scan exits 1. See [Extras](#extras).
 | [`pipx`](#install-with-pipx) | you already use pipx | supported |
 | [`pip` in a virtual environment](#install-with-pip) | you manage Python environments yourself | supported |
 | [Container image](#container-image) | you want every scanner without installing them | build it yourself |
-| [Nix mode](#nix-mode) | you use Nix | not in any release; install from `main` or use a source checkout |
+| [Nix mode](#nix-mode) | you use Nix | supported |
 | [Homebrew](#homebrew) | you install your tools with Homebrew, on macOS or Linux | supported |
 | pre-commit | you want a scan on every commit | see [Run ASH with pre-commit](pre-commit.md) |
 | From a clone | you are changing ASH | see [Contribute to ASH](../contributing/index.md) |
@@ -203,6 +203,11 @@ uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://gith
 is made, so `ash --version` does not tell the two apart. Pin a commit SHA instead of
 `@main` when you need to know which code you ran.
 
+In [Nix mode](#nix-mode), an install of `main` resolves its flake to the latest
+release's tag, because that is the version it reports. Set
+`ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main`, or the commit you
+pinned, so the scanner toolchain matches the code.
+
 ## Container image
 
 No ASH image is published. `ash --mode container` builds an image with every scanner
@@ -230,15 +235,28 @@ A file that is missing, cannot be read, does not parse, or is not a valid config
 scan with exit code 3 before the previous run's output is cleared, and that includes the
 file `ASH_CONFIG` names when `--config` names a valid one.
 
-Nix mode is not in any release: v3.7.x rejects `--mode nix`. Use it from a source
-checkout or from an install of `main`:
+Nix mode is in the latest release; v3.7.x and older reject `--mode nix`, so install a
+newer release:
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network and scans in a Nix shell" -->
+```bash
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+ash scan --mode nix
+```
+
+Which flake supplies the shell's tools:
 
 - From a source checkout, ASH uses that checkout's `flake.nix`.
-- An install of `main` looks for the flake at the release tag that matches its version
-  number. Until a release contains `flake.nix`, that fails with an error saying
-  `flake.nix` does not exist. Set `ASH_NIX_FLAKE_REF` to a flake reference that has
-  it: a checkout, written `path:` followed by its absolute path, or a branch or commit,
-  such as `github:awslabs/automated-security-helper/main`.
+- An installed ASH looks for the flake at the release tag matching the version it
+  reports, which releases newer than v3.7.x ship, so a release install needs nothing
+  set.
+- Set `ASH_NIX_FLAKE_REF` to scan with a different flake: a checkout, written `path:`
+  followed by its absolute path, or a branch, tag or commit of this repository or a
+  fork. An install of `main` reports the latest release's version number and so
+  resolves to that release's flake, not `main`'s; set
+  `ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main`, or a matching
+  commit, so the scanner toolchain matches the code you run (see
+  [Install from main](#install-from-main)).
 
 ## Homebrew
 

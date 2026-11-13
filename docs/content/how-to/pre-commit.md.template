@@ -256,9 +256,9 @@ pre-commit run --hook-stage manual ash-full-scan --all-files
 
 ## Run the hook in Nix mode {#nix}
 
-!!! warning "Nix mode is on `main` only"
-    Nix mode is not in any release: v3.7.x rejects `--mode nix`. This recipe works with an
-    ASH installed from `main` or from a source checkout, not with a released `rev`.
+!!! note "Nix mode needs a current release"
+    Nix mode is in the latest release; v3.7.x and older reject `--mode nix`. This recipe
+    runs the ASH on `PATH`, so install that release or newer, or use a source checkout.
 
 `.pre-commit-hooks.yaml` defines no Nix hook: `ash` and `ash-simple-scan` run precommit
 mode and `ash-full-scan` runs container mode, and ASH takes one `--mode` per run. To scan
@@ -273,22 +273,22 @@ repos:
     hooks:
       - id: ash-nix
         name: ASH scan in Nix mode
-        entry: env ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main ash scan --mode nix --no-progress
+        entry: ash scan --mode nix --no-progress
         language: system
         pass_filenames: false
         stages: [manual]
 ```
 
-<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix, an ASH from main and the network" -->
+<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix and the network" -->
 ```bash
-uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}'
 pre-commit run --hook-stage manual ash-nix --all-files
 ```
 
 This is a different hook from `ash`: it runs the scanners of a normal scan, not the five
 of precommit mode, so it takes longer and belongs on `manual` or `pre-push`. It uses the
-installation on `PATH`, so install ASH with the `cdk` extra for cdk-nag. A `main` install
-cannot find a release tag that contains `flake.nix`, so the hook's `entry` sets
-`ASH_NIX_FLAKE_REF` itself through `env`. The hook then finds `flake.nix` on a `pre-push`
-or from an IDE or GUI client as well, where a variable exported in your shell may not be set.
+installation on `PATH`, so install ASH with the `cdk` extra for cdk-nag. An installed
+release finds `flake.nix` at its own release tag with nothing set, so the hook works on a
+`pre-push` and from an IDE or GUI client as well, where a variable exported in your shell
+may not be set.
 [Install ASH](install.md#nix-mode) covers Nix mode's requirements.

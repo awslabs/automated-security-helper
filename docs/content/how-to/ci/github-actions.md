@@ -616,20 +616,21 @@ SARIF upload alone you do not need this option.
 
 ## Run in Nix mode {#nix}
 
-!!! warning "Nix mode is on `main` only"
-    Nix mode is not in any release: v3.7.x rejects `--mode nix`, and the reusable
-    workflows' `ash-mode` input takes `local` or `container`, not `nix`. Write the steps
-    yourself, as below, and install ASH from `main`. Pin a commit SHA instead of `main`
-    when you need to know which code ran.
+!!! note "Write the Nix job yourself"
+    The reusable workflows' `ash-mode` input takes `local` or `container`, not `nix`,
+    so write the steps yourself, as below. Nix mode is in the latest release; v3.7.x
+    and older reject `--mode nix`.
 
 Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
 ASH's `flake.nix`, so the job installs neither Ruby nor the scanner binaries. The job
 needs Nix on the runner, and ASH installed with the `cdk` extra: Nix mode does not install
 ASH, and cdk-nag runs on the Python environment ASH is installed in. ASH passes
-`nix-command` and `flakes` on each invocation. A `main` install cannot find a release tag
-that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s flake.
+`nix-command` and `flakes` on each invocation. The installed release resolves its flake
+to its own release tag, so the job sets no `ASH_NIX_FLAKE_REF`; set it only to scan with
+a different flake, such as when running ASH from `main` or a fork
+([Nix mode](../install.md#nix-mode)).
 
-<!-- doctest: config kind=github-actions runner=none reason="installs ASH from main, which the runner cannot swap for the pull request's build" -->
+<!-- doctest: config kind=github-actions runner=none reason="installs a released ASH, which the runner cannot swap for the pull request's build" -->
 ```yaml
 name: ASH (Nix mode)
 on:
@@ -639,8 +640,6 @@ permissions:
 jobs:
   ash-nix:
     runs-on: ubuntu-latest
-    env:
-      ASH_NIX_FLAKE_REF: github:awslabs/automated-security-helper/main
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -658,7 +657,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main' \
+          uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0' \
             2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"

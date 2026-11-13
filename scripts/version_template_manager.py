@@ -22,9 +22,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # interpolated for the reason the flake entry of ASH_PIN_PATTERNS gives.
 #
 # One list for three readers: scripts/docs_versions.py check reads which release a built
-# page pins (release_pins) and requires the main version to name main in every form a
-# release page uses (branch_ref_pattern); scripts/docs_checks.py refuses {{RELEASE}} in
-# any of these forms in a template (release_in_install_ref). Whether a `v<version>` after
+# page pins (release_pins) and requires the main version to pin the current release in
+# every form the newest release's page uses (forms_pinning_a_release);
+# scripts/docs_checks.py refuses {{RELEASE}} in any of these forms in a template
+# (release_in_install_ref), and its install-commands check reads each form's branch
+# rendering too (the third column), so a `refs/heads/<branch>` ref is read where a
+# `refs/tags/v<version>` pin would be. Whether a `v<version>` after
 # one of these prefixes is ASH's pin is decided once, by ASH_PIN_PATTERNS below, which
 # `convert` and the two readers of a built page's pins (release_pins and
 # forms_pinning_a_release) all use: a prefix such as `--branch ` or `rev: ` is written by
@@ -340,13 +343,16 @@ class VersionTemplateManager:
         # The version generate_all_from_templates read for the run in progress, so
         # each template does not read it again; None outside such a run.
         self._run_version: Optional[str] = None
-        # The ref an install command uses. A release's docs render it as the release,
-        # the docs site's main version as `main` (see render_for_branch).
+        # The ref an install command uses. Every build that renders a template
+        # renders it as the release being built (docs/hooks/install_refs.py), and the
+        # committed pages carry the current release: a reader of any docs version,
+        # the site's main version included, installs a release.
         self.version_placeholder = "{{VERSION}}"
         # The current release number, on every build: what `ash --version` prints, the
         # release this repository's generated files pin, a release named in a table.
-        # Never in an install command, where the main version would then install a
-        # release; scripts/docs_checks.py enforces that with release_in_install_ref.
+        # Never in an install command, whose ref is written with the version
+        # placeholder, the one `convert` writes and the pin readers key on;
+        # scripts/docs_checks.py enforces that with release_in_install_ref.
         self.release_placeholder = "{{RELEASE}}"
 
         # Files to process (relative to project root). Every page with a
@@ -402,26 +408,6 @@ class VersionTemplateManager:
         """A template rendered for a release: both placeholders become the version."""
         return content.replace(self.version_placeholder, version).replace(
             self.release_placeholder, version
-        )
-
-    def render_for_branch(self, content: str, branch: str, release: str) -> str:
-        """A template rendered for a branch, such as main, instead of a release.
-
-        The docs site's `main` version is built this way (docs/hooks/install_refs.py),
-        so its install commands install main. A placeholder written after a `v`, as in
-        `@v{{VERSION}}`, `--branch v{{VERSION}}` or `rev: v{{VERSION}}`, names a release
-        tag, and the whole tag becomes the branch: `@main`, not `@vmain`. A tag looked up
-        by its full name, `refs/tags/v{{VERSION}}`, becomes the branch's
-        `refs/heads/<branch>`, so the command still names a ref that exists. A bare
-        placeholder becomes the branch name too. The release placeholder becomes
-        release, the current release number: an install of main reports it.
-        """
-        tag = "v" + self.version_placeholder
-        return (
-            content.replace("refs/tags/" + tag, "refs/heads/" + branch)
-            .replace(tag, branch)
-            .replace(self.version_placeholder, branch)
-            .replace(self.release_placeholder, release)
         )
 
     def packaged_release(self) -> str:
@@ -513,12 +499,6 @@ class VersionTemplateManager:
                     )
                 )
         return found
-
-    @staticmethod
-    def branch_ref_pattern(form: str, branch: str) -> "re.Pattern[str]":
-        """The named install-command form, naming branch instead of a release."""
-        rendering = next(b for name, _p, b in INSTALL_REF_FORMS if name == form)
-        return re.compile(rendering.format(branch=re.escape(branch)) + r"(?![\w.-])")
 
     def release_in_install_ref(self) -> "re.Pattern[str]":
         """The release placeholder written as the ref of an install command."""

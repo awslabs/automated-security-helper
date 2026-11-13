@@ -23,14 +23,14 @@ one of them.
 | pipx | `ash` in an isolated pipx environment | Supported | [Install with pipx](how-to/install.md#install-with-pipx) |
 | pip | `ash` in a virtual environment you manage | Supported | [Install with pip](how-to/install.md#install-with-pip) |
 | Container | An image you build yourself; no ASH image is published | Build it yourself | [Container image](how-to/install.md#container-image), [Run in a container](how-to/run-in-a-container.md) |
-| Nix | Scan inside `nix develop` with `--mode nix` | Not in any release; see the note below | [Nix mode](how-to/install.md#nix-mode) |
+| Nix | Scan inside `nix develop` with `--mode nix` | Supported; see the note below | [Nix mode](how-to/install.md#nix-mode) |
 | Homebrew | The Homebrew tap | Supported | [Homebrew](how-to/install.md#homebrew) |
 | Pre-built image in your registry | `ash build-image`, then push to your own registry | Operator-built | [Roll out across repositories](getting-started/platform-teams.md) |
 
-!!! note "Nix mode is not in a release"
-    Released 3.7.x rejects `--mode nix`. Nix mode exists on `main` only, so use
-    a source checkout or an install from `main`. The install guide has the
-    steps and the `ASH_NIX_FLAKE_REF` setting for installs of `main`.
+!!! note "Nix mode needs a current release"
+    Nix mode is in the latest release; v3.7.x and older reject `--mode nix`, so
+    install a newer release or use a source checkout. The install guide has the
+    steps and the `ASH_NIX_FLAKE_REF` setting.
 
 ## Surfaces and backends
 
@@ -39,7 +39,7 @@ guide does not document that combination.
 
 | Surface | Backend it runs on | Guide |
 | --- | --- | --- |
-| Local scan | Any installed `ash` (uv tool, uvx, pipx, pip, Homebrew), the container, or Nix (`main` only) | [Run ASH locally](getting-started/local.md), [Run in a container](how-to/run-in-a-container.md) |
+| Local scan | Any installed `ash` (uv tool, uvx, pipx, pip, Homebrew), the container, or Nix | [Run ASH locally](getting-started/local.md), [Run in a container](how-to/run-in-a-container.md) |
 | pre-commit hooks `ash` and `ash-simple-scan` | `--mode=precommit`, in the environment pre-commit builds | [Run ASH with pre-commit](how-to/pre-commit.md) |
 | pre-commit hook `ash-full-scan` | Container (`--mode=container`) | [The ash-full-scan hook](how-to/pre-commit.md#full-scan) |
 | MCP server over stdio | An installed `ash` | [Run the MCP server](how-to/mcp-server.md) |
