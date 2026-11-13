@@ -230,25 +230,6 @@
           "sha256": {}
         }
       },
-      "semgrep": {
-        "name": "semgrep",
-        "enabled": true,
-        "options": {
-          "severity_threshold": null,
-          "scan_timeout": 1800,
-          "config": "p/ci",
-          "exclude": [
-            "*-converted.py",
-            "*_report_result.txt"
-          ],
-          "exclude_rule": [],
-          "severity": [],
-          "metrics": "auto",
-          "offline": false,
-          "tool_version": null,
-          "install_timeout": 300
-        }
-      },
       "syft": {
         "name": "syft",
         "enabled": true,

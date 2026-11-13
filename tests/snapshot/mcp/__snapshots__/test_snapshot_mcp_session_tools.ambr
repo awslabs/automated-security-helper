@@ -365,7 +365,7 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, syft
               pins:       bandit >=1.7.0,<2.0.0
         
           2. web
@@ -374,7 +374,7 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, syft
               pins:       bandit >=1.7.0,<2.0.0
         
           3. gone
@@ -383,7 +383,7 @@
               relative:   gone
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, syft
               pins:       bandit >=1.7.0,<2.0.0
         
         Nothing has been scanned. This is a resolution and validation pass only.
@@ -407,7 +407,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
           ]),
           'severity_threshold': 'MEDIUM',
@@ -434,7 +433,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
           ]),
           'severity_threshold': 'HIGH',
@@ -461,7 +459,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
           ]),
           'severity_threshold': 'MEDIUM',
@@ -510,7 +507,7 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, syft
               pins:       bandit >=1.7.0,<2.0.0
         
           2. web
@@ -519,7 +516,7 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
+              scanners:   bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, syft
               pins:       bandit >=1.7.0,<2.0.0
         
           3. gone  [skipped: error]
@@ -549,7 +546,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
           ]),
           'severity_threshold': 'MEDIUM',
@@ -576,7 +572,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
           ]),
           'severity_threshold': 'HIGH',
