@@ -120,6 +120,13 @@ checkov is the slowest scanner. Scan time grows with the size of the repository,
 every run scans all of it. The hook environment takes about 650 MB under
 `~/.cache/pre-commit`, and bandit and checkov about 240 MB under `~/.local/share/uv`.
 
+About two seconds of every later run is ASH's own startup (the interpreter and the eager
+imports), paid again on each commit. [Express mode](express-mode.md) removes it: run
+`ash express start` once (or any scan with `--express`), and every hook run afterwards forks a
+resident warm process instead of starting cold -- Linux and macOS only, and the hook needs
+no configuration change. Pairing the daemon with a scan scoped to the files the commit
+touches is the fastest hook shape.
+
 ## Pre-commit and CI together {#with-ci}
 
 The pre-commit hook and a CI scan answer different questions, so most repositories run

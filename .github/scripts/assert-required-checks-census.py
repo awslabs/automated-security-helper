@@ -103,6 +103,15 @@ _UNGATED: dict[str, str] = {
         "under `!cancelled()` whether it succeeded, failed, was skipped or was "
         "cancelled by its concurrency group, and scan-validation itself is gated."
     ),
+    "e2e-express": (
+        "the advisory express-daemon parity cells, carrying continue-on-error. Express "
+        "mode is an accelerator whose contract is the silent cold fallback: a scan "
+        "is never wrong because the daemon is broken, only slower, so the daemon's "
+        "own end-to-end verdict is information for the express maintainers rather "
+        "than part of the merge gate. The express code's correctness is gated where "
+        "every other module's is, by its unit and integration tests in the gated "
+        "tiers, and Windows's unix-only refusal runs in the gated e2e tier."
+    ),
 }
 
 # A mapping key, optionally preceded by one or more sequence dashes. The dashes have to

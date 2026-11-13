@@ -531,6 +531,10 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 157 check",
             "157 is this",
             "~442 runner jobs",
+            # Before the advisory e2e-express job was added (+2 on every event).
+            "expands to 291 jobs",
+            "contributes 211 check",
+            "211 is this",
         ):
             assert stale not in COMMENTS
 

@@ -1,0 +1,525 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""What the express client and daemon share: paths, identity, and the wire protocol.
+
+Standard library only, at module scope and below: the client imports this before
+the heavy CLI, and anything heavier here would spend the startup time express
+exists to remove.
+
+The socket lives in a directory this module creates and polices
+(:func:`runtime_dir`): mode 0700, owned by the invoking user, never reached
+through a symlink. Its name carries the uid and a hash of the ASH version
+(:func:`socket_path`), so two users, or two ASH versions, never share a socket,
+and upgrading ASH strands the old daemon at its old path, where its idle timer
+retires it. The handshake then compares a finer fingerprint of the installed
+package set (:func:`runtime_fingerprint`), which catches an environment change
+the version number does not show.
+
+The protocol is one JSON object per line (UTF-8, ``\\n``-terminated), capped at
+:data:`MAX_FRAME_BYTES`, with the client's stdin/stdout/stderr passed once as
+file descriptors over the socket (``SCM_RIGHTS``) ahead of the request frame.
+The forked scan child writes to those descriptors directly, so its output --
+colors, progress, isatty decisions -- is the cold run's, byte for byte; the
+frames carry only control: the request, the started/refused answer, forwarded
+signals, and the exit code.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import socket
+import struct
+import sys
+from pathlib import Path
+from typing import Any, Mapping, MutableMapping, Optional
+
+#: Bumped when a frame's shape changes incompatibly. The daemon refuses a
+#: request whose protocol differs, and the client reads that refusal as a stale
+#: daemon (fall back cold; restart it under --express).
+PROTOCOL_VERSION = 1
+
+#: A frame larger than this is a protocol error, not a request to honour: the
+#: legitimate frames are argv, cwd and a bounded environment subset, which fit
+#: in a fraction of it, and an unbounded readline would let a broken writer
+#: grow the reader's buffer without limit.
+MAX_FRAME_BYTES = 1024 * 1024
+
+#: Set in the environment of every forked scan child (and honoured by the
+#: client, which never delegates when it is set), so a scan running inside the
+#: daemon can never try to delegate to the daemon again.
+CHILD_ENV = "ASH_EXPRESS_CHILD"
+
+#: Seconds since the last request after which an idle daemon exits.
+DEFAULT_IDLE_SECONDS = 30 * 60
+
+#: Environment variable that overrides :data:`DEFAULT_IDLE_SECONDS` for
+#: ``ash express start`` and for the daemon an autostart spawns.
+IDLE_ENV = "ASH_EXPRESS_IDLE_SECONDS"
+
+#: How long the client gives an autostarted daemon to come up before it gives
+#: up and runs cold. The daemon binds its socket before the warm imports, so
+#: this covers process start, not the imports.
+START_TIMEOUT_SECONDS = 20.0
+
+#: The exact environment variable names, beyond the ``ASH_`` prefix, that a
+#: scan's behaviour honours and the request therefore carries: the documented
+#: inputs (OCI_RUNNER and its wrapper refusal, CI detection, color and width
+#: controls, traceback rendering) -- see the CLI options that declare them as
+#: ``envvar`` and utils/log.py.
+HONORED_ENV_EXACT = frozenset(
+    {
+        "OCI_RUNNER",
+        "OCI_RUNNER_WRAPPER",
+        "CI",
+        "NO_COLOR",
+        "FORCE_COLOR",
+        "PYTHON_COLORS",
+        "TERM",
+        "COLUMNS",
+        "LINES",
+        "TERMINAL_WIDTH",
+        "PYTHONIOENCODING",
+        "TYPER_STANDARD_TRACEBACK",
+        "_TYPER_STANDARD_TRACEBACK",
+        "ASH_DEBUG_SHOW_LOCALS",
+    }
+)
+
+#: Execution basics the forked child takes from the client rather than from the
+#: shell the daemon happened to be started in: scanner subprocesses are resolved
+#: through PATH, temporary files land under TMPDIR, and locale decides stream
+#: codecs. Without these a scan through the daemon could find different tools
+#: than the same command run cold from the same shell.
+EXECUTION_ENV_EXACT = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+    }
+)
+
+
+class ExpressUnavailable(Exception):
+    """Express mode cannot run here: the reason is the message.
+
+    Raised for a platform with no unix sockets or no descriptor passing, and
+    for a runtime directory that cannot be made safe (a symlink, another
+    owner, a mode that cannot be corrected). The client reads it as "run
+    cold"; ``ash express start`` prints it.
+    """
+
+
+class ExpressProtocolError(Exception):
+    """The peer wrote something that is not this protocol."""
+
+
+def peer_credentials_supported() -> bool:
+    """Whether this platform can read a unix peer's uid from the kernel.
+
+    Linux (``SO_PEERCRED``) and macOS (``LOCAL_PEERCRED``); see
+    :func:`peer_uid`. Part of :func:`express_supported` on purpose: the daemon
+    refuses every peer whose uid it cannot read, so a platform without a
+    peer-credential read would start a daemon that serves nobody -- better to
+    refuse cleanly up front than to look started while silently serving
+    nothing.
+    """
+    return hasattr(socket, "SO_PEERCRED") or sys.platform == "darwin"
+
+
+def express_supported() -> bool:
+    """Whether this platform can run express mode at all.
+
+    Unix only, and only where the stdlib exposes descriptor passing
+    (``socket.send_fds``/``recv_fds``, Python 3.9+ on posix), ``os.fork``, and
+    a kernel peer-credential read (:func:`peer_credentials_supported`). No TCP
+    fallback exists on purpose; a platform without unix sockets has no express
+    mode rather than a network listener.
+    """
+    return (
+        os.name == "posix"
+        and hasattr(socket, "AF_UNIX")
+        and hasattr(socket, "send_fds")
+        and hasattr(socket, "recv_fds")
+        and hasattr(os, "fork")
+        and peer_credentials_supported()
+    )
+
+
+def _require_supported() -> None:
+    if not express_supported():
+        raise ExpressUnavailable(
+            "express mode needs a posix platform with unix-domain sockets and "
+            "file-descriptor passing (socket.send_fds); this platform has no "
+            "express mode and every scan runs cold in-process."
+        )
+
+
+def ash_version() -> str:
+    """The installed ASH version, read through the light version module."""
+    from automated_security_helper.utils.get_ash_version import get_ash_version
+
+    return get_ash_version()
+
+
+def _site_entries() -> list[str]:
+    """The ``*.dist-info``/``*.egg-info`` directory names in the site
+    directories, sorted.
+
+    A cheap, stable listing of the installed package set: those names carry the
+    distribution name and version, and listing directories costs milliseconds
+    where importing ``importlib.metadata`` and reading every distribution costs
+    a noticeable slice of the startup this module exists to remove.
+
+    The site directories, deliberately not all of ``sys.path``: under
+    ``python -m`` the path starts with the invocation directory, so a
+    ``dist-info`` that happens to sit in the scanned project would have poisoned
+    the fingerprint of every scan run from there, and the daemon would have read
+    as permanently stale from that one directory. Directories that cannot be
+    listed are skipped: the fingerprint has to be computable everywhere, and
+    the client and the daemon compute it over the same survivors.
+    """
+    try:
+        import site
+
+        directories = list(site.getsitepackages())
+        directories.append(site.getusersitepackages())
+    except Exception:  # noqa: BLE001 - a -S interpreter has no site module
+        directories = [
+            entry for entry in sys.path if entry and "site-packages" in entry
+        ]
+    names: set[str] = set()
+    for entry in directories:
+        try:
+            listed = os.listdir(entry)
+        except OSError:
+            continue
+        for name in listed:
+            if name.endswith((".dist-info", ".egg-info")):
+                names.add(name)
+    return sorted(names)
+
+
+def runtime_fingerprint() -> str:
+    """A fingerprint of the environment a scan would run in.
+
+    The interpreter (version and real executable path) and the installed
+    package set (:func:`_site_entries`), hashed. The daemon records its own at
+    start; a client whose fingerprint differs is running against different
+    code, and the daemon's warm imports would scan with the old one -- so the
+    handshake refuses and the client falls back cold (restarting the daemon
+    under ``--express``). The ASH version is not part of it because the socket
+    path already carries it (:func:`socket_path`).
+    """
+    digest = hashlib.sha256()
+    digest.update(sys.version.encode("utf-8", "backslashreplace"))
+    digest.update(b"\x00")
+    digest.update(
+        os.path.realpath(sys.executable or "").encode("utf-8", "backslashreplace")
+    )
+    for name in _site_entries():
+        digest.update(b"\x00")
+        digest.update(name.encode("utf-8", "backslashreplace"))
+    return digest.hexdigest()
+
+
+def socket_key(version: Optional[str] = None, uid: Optional[int] = None) -> str:
+    """The short key the socket and log file names carry: hash of (uid, version)."""
+    if version is None:
+        version = ash_version()
+    if uid is None:
+        uid = os.getuid()
+    digest = hashlib.sha256(f"{uid}:{version}".encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def _ensure_private_dir(path: Path) -> Path:
+    """Make *path* a private (0700) directory of this user's, or refuse.
+
+    Refusals are :class:`ExpressUnavailable`, so the caller runs cold: a
+    directory reached through a symlink, owned by someone else, or whose mode
+    cannot be brought to 0700 is not a place to put a credential-equivalent
+    socket. The mode of an existing directory this user owns is corrected
+    rather than refused -- an older umask should not strand express mode -- and
+    checked again after the chmod.
+    """
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ExpressUnavailable(
+            f"express runtime directory {path} cannot be created: {exc}"
+        ) from None
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise ExpressUnavailable(
+            f"express runtime directory {path} cannot be read: {exc}"
+        ) from None
+    import stat as stat_module
+
+    if stat_module.S_ISLNK(info.st_mode) or not stat_module.S_ISDIR(info.st_mode):
+        raise ExpressUnavailable(
+            f"express runtime directory {path} is not a directory reached without "
+            "following a link; refusing to place a socket there."
+        )
+    if info.st_uid != os.getuid():
+        raise ExpressUnavailable(
+            f"express runtime directory {path} is owned by uid {info.st_uid}, not "
+            f"this user ({os.getuid()}); refusing to place a socket there."
+        )
+    if stat_module.S_IMODE(info.st_mode) != 0o700:
+        try:
+            os.chmod(path, 0o700)
+        except OSError as exc:
+            raise ExpressUnavailable(
+                f"express runtime directory {path} mode "
+                f"{oct(stat_module.S_IMODE(info.st_mode))} cannot be corrected "
+                f"to 0700: {exc}"
+            ) from None
+        if stat_module.S_IMODE(os.lstat(path).st_mode) != 0o700:
+            raise ExpressUnavailable(
+                f"express runtime directory {path} did not take mode 0700."
+            )
+    return path
+
+
+def runtime_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
+    """The private directory the socket and daemon log live in.
+
+    ``$XDG_RUNTIME_DIR/ash-express`` where the variable names a directory (the
+    per-user tmpfs systemd provides, already 0700 and cleared at logout), else
+    ``~/.ash/run``. Either way the leaf directory is created and policed by
+    :func:`_ensure_private_dir`.
+    """
+    _require_supported()
+    if environ is None:
+        environ = dict(os.environ)
+    base = environ.get("XDG_RUNTIME_DIR", "")
+    if base and os.path.isdir(base):
+        return _ensure_private_dir(Path(base) / "ash-express")
+    return _ensure_private_dir(Path.home() / ".ash" / "run")
+
+
+def socket_path(environ: Optional[Mapping[str, str]] = None) -> Path:
+    """The unix socket path for this uid and ASH version."""
+    return runtime_dir(environ) / f"ash-{os.getuid()}-{socket_key()}.sock"
+
+
+def log_path(environ: Optional[Mapping[str, str]] = None) -> Path:
+    """Where a daemonized express daemon sends its stdout/stderr."""
+    return runtime_dir(environ) / f"ash-{os.getuid()}-{socket_key()}.log"
+
+
+def idle_seconds(environ: Optional[Mapping[str, str]] = None) -> int:
+    """The configured idle timeout: :data:`IDLE_ENV`, else the default.
+
+    A value that is not a positive integer is ignored rather than refused --
+    the daemon's lifetime is not worth failing a scan over -- and the default
+    stands.
+    """
+    if environ is None:
+        # Seconds of inactivity after which an idle express daemon exits.
+        # `ash express start --idle-seconds` writes it for the daemon it
+        # starts, and an autostarted daemon inherits it from the scan's shell.
+        raw = os.environ.get(IDLE_ENV, "")
+    else:
+        raw = environ.get(IDLE_ENV, "")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_IDLE_SECONDS
+    return value if value > 0 else DEFAULT_IDLE_SECONDS
+
+
+def honored_env(environ: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """The environment subset a scan request carries: every ``ASH_*`` and
+    ``GIT_*`` variable, the documented exact names, and the execution basics.
+
+    The whole client environment is deliberately not sent: the daemon's child
+    applies this subset over its own environment and removes honoured names the
+    request lacks (:func:`is_honored_name`), so a variable ASH never reads
+    cannot differ between an express run and a cold one in a way ASH would notice,
+    and the request stays small and reviewable.
+    """
+    if environ is None:
+        environ = dict(os.environ)
+    carried: dict[str, str] = {}
+    for name, value in environ.items():
+        if is_honored_name(name):
+            carried[name] = value
+    return carried
+
+
+def is_honored_name(name: str) -> bool:
+    """Whether *name* is in the request's environment subset.
+
+    ``GIT_*`` is carried whole: ASH's scan runs git in the scanned tree (the
+    scan set, ``--changed-files-only``), and git's own environment --
+    ``GIT_INDEX_FILE`` and ``GIT_DIR`` above all, which git sets for the hooks
+    it invokes -- changes what those commands read. A pre-commit hook's scan
+    through the daemon has to see the same index a cold run in that hook sees.
+    """
+    return (
+        name.startswith(("ASH_", "GIT_"))
+        or name in HONORED_ENV_EXACT
+        or name in EXECUTION_ENV_EXACT
+    )
+
+
+def apply_request_env(
+    request_env: dict[str, str], environ: MutableMapping[str, str]
+) -> None:
+    """Make *environ*'s honoured subset equal *request_env*, leaving the rest.
+
+    Run in the forked child before it drops into the CLI: honoured names the
+    request lacks are removed (a stale ``ASH_CONFIG`` in the daemon's own
+    environment must not reach a client that unset it), the request's pairs are
+    set, and nothing else is touched. :data:`CHILD_ENV` is never removed, so a
+    request cannot clear the one variable that stops re-delegation.
+    """
+    for name in [key for key in environ if is_honored_name(key)]:
+        if name not in request_env and name != CHILD_ENV:
+            del environ[name]
+    for name, value in request_env.items():
+        if name == CHILD_ENV:
+            continue
+        if is_honored_name(name):
+            environ[name] = value
+
+
+#: What an autostarted daemon's own environment keeps
+#: (:func:`scrubbed_daemon_environment`): the execution basics, the terminal
+#: and runtime-directory context, and the one express setting the daemon reads.
+DAEMON_ENV_KEPT = frozenset(
+    {
+        *EXECUTION_ENV_EXACT,
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TERM",
+        "XDG_RUNTIME_DIR",
+        "PYTHONIOENCODING",
+        IDLE_ENV,
+    }
+)
+
+
+def scrubbed_daemon_environment(environ: Mapping[str, str]) -> dict[str, str]:
+    """What survives of *environ* into an autostarted daemon.
+
+    The daemon is autostarted from whatever invocation happened to come first,
+    and it outlives that invocation by up to the idle window -- so the first
+    scan's incidentals (``GIT_INDEX_FILE`` from a commit hook, an activated
+    virtualenv's variables, cloud credentials in the shell) must not become
+    ambient state every later scan's child inherits. Only the names in
+    :data:`DAEMON_ENV_KEPT` survive; everything a scan honours travels in that
+    scan's own request instead (:func:`honored_env`), applied per child.
+    """
+    return {name: value for name, value in environ.items() if name in DAEMON_ENV_KEPT}
+
+
+def send_frame(sock: socket.socket, frame: dict[str, Any]) -> None:
+    """Write one frame: a compact JSON object and its newline."""
+    data = json.dumps(frame, separators=(",", ":")).encode("utf-8") + b"\n"
+    if len(data) > MAX_FRAME_BYTES:
+        raise ExpressProtocolError(
+            f"frame of {len(data)} bytes exceeds the {MAX_FRAME_BYTES}-byte cap"
+        )
+    sock.sendall(data)
+
+
+class FrameReader:
+    """Reads newline-delimited JSON frames off a stream socket.
+
+    One reader per connection: it buffers, so bytes it has read belong to it.
+    ``read_frame`` returns the next frame as a dict, or ``None`` at a clean
+    EOF on a frame boundary; anything else -- EOF mid-frame, a line that is
+    not a JSON object, a line past :data:`MAX_FRAME_BYTES` -- is a
+    :class:`ExpressProtocolError`.
+    """
+
+    def __init__(self, sock: socket.socket) -> None:
+        self._sock = sock
+        self._buffer = b""
+
+    def read_frame(self) -> Optional[dict[str, Any]]:
+        while b"\n" not in self._buffer:
+            if len(self._buffer) > MAX_FRAME_BYTES:
+                raise ExpressProtocolError("frame exceeds the size cap")
+            chunk = self._sock.recv(65536)
+            if not chunk:
+                if self._buffer:
+                    raise ExpressProtocolError("connection ended mid-frame")
+                return None
+            self._buffer += chunk
+        line, _, self._buffer = self._buffer.partition(b"\n")
+        if len(line) > MAX_FRAME_BYTES:
+            raise ExpressProtocolError("frame exceeds the size cap")
+        try:
+            frame = json.loads(line)
+        except ValueError as exc:
+            raise ExpressProtocolError(f"frame is not JSON: {exc}") from None
+        if not isinstance(frame, dict):
+            raise ExpressProtocolError("frame is not a JSON object")
+        return frame
+
+
+#: Linux ``struct ucred``: pid (signed), uid and gid (unsigned). The uid is
+#: unpacked unsigned on purpose: a directory-service uid at or above 2**31 (an
+#: SSSD or AD id mapping) read through a signed format came back negative, and
+#: the daemon refused its own user.
+_UCRED_FORMAT = "iII"
+
+#: macOS ``struct xucred`` (sys/ucred.h): ``cr_version`` and ``cr_uid``, both
+#: unsigned, are all the check reads; the group array behind them is not asked
+#: for. ``XUCRED_VERSION`` is 0.
+_XUCRED_HEAD_FORMAT = "II"
+_XUCRED_SIZE = 76
+_LOCAL_PEERCRED = 0x0001  # at option level SOL_LOCAL, which is 0
+_XUCRED_VERSION = 0
+
+
+def peer_uid(sock: socket.socket) -> Optional[int]:
+    """The uid of the process on the other end of unix socket *sock*, or None.
+
+    Read from the kernel, never from anything the peer sent: ``SO_PEERCRED``
+    on Linux, ``LOCAL_PEERCRED`` (an ``xucred``) on macOS. ``None`` means it
+    could not be read -- a platform with neither, a socket that is not
+    connected, an answer of an unknown shape -- and the daemon treats None as
+    a refusal: the check fails closed.
+    """
+    so_peercred = getattr(socket, "SO_PEERCRED", None)
+    if so_peercred is not None:
+        try:
+            data = sock.getsockopt(
+                socket.SOL_SOCKET, so_peercred, struct.calcsize(_UCRED_FORMAT)
+            )
+            _, uid, _ = struct.unpack(_UCRED_FORMAT, data)
+        except (OSError, struct.error):
+            return None
+        return uid
+    if sys.platform == "darwin":
+        try:
+            data = sock.getsockopt(0, _LOCAL_PEERCRED, _XUCRED_SIZE)
+            version, uid = struct.unpack_from(_XUCRED_HEAD_FORMAT, data)
+        except (OSError, struct.error):
+            return None
+        if version != _XUCRED_VERSION:
+            return None
+        return uid
+    return None
+
+
+def peer_is_this_user(sock: socket.socket, uid: Optional[int] = None) -> bool:
+    """Whether *sock*'s peer runs as this user. Unreadable reads as no."""
+    if uid is None:
+        uid = os.getuid()
+    peer = peer_uid(sock)
+    return peer is not None and peer == uid
