@@ -181,3 +181,35 @@ class TestAcknowledgementOrdering:
         sent = next(data for kind, data in events if kind == "sent")
         assert b'"ok":true' in sent
         assert daemon.children.get(54321) is connection
+
+
+class TestAutostartReadiness:
+    def test_a_loser_bind_still_tells_the_client_a_daemon_serves(self, monkeypatch):
+        """A concurrent autostart loser (pre-commit fires parallel batches, so
+        the first commit starts several daemons at once) writes the
+        another-daemon-owns-it byte instead of dying silently: its client then
+        connects to the winner rather than running cold with a warning."""
+        from automated_security_helper.express import daemon as daemon_module
+
+        class _Loser:
+            def __init__(self, idle_timeout):
+                self.idle_timeout = idle_timeout
+
+            def bind(self):
+                # Another daemon holds the socket's lock: the loser answer.
+                return False
+
+            def run(self):  # pragma: no cover - the loser must never serve
+                raise AssertionError("a loser daemon must not enter the loop")
+
+        monkeypatch.setattr(daemon_module, "ExpressDaemon", _Loser)
+        read_fd, write_fd = os.pipe()
+        try:
+            daemon_module.serve(idle_timeout=1.0, ready_fd=write_fd)
+            assert os.read(read_fd, 2) == b"\x02"
+        finally:
+            os.close(read_fd)
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass  # serve closed it, as it must

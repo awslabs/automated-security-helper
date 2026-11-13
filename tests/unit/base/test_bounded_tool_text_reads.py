@@ -353,6 +353,16 @@ _ALLOWED_SIZED_READS = {
     ): "ASH's own aggregated-results file, read in bounded pieces to find and "
     "drop the old workspace block before the replacement is written; never a "
     "tool log",
+    (
+        "express/daemon.py",
+        "ExpressDaemon._drain",
+    ): "the daemon's own signal-wakeup self-pipe, drained in 4096-byte chunks "
+    "and discarded; kernel wakeup bytes, never tool text",
+    (
+        "express/client.py",
+        "autostart",
+    ): "the one readiness byte the autostarted daemon writes on its pipe after "
+    "binding its socket; a protocol byte compared with a constant, never text",
 }
 
 

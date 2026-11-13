@@ -700,6 +700,32 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         "_write_private_copy",
         "os.fdopen",
     ): (1, _TOOL_CONFIG_DIR),
+    # The express daemon's own files live beside its socket in the 0700 runtime
+    # directory (express/runtime.py runtime_dir), never in an output directory:
+    # the detached daemon's log, appended to by the starting client, and the
+    # daemon's singleton lock file, created (O_CREAT) to hold the flock.
+    (f"{_ASH}/express/client.py", "autostart", "os.open"): (
+        1,
+        "the express runtime directory (the daemon's log file, 0600)",
+    ),
+    (f"{_ASH}/express/client.py", "_remove_if_dead", "os.open"): (
+        1,
+        (
+            "the express runtime directory (the daemon's singleton lock file, "
+            "opened O_CREAT to take the dead-daemon flock; no bytes are written)"
+        ),
+    ),
+    (f"{_ASH}/express/daemon.py", "ExpressDaemon.bind", "os.open"): (
+        1,
+        "the express runtime directory (the daemon's singleton lock file)",
+    ),
+    # os.fdopen is listed as a write by the detector's kind rule; these two wrap
+    # descriptors the client already passed over the socket (its own terminal),
+    # so what they write to is the client's stdout/stderr, never a path here.
+    (f"{_ASH}/express/daemon.py", "ExpressDaemon._reopen_std_streams", "os.fdopen"): (
+        2,
+        "the client's own stdout/stderr descriptors, passed over the socket",
+    ),
 }
 
 

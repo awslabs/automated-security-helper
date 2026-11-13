@@ -73,20 +73,42 @@ class TestRuntimeDir:
         with pytest.raises(runtime.ExpressUnavailable, match="owned by uid"):
             runtime.runtime_dir({"XDG_RUNTIME_DIR": str(tmp_path)})
 
-    def test_socket_and_log_names_carry_the_uid_and_the_version_key(self, tmp_path):
-        environ = {"XDG_RUNTIME_DIR": str(tmp_path)}
-        sock = runtime.socket_path(environ)
-        log = runtime.log_path(environ)
-        key = runtime.socket_key()
-        assert sock.name == f"ash-{os.getuid()}-{key}.sock"
-        assert log.name == f"ash-{os.getuid()}-{key}.log"
-        assert sock.parent == tmp_path / "ash-express"
+    def test_socket_and_log_names_carry_the_uid_and_the_version_key(self):
+        # A short directory of this test's own: pytest's tmp_path can be long
+        # enough to trip the AF_UNIX length refusal this module enforces.
+        import shutil
+        import tempfile
 
-    def test_the_socket_key_moves_with_the_version_and_the_uid(self):
-        base = runtime.socket_key(version="1.0.0", uid=1000)
-        assert runtime.socket_key(version="1.0.1", uid=1000) != base
-        assert runtime.socket_key(version="1.0.0", uid=1001) != base
-        assert runtime.socket_key(version="1.0.0", uid=1000) == base
+        base = tempfile.mkdtemp(prefix="ash-t", dir="/tmp")
+        try:
+            environ = {"XDG_RUNTIME_DIR": base}
+            sock = runtime.socket_path(environ)
+            log = runtime.log_path(environ)
+            key = runtime.socket_key()
+            assert sock.name == f"ash-{os.getuid()}-{key}.sock"
+            assert log.name == f"ash-{os.getuid()}-{key}.log"
+            assert sock.parent == Path(base) / "ash-express"
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+
+    def test_a_socket_path_over_the_af_unix_limit_is_refused(self, tmp_path):
+        """bind() on an over-long AF_UNIX path fails only after the daemon has
+        already forked, so the length is refused up front and the scan runs
+        cold instead of spending a start window on every invocation."""
+        padding = max(8, runtime.MAX_SOCKET_PATH_BYTES - len(str(tmp_path)) + 8)
+        deep = tmp_path / ("x" * padding)
+        deep.mkdir()
+        with pytest.raises(runtime.ExpressUnavailable, match="AF_UNIX"):
+            runtime.socket_path({"XDG_RUNTIME_DIR": str(deep)})
+
+    def test_the_socket_key_moves_with_the_version_the_uid_and_the_prefix(self):
+        base = runtime.socket_key(version="1.0.0", uid=1000, prefix="/venv/a")
+        assert runtime.socket_key(version="1.0.1", uid=1000, prefix="/venv/a") != base
+        assert runtime.socket_key(version="1.0.0", uid=1001, prefix="/venv/a") != base
+        # Two installations of one version never share a socket: without this,
+        # each --express run would stop and restart the other's daemon forever.
+        assert runtime.socket_key(version="1.0.0", uid=1000, prefix="/venv/b") != base
+        assert runtime.socket_key(version="1.0.0", uid=1000, prefix="/venv/a") == base
 
 
 @needs_posix

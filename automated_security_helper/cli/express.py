@@ -19,6 +19,7 @@ from typing import Annotated, Optional
 import typer
 
 from automated_security_helper.utils.console import echo
+from automated_security_helper.utils.process_env import set_environ, snapshot_environ
 
 express_app = typer.Typer(
     name="express",
@@ -70,6 +71,16 @@ def start_daemon(
     except runtime.ExpressUnavailable as exc:
         raise _unavailable_exit(exc) from None
     status = client.control_request(path, {"op": "status"})
+    if status is not None and not status.get("ok"):
+        # Something answered on the socket and it was not a healthy daemon's
+        # status. Starting over it would only race whatever it is; say so.
+        echo(
+            f"something is listening at {path} but did not answer as an express "
+            "daemon; run 'ash express stop', or remove whatever holds the "
+            "socket, before starting one.",
+            err=True,
+        )
+        raise typer.Exit(1)
     if status is not None and status.get("ok"):
         # "Already running" counts only for a daemon a scan would actually
         # use: one whose protocol and installed-package fingerprint match
@@ -93,18 +104,18 @@ def start_daemon(
             )
             raise typer.Exit(1)
         echo("replacing a stale express daemon")
-        client._stop_daemon(path)
+        client.stop_daemon(path)
     if idle_seconds is not None:
         # The autostart and the foreground serve both read the environment's
         # idle setting; the option is written there so one mechanism decides.
-        os.environ[runtime.IDLE_ENV] = str(idle_seconds)
+        set_environ(runtime.IDLE_ENV, str(idle_seconds))
     if foreground:
         from automated_security_helper.express.daemon import serve
 
         serve(idle_timeout=runtime.idle_seconds())
         return
-    client.autostart(os.environ)
-    sock = client.await_daemon(path)
+    started = client.autostart(snapshot_environ())
+    sock = client.await_daemon(path) if started else None
     if sock is None:
         echo(
             f"the express daemon did not come up; its log is {runtime.log_path()}",
@@ -128,19 +139,46 @@ def stop_daemon() -> None:
     if answer is None:
         echo("no express daemon is running")
         return
+    if not answer.get("ok"):
+        # Something answered, and it refused or was not a daemon. "Stopped"
+        # would be a lie that a caller (a test teardown, a script) acts on.
+        echo(
+            f"whatever is listening at {path} did not acknowledge the stop: "
+            f"{answer.get('reason', 'no reason given')}",
+            err=True,
+        )
+        raise typer.Exit(1)
     # Wait on the daemon's own pid where it gave one; the daemon unlinks its
-    # socket itself (and only its own; see the client's _stop_daemon).
+    # socket itself (and only its own; see the client's stop_daemon). The
+    # success claim is verified, not assumed: a daemon still alive at the
+    # deadline -- a scan refusing to die, a wedged loop -- is reported as
+    # exactly that, with a non-zero exit.
     pid = answer.get("pid")
-    deadline = time.monotonic() + 5.0
+    # Longer than the daemon's own child grace (runtime.STOP_GRACE_SECONDS,
+    # plus its select tick and reaping): a stop that lands while a scan takes
+    # its whole grace to die must not read as a daemon that refused to exit.
+    deadline = time.monotonic() + runtime.STOP_WAIT_SECONDS
+    stopped = False
     while time.monotonic() < deadline:
         if isinstance(pid, int):
             try:
                 os.kill(pid, 0)
             except OSError:
+                stopped = True
                 break
         elif not os.path.exists(path):
+            stopped = True
             break
         time.sleep(0.05)
+    if not stopped:
+        what = f"pid {pid}" if isinstance(pid, int) else f"the socket at {path}"
+        echo(
+            f"the express daemon acknowledged the stop but {what} is still "
+            f"there after {runtime.STOP_WAIT_SECONDS:.0f} seconds; it may be "
+            "finishing a scan. Check 'ash express status'.",
+            err=True,
+        )
+        raise typer.Exit(1)
     echo("express daemon stopped")
 
 
@@ -159,11 +197,32 @@ def daemon_status(
     except runtime.ExpressUnavailable as exc:
         raise _unavailable_exit(exc) from None
     status = client.control_request(path, {"op": "status"})
-    if status is None or not status.get("ok"):
+    if status is None:
         if as_json:
             echo(json.dumps({"running": False, "socket": os.fspath(path)}))
         else:
             echo(f"express daemon: not running (socket would be {path})")
+        raise typer.Exit(1)
+    if not status.get("ok"):
+        # Answered, but not as a daemon's status: that is its own state, not
+        # "not running" -- a scan would consult this socket and be refused.
+        if as_json:
+            echo(
+                json.dumps(
+                    {
+                        "running": False,
+                        "answered": True,
+                        "socket": os.fspath(path),
+                        "reason": status.get("reason", "not a status answer"),
+                    }
+                )
+            )
+        else:
+            echo(
+                f"express daemon: something is listening at {path} but did not "
+                "answer as a daemon; run 'ash express stop' to clear it.",
+                err=True,
+            )
         raise typer.Exit(1)
     if as_json:
         status["running"] = True

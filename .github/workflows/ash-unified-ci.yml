@@ -1356,11 +1356,26 @@ jobs:
         run: uv sync --extra cdk --extra symbols
       - name: Run the express e2e tests
         shell: bash
-        # -s so the parity test's measured express-vs-cold wall line lands in
-        # the job log, which is this advisory job's whole product.
+        # -m e2e as the required e2e jobs select, so this leg measures the
+        # same population. -s so the parity test's measured express-vs-cold
+        # wall line lands in the job log, which is this advisory job's whole
+        # product. pytest exits 5 when nothing was collected, which fails the
+        # step -- and the junit count is asserted on top, so a future marker
+        # or path change cannot turn this into a green leg that measured
+        # nothing (advisory means nobody reads it unless it is red).
         run: |
           uv run pytest tests/integration/express/test_express_e2e.py \
-            --run-integration -n 0 -s
+            --run-integration -m e2e -n 0 -s
+          python3 - <<'COUNT'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("test-results/pytest.junit.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          ran = int(suite.get("tests", "0")) - int(suite.get("skipped", "0"))
+          print(f"express e2e tests executed: {ran}")
+          sys.exit(0 if ran >= 4 else 1)
+          COUNT
 
   # ---------------------------------------------------------------------------
   # Warm the ASH image's layer cache before the scan legs build it

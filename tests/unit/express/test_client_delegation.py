@@ -71,6 +71,67 @@ class TestClassification:
 
 
 class TestColdRoads:
+    @pytest.mark.parametrize(
+        "environ",
+        [
+            {"_ASH_COMPLETE": "bash_complete"},
+            {"_ASHV3_COMPLETE": "zsh_complete"},
+            {"_AUTOMATED_SECURITY_HELPER_COMPLETE": "complete"},
+            {"_AGENTIC_SECURITY_HARNESS_COMPLETE": "complete"},
+            {"COMP_WORDS": "ash ", "COMP_CWORD": "1"},
+        ],
+    )
+    def test_shell_completion_never_starts_a_scan(self, monkeypatch, environ):
+        """TAB after ``ash `` re-invokes the program with the completion
+        protocol's environment and an argv that classifies as a bare scan;
+        with a daemon up, that must complete, not scan the working directory
+        into the completion."""
+        monkeypatch.setattr(runtime, "express_supported", lambda: True)
+        monkeypatch.setattr(
+            client, "_connect", lambda *_: pytest.fail("completion must not connect")
+        )
+        assert client.completion_in_progress(environ)
+        assert client.delegated_exit_code([], environ=environ) is None
+
+    def test_every_declared_completion_name_is_read(self):
+        """The reads are spelled out one by one (so the environment audits can
+        resolve them), and this ties each spelling back to the declared set."""
+        for name in sorted(client.COMPLETION_ENV_NAMES):
+            assert client.completion_in_progress({name: "complete"}), name
+
+    def test_an_ordinary_environment_is_not_a_completion(self):
+        """An unrelated ``_*_COMPLETE``-shaped variable (a profile's
+        ``_SETUP_COMPLETE=1``, a CI image's) must not read as a completion:
+        that switched express off for every scan of that shell, silently."""
+        assert not client.completion_in_progress(
+            {
+                "PATH": "/usr/bin",
+                "ASH_MODE": "local",
+                "_COMPLETED_STEPS": "3",
+                "_SETUP_COMPLETE": "1",
+            }
+        )
+
+    def test_the_completion_names_are_the_console_scripts(self):
+        """One completion variable per console script pyproject declares, in
+        click's derived spelling, so a renamed or added alias cannot leave a
+        completion that scans the working directory."""
+        import re
+        from pathlib import Path
+
+        pyproject = (Path(__file__).resolve().parents[3] / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+        block = re.search(r"\[project\.scripts\](.*?)\n\[", pyproject, re.DOTALL).group(
+            1
+        )
+        scripts = re.findall(r"(?m)^([A-Za-z0-9-]+) *=", block)
+        assert scripts, "no console scripts found in pyproject.toml"
+        derived = {
+            "_" + name.upper().replace("-", "_") + "_COMPLETE" for name in scripts
+        }
+        assert derived == set(client.COMPLETION_ENV_NAMES)
+
     def test_a_express_child_never_delegates_again(self, monkeypatch):
         monkeypatch.setattr(
             client, "_connect", lambda *_: pytest.fail("a child must not connect")
@@ -89,12 +150,26 @@ class TestColdRoads:
         )
         assert client.delegated_exit_code(["scan", "--no-express"], environ={}) is None
 
-    def test_an_unsupported_platform_runs_cold(self, monkeypatch):
+    def test_an_unsupported_platform_runs_cold(self, monkeypatch, capsys):
         monkeypatch.setattr(runtime, "express_supported", lambda: False)
         monkeypatch.setattr(
             client, "_connect", lambda *_: pytest.fail("unsupported must not connect")
         )
         assert client.delegated_exit_code(["scan"], environ={}) is None
+        assert capsys.readouterr().err == "", "without --express the fallback is silent"
+
+    def test_an_unsupported_platform_with_the_flag_says_so_once(
+        self, monkeypatch, capsys
+    ):
+        """--express asked for the daemon by name, so the one place there can
+        never be one is said out loud (the docs promise the line), while the
+        flagless scan above stays silent."""
+        monkeypatch.setattr(runtime, "express_supported", lambda: False)
+        monkeypatch.setattr(
+            client, "_connect", lambda *_: pytest.fail("unsupported must not connect")
+        )
+        assert client.delegated_exit_code(["scan", "--express"], environ={}) is None
+        assert "running cold" in capsys.readouterr().err
 
     def test_no_socket_and_no_express_flag_runs_cold(self, monkeypatch, tmp_path):
         monkeypatch.setattr(runtime, "express_supported", lambda: True)
@@ -128,7 +203,7 @@ class _Recorder:
         monkeypatch.setattr(client, "_connect", self._connect)
         monkeypatch.setattr(client, "await_daemon", self._await)
         monkeypatch.setattr(client, "autostart", self._autostart)
-        monkeypatch.setattr(client, "_stop_daemon", self._stop)
+        monkeypatch.setattr(client, "stop_daemon", self._stop)
         monkeypatch.setattr(client, "_run_on_daemon", self._run)
         self.connectable = False
 
@@ -143,6 +218,7 @@ class _Recorder:
     def _autostart(self, environ):
         self.calls.append("autostart")
         self.connectable = True
+        return True
 
     def _stop(self, path):
         self.calls.append("stop")
@@ -214,8 +290,20 @@ class TestHonoredEnv:
             # scan through the daemon must see the same index a cold run sees.
             "GIT_INDEX_FILE": ".git/index.lock-side",
             "GIT_DIR": ".git",
-            "AWS_SECRET_ACCESS_KEY": "never-carried",
+            # A cold run's AWS reporters, proxied downloads, TLS trust, container
+            # connection and scanner credentials read these; through the daemon
+            # they travel in the request to the one forked child, so they must
+            # be in the subset or an express scan would differ with no flag.
+            "AWS_PROFILE": "reporting",
+            "UV_INDEX_URL": "https://mirror.example/simple",
+            "HTTPS_PROXY": "http://proxy.example:3128",
+            "no_proxy": "localhost",
+            "REQUESTS_CA_BUNDLE": "/etc/pki/bundle.pem",
+            "DOCKER_HOST": "unix:///run/podman.sock",
+            "SEMGREP_APP_TOKEN": "token",
+            "XDG_CACHE_HOME": "/var/cache/me",
             "SOME_RANDOM_VAR": "never-carried",
+            "LD_PRELOAD": "never-carried",
         }
         carried = runtime.honored_env(environ)
         assert carried == {
@@ -226,7 +314,24 @@ class TestHonoredEnv:
             "HOME": "/u/user",
             "GIT_INDEX_FILE": ".git/index.lock-side",
             "GIT_DIR": ".git",
+            "AWS_PROFILE": "reporting",
+            "UV_INDEX_URL": "https://mirror.example/simple",
+            "HTTPS_PROXY": "http://proxy.example:3128",
+            "no_proxy": "localhost",
+            "REQUESTS_CA_BUNDLE": "/etc/pki/bundle.pem",
+            "DOCKER_HOST": "unix:///run/podman.sock",
+            "SEMGREP_APP_TOKEN": "token",
+            "XDG_CACHE_HOME": "/var/cache/me",
         }
+
+    def test_a_proxy_variable_reaches_the_child_and_a_stale_one_is_removed(self):
+        child_environ = {"HTTPS_PROXY": "http://old-proxy:1", "PATH": "/usr/bin"}
+        runtime.apply_request_env(
+            {"HTTPS_PROXY": "http://proxy.example:3128"}, child_environ
+        )
+        assert child_environ["HTTPS_PROXY"] == "http://proxy.example:3128"
+        runtime.apply_request_env({}, child_environ)
+        assert "HTTPS_PROXY" not in child_environ
 
     def test_the_child_side_removes_stale_honored_names_and_keeps_the_rest(self):
         daemon_environ = {
@@ -246,8 +351,29 @@ class TestHonoredEnv:
 
     def test_an_unhonored_request_key_is_ignored_by_the_child(self):
         environ = {}
-        runtime.apply_request_env({"AWS_SECRET_ACCESS_KEY": "nope"}, environ)
+        runtime.apply_request_env({"LD_PRELOAD": "nope"}, environ)
         assert environ == {}
+
+
+class TestSignalExitCode:
+    """A signal recorded during a refused or broken handshake must not vanish
+    into a cold run: it maps to the exit code the cold run would have died
+    with, SIGTERM outranking SIGINT (a CI timeout reads as 143 even when an
+    interrupt also landed)."""
+
+    def test_nothing_pending_means_no_exit(self):
+        assert client._signal_exit_code([]) is None
+
+    def test_sigint_maps_to_130(self):
+        import signal as signal_module
+
+        assert client._signal_exit_code([int(signal_module.SIGINT)]) == 130
+
+    def test_sigterm_maps_to_143_and_outranks_sigint(self):
+        import signal as signal_module
+
+        pending = [int(signal_module.SIGINT), int(signal_module.SIGTERM)]
+        assert client._signal_exit_code(pending) == 143
 
 
 class TestScrubbedDaemonEnvironment:

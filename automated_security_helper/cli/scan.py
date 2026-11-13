@@ -955,12 +955,15 @@ def run_ash_scan_cli_command(
                 "is not running (--express), or force an ordinary cold in-process "
                 "run (--no-express). Without either, a scan uses the daemon "
                 "automatically whenever its socket exists and its ASH version "
-                "matches, and silently runs cold otherwise. Unix only; see "
-                "'ash express --help' and the express-mode how-to. The flag is "
-                "read by the console entry point before this command parses, "
-                "so by the time a scan runs here the decision has been made: "
-                "this parameter exists so the flag is documented and accepted, "
-                "and it changes nothing further in-process."
+                "matches, and silently runs cold otherwise. Unix only (Linux and "
+                "macOS). The flag is read by the console entry point before this "
+                "command parses, so it applies to CLI invocations: the 'ash' "
+                "console script gets the full saving; 'python -m "
+                "automated_security_helper.cli.main' delegates too but has paid "
+                "the import cost already; scans the MCP server hosts in-process "
+                "never delegate. By the time a scan runs here the decision has "
+                "been made, so this parameter only documents and accepts the "
+                "flag."
             ),
         ),
     ] = None,

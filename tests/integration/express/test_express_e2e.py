@@ -45,11 +45,18 @@ pytestmark = pytest.mark.e2e
 #: the saving. The module form stays as the fallback for an environment whose
 #: script is not beside the interpreter.
 _ASH_SCRIPT = Path(sys.executable).parent / "ash"
-ASH = (
-    [os.fspath(_ASH_SCRIPT)]
-    if _ASH_SCRIPT.is_file()
-    else [sys.executable, "-m", "automated_security_helper.cli.main"]
-)
+if _ASH_SCRIPT.is_file():
+    ASH = [os.fspath(_ASH_SCRIPT)]
+else:
+    ASH = [sys.executable, "-m", "automated_security_helper.cli.main"]
+    # Said out loud in the run's output: a parity delta measured through the
+    # module form is dominated by the import both sides pay, so a small delta
+    # from such a run is the harness's shape, not a defect.
+    print(
+        "e2e-express: no console script beside the interpreter; running the "
+        "module form, whose warm-vs-cold delta understates the real saving.",
+        file=sys.stderr,
+    )
 
 _GATED = os.environ.get("ASH_E2E_EXPRESS") != "1"
 gated = pytest.mark.skipif(

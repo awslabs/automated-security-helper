@@ -43,6 +43,11 @@ import time
 from typing import Any, Optional
 
 from automated_security_helper.express import runtime
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    snapshot_environ,
+)
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 #: Modules imported once at daemon start. The point is the import cache the
 #: forked children inherit copy-on-write: the CLI (typer, rich, click and every
@@ -78,13 +83,53 @@ def warm_imports() -> list[str]:
             continue
         if name.endswith("ash_builtin"):
             search = getattr(module, "__path__", None)
-            if search:
-                for info in pkgutil.walk_packages(search, prefix=name + "."):
-                    try:
-                        importlib.import_module(info.name)
-                    except Exception as exc:  # noqa: BLE001
-                        failures.append(f"{info.name}: {type(exc).__name__}: {exc}")
+            if not search:
+                continue
+            # The walk itself can raise, not only the imports inside it:
+            # walk_packages imports each package to descend into it, and
+            # without ``onerror`` an ImportError there propagates out of the
+            # ITERATION -- and anything escaping this function would kill a
+            # daemon that has already bound its socket, leaving a dead socket
+            # every scan silently colds against. Everything is caught; the
+            # cost of any failure here is warmth, never the daemon.
+            try:
+                walked = list(
+                    pkgutil.walk_packages(
+                        search,
+                        prefix=name + ".",
+                        onerror=lambda failed: failures.append(
+                            f"{failed}: not walkable"
+                        ),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"{name} walk: {type(exc).__name__}: {exc}")
+                continue
+            for info in walked:
+                try:
+                    importlib.import_module(info.name)
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"{info.name}: {type(exc).__name__}: {exc}")
     return failures
+
+
+def _signal_scan(pid: int, signum: int) -> None:
+    """Deliver *signum* to the scan's whole process group, else to the pid.
+
+    The child made itself a group leader at fork (both sides set it), so the
+    group id is the pid; the single-pid fallback covers the narrow window
+    before that and any platform refusal, where orphaning a scanner subprocess
+    is still better than not stopping the scan at all.
+    """
+    try:
+        os.killpg(pid, signum)
+        return
+    except OSError:
+        pass
+    try:
+        os.kill(pid, signum)
+    except OSError:
+        pass
 
 
 def concurrency_cap() -> int:
@@ -106,10 +151,13 @@ def should_idle_exit(
 
 
 def _log(message: str) -> None:
-    """One timestamped line on the daemon's stdout (the express log file)."""
+    """One timestamped line on the daemon's stdout (the express log file).
+
+    Shown, not obeyed: a message can quote a request's text or an exception's.
+    """
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
     try:
-        print(f"{stamp}Z {message}", flush=True)
+        print(shown_not_obeyed(f"{stamp}Z {message}"), flush=True)
     except Exception:
         pass
 
@@ -159,7 +207,14 @@ class ExpressDaemon:
 
     # -- setup ---------------------------------------------------------------
 
-    def bind(self) -> None:
+    def bind(self) -> bool:
+        """Bind the socket; False when another daemon already owns it.
+
+        The False answer matters to a concurrent autostart's LOSER: pre-commit
+        runs parallel hook batches, so the first commit after ``--express``
+        fires several autostarts at once, and every loser must tell its client
+        "a daemon is there, use it" rather than die silently into a cold run.
+        """
         path = runtime.socket_path()
         # The probe/unlink/bind sequence below is serialized across daemons by
         # a sibling lock file: without it, two concurrent autostarts could both
@@ -181,7 +236,7 @@ class ExpressDaemon:
             # Another daemon holds the lock: it is serving, or about to.
             os.close(self._lock_fd)
             self._lock_fd = None
-            raise SystemExit(0) from None
+            return False
         probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         probe.settimeout(1.0)
         try:
@@ -193,8 +248,14 @@ class ExpressDaemon:
             except OSError:
                 pass
         else:
-            probe.close()
-            raise SystemExit(0)  # another daemon already serves this socket
+            # Another daemon already serves this socket (one from before this
+            # lock existed): not ours; the lock is released for its successor.
+            try:
+                os.close(self._lock_fd)
+            except OSError:
+                pass
+            self._lock_fd = None
+            return False
         finally:
             try:
                 probe.close()
@@ -223,6 +284,7 @@ class ExpressDaemon:
         # A scan child that writes to a client who vanished must die of its
         # own EPIPE semantics, not take the daemon with it.
         signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+        return True
 
     def _on_sigterm(self, *_: Any) -> None:
         self.stopping = True
@@ -234,11 +296,14 @@ class ExpressDaemon:
             f"express daemon pid {os.getpid()} serving {runtime.socket_path()} "
             f"(ash {self.version}, idle timeout {int(self.idle_timeout)}s)"
         )
-        failures = warm_imports()
-        for failure in failures:
-            _log(f"warm import skipped: {failure}")
-        _log("warm imports complete")
         try:
+            # Inside the try: the socket is already bound, so from here on
+            # every exit must run _shutdown or a dead socket file stays behind
+            # and every scan silently colds against it until someone cleans up.
+            failures = warm_imports()
+            for failure in failures:
+                _log(f"warm import skipped: {failure}")
+            _log("warm imports complete")
             while True:
                 for key, _ in self.selector.select(timeout=1.0):
                     key.data(key.fileobj)
@@ -269,20 +334,21 @@ class ExpressDaemon:
                 os.unlink(path)
         except OSError:
             pass
-        # Running scans are told to stop and given a moment to report, so their
-        # clients read a real exit code where they can; a child that outlives
-        # the wait gets the SIGTERM code reported for it, which is what its
-        # kill will produce.
+        # Running scans are told to stop, by process group so their scanner
+        # subprocesses go with them, and given a moment to report real exit
+        # codes. A group that outlives the wait is SIGKILLed BEFORE its client
+        # is told 143: reported first, a survivor kept writing into a terminal
+        # whose owner had been told the scan was over.
         for pid in list(self.children):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
-        deadline = time.monotonic() + 5.0
+            _signal_scan(pid, signal.SIGTERM)
+        deadline = time.monotonic() + runtime.STOP_GRACE_SECONDS
         while self.children and time.monotonic() < deadline:
             self._reap()
             if self.children:
                 time.sleep(0.05)
+        for pid in list(self.children):
+            _signal_scan(pid, signal.SIGKILL)
+        self._reap()
         for connection in list(self.children.values()):
             try:
                 runtime.send_frame(connection.sock, {"exit": 128 + int(signal.SIGTERM)})
@@ -473,6 +539,15 @@ class ExpressDaemon:
         if pid == 0:
             self._child(connection, request)  # never returns
             os._exit(70)  # unreachable; EX_SOFTWARE if it somehow is
+        # The child leads its own process group (both sides set it, so neither
+        # order of scheduling leaves a window where a group signal misses):
+        # a scan starts scanner subprocesses, and a single-pid SIGTERM with
+        # the group unset would stop the scan while orphaning the tools it was
+        # running.
+        try:
+            os.setpgid(pid, pid)
+        except OSError:
+            pass
         self.scans_served += 1
         self.children[pid] = connection
         connection.child_pid = pid
@@ -498,6 +573,11 @@ class ExpressDaemon:
         """
         code = 1
         try:
+            # Group leadership first (the parent sets it too; see _start_scan).
+            try:
+                os.setpgid(0, 0)
+            except OSError:
+                pass
             signal.set_wakeup_fd(-1)
             # The dispositions a cold CPython starts with, not a blanket
             # SIG_DFL: the interpreter ignores SIGPIPE (a scan piped into a
@@ -539,16 +619,22 @@ class ExpressDaemon:
             # parent's), and the wakeup pipe.
             self._close_daemon_fds()
             # The environment first, the streams second: the streams' codec is
-            # the request's PYTHONIOENCODING, not the daemon's.
-            runtime.apply_request_env(dict(request.get("env", {})), os.environ)
-            os.environ[runtime.CHILD_ENV] = "1"
+            # the request's PYTHONIOENCODING, not the daemon's. Applied through
+            # the locked helpers; this forked child is single-threaded.
+            overrides = runtime.request_env_overrides(
+                dict(request.get("env", {})), snapshot_environ()
+            )
+            overrides[runtime.CHILD_ENV] = "1"
+            apply_environ_overrides(overrides)
             self._reopen_std_streams()
             try:
                 os.chdir(request["cwd"])
             except OSError as exc:
                 print(
-                    f"ash express: cannot enter the requested working directory "
-                    f"{request['cwd']!r}: {exc}",
+                    shown_not_obeyed(
+                        f"ash express: cannot enter the requested working "
+                        f"directory {request['cwd']!r}: {exc}"
+                    ),
                     file=sys.stderr,
                     flush=True,
                 )
@@ -559,7 +645,11 @@ class ExpressDaemon:
             try:
                 import traceback
 
-                traceback.print_exc()
+                print(
+                    shown_not_obeyed(traceback.format_exc()),
+                    file=sys.stderr,
+                    flush=True,
+                )
             except BaseException:
                 pass
             code = 1
@@ -671,7 +761,10 @@ class ExpressDaemon:
         from automated_security_helper.cli.entrypoint import main as entry_main
 
         try:
-            entry_main()
+            # entry_main is annotated None today; the console script is still
+            # sys.exit(main()), so an int return there would be an exit code,
+            # and this guard keeps the parity if that annotation ever loosens.
+            returned = entry_main()  # type: ignore[func-returns-value]
         except SystemExit as exc:
             if exc.code is None:
                 return 0
@@ -679,14 +772,20 @@ class ExpressDaemon:
                 return exc.code
             # A string SystemExit prints its message and exits 1, as the
             # interpreter's top level treats it.
-            print(exc.code, file=sys.stderr, flush=True)
+            print(shown_not_obeyed(str(exc.code)), file=sys.stderr, flush=True)
             return 1
         except BaseException:
             import traceback
 
-            traceback.print_exc()
+            print(
+                shown_not_obeyed(traceback.format_exc()),
+                file=sys.stderr,
+                flush=True,
+            )
             return 1
-        return 0
+        # The console script is sys.exit(main()), so a normal int return is an
+        # exit code there and must be one here, for exit-code parity.
+        return returned if isinstance(returned, int) else 0
 
     # -- after the fork ------------------------------------------------------
 
@@ -714,11 +813,9 @@ class ExpressDaemon:
             if connection.child_pid is not None and signum in (
                 int(signal.SIGINT),
                 int(signal.SIGTERM),
+                int(getattr(signal, "SIGHUP", signal.SIGTERM)),
             ):
-                try:
-                    os.kill(connection.child_pid, int(signum))
-                except OSError:
-                    pass
+                _signal_scan(connection.child_pid, int(signum))
 
     def _discard(self, connection: _Connection, kill: bool) -> None:
         try:
@@ -727,10 +824,7 @@ class ExpressDaemon:
             pass
         self.connections.pop(connection.sock.fileno(), None)
         if kill and connection.child_pid is not None:
-            try:
-                os.kill(connection.child_pid, signal.SIGTERM)
-            except OSError:
-                pass
+            _signal_scan(connection.child_pid, signal.SIGTERM)
         connection.close()
 
     def _reap(self) -> None:
@@ -781,15 +875,33 @@ class ExpressDaemon:
         }
 
 
-def serve(idle_timeout: Optional[float] = None) -> None:
+def serve(idle_timeout: Optional[float] = None, ready_fd: Optional[int] = None) -> None:
     """Bind the socket and run the daemon loop in this process until it retires.
 
     The caller decides detachment: ``ash express start`` double-forks first (as
     the client's autostart does) or runs this in the foreground under
-    ``--foreground``.
+    ``--foreground``. *ready_fd*, when given, is the write end of the
+    autostart's readiness pipe: one byte the moment the socket is bound and
+    listening, then closed -- a death before that point closes the pipe with
+    no byte, which tells the starting client within milliseconds instead of
+    its whole poll window.
     """
     if idle_timeout is None:
         idle_timeout = runtime.idle_seconds()
     daemon = ExpressDaemon(idle_timeout=float(idle_timeout))
-    daemon.bind()
+    bound = daemon.bind()
+    if ready_fd is not None:
+        # One byte either way: "bound and listening", or "another daemon owns
+        # this socket, connect to it". A concurrent autostart's loser (parallel
+        # pre-commit batches fire several at once) must not read as a death.
+        try:
+            os.write(ready_fd, b"\x01" if bound else b"\x02")
+        except OSError:
+            pass
+        try:
+            os.close(ready_fd)
+        except OSError:
+            pass
+    if not bound:
+        return
     daemon.run()

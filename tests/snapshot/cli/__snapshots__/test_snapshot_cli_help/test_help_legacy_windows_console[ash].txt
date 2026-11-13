@@ -216,6 +216,45 @@
 │                                                                           unsandboxed inside    │
 │                                                                           the container. See    │
 │                                                                           docs/content/docs/sc… │
+│ --express                 --no-express                                    Run this scan on the  │
+│                                                                           resident express      │
+│                                                                           daemon, starting it   │
+│                                                                           if it is not running  │
+│                                                                           (--express), or force │
+│                                                                           an ordinary cold      │
+│                                                                           in-process run        │
+│                                                                           (--no-express).       │
+│                                                                           Without either, a     │
+│                                                                           scan uses the daemon  │
+│                                                                           automatically         │
+│                                                                           whenever its socket   │
+│                                                                           exists and its ASH    │
+│                                                                           version matches, and  │
+│                                                                           silently runs cold    │
+│                                                                           otherwise. Unix only  │
+│                                                                           (Linux and macOS).    │
+│                                                                           The flag is read by   │
+│                                                                           the console entry     │
+│                                                                           point before this     │
+│                                                                           command parses, so it │
+│                                                                           applies to CLI        │
+│                                                                           invocations: the      │
+│                                                                           'ash' console script  │
+│                                                                           gets the full saving; │
+│                                                                           'python -m            │
+│                                                                           automated_security_h… │
+│                                                                           delegates too but has │
+│                                                                           paid the import cost  │
+│                                                                           already; scans the    │
+│                                                                           MCP server hosts      │
+│                                                                           in-process never      │
+│                                                                           delegate. By the time │
+│                                                                           a scan runs here the  │
+│                                                                           decision has been     │
+│                                                                           made, so this         │
+│                                                                           parameter only        │
+│                                                                           documents and accepts │
+│                                                                           the flag.             │
 │ --offline-semgrep-rul…                             <str>                  Specify Semgrep       │
 │                                                                           rulesets for use in   │
 │                                                                           ASH offline mode      │
@@ -507,4 +546,7 @@
 │ dependencies     Install dependencies for ASH plugins                                           │
 │ inspect          Inspect and analyze ASH outputs and reports                                    │
 │ plugin           Manage ASH plugins                                                             │
+│ express          Manage the express daemon: a resident warm ASH process that removes startup    │
+│                  cost from every scan. Unix only; scans fall back to ordinary cold runs         │
+│                  wherever the daemon is unavailable.                                            │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

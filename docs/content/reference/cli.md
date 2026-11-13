@@ -32,6 +32,10 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash config wizard`](#config-wizard) | Interactive configuration wizard. |
 | [`ash dependencies`](#dependencies) | Install dependencies for ASH plugins |
 | [`ash dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
+| [`ash express`](#express) | Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable. |
+| [`ash express start`](#express-start) | Start the express daemon for this user and ASH version (idempotent). |
+| [`ash express status`](#express-status) | Report whether the express daemon is running, and what it has served. |
+| [`ash express stop`](#express-stop) | Stop the express daemon. A scan it is running is sent SIGTERM. |
 | [`ash get-genai-guide`](#get-genai-guide) | Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file. |
 | [`ash inspect`](#inspect) | Inspect and analyze ASH outputs and reports |
 | [`ash inspect findings`](#inspect-findings) | The `inspect findings` command provides an interactive TUI to explore the findings and identify actions to quickly take. |
@@ -51,7 +55,7 @@ Automated Security Helper, the agentic security harness · one workflow for your
 ash [OPTIONS] COMMAND [ARGS]...
 ```
 
-Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg).
+Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--express`](#scan--express), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg).
 
 Options that only `ash` itself accepts:
 
@@ -61,7 +65,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
+Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
 
 ## <a id="build-image"></a>`ash build-image`
 
@@ -400,6 +404,55 @@ ash dependencies install [OPTIONS]
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color` | flag | on |  | Enable/disable colorized output |
 
+## <a id="express"></a>`ash express`
+
+Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable.
+
+```text
+ash express [OPTIONS] COMMAND [ARGS]...
+```
+
+This command takes no options.
+
+Subcommands: [`ash express start`](#express-start), [`ash express status`](#express-status), [`ash express stop`](#express-stop).
+
+### <a id="express-start"></a>`ash express start`
+
+Start the express daemon for this user and ASH version (idempotent).
+
+```text
+ash express start [OPTIONS]
+```
+
+<!-- doctest: options of=cli.express.start -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="express-start--idle-seconds"></a>`--idle-seconds` | int range | not set |  | Seconds of inactivity after which the daemon exits. Defaults to the ASH_EXPRESS_IDLE_SECONDS environment variable, else 1800. |
+| <a id="express-start--foreground"></a>`--foreground` | flag | off |  | Run the daemon in this process, attached to this terminal, instead of detaching it. Useful for watching its log live. |
+
+### <a id="express-status"></a>`ash express status`
+
+Report whether the express daemon is running, and what it has served.
+
+```text
+ash express status [OPTIONS]
+```
+
+<!-- doctest: options of=cli.express.status -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="express-status--json"></a>`--json` | flag | off |  | Print the daemon's status object as JSON. |
+
+### <a id="express-stop"></a>`ash express stop`
+
+Stop the express daemon. A scan it is running is sent SIGTERM.
+
+```text
+ash express stop [OPTIONS]
+```
+
+This command takes no options.
+
 ## <a id="get-genai-guide"></a>`ash get-genai-guide`
 
 Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.
@@ -620,6 +673,7 @@ ash scan [OPTIONS]
 | <a id="scan--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. See https://awslabs.github.io/automated-security-helper/latest/how-to/configure/ |
 | <a id="scan--offline"></a>`--offline` / `--no-offline` | flag | off |  | Run scan in offline/airgapped mode. npm-audit does not run offline, because npm, yarn and pnpm audit by asking the registry: a project with a lockfile reports it MISSING, and one without reports it SKIPPED. IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage. |
 | <a id="scan--sandbox"></a>`--sandbox` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | not set |  | Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner whose sandbox cannot be set up is graded by the refusal: under 'auto' no working backend is a missing dependency and the scanner is reported MISSING; a named backend that is unavailable, or any other refusal (such as a results path that is a symlink), is reported ERROR. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md |
+| <a id="scan--express"></a>`--express` / `--no-express` | flag | not set |  | Run this scan on the resident express daemon, starting it if it is not running (--express), or force an ordinary cold in-process run (--no-express). Without either, a scan uses the daemon automatically whenever its socket exists and its ASH version matches, and silently runs cold otherwise. Unix only (Linux and macOS). The flag is read by the console entry point before this command parses, so it applies to CLI invocations: the 'ash' console script gets the full saving; 'python -m automated_security_helper.cli.main' delegates too but has paid the import cost already; scans the MCP server hosts in-process never delegate. By the time a scan runs here the decision has been made, so this parameter only documents and accepts the flag. |
 | <a id="scan--offline-semgrep-rulesets"></a>`--offline-semgrep-rulesets` | text | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | <a id="scan--strategy"></a>`--strategy` | one of `sequential`, `parallel` | `parallel` |  | Whether to run scanners in parallel or sequential |
 | <a id="scan--progress"></a>`--progress`, `-p` / `--no-progress`, `-P` | flag | on |  | Show progress of each job live in the console. Defaults to True. |

@@ -81,6 +81,19 @@ class TestFrameReader:
         with pytest.raises(runtime.ExpressProtocolError, match="not a JSON object"):
             reader.read_frame()
 
+    def test_a_frame_nested_too_deeply_is_a_protocol_error_not_a_crash(self):
+        """A line of 50,000 nested arrays is under the byte cap but blows the
+        JSON parser's recursion limit. From a same-user peer that is a broken
+        client, not an attack, and either way the reader answers with the
+        protocol error every caller already handles instead of letting
+        RecursionError unwind through the daemon's accept loop."""
+        depth = 50_000
+        line = b"[" * depth + b"]" * depth + b"\n"
+        assert len(line) < runtime.MAX_FRAME_BYTES
+        reader = runtime.FrameReader(_ScriptedSock([line]))
+        with pytest.raises(runtime.ExpressProtocolError, match="nested too deeply"):
+            reader.read_frame()
+
     def test_an_unbounded_line_is_cut_off_at_the_cap(self):
         chunk = b"x" * 65536
         reader = runtime.FrameReader(

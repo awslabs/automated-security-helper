@@ -6,8 +6,9 @@
 :func:`delegated_exit_code` is the whole interface: given the process argv
 (after the program name), it returns the exit code of a scan the daemon ran, or
 ``None``, which tells the entry point to run cold in-process exactly as it
-always has. Everything here is standard library; the first heavy import is what
-the ``None`` answer leads to.
+always has. Everything here is standard library (``utils.process_env``, the
+package's locked environment access, is itself standard library only); the
+first heavy import is what the ``None`` answer leads to.
 
 The decision tree, in the order it is walked:
 
@@ -33,6 +34,7 @@ never wrong.
 from __future__ import annotations
 
 import os
+import select
 import signal
 import socket
 import sys
@@ -45,6 +47,11 @@ from typing import Any, Mapping, Optional, Union
 PathLike = Union[str, "os.PathLike[str]"]
 
 from automated_security_helper.express import runtime
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    snapshot_environ,
+)
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 #: The root CLI's subcommand names that are not a scan (cli/main.py registers
 #: them). ``scan`` is deliberately absent. A new subcommand added without
@@ -112,21 +119,78 @@ def delegated_exit_code(
     explicitly.
     """
     if environ is None:
-        environ = os.environ
+        environ = snapshot_environ()
     try:
         return _delegated_exit_code(argv, environ)
+    except KeyboardInterrupt:
+        # A die-now raise that escaped the inner guards (it can land between
+        # them): end with the interrupt code, never a traceback and never a
+        # cold scan the operator just asked to stop.
+        return 130
     except Exception as exc:  # noqa: BLE001 - the fallback is the contract
         if wants_express(argv):
             _note(f"ash express: falling back to a cold run: {exc}")
         return None
 
 
+def completion_in_progress(environ: Mapping[str, str]) -> bool:
+    """Whether this invocation is a shell completion, which must never scan.
+
+    click's completion protocol re-invokes the program with ``_<PROG>_COMPLETE``
+    in the environment (``_ASH_COMPLETE`` and the other console-script names),
+    and bash's own machinery exports ``COMP_WORDS``/``COMP_CWORD``. A bare
+    ``ash`` is a scan of the working directory by design, so without this
+    check, TAB after ``ash `` with a daemon up would have started that scan
+    into the completion.
+    """
+    if "COMP_WORDS" in environ or "COMP_CWORD" in environ:
+        return True
+    # click's shell-completion re-invocation carries one of these variables,
+    # one per console script ASH installs (COMPLETION_ENV_NAMES; a test pins
+    # the spellings to pyproject). Any of them present means this process is
+    # answering a TAB completion, which must never start a scan.
+    return (
+        "_ASH_COMPLETE" in environ
+        or "_ASHV3_COMPLETE" in environ
+        or "_AUTOMATED_SECURITY_HELPER_COMPLETE" in environ
+        or "_AGENTIC_SECURITY_HARNESS_COMPLETE" in environ
+    )
+
+
+#: click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE`
+#: with the program name uppercased and `-` as `_`). Matched exactly: the older
+#: any-`_*_COMPLETE` match read an unrelated variable (a profile's
+#: `_SETUP_COMPLETE=1`, say) as a completion and silently switched express off
+#: for every scan of that shell. Pinned against pyproject's console scripts.
+COMPLETION_ENV_NAMES = frozenset(
+    {
+        "_ASH_COMPLETE",
+        "_ASHV3_COMPLETE",
+        "_AUTOMATED_SECURITY_HELPER_COMPLETE",
+        "_AGENTIC_SECURITY_HARNESS_COMPLETE",
+    }
+)
+
+
 def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optional[int]:
-    if environ.get(runtime.CHILD_ENV):
+    # ASH_EXPRESS_CHILD (the spelling behind runtime.CHILD_ENV) is set in
+    # every forked scan child's environment, so a scan already running inside
+    # the daemon never delegates to the daemon again.
+    if environ.get("ASH_EXPRESS_CHILD"):
         return None
-    if not runtime.express_supported():
+    if completion_in_progress(environ):
         return None
     if not is_scan_invocation(argv):
+        return None
+    if not runtime.express_supported():
+        # The silent cold fallback, except that --express asked for the daemon
+        # by name: one line says why there is none, as every other explicit
+        # fallback does (the docs promise exactly this).
+        if wants_express(argv):
+            _note(
+                "ash express: express mode needs unix-domain sockets and a "
+                "peer-credential read, which this platform lacks; running cold."
+            )
         return None
     explicit = wants_express(argv)
     path = runtime.socket_path()
@@ -135,7 +199,12 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
     if sock is None and not explicit:
         return None
     if sock is None:
-        autostart(environ)
+        if not autostart(environ):
+            _note(
+                "ash express: the daemon did not come up; running cold. Its "
+                f"log is {runtime.log_path()}"
+            )
+            return None
         sock = await_daemon(path)
         if sock is None:
             _note("ash express: the daemon did not come up; running cold.")
@@ -149,8 +218,10 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
         return None
     # --express and the running daemon is stale (version, fingerprint or
     # protocol): restart it once and try again; a second refusal is a cold run.
-    _stop_daemon(path)
-    autostart(environ)
+    stop_daemon(path)
+    if not autostart(environ):
+        _note("ash express: the daemon did not come back up; running cold.")
+        return None
     sock = await_daemon(path)
     if sock is None:
         _note("ash express: the daemon did not come back up; running cold.")
@@ -162,10 +233,32 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
     return None
 
 
+def _signal_exit_code(pending: list[int]) -> Optional[int]:
+    """The exit code a recorded-but-undeliverable signal maps to, or None.
+
+    Used when the handshake ends in a refusal or a break with signals still
+    recorded: there is no scan to forward them to and no cold run should
+    start under an interrupt. SIGTERM beats SIGINT (a CI timeout should read
+    as 143 even if an interrupt also landed), and the codes are the shell's,
+    128 plus the signal, with SIGINT as 130.
+    """
+    if int(signal.SIGTERM) in pending:
+        return 128 + int(signal.SIGTERM)
+    if hasattr(signal, "SIGHUP") and int(signal.SIGHUP) in pending:
+        return 128 + int(signal.SIGHUP)
+    if int(signal.SIGINT) in pending:
+        return 130
+    return None
+
+
 def _note(text: str) -> None:
-    """One line to stderr, best effort: a broken stderr must not fail the scan."""
+    """One line to stderr, best effort: a broken stderr must not fail the scan.
+
+    Shown, not obeyed: a note quotes exception text, which can carry a path or
+    a message with terminal controls in it.
+    """
     try:
-        print(text, file=sys.stderr, flush=True)
+        print(shown_not_obeyed(text), file=sys.stderr, flush=True)
     except Exception:
         pass
 
@@ -181,20 +274,58 @@ def _connect(path: PathLike) -> Optional[socket.socket]:
     dead, so nothing is unlinked: the answer is simply "run cold this time".
     """
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(5.0)
+    # Short on purpose: an implicit scan pays this on every invocation while a
+    # socket file exists, so a wedged daemon costs at most these seconds before
+    # the silent cold fallback. The one path that legitimately waits longer --
+    # the handshake right after an autostart, while the daemon warms its
+    # imports -- goes through await_daemon, which re-times its socket to
+    # HANDSHAKE_TIMEOUT_SECONDS after connecting.
+    sock.settimeout(runtime.CONNECT_TIMEOUT_SECONDS)
     try:
         sock.connect(os.fspath(path))
     except ConnectionRefusedError:
         sock.close()
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+        _remove_if_dead(path)
         return None
     except OSError:
         sock.close()
         return None
     return sock
+
+
+def _remove_if_dead(path: PathLike) -> None:
+    """Remove a refusing socket file, but only when no daemon is alive for it.
+
+    ``ECONNREFUSED`` alone does not prove death: a daemon between its bind and
+    its listen refuses too, so unlinking on the refusal let a second client in
+    that window delete a LIVE daemon's socket. The daemon holds an exclusive
+    lock on ``<socket>.lock`` for its whole life, so the lock being takeable is
+    the proof of death -- and holding it across the unlink serializes this
+    removal against a daemon starting right now.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        return
+    try:
+        fd = os.open(os.fspath(path) + ".lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    except OSError:
+        return
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            # A daemon is alive, starting or running: not ours to remove.
+            return
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def _run_on_daemon(
@@ -240,19 +371,33 @@ def _run_on_daemon(
         # interrupt code, as a cold run's die-now ending does: the forwarded
         # SIGINT is already on its way to the child, and closing the
         # connection makes the daemon SIGTERM it as well.
-        state: dict[str, Any] = {"interrupts": 0, "started": False, "pending": []}
+        state: dict[str, Any] = {
+            "started": False,
+            "pending": [],
+            "deliveries": {},
+            "die_now": 130,
+        }
+
+        def send_signal_frame(signum: int) -> None:
+            try:
+                runtime.send_frame(sock, {"op": "signal", "signum": int(signum)})
+            except Exception:
+                pass
 
         def forward(signum: int, frame: Optional[FrameType]) -> None:  # noqa: ARG001
-            if signum == int(signal.SIGINT):
-                state["interrupts"] += 1
+            count = state["deliveries"].get(int(signum), 0) + 1
+            state["deliveries"][int(signum)] = count
             if not state["started"]:
                 state["pending"].append(int(signum))
             else:
-                try:
-                    runtime.send_frame(sock, {"op": "signal", "signum": int(signum)})
-                except Exception:
-                    pass
-            if signum == int(signal.SIGINT) and state["interrupts"] >= 2:
+                send_signal_frame(signum)
+            # The second delivery of an ending signal is "die now", as a cold
+            # run's double Ctrl-C is -- and the same for a repeated SIGTERM, so
+            # a hung daemon cannot make this client unkillable short of KILL.
+            if count >= 2 and signum in (int(signal.SIGINT), int(signal.SIGTERM)):
+                state["die_now"] = (
+                    128 + int(signum) if signum != int(signal.SIGINT) else 130
+                )
                 raise KeyboardInterrupt
 
         previous = {}
@@ -272,46 +417,70 @@ def _run_on_daemon(
                 runtime.send_frame(sock, request)
                 answer = reader.read_frame()
             except KeyboardInterrupt:
-                return ("exit", 130)
+                return ("exit", state["die_now"])
             except (OSError, runtime.ExpressProtocolError) as exc:
+                interrupted = _signal_exit_code(state["pending"])
+                if interrupted is not None:
+                    # A SIGTERM or Ctrl-C arrived while the handshake broke:
+                    # falling back cold would run a whole scan the operator
+                    # just asked to stop. Exit as the cold run would have.
+                    return ("exit", interrupted)
                 if explicit:
                     _note(f"ash express: handshake failed: {exc}")
                 return ("fallback", None)
             if not answer or not answer.get("ok"):
+                interrupted = _signal_exit_code(state["pending"])
+                if interrupted is not None:
+                    return ("exit", interrupted)
                 reason = (answer or {}).get("reason", "no answer")
                 if explicit:
                     _note(f"ash express: daemon refused the scan: {reason}")
                 return ("stale" if (answer or {}).get("stale") else "fallback", None)
 
-            # The scan is running against our own stdin/stdout/stderr.
-            state["started"] = True
-            for signum in state["pending"]:
-                try:
-                    runtime.send_frame(sock, {"op": "signal", "signum": signum})
-                except Exception:
-                    pass
-            sock.settimeout(None)
-            while True:
-                try:
-                    frame = reader.read_frame()
-                except KeyboardInterrupt:
-                    # The second Ctrl-C: the cold run's die-now code, at once.
-                    return ("exit", 130)
-                except (OSError, runtime.ExpressProtocolError) as exc:
-                    _note(
-                        f"ash express: lost the daemon mid-scan ({exc}); the "
-                        "scan's exit code is unknown and is reported as 1."
-                    )
-                    return ("exit", 1)
-                if frame is None:
-                    _note(
-                        "ash express: the daemon closed the connection before "
-                        "reporting the scan's exit code; reported as 1."
-                    )
-                    return ("exit", 1)
-                if "exit" in frame:
-                    code = frame["exit"]
-                    return ("exit", code if isinstance(code, int) else 1)
+            # The scan is running against our own stdin/stdout/stderr. One
+            # KeyboardInterrupt guard covers the whole stretch from here to
+            # the exit frame: the die-now raise can land in the flush loop, in
+            # settimeout, or in the read, and every one of them is the same
+            # "end now with the signal's code", never an escaping traceback.
+            try:
+                # The recorded signals are flushed by index -- a signal landing
+                # mid-flush is appended and picked up by the same loop -- and
+                # only then does the handler switch to writing frames itself,
+                # with one more drain for a signal that landed between the
+                # loop's end and the switch. The switch-then-flush order would
+                # have let the handler interleave a frame into the middle of a
+                # flush write.
+                index = 0
+                while index < len(state["pending"]):
+                    send_signal_frame(state["pending"][index])
+                    index += 1
+                state["started"] = True
+                while index < len(state["pending"]):
+                    send_signal_frame(state["pending"][index])
+                    index += 1
+                sock.settimeout(None)
+                while True:
+                    try:
+                        frame = reader.read_frame()
+                    except (OSError, runtime.ExpressProtocolError) as exc:
+                        _note(
+                            f"ash express: lost the daemon mid-scan ({exc}); the "
+                            "scan's exit code is unknown and is reported as 1."
+                        )
+                        return ("exit", 1)
+                    if frame is None:
+                        _note(
+                            "ash express: the daemon closed the connection before "
+                            "reporting the scan's exit code; reported as 1."
+                        )
+                        return ("exit", 1)
+                    if "exit" in frame:
+                        code = frame["exit"]
+                        return ("exit", code if isinstance(code, int) else 1)
+            except KeyboardInterrupt:
+                # The second Ctrl-C (or second SIGTERM): the cold run's
+                # die-now ending, at once, with that signal's exit code.
+                return ("exit", state["die_now"])
         finally:
             for signum, handler in previous.items():
                 try:
@@ -330,6 +499,11 @@ def await_daemon(
         sock.settimeout(1.0)
         try:
             sock.connect(os.fspath(path))
+            # The connect poll is tight on purpose, but the socket returned here
+            # carries the handshake, and the first request after an autostart
+            # lands while the daemon is still warming its imports -- give it the
+            # handshake budget, not the poll's second.
+            sock.settimeout(runtime.HANDSHAKE_TIMEOUT_SECONDS)
             return sock
         except OSError:
             sock.close()
@@ -357,7 +531,7 @@ def control_request(path: PathLike, frame: dict[str, Any]) -> Optional[dict[str,
         return None
 
 
-def _stop_daemon(path: PathLike) -> None:
+def stop_daemon(path: PathLike) -> None:
     """Ask the daemon at *path* to exit, and wait for it to have exited.
 
     The wait is on the daemon's pid (from the stop answer), not on the socket
@@ -371,7 +545,10 @@ def _stop_daemon(path: PathLike) -> None:
     if answer is None:
         return
     pid = answer.get("pid")
-    deadline = time.monotonic() + 5.0
+    # Longer than the daemon's own child grace (STOP_GRACE_SECONDS plus its
+    # select tick and reaping), so a stop during a slow-dying scan is not
+    # mis-read as a daemon that refused to exit.
+    deadline = time.monotonic() + runtime.STOP_WAIT_SECONDS
     while time.monotonic() < deadline:
         if isinstance(pid, int):
             try:
@@ -385,8 +562,13 @@ def _stop_daemon(path: PathLike) -> None:
         time.sleep(0.05)
 
 
-def autostart(environ: Mapping[str, str]) -> None:
+def autostart(environ: Mapping[str, str]) -> bool:
     """Start the daemon, detached, by double-fork from this thin process.
+
+    True once the daemon has bound its socket (its readiness byte arrived);
+    False when it died first or never answered within the start window, so the
+    caller can fall back cold at once instead of polling a socket that will
+    never exist.
 
     The intermediate child calls ``setsid`` and forks again, so the daemon has
     no controlling terminal and is not this client's child; the client reaps
@@ -403,18 +585,38 @@ def autostart(environ: Mapping[str, str]) -> None:
     log_file = runtime.log_path()
     idle = runtime.idle_seconds(dict(environ))
     scrubbed = runtime.scrubbed_daemon_environment(dict(environ))
+    # Flushed before the fork: buffered output would otherwise be duplicated
+    # into the daemon and land a second time in its log file.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    # The readiness pipe: the daemon writes one byte the moment its socket is
+    # bound and listening, and a grandchild that dies first closes the pipe
+    # with no byte -- so a daemon that cannot start (an import error, a bind
+    # refusal) is known here within milliseconds, not after a whole poll
+    # window on every invocation.
+    ready_read, ready_write = os.pipe()
     middle = os.fork()
     if middle == 0:
         # Intermediate child, then daemon. Every path out of here is os._exit:
         # this process must never return into the client's Python stack.
         code = 1
         try:
+            os.close(ready_read)
             os.setsid()
             if os.fork() > 0:
                 os._exit(0)
             os.chdir(os.fspath(runtime.runtime_dir()))
-            os.environ.clear()
-            os.environ.update(scrubbed)
+            # The scrub, through the locked helpers: everything not in the
+            # scrubbed set is removed, the rest set to the scrubbed values.
+            # This forked child is single-threaded, so the lock is free.
+            overrides: dict[str, Optional[str]] = {
+                name: None for name in snapshot_environ() if name not in scrubbed
+            }
+            overrides.update(scrubbed)
+            apply_environ_overrides(overrides)
             null = os.open(os.devnull, os.O_RDONLY)
             os.dup2(null, 0)
             os.close(null)
@@ -424,12 +626,51 @@ def autostart(environ: Mapping[str, str]) -> None:
             os.dup2(log, 1)
             os.dup2(log, 2)
             os.close(log)
+            # Nothing of the starting process's descriptor table may outlive
+            # the start: a fork without an exec inherits every open fd, and a
+            # CI status pipe or a make jobserver fd held open here would keep
+            # its reader waiting for EOF until the daemon idled out.
+            try:
+                limit = os.sysconf("SC_OPEN_MAX")
+            except (OSError, ValueError):
+                limit = 65536
+            if not isinstance(limit, int) or limit <= 0:
+                limit = 65536
+            # Everything but the readiness pipe's write end, which the daemon
+            # closes itself right after it binds.
+            os.closerange(3, ready_write)
+            os.closerange(ready_write + 1, limit)
             from automated_security_helper.express.daemon import serve
 
-            serve(idle_timeout=idle)
+            serve(idle_timeout=idle, ready_fd=ready_write)
             code = 0
         except BaseException:
             code = 1
         finally:
             os._exit(code)
+    os.close(ready_write)
     os.waitpid(middle, 0)
+    deadline = time.monotonic() + runtime.START_TIMEOUT_SECONDS
+    became_ready = False
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            readable, _, _ = select.select([ready_read], [], [], remaining)
+            if not readable:
+                break
+            # One byte = a daemon is serving: ours ("\x01", bound and
+            # listening) or a concurrent autostart's winner ("\x02", whose
+            # socket the loser found owned). EOF with no byte = the daemon
+            # died before it could bind.
+            became_ready = os.read(ready_read, 1) in (b"\x01", b"\x02")
+            break
+    except OSError:
+        became_ready = False
+    finally:
+        try:
+            os.close(ready_read)
+        except OSError:
+            pass
+    return became_ready

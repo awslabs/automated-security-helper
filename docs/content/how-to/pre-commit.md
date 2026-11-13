@@ -121,11 +121,14 @@ every run scans all of it. The hook environment takes about 650 MB under
 `~/.cache/pre-commit`, and bandit and checkov about 240 MB under `~/.local/share/uv`.
 
 About two seconds of every later run is ASH's own startup (the interpreter and the eager
-imports), paid again on each commit. [Express mode](express-mode.md) removes it: run
-`ash express start` once (or any scan with `--express`), and every hook run afterwards forks a
-resident warm process instead of starting cold -- Linux and macOS only, and the hook needs
-no configuration change. Pairing the daemon with a scan scoped to the files the commit
-touches is the fastest hook shape.
+imports), paid again on each commit. [Express mode](express-mode.md) removes it: add
+`--express` to the hook's `args`, and the first commit starts a resident warm daemon
+paired with the hook's own environment, which every later hook run forks instead of
+starting cold (Linux and macOS only). The pairing matters: the daemon serves exactly the
+ASH installation that started it, and pre-commit's hook environment is its own
+installation, so a daemon started from your shell's `ash` is silently ignored by the
+hook -- start it with the hook's flag, not from the shell. Pairing the daemon with a scan
+scoped to the files the commit touches is the fastest hook shape.
 
 ## Pre-commit and CI together {#with-ci}
 

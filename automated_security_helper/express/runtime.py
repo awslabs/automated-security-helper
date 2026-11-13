@@ -3,9 +3,11 @@
 
 """What the express client and daemon share: paths, identity, and the wire protocol.
 
-Standard library only, at module scope and below: the client imports this before
-the heavy CLI, and anything heavier here would spend the startup time express
-exists to remove.
+Standard library only, at module scope and below -- plus
+``utils.process_env``, itself standard library only, for the locked
+environment reads the package requires everywhere: the client imports this
+before the heavy CLI, and anything heavier here would spend the startup time
+express exists to remove.
 
 The socket lives in a directory this module creates and polices
 (:func:`runtime_dir`): mode 0700, owned by the invoking user, never reached
@@ -36,6 +38,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Optional
 
+from automated_security_helper.utils.process_env import snapshot_environ
+
 #: Bumped when a frame's shape changes incompatibly. The daemon refuses a
 #: request whose protocol differs, and the client reads that refusal as a stale
 #: daemon (fall back cold; restart it under --express).
@@ -64,6 +68,30 @@ IDLE_ENV = "ASH_EXPRESS_IDLE_SECONDS"
 #: this covers process start, not the imports.
 START_TIMEOUT_SECONDS = 20.0
 
+#: How long the client waits for the daemon to answer a handshake. Sized to
+#: cover the warm-import window: the daemon binds its socket first and enters
+#: its accept loop only once the imports are done, so the first request after
+#: an autostart legitimately waits several seconds (more on a loaded CI
+#: runner) with the connection sitting in the listen backlog. A short timeout
+#: here made exactly the scan that started the daemon run cold.
+HANDSHAKE_TIMEOUT_SECONDS = 30.0
+
+#: How long the client gives a connect on an existing socket file. Short on
+#: purpose: an implicit scan meets this on every invocation while a socket
+#: file exists, so a wedged daemon may cost at most these seconds before the
+#: silent cold fallback. The post-autostart handshake, which legitimately
+#: waits out the warm imports, runs on HANDSHAKE_TIMEOUT_SECONDS instead
+#: (await_daemon re-times its socket after connecting).
+CONNECT_TIMEOUT_SECONDS = 5.0
+
+#: How long the daemon gives a running scan after SIGTERM before the SIGKILL
+#: escalation at shutdown -- and, with margin for the daemon's own select tick
+#: and reaping, how long a stopper waits for the daemon's pid to go away
+#: before calling the stop incomplete. One pair of constants, so the stopper
+#: can never be made a liar by the grace it is itself granting.
+STOP_GRACE_SECONDS = 5.0
+STOP_WAIT_SECONDS = 10.0
+
 #: The exact environment variable names, beyond the ``ASH_`` prefix, that a
 #: scan's behaviour honours and the request therefore carries: the documented
 #: inputs (OCI_RUNNER and its wrapper refusal, CI detection, color and width
@@ -82,11 +110,59 @@ HONORED_ENV_EXACT = frozenset(
         "LINES",
         "TERMINAL_WIDTH",
         "PYTHONIOENCODING",
+        # Traceback rendering's other inputs are ASH's own ASH_DEBUG_* names,
+        # which the ASH_ prefix of HONORED_ENV_PREFIXES already carries.
         "TYPER_STANDARD_TRACEBACK",
         "_TYPER_STANDARD_TRACEBACK",
-        "ASH_DEBUG_SHOW_LOCALS",
+        # Network reachability and trust: a cold run's proxied downloads
+        # (content databases, npm-audit's registry asks) and TLS trust follow
+        # these, so a scan through the daemon must see the client's values.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+        # Container-mode scans resolve their runtime through these (podman's
+        # own connection variables beside docker's).
+        "DOCKER_HOST",
+        "DOCKER_CONFIG",
+        "DOCKER_CERT_PATH",
+        "DOCKER_TLS_VERIFY",
+        "DOCKER_CONTEXT",
+        "CONTAINER_HOST",
+        "CONTAINER_CONNECTION",
+        "CONTAINER_SSHKEY",
+        "OCI_RUNNER_EXTRA_ARGS",
+        # Scanner credentials a cold run would have had in its environment.
+        "SNYK_TOKEN",
+        "SEMGREP_APP_TOKEN",
+        "BC_API_KEY",
+        "GITHUB_TOKEN",
+        # Per-user directory conventions several scanners read.
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_RUNTIME_DIR",
     }
 )
+
+#: Environment-variable name prefixes carried whole in a scan request, beyond
+#: ``ASH_`` and ``GIT_`` (see :func:`is_honored_name`): AWS credentials and
+#: configuration (the AWS reporters and botocore read many ``AWS_*`` names),
+#: and uv's knobs (``ash dependencies install`` runs uv). Carried per request
+#: over the same-uid 0600 socket and applied to the one forked child, never
+#: into the daemon's own environment, so a credential here has the same reach
+#: it has in a cold run's process.
+HONORED_ENV_PREFIXES = ("ASH_", "GIT_", "AWS_", "UV_")
 
 #: Execution basics the forked child takes from the client rather than from the
 #: shell the daemon happened to be started in: scanner subprocesses are resolved
@@ -198,13 +274,47 @@ def _site_entries() -> list[str]:
     names: set[str] = set()
     for entry in directories:
         try:
-            listed = os.listdir(entry)
+            listed = os.scandir(entry)
         except OSError:
             continue
-        for name in listed:
-            if name.endswith((".dist-info", ".egg-info")):
-                names.add(name)
+        with listed:
+            for item in listed:
+                if item.name.endswith((".dist-info", ".egg-info")):
+                    # The mtime beside the name: a reinstall of the SAME
+                    # version rewrites the dist-info, so it must read as a
+                    # different environment though no name changed.
+                    try:
+                        stamp = item.stat().st_mtime_ns
+                    except OSError:
+                        stamp = 0
+                    names.add(f"{item.name}:{stamp}")
     return sorted(names)
+
+
+def _own_tree_stamp() -> str:
+    """A stamp of ASH's own installed source tree: newest mtime and file count.
+
+    For editable installs, whose code changes with no dist-info change at all:
+    a developer's edit-scan loop against a warm daemon would otherwise serve
+    the pre-edit code for up to the idle window, silently. Walking the
+    package's ~300 files costs single-digit milliseconds, which the warm path
+    saves a hundred times over.
+    """
+    newest = 0
+    count = 0
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for directory, _, files in os.walk(root):
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            count += 1
+            try:
+                mtime = os.stat(os.path.join(directory, name)).st_mtime_ns
+            except OSError:
+                continue
+            if mtime > newest:
+                newest = mtime
+    return f"{count}:{newest}"
 
 
 def runtime_fingerprint() -> str:
@@ -215,8 +325,11 @@ def runtime_fingerprint() -> str:
     start; a client whose fingerprint differs is running against different
     code, and the daemon's warm imports would scan with the old one -- so the
     handshake refuses and the client falls back cold (restarting the daemon
-    under ``--express``). The ASH version is not part of it because the socket
-    path already carries it (:func:`socket_path`).
+    under ``--express``). The package set carries each entry's mtime, so a
+    reinstall of the same versions still reads as a change, and ASH's own
+    source tree is stamped (:func:`_own_tree_stamp`), so an editable install's
+    edits do too. The ASH version is not part of it because the socket path
+    already carries it (:func:`socket_path`).
     """
     digest = hashlib.sha256()
     digest.update(sys.version.encode("utf-8", "backslashreplace"))
@@ -224,19 +337,35 @@ def runtime_fingerprint() -> str:
     digest.update(
         os.path.realpath(sys.executable or "").encode("utf-8", "backslashreplace")
     )
+    digest.update(b"\x00")
+    digest.update(_own_tree_stamp().encode("utf-8"))
     for name in _site_entries():
         digest.update(b"\x00")
         digest.update(name.encode("utf-8", "backslashreplace"))
     return digest.hexdigest()
 
 
-def socket_key(version: Optional[str] = None, uid: Optional[int] = None) -> str:
-    """The short key the socket and log file names carry: hash of (uid, version)."""
+def socket_key(
+    version: Optional[str] = None,
+    uid: Optional[int] = None,
+    prefix: Optional[str] = None,
+) -> str:
+    """The short key the socket and log file names carry: hash of (uid,
+    version, installation prefix).
+
+    The prefix (``sys.prefix``, resolved) is part of the key so two
+    installations of the same ASH version -- two virtualenvs, say -- never
+    share a socket. Without it the second environment's every request would
+    fingerprint-refuse against the first one's daemon, and two ``--express``
+    users would stop and restart each other's daemons forever.
+    """
     if version is None:
         version = ash_version()
     if uid is None:
         uid = os.getuid()
-    digest = hashlib.sha256(f"{uid}:{version}".encode("utf-8"))
+    if prefix is None:
+        prefix = os.path.realpath(sys.prefix)
+    digest = hashlib.sha256(f"{uid}:{version}:{prefix}".encode("utf-8"))
     return digest.hexdigest()[:16]
 
 
@@ -300,16 +429,30 @@ def runtime_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
     """
     _require_supported()
     if environ is None:
-        environ = dict(os.environ)
+        environ = snapshot_environ()
     base = environ.get("XDG_RUNTIME_DIR", "")
     if base and os.path.isdir(base):
         return _ensure_private_dir(Path(base) / "ash-express")
     return _ensure_private_dir(Path.home() / ".ash" / "run")
 
 
+#: The longest socket path this module will bind or connect to. AF_UNIX's
+#: sun_path caps at 108 bytes on Linux and 104 on macOS (NUL included); past
+#: this, bind() fails after the daemon has already forked, so the length is
+#: refused up front and the scan runs cold instead of stalling a start window.
+MAX_SOCKET_PATH_BYTES = 103
+
+
 def socket_path(environ: Optional[Mapping[str, str]] = None) -> Path:
-    """The unix socket path for this uid and ASH version."""
-    return runtime_dir(environ) / f"ash-{os.getuid()}-{socket_key()}.sock"
+    """The unix socket path for this uid and ASH installation."""
+    path = runtime_dir(environ) / f"ash-{os.getuid()}-{socket_key()}.sock"
+    encoded = len(os.fsencode(os.fspath(path)))
+    if encoded > MAX_SOCKET_PATH_BYTES:
+        raise ExpressUnavailable(
+            f"the socket path is {encoded} bytes, over the {MAX_SOCKET_PATH_BYTES}"
+            f"-byte AF_UNIX limit this module binds within: {path}"
+        )
+    return path
 
 
 def log_path(environ: Optional[Mapping[str, str]] = None) -> Path:
@@ -328,7 +471,7 @@ def idle_seconds(environ: Optional[Mapping[str, str]] = None) -> int:
         # Seconds of inactivity after which an idle express daemon exits.
         # `ash express start --idle-seconds` writes it for the daemon it
         # starts, and an autostarted daemon inherits it from the scan's shell.
-        raw = os.environ.get(IDLE_ENV, "")
+        raw = os.environ.get("ASH_EXPRESS_IDLE_SECONDS", "")
     else:
         raw = environ.get(IDLE_ENV, "")
     try:
@@ -349,7 +492,7 @@ def honored_env(environ: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     and the request stays small and reviewable.
     """
     if environ is None:
-        environ = dict(os.environ)
+        environ = snapshot_environ()
     carried: dict[str, str] = {}
     for name, value in environ.items():
         if is_honored_name(name):
@@ -360,14 +503,16 @@ def honored_env(environ: Optional[Mapping[str, str]] = None) -> dict[str, str]:
 def is_honored_name(name: str) -> bool:
     """Whether *name* is in the request's environment subset.
 
-    ``GIT_*`` is carried whole: ASH's scan runs git in the scanned tree (the
-    scan set, ``--changed-files-only``), and git's own environment --
-    ``GIT_INDEX_FILE`` and ``GIT_DIR`` above all, which git sets for the hooks
-    it invokes -- changes what those commands read. A pre-commit hook's scan
-    through the daemon has to see the same index a cold run in that hook sees.
+    The prefixes (:data:`HONORED_ENV_PREFIXES`) are carried whole. ``GIT_*``
+    because ASH's scan runs git in the scanned tree (the scan set,
+    ``--changed-files-only``) and git's own environment -- ``GIT_INDEX_FILE``
+    and ``GIT_DIR`` above all, which git sets for the hooks it invokes --
+    changes what those commands read: a pre-commit hook's scan through the
+    daemon has to see the same index a cold run in that hook sees. ``AWS_*``
+    and ``UV_*`` for the same reason, one reporter and one installer over.
     """
     return (
-        name.startswith(("ASH_", "GIT_"))
+        name.startswith(HONORED_ENV_PREFIXES)
         or name in HONORED_ENV_EXACT
         or name in EXECUTION_ENV_EXACT
     )
@@ -384,14 +529,30 @@ def apply_request_env(
     set, and nothing else is touched. :data:`CHILD_ENV` is never removed, so a
     request cannot clear the one variable that stops re-delegation.
     """
-    for name in [key for key in environ if is_honored_name(key)]:
-        if name not in request_env and name != CHILD_ENV:
-            del environ[name]
+    for name, value in request_env_overrides(request_env, environ).items():
+        if value is None:
+            environ.pop(name, None)
+        else:
+            environ[name] = value
+
+
+def request_env_overrides(
+    request_env: Mapping[str, str], current: Mapping[str, str]
+) -> dict[str, Optional[str]]:
+    """:func:`apply_request_env`'s plan as a set/remove mapping (``None`` =
+    remove), the shape ``utils.process_env.apply_environ_overrides`` takes, for
+    the forked child that applies it to the real environment under the lock."""
+    overrides: dict[str, Optional[str]] = {
+        name: None
+        for name in current
+        if is_honored_name(name) and name not in request_env and name != CHILD_ENV
+    }
     for name, value in request_env.items():
         if name == CHILD_ENV:
             continue
         if is_honored_name(name):
-            environ[name] = value
+            overrides[name] = value
+    return overrides
 
 
 #: What an autostarted daemon's own environment keeps
@@ -466,6 +627,12 @@ class FrameReader:
             frame = json.loads(line)
         except ValueError as exc:
             raise ExpressProtocolError(f"frame is not JSON: {exc}") from None
+        except RecursionError:
+            # A frame nested past the interpreter's recursion limit is a
+            # protocol error like any other malformed frame: as anything else
+            # it would unwind through the daemon's event loop, whose teardown
+            # ends every running scan over one bad client.
+            raise ExpressProtocolError("frame is nested too deeply") from None
         if not isinstance(frame, dict):
             raise ExpressProtocolError("frame is not a JSON object")
         return frame

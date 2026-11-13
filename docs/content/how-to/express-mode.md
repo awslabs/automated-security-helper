@@ -14,15 +14,19 @@ executes, with your command line, your working directory and your terminal, so i
 reports and exit code are the cold run's. Express is an accelerator, never a different scan.
 
 Unix only (Linux and macOS). On Windows, and anywhere else without unix-domain sockets,
-there is no express mode: `ash express start` refuses with a clear message, `--express` is
-accepted and means nothing, and every scan runs cold exactly as before.
+there is no express mode: `ash express start` refuses with a clear message,
+`ash scan --express` prints one line on stderr saying the platform has no express mode
+and runs cold, and every scan without the flag runs cold silently, exactly as before.
 
 ## Use it {#use}
 
 Nothing is required. When the daemon is running, every `ash scan` (and bare `ash`) uses it
 automatically; when it is not, or anything about it is off, the scan silently runs cold.
-Express can make a scan faster or leave it as it was -- there is no failure mode in which it
-makes a scan wrong, and none in which it makes one fail.
+Up to the moment the daemon accepts a scan, express can only make it faster or leave it as
+it was: every pre-acceptance failure is the cold run. Once a scan is running on the daemon
+there is no silent fallback either way -- a daemon killed mid-scan is reported on stderr
+and the scan exits 1 rather than being rerun behind your back -- so express never produces
+a wrong result; the one failure you can see is that rare mid-scan report.
 
 Start the daemon on demand from a scan:
 
@@ -58,12 +62,16 @@ environment variable), so a daemon you forget about costs memory only until then
 ## What a scan sends to the daemon {#protocol}
 
 The client hands the daemon the scan's command line, its working directory, and the
-environment variables ASH honours (every `ASH_*` and `GIT_*` variable -- a commit hook's
-`GIT_INDEX_FILE` changes what the scan's git commands read, so it travels with the
-request -- the documented inputs such as `OCI_RUNNER`, `CI` and the color controls, and
-the execution basics `PATH`, `HOME`, `TMPDIR` and locale). The daemon's own environment
-is scrubbed down to those basics when it autostarts, so nothing else from the invocation
-that happened to start it becomes ambient state under later scans. The client also
+environment variables ASH honours: every `ASH_*`, `GIT_*` (a commit hook's
+`GIT_INDEX_FILE` changes what the scan's git commands read), `AWS_*` (the AWS reporters)
+and `UV_*` variable; the documented inputs such as `OCI_RUNNER`, `CI` and the color
+controls; the proxy and TLS-trust variables, the `DOCKER_*` and podman `CONTAINER_*`
+connection variables, the
+scanner credential tokens and the `XDG_*` directories; and the execution basics `PATH`,
+`HOME`, `TMPDIR` and locale. The subset travels only inside the request, over the
+same-user socket, to the one forked child -- the daemon's own environment is scrubbed
+down to the execution basics when it autostarts, so nothing from the invocation that
+happened to start it becomes ambient state under later scans. The client also
 passes its stdin, stdout and stderr as file descriptors, so
 the forked scan writes to your terminal directly -- progress, colors and prompts behave as
 a cold run's, and nothing of the scan's output travels over the socket. Ctrl-C in the
@@ -105,22 +113,37 @@ changes the very next scan with no daemon restart.
 
 ## When it falls back cold {#fallback}
 
-Silently, by design, whenever the daemon cannot be used: no socket, a stale daemon, a
-daemon already running as many scans as you have CPUs, a protocol hiccup, an unsupported
-platform. The failure mode of express is a scan at the old speed, never a failed or wrong
-scan. With `--express` on the command line the fallback additionally prints one line to
-stderr saying why, since that invocation asked for the daemon explicitly.
+Silently, by design, whenever the daemon cannot be used *before it has accepted the
+scan*: no socket, a stale daemon, a daemon already running as many scans as you have
+CPUs, a protocol hiccup, an unsupported platform. Every one of those is a scan at the
+old speed, never a failed or wrong one. With `--express` on the command line the
+fallback additionally prints one line to stderr saying why, since that invocation asked
+for the daemon explicitly. After acceptance the scan is running against your terminal,
+so there is deliberately no fallback left: a daemon lost mid-scan (killed, machine
+shutdown) is reported on stderr and the command exits 1 -- rerunning it silently could
+double a scan's side effects. A Ctrl-C or termination signal that lands during the
+handshake itself ends the command with the usual interrupt code instead of starting a
+cold scan you just asked to stop.
 
-Two commands never use the daemon: anything that is not a scan (`ash report`,
-`ash inspect`, ...), and any scan with `--no-express`.
+Some invocations never use the daemon: anything that is not a scan (`ash report`,
+`ash inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
+MCP server hosts in-process. The console script `ash` gets the full saving; running the
+module form (`python -m automated_security_helper.cli.main`) delegates too, but it has
+already paid the import cost by the time it does.
 
 ## Pre-commit hooks {#pre-commit}
 
-The per-commit startup tax is the reason express exists. Start the daemon once
-(`ash express start`, or one `ash scan --express`), and every hook run afterwards skips the
-startup entirely; pair it with a scan scoped to what the commit touches (see
-[Run ASH with pre-commit](pre-commit.md)) for the fastest hook. The daemon outlives the
-hook process, so the warmth carries from commit to commit.
+The per-commit startup tax is the reason express exists -- with one pairing rule: the
+daemon serves exactly the ASH installation that started it (the version keys the socket,
+and a fingerprint of the installed packages is checked per request), and pre-commit runs
+ASH from a hook environment of its own, which is a *different* installation than the
+`ash` on your shell's PATH. A daemon started from your shell is therefore silently
+ignored by the hook. Start the daemon from the hook's own ASH instead: add `--express`
+to the hook's `args`, and the first commit starts a daemon paired with the hook
+environment, which every later commit then uses with no flag needed. Pair it with a scan
+scoped to what the commit touches (see [Run ASH with pre-commit](pre-commit.md)) for the
+fastest hook. The daemon outlives the hook process, so the warmth carries from commit to
+commit, and its idle timer retires it after a quiet half hour.
 
 ## Troubleshooting {#troubleshoot}
 

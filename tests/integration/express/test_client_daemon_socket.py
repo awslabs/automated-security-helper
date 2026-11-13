@@ -36,6 +36,9 @@ class _ScriptedDaemon:
         self.received_fds = []
         self.peer_uid = None
         self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        # Bounded accept: a test whose client never connects must leave a
+        # thread that ends on its own, not one blocked in accept forever.
+        self._server.settimeout(10.0)
         self._server.bind(os.fspath(path))
         self._server.listen(1)
         self.thread = threading.Thread(target=self._serve, daemon=True)
@@ -59,12 +62,14 @@ class _ScriptedDaemon:
 
 
 @pytest.fixture
-def socket_dir(tmp_path, monkeypatch):
+def socket_dir():
     """A private socket path of this test's own, short enough for AF_UNIX.
 
     pytest's tmp_path can be longer than the AF_UNIX name limit (about 104
     bytes), so the socket goes under a short mkdtemp of its own and the path
-    length is asserted rather than hoped about.
+    length is asserted rather than hoped about. Every test hands this path to
+    the client call under test explicitly; nothing here resolves it through
+    ``runtime.socket_path``.
     """
     import shutil
     import tempfile
@@ -76,10 +81,13 @@ def socket_dir(tmp_path, monkeypatch):
         base = tempfile.mkdtemp(prefix="ash-t", dir="/tmp")
     path = os.path.join(base, "d.sock")
     assert len(path) < 100, path
-    monkeypatch.setattr(runtime, "socket_path", lambda *_: path)
     yield path
     try:
         os.unlink(path)
+    except OSError:
+        pass
+    try:
+        os.unlink(path + ".lock")
     except OSError:
         pass
     os.rmdir(base)
@@ -104,7 +112,12 @@ class TestTheWire:
         assert daemon.request["op"] == "scan"
         assert daemon.request["argv"] == ["scan", "--source-dir", "."]
         assert daemon.request["cwd"] == os.getcwd()
-        assert daemon.request["env"] == {"ASH_MODE": "local"}
+        # Asserted by names and the one named value, never the mapping itself:
+        # a failed assertion prints its operands (tests/utils/env_assertions.py).
+        carried_names = sorted(daemon.request["env"])
+        assert carried_names == ["ASH_MODE"]
+        carried_mode = daemon.request["env"].get("ASH_MODE")
+        assert carried_mode == "local"
         assert daemon.request["version"] == runtime.ash_version()
         assert daemon.request["fingerprint"] == runtime.runtime_fingerprint()
         assert daemon.request["protocol"] == runtime.PROTOCOL_VERSION
@@ -167,6 +180,52 @@ class TestTheWire:
         assert answer == {"ok": True, "pid": 7, "active_scans": 0}
         assert daemon.request == {"op": "status"}
         assert daemon.received_fds == [], "a control request carries no descriptors"
+
+    def test_a_sigterm_after_start_is_forwarded_and_the_exit_is_143(self, socket_dir):
+        """The CI-timeout shape: the runner SIGTERMs the client while the scan
+        runs on the daemon. The client's handler writes a signal frame (never
+        dies itself), the daemon-side script answers with the exit code the
+        signalled scan died with, and the client reports exactly that code."""
+
+        class _SignalAwareDaemon(_ScriptedDaemon):
+            def __init__(self, path):
+                self.signal_frame = None
+                super().__init__(path, answers=[])
+
+            def _serve(self):
+                conn, _ = self._server.accept()
+                try:
+                    data, fds, _, _ = socket.recv_fds(conn, 1, 3)
+                    self.received_fds = list(fds)
+                    reader = runtime.FrameReader(conn)
+                    self.request = reader.read_frame()
+                    runtime.send_frame(conn, {"ok": True, "pid": 4242})
+                    # Block as a real daemon does while the scan runs; the next
+                    # frame on this connection is the client's forwarded signal.
+                    self.signal_frame = reader.read_frame()
+                    runtime.send_frame(conn, {"exit": 143})
+                finally:
+                    for fd in self.received_fds:
+                        os.close(fd)
+                    conn.close()
+                    self._server.close()
+
+        daemon = _SignalAwareDaemon(socket_dir)
+        sock = client._connect(socket_dir)
+        import signal as signal_module
+
+        timer = threading.Timer(0.2, os.kill, args=(os.getpid(), signal_module.SIGTERM))
+        timer.start()
+        try:
+            outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
+        finally:
+            timer.cancel()
+        daemon.thread.join(timeout=10)
+        assert outcome == ("exit", 143)
+        assert daemon.signal_frame == {
+            "op": "signal",
+            "signum": int(signal_module.SIGTERM),
+        }
 
     def test_frames_survive_json_with_non_ascii_values(self, socket_dir):
         argv = ["scan", "--source-dir", "précis"]

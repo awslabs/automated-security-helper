@@ -352,7 +352,7 @@ require_mountable() {
 # detector, the argument loop and the config handling.
 # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
 # lists against the real commands and options.
-ASH_SUBCOMMANDS="scan build-image report merge mcp get-genai-guide config dependencies inspect plugin"
+ASH_SUBCOMMANDS="scan build-image report merge mcp get-genai-guide config dependencies inspect plugin express"
 # The subcommands whose own -o is NOT the container runtime: get-genai-guide's -o is
 # its --output, config's its --output-dir. After one of these, -o is the
 # subcommand's and is forwarded. After scan, whose -o is the CLI's own alias of

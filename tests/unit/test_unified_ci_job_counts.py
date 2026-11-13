@@ -522,8 +522,12 @@ class TestTheCommentsMatchTheWorkflow:
             "137 on a pull request",
             "contributes 212 check",
             "212 is this",
-            # (The four-shard unit tier's figures, 291 / 211 / 136, are the current ones
-            # again now that all three unit pools are sharded, so they left this list.)
+            # (The four-shard unit tier's figures, 291 / 211 / 136, came back when all
+            # three unit pools were sharded, and were then superseded by the advisory
+            # e2e-express job: the current figures are 293 / 213 / 138. "291 on a push"
+            # and "136 on a pull request" are not in this list because the history
+            # sentence in the required-checks note still states them as the superseded
+            # figures, the same convention as "109 on a pull request" above.)
             # Before the Windows unit pool was sharded four ways (unit-test 25 -> 40).
             # ("109 on a pull request" is not in this list: the history sentence in the
             # required-checks note still states it as the superseded figure.)

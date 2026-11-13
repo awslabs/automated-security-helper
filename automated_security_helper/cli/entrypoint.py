@@ -841,11 +841,21 @@ def main() -> None:
         # is what express removes. Every other answer is None -- not a scan, no
         # daemon, --no-express, any failure at all -- and the cold run proceeds
         # exactly as it always has. The client imports only the standard
-        # library and the light express modules, and it never raises: a defect in
-        # express may cost warmth, never a scan.
-        from automated_security_helper.express.client import delegated_exit_code
+        # library and the light express modules, and it never raises by
+        # contract -- but the try covers the IMPORT too: a broken express
+        # module (a bad partial install, say) must cost warmth, never every
+        # ash command there is, --no-express included. The SystemExit is
+        # raised outside the except so the daemon's exit code is never
+        # mistaken for a failure of the client.
+        code = None
+        try:
+            from automated_security_helper.express.client import (
+                delegated_exit_code,
+            )
 
-        code = delegated_exit_code(sys.argv[1:])
+            code = delegated_exit_code(sys.argv[1:])
+        except Exception:  # noqa: BLE001 - the cold path is the contract
+            code = None
         if code is not None:
             raise SystemExit(code)
 
