@@ -5895,6 +5895,13 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
         argv.extend(["--scanners", scanner])
     for scanner in opts.excluded_scanners or []:
         argv.extend(["--exclude-scanners", scanner])
+    # None means not given (ScanOptions); an entry per name, as the other scanner
+    # lists are spelled. The inner scan applies the same precedence this process
+    # would (--only-scanners replaces, --add-scanners adds).
+    for scanner in opts.only_scanners or []:
+        argv.extend(["--only-scanners", scanner])
+    for scanner in opts.add_scanners or []:
+        argv.extend(["--add-scanners", scanner])
     for module in opts.ash_plugin_modules or []:
         argv.extend(["--ash-plugin-modules", module])
     for fmt in opts.output_formats or []:
