@@ -521,10 +521,9 @@ def test_a_section_the_trusted_base_spells_another_way_is_made_once(tmp_path):
 
 #: A tightening value, the scanner and option it narrows, and the loosening
 #: value an operator may choose; the scanner sections are plugin dicts (trivy-repo)
-#: and typed models (semgrep, opengrep).
+#: and typed models (opengrep).
 TIGHTENING = [
     pytest.param("trivy-repo", "disable_telemetry", True, False, id="trivy-repo"),
-    pytest.param("semgrep", "metrics", "off", "on", id="semgrep"),
     pytest.param("opengrep", "metrics", "off", "on", id="opengrep"),
 ]
 

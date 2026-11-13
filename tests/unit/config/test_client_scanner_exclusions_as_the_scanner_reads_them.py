@@ -518,10 +518,10 @@ def test_a_client_string_copy_of_an_operator_entry_follows_the_operators_expirat
     expired applied again, for good. Expired, the copy is dropped; unexpired,
     the operator's path stays as the string the option holds."""
     config = AshConfig()
-    config.scanners.semgrep.options.exclude = ["shared"]
+    config.scanners.opengrep.options.exclude = ["shared"]
     operator = {
         "scanners": {
-            "semgrep": {
+            "opengrep": {
                 "options": {
                     "exclude": [
                         {"path": "shared", "reason": "op", "expiration": expiration}
@@ -533,7 +533,7 @@ def test_a_client_string_copy_of_an_operator_entry_follows_the_operators_expirat
 
     _strip(config, {}, operator, tmp_path)
 
-    assert config.scanners.semgrep.options.exclude == kept
+    assert config.scanners.opengrep.options.exclude == kept
     assert config._client_scanner_exclusions == []
 
 

@@ -36,7 +36,7 @@ def generator(script_loader):
 
 def test_the_registry_lists_are_not_empty() -> None:
     # A loop over an empty list passes whatever it asserts.
-    assert len(BUILTIN_SCANNERS) >= 16
+    assert len(BUILTIN_SCANNERS) >= 15
     assert len(BUILTIN_CONVERTERS) >= 2
 
 

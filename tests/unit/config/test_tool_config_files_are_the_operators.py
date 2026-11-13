@@ -139,13 +139,12 @@ def test_an_mcp_clients_overrides_are_not_replayed_as_the_operators(
     assert read(from_the_operator) == expected
 
 
-#: opengrep's and semgrep's rules and metrics setting, each with a value other
-#: than its default.
+#: opengrep's rules and metrics setting, each with a value other than its
+#: default. (``semgrep`` is only an alias of this plugin now, so it has no cells
+#: of its own.)
 RULE_CHOICES = [
     ("opengrep", "config", "p/default"),
-    ("semgrep", "config", "https://rules.example.invalid/rules.yaml"),
     ("opengrep", "metrics", "on"),
-    ("semgrep", "metrics", "on"),
 ]
 _RULE_IDS = [f"{scanner}.{option}" for scanner, option, _ in RULE_CHOICES]
 
@@ -293,26 +292,19 @@ def test_syft_gets_an_empty_config_not_the_trees(
     assert contents == [{}]
 
 
-@pytest.mark.parametrize("tool", ["semgrep", "opengrep"])
 def test_a_semgrepignore_is_not_honored_and_the_defaults_are_kept(
-    tmp_path: Path, tool: str
+    tmp_path: Path,
 ) -> None:
     from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
         SEMGREP_DEFAULT_IGNORES,
     )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
+    )
 
-    if tool == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner as cls,
-            SemgrepScannerConfig as cfg,
-        )
-    else:
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
-            OpengrepScanner as cls,  # type: ignore[assignment]
-            OpengrepScannerConfig as cfg,  # type: ignore[assignment]
-        )
     context = _context(tmp_path)
-    scanner = cls(context=context, config=cfg())
+    scanner = OpengrepScanner(context=context, config=OpengrepScannerConfig())
     argv = [
         str(a)
         for a in scanner._resolve_arguments(
@@ -325,23 +317,22 @@ def test_a_semgrepignore_is_not_honored_and_the_defaults_are_kept(
 
 
 def _semgrepignore_notes(tmp_path: Path, *, enabled: bool) -> List[str]:
-    """The ``.semgrepignore`` notes a semgrep scanner records while its command is built.
+    """The ``.semgrepignore`` notes an opengrep scanner records while its command is built.
 
-    The scanner is enabled or disabled explicitly: ``SemgrepScannerConfig``'s
-    default is False on Windows, where semgrep publishes no build, and the note
-    is recorded only for an enabled scanner (a disabled one runs neither tool,
-    so it leaves nothing unhonored), so a test of the note cannot rest on the
-    default.
+    The scanner is enabled or disabled explicitly: ``OpengrepScannerConfig``'s
+    default is False on Windows, and the note is recorded only for an enabled
+    scanner (a disabled one runs no tool, so it leaves nothing unhonored), so a
+    test of the note cannot rest on the default.
     """
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
-        SemgrepScannerConfig,
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
     )
 
     context = _context(tmp_path)
     (Path(context.source_dir) / ".semgrepignore").write_text("hidden/\n", "utf-8")
-    scanner = SemgrepScanner(
-        context=context, config=SemgrepScannerConfig(enabled=enabled)
+    scanner = OpengrepScanner(
+        context=context, config=OpengrepScannerConfig(enabled=enabled)
     )
     scanner._resolve_arguments(
         target=Path(context.source_dir), results_file=tmp_path / "r.sarif"
@@ -500,11 +491,10 @@ def test_patterns_mode_is_refused_whatever_else_the_section_sets(
     assert "scanners.opengrep.options.patterns" in str(refused.value)
 
 
-@pytest.mark.parametrize("scanner", ["opengrep", "semgrep"])
-def test_a_repositorys_metrics_off_is_kept(tmp_path: Path, scanner: str) -> None:
+def test_a_repositorys_metrics_off_is_kept(tmp_path: Path) -> None:
     """``off`` only stops the tool sending usage data, so any config may set it."""
-    repo = _repo(tmp_path, {scanner: {"options": {"metrics": "off"}}})
-    assert _option(resolve_config(source_dir=repo), scanner, "metrics") == "off"
+    repo = _repo(tmp_path, {"opengrep": {"options": {"metrics": "off"}}})
+    assert _option(resolve_config(source_dir=repo), "opengrep", "metrics") == "off"
 
 
 @pytest.mark.parametrize(

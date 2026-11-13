@@ -379,6 +379,7 @@ class TestDefaults:
         model_validate so the schema check covers extras that real plugins add,
         from their own models.
         """
+        from automated_security_helper.utils.scanner_names import SCANNER_NAME_ALIASES
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             FerretScannerConfig,
         )
@@ -430,9 +431,16 @@ class TestDefaults:
             # the dumped dict, the denylist entry is anchored to a real path.
             assert path.startswith("/"), f"non-pointer denied path: {path!r}"
             node: object = dumped
+            previous = ""
             for seg in path[1:].split("/"):
                 if "*" in seg or seg == "-":
                     return True  # wildcard prefix reached — anchor verified
+                if previous == "scanners":
+                    # A retired scanner name (``semgrep``) is an alias of the
+                    # plugin that serves it; its entries guard the alias
+                    # spelling and are anchored at the plugin's own section.
+                    seg = SCANNER_NAME_ALIASES.get(seg, seg)
+                previous = seg
                 if isinstance(node, dict) and seg in node:
                     node = node[seg]
                     continue

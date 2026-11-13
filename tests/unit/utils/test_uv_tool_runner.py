@@ -4128,7 +4128,7 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
         files = sorted(root.rglob("*.py"))
         # Denominator control: an empty or relocated tree must fail, not
         # pass vacuously.
-        assert any(file.name == "semgrep_scanner.py" for file in files), files
+        assert any(file.name == "bandit_scanner.py" for file in files), files
         found: Counter = Counter()
         for file in files:
             tree = ast.parse(file.read_text(encoding="utf-8"))

@@ -219,7 +219,7 @@ def test_the_archive_limit_warning_for_a_default_it_caps(
         ),
         (
             "tool_version",
-            {"scanners": {"semgrep": {"options": {"tool_version": "==1.7.9"}}}},
+            {"scanners": {"bandit": {"options": {"tool_version": "==1.7.9"}}}},
         ),
         ("content_db_staleness", {"content_db_staleness": "warn"}),
     ],

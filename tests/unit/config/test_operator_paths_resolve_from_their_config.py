@@ -173,7 +173,6 @@ PATH_OPTIONS: List[PathOption] = [
     _scanner_option("checkov", "config_file"),
     _scanner_option("ferret-scan", "config_file"),
     _scanner_option("detect-secrets", "baseline_file"),
-    _scanner_option("semgrep", "config"),
     _scanner_option("opengrep", "config"),
     *(path.option for path in SCANNER_PATHS),
     PathOption(
@@ -424,16 +423,16 @@ def test_a_relative_detect_secrets_file_entry_is_taken_from_its_files_directory(
 def test_a_rules_config_that_names_no_file_there_is_left_as_written(
     tmp_path: Path, value: str
 ) -> None:
-    """semgrep's and opengrep's config is a registry entry or a URL unless it is a path."""
+    """opengrep's config is a registry entry or a URL unless it is a path."""
     repo = _repo(tmp_path)
     operator = _write(
         tmp_path / "operator" / "ash.yaml",
-        {"scanners": {"semgrep": {"options": {"config": value}}}},
+        {"scanners": {"opengrep": {"options": {"config": value}}}},
     )
 
     config = resolve_config(config_path=operator, source_dir=repo)
 
-    assert _options(config, "semgrep").get("config") == value
+    assert _options(config, "opengrep").get("config") == value
 
 
 @pytest.mark.parametrize("value", ["~/tools/bandit.yaml", "/etc/ash/bandit.yaml"])

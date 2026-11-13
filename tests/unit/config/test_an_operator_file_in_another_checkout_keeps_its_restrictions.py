@@ -34,13 +34,13 @@ OPERATOR = """\
 project_name: operator
 sandbox:
   extra_read_paths: [/data]
-  network_scanners: [semgrep]
+  network_scanners: [opengrep]
 converters:
   archive:
     options:
       max_members: 10
 scanners:
-  semgrep:
+  opengrep:
     options:
       metrics: "off"
 """
@@ -121,7 +121,7 @@ def _resolve(
 
 
 def _metrics(config: AshConfig) -> Any:
-    return config.get_plugin_config("scanner", "semgrep")["options"]["metrics"]
+    return config.get_plugin_config("scanner", "opengrep")["options"]["metrics"]
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -150,7 +150,7 @@ def test_a_network_list_in_a_file_in_another_checkout_still_narrows(
 ) -> None:
     config = _resolve(tmp_path, monkeypatch, "checkout", route)
 
-    assert config.sandbox.network_limit == ["semgrep"]
+    assert config.sandbox.network_limit == ["opengrep"]
     # Only the limit is kept: the list does not replace the scanners' defaults.
     assert config.sandbox.network_scanners is None
 
@@ -181,7 +181,7 @@ def test_control_the_operators_own_file_outside_every_checkout_is_unchanged(
     assert config.converters.archive.options.max_members == 10
     assert _metrics(config) == "off"
     assert config.sandbox.extra_read_paths == ["/data"]
-    assert config.sandbox.network_scanners == ["semgrep"]
+    assert config.sandbox.network_scanners == ["opengrep"]
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -242,7 +242,7 @@ def test_a_tightening_scanner_value_is_kept_and_a_looser_one_is_not() -> None:
     tight = _loaded(
         {
             "scanners": {
-                "semgrep": {"options": {"metrics": "off"}},
+                "opengrep": {"options": {"metrics": "off"}},
                 "trivy": {"options": {"disable_telemetry": True}},
             }
         }
@@ -255,7 +255,7 @@ def test_a_tightening_scanner_value_is_kept_and_a_looser_one_is_not() -> None:
     assert trivy["disable_telemetry"] is True
 
     loose_base = _loaded({})
-    loose = _loaded({"scanners": {"semgrep": {"options": {"metrics": "on"}}}})
+    loose = _loaded({"scanners": {"opengrep": {"options": {"metrics": "on"}}}})
 
     keep_restrictions(loose_base, loose)
 
@@ -266,18 +266,18 @@ def test_a_network_list_becomes_a_limit_and_never_a_list() -> None:
     from automated_security_helper.config.restrictions_kept import keep_restrictions
 
     base = _loaded({})
-    two = _loaded({"sandbox": {"network_scanners": ["semgrep", "grype"]}})
+    two = _loaded({"sandbox": {"network_scanners": ["opengrep", "grype"]}})
 
     keep_restrictions(base, two)
 
-    assert base.sandbox.network_limit == ["semgrep", "grype"]
+    assert base.sandbox.network_limit == ["opengrep", "grype"]
     assert base.sandbox.network_scanners is None
 
-    one = _loaded({"sandbox": {"network_scanners": ["semgrep"]}})
+    one = _loaded({"sandbox": {"network_scanners": ["opengrep"]}})
 
     keep_restrictions(base, one)
 
-    assert base.sandbox.network_limit == ["semgrep"]
+    assert base.sandbox.network_limit == ["opengrep"]
 
     untouched = _loaded({})
 
@@ -296,8 +296,8 @@ def test_nothing_else_is_carried_from_the_source() -> None:
             "content_db_staleness": "warn",
             "sandbox": {
                 "extra_read_paths": ["/data"],
-                "read_path_scanners": ["semgrep"],
-                "env_scanners": ["semgrep"],
+                "read_path_scanners": ["opengrep"],
+                "env_scanners": ["opengrep"],
                 "mode": "bwrap",
             },
         }

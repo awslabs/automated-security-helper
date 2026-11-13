@@ -1304,7 +1304,7 @@ CLEAN_SCANNER_TABLES = """# Scanners
 
 | What your repository has | Built-in scanners | Community plugins |
 |---|---|---|
-| Python code | bandit, semgrep, opengrep | snyk-code |
+| Python code | bandit, opengrep | snyk-code |
 | Secrets, in any file | detect-secrets | ferret-scan (sensitive data), trivy-repo |
 | CDK apps | cfn-nag, checkov (on the templates `cdk synth` writes) | |
 
@@ -1316,7 +1316,7 @@ CLEAN_SCANNER_TABLES = """# Scanners
 
 | Scanners | What they both do |
 |---|---|
-| semgrep and opengrep | x |
+| bandit and opengrep | x |
 """
 
 SCANNER_DEFECTS = [
@@ -1327,6 +1327,14 @@ SCANNER_DEFECTS = [
             "| Secrets | detect-secrets, trufflehog | |\n"
         ),
         "'trufflehog' in the Built-in scanners column is not a scanner ASH ships",
+    ),
+    (
+        "the retired scanner name, which opengrep now serves as an alias",
+        "| What | Built-in scanners |\n|---|---|\n| Python | bandit, semgrep |\n",
+        (
+            "'semgrep' in the Built-in scanners column is not a scanner ASH ships; "
+            "did you mean 'opengrep'?"
+        ),
     ),
     (
         "a misspelled scanner row",
@@ -1370,7 +1378,7 @@ def test_the_scanner_check_counts_what_it_examined(tmp_path):
     notes: list[str] = []
     assert dc.check_scanner_names([page], tmp_path, notes=notes) == []
     assert notes == [
-        "examined 9 cells in 4 scanner columns: 14 scanner names, 0 other items"
+        "examined 9 cells in 4 scanner columns: 13 scanner names, 0 other items"
     ]
 
 
