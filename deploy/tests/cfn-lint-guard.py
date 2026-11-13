@@ -958,20 +958,22 @@ def _approved_list_controls(template_dir: Path, rules_file: Path) -> list[str]:
 
     # A 14th suppression of an approved rule, on a resource nobody approved.
     extra = copy.deepcopy(bodies)
-    victim = next(
+    unapproved = next(
         lid
         for lid in extra[first.template]["Resources"]
         if (first.template, lid) not in {(a.template, a.logical_id) for a in approved}
     )
-    extra[first.template]["Resources"][victim].setdefault("Metadata", {})["guard"] = {
+    extra[first.template]["Resources"][unapproved].setdefault("Metadata", {})[
+        "guard"
+    ] = {
         "SuppressedRules": [rule],
         "SuppressedRuleReasons": dict(first.reasons),
     }
     _expect(
         problems,
         flagged(extra)
-        == [f"{first.template}: {victim} Metadata.guard.SuppressedRules"],
-        f"an approved rule on unapproved resource {first.template}/{victim} was not the one thing flagged: {flagged(extra)}",
+        == [f"{first.template}: {unapproved} Metadata.guard.SuppressedRules"],
+        f"an approved rule on unapproved resource {first.template}/{unapproved} was not the one thing flagged: {flagged(extra)}",
     )
 
     # An approved resource whose reason was edited.

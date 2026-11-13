@@ -313,7 +313,7 @@ feature request. It does not pass addresses through either, because nothing in A
 would read them. This is the narrowest option that does anything at all rather than
 a preference among three, and the CRD deliberately has no field implying otherwise.
 
-### The auth header value, and a bypass this operator shipped
+### The auth header value, and an inverted check this operator shipped
 
 `auth.headerName` with `auth.valueFrom.secretKeyRef` is the single-tenant header
 check. The value reaches the pod as a `secretKeyRef` the kubelet resolves, and the
@@ -333,7 +333,7 @@ holder of the real secret gets 401. Nothing upstream rescues it: `ashx mcp`'s
 supplies no value.
 
 A test asserted the literal was *present* in the rendered manifest, so the suite passed
-only while the bypass existed. `tests/test_manifests.py::TestMcpAuthIsNotBypassable`
+only while the fault existed. `tests/test_manifests.py::TestMcpAuthIsNotBypassable`
 now asserts the opposite, executes the emitted command with a known value in the
 environment and checks what `ashx` would actually receive, and requires that an empty
 Secret key makes the container exit 78 rather than start without auth. Reintroducing
@@ -346,7 +346,7 @@ into a shell command". It does not — `build_shard_job` emits
 `command: [/bin/sh, <script>]` with `args:`, and the script runs `"$@"`, so nothing on
 that path re-parses argv. The guard is kept, because a path containing a newline still
 has no business in an argv and because a future change that *does* add a `-c` wrapper
-should not silently become exploitable; but its stated reason is now what it actually
+should not silently start re-parsing argv; but its stated reason is now what it actually
 does.
 
 Two other things the `AshMcpServer` reconciler does that are easy to omit:

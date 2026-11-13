@@ -91,11 +91,21 @@ def _readme_passages() -> Iterator[Tuple[str, str]]:
                 yield f"{path.relative_to(REPO_ROOT)}", passage
 
 
+#: AshEksOperator installs an operator image the adopter supplies (`OperatorImageUri`);
+#: it builds no ASH scanner image, so it has no offline mode (f27a11d5c38).
+_TEMPLATES_WITHOUT_A_SCANNER_IMAGE = ("AshEksOperator.template.json",)
+
+
 def _template_descriptions() -> Iterator[Tuple[str, str]]:
     templates = sorted(CDK_TEMPLATES.glob("*.template.json"))
     assert templates, f"no committed templates under {CDK_TEMPLATES}"
     for path in templates:
         parameters = json.loads(path.read_text(encoding="utf-8")).get("Parameters", {})
+        if path.name in _TEMPLATES_WITHOUT_A_SCANNER_IMAGE:
+            # Control: the exemption is real, not a template that lost its parameter.
+            assert "AshOfflineMode" not in parameters, path.name
+            assert "OperatorImageUri" in parameters, path.name
+            continue
         assert "AshOfflineMode" in parameters, f"{path.name} declares no AshOfflineMode"
         yield path.name, parameters["AshOfflineMode"].get("Description", "")
 

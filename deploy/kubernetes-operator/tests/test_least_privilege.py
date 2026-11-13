@@ -14,8 +14,8 @@ every binding, as reviewed, read from every object `kubectl apply -f manifests/`
 would send (.yaml, .yml and .json files, List items expanded) rather than rbac.yaml
 alone, and manifests/ may hold only the reviewed files. Any change at all, `create`
 on pods included, goes red there and has to be re-pinned by hand. The denylist
-tests below it name the grants that must never be re-pinned, so the reviewer
-updating the pin is told which kind of widening they are looking at.
+tests below it name the grants that must never be re-pinned, so whoever
+updates the pin is told which kind of widening they are looking at.
 
 Every pin is keyed by (apiVersion, kind, namespace, name), because the API group is
 part of what identifies an object to the API server: a Role keyed by kind and name
@@ -652,7 +652,7 @@ def _move_the_deployment_to_a_custom_group(d: Path) -> None:
     _replace(
         d / "operator.yaml",
         "apiVersion: apps/v1\nkind: Deployment\n",
-        "apiVersion: evil.example.com/v1\nkind: Deployment\n",
+        "apiVersion: custom.example.com/v1\nkind: Deployment\n",
     )
 
 
@@ -680,7 +680,7 @@ def test_the_pin_is_clean_on_an_untouched_copy(tmp_path):
         (_automount_the_scan_token, "automountServiceAccountToken=True"),
         (_bind_through_the_openshift_group, "unreviewed authorization.openshift.io/v1"),
         (_add_group_names_to_the_binding, "carries ['groupNames']"),
-        (_move_the_deployment_to_a_custom_group, "unreviewed evil.example.com/v1"),
+        (_move_the_deployment_to_a_custom_group, "unreviewed custom.example.com/v1"),
     ],
     ids=[
         "yml-file",

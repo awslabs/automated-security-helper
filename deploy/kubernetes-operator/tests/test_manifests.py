@@ -331,7 +331,7 @@ AUTH_SPEC = {
 
 # The exact string an earlier version of this operator handed to `ashx mcp` as the
 # expected credential. Named once, so every test below refers to the same bytes.
-BYPASS_LITERAL = "${ASH_MCP_AUTH_HEADER_VALUE}"
+PLACEHOLDER_LITERAL = "${ASH_MCP_AUTH_HEADER_VALUE}"
 
 
 def mcp_deployment(spec=None):
@@ -344,7 +344,7 @@ def mcp_deployment(spec=None):
 
 
 class TestMcpAuthIsNotBypassable:
-    """Regression tests for an auth bypass this operator shipped and a test pinned.
+    """Regression tests for an inverted auth check this operator shipped and a test pinned.
 
     The bug: ``build_mcp_argv`` emitted the literal ``${ASH_MCP_AUTH_HEADER_VALUE}``
     as an argv element and the container ran ``sh -c 'exec "$0" "$@"' <argv>``. A
@@ -356,13 +356,13 @@ class TestMcpAuthIsNotBypassable:
     no ``envvar=``, so nothing upstream supplied the real value either.
 
     The test that used to live here asserted the literal was *present* in the
-    rendered manifest, so the suite passed only while the bypass existed. These
+    rendered manifest, so the suite passed only while the fault existed. These
     assert the opposite, and the last one would have caught it.
     """
 
     def test_the_bypass_literal_is_absent_from_the_whole_manifest(self):
         rendered = yaml.safe_dump(mcp_deployment(AUTH_SPEC))
-        assert BYPASS_LITERAL not in rendered, (
+        assert PLACEHOLDER_LITERAL not in rendered, (
             "the unexpanded placeholder is back in the manifest. Whatever consumes it "
             "will treat those characters as the expected credential."
         )
@@ -413,8 +413,8 @@ class TestMcpAuthIsNotBypassable:
             },
         )
         assert "--auth-header-value the-real-secret" in result.stdout, result.stdout
-        assert BYPASS_LITERAL not in result.stdout, (
-            "the literal placeholder reached argv, which is the bypass itself"
+        assert PLACEHOLDER_LITERAL not in result.stdout, (
+            "the literal placeholder reached argv, which is the fault itself"
         )
 
     def test_an_empty_secret_refuses_to_start_rather_than_serving_without_auth(self):
