@@ -10,7 +10,10 @@ for these fixtures, or in the JSON it prints, fails here rather than silently
 diverging from the captures.
 
 Runs in CI in the ``integration-test`` job (``--run-integration``), which has
-network access for the install and for the one ``verify`` test.
+network access for the install and for the one ``verify`` test. On a platform
+the scanner itself refuses (``unsupported_platform_reason``; Windows today)
+every test here skips with that reason, since an enabled GuardDog there is
+SKIPPED by design rather than installed.
 """
 
 import shutil
@@ -59,6 +62,13 @@ def _scanner(
             enabled=True, options=GuardDogScannerConfigOptions(**options)
         ),
     )
+    # The scanner refuses some platforms outright (Windows: nono-py has no build
+    # there), and a scan it reports as SKIPPED is the product behavior, not a
+    # broken install. Read the refusal from the scanner itself so these tests
+    # start running the day the platform gate is lifted.
+    reason = scanner.unsupported_platform_reason()
+    if reason is not None:
+        pytest.skip(f"the scanner itself refuses this platform: {reason}")
     assert scanner.validate_plugin_dependencies(), (
         "GuardDog could not be installed or found; this test must run the real tool"
     )

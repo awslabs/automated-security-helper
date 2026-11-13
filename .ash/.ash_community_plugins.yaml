@@ -1424,8 +1424,8 @@ global_settings:
       reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/interactions/run_ash_container.py
-      line_start: 4352
-      line_end: 4352
+      line_start: 4353
+      line_end: 4353
       reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
     # === GuardDog: hits the self-scan reports with max_hits: 0 ===
     # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
