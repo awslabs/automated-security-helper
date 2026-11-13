@@ -575,7 +575,10 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 213 check",
             "213 is this",
             "~596 runner jobs",
-            "~297",
+            # The phrase the old figure stood in ("~596 runner jobs instead of
+            # ~297."), anchored so an unrelated "~2970" or "~297 s" in a later
+            # comment cannot trip it.
+            "instead of ~297.",
         ):
             assert stale not in COMMENTS
 

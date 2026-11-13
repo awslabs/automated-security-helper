@@ -1095,10 +1095,11 @@ jobs:
   # without the base checked out. ensure-cache's failure still fails the run,
   # through required-checks, whose `needs` lists it. Like the unit jobs, these carry no
   # job-level `if:`. The per-job
-  # `max-parallel` caps below stay per job, so the macOS pool can see up to 49 legs
-  # at once on a pull request (24 unit, 24 integration, 1 e2e); the caps were chosen
-  # per job and the repository's macOS concurrency limit is not read from here, so extra
-  # legs queue rather than fail.
+  # `max-parallel` caps below stay per job, so the macOS pool can see up to 50 legs
+  # at once on a pull request (24 unit, 24 integration, 1 e2e, 1 e2e-express), and 51 on
+  # a push to main, where e2e-test-macos also runs its macos-latest leg; the caps were
+  # chosen per job and the repository's macOS concurrency limit is not read from here,
+  # so extra legs queue rather than fail.
   # ASH_REQUIRE_CDK_EXTRA is set by the action, and
   # tests/integration/scanners/test_cdk_nag_real_pack.py carries the integration marker,
   # so the cdk-nag path runs on every OS and Python version here. The separate
@@ -1391,9 +1392,17 @@ jobs:
         # step -- and the junit count is asserted on top, so a future marker
         # or path change cannot turn this into a green leg that measured
         # nothing (advisory means nobody reads it unless it is red).
+        # --run-integration is the only gate flag these cells need: tests/conftest.py
+        # skips integration and e2e tests without it, and skips WITHOUT --run-slow
+        # only tests that carry the slow marker or keyword, which none of these
+        # cells do (measured: five run, two Windows-only skipped, without it). The
+        # required e2e legs pass --run-slow for the slow-marked cells elsewhere in
+        # the tier. The junit file is named here, not left to pytest.ini's addopts,
+        # because the count step below parses exactly this path.
         run: |
           uv run pytest tests/integration/express/test_express_e2e.py \
-            --run-integration -m e2e -n 0 -s
+            --run-integration -m e2e -n 0 -s \
+            --junit-xml=test-results/pytest.junit.xml
           python3 - <<'COUNT'
           import sys
           import xml.etree.ElementTree as ET
@@ -1535,6 +1544,12 @@ jobs:
       # cell queued 19.8 minutes behind the cap) ended run 43449176506 alongside the
       # macOS integration cap; the first-wave queues on every hosted label were seconds,
       # so the cap, not the pools, was the wait.
+      # The cost to OTHER runs was considered: the original cap also existed so these
+      # container-runtime legs would not crowd other runs out of the shared runner
+      # pools, and a pull request now asks for its whole wave at once. It is accepted
+      # under the CI-speed program (this run's wall is the measured gain; concurrent
+      # runs share the organization's concurrency limit and queue rather than fail),
+      # and the caps are deliberately not lowered here.
       max-parallel: 24
       matrix:
         # WHY THERE IS NO `platform` KEY HERE ANY MORE
@@ -2503,6 +2518,17 @@ jobs:
       - name: Install the scanners the docs examples run for real
         run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
       # PATH gains the two install directories for this step only, as on integration-test.
+      #
+      # ASH_REQUIRE_PREINSTALLED_TOOLS and ASH_CFN_GUARD_RULES_DIR, which
+      # integration-test sets beside its install step, are deliberately not set here.
+      # The first turns a pre-installed tool the suite cannot find into a failure at
+      # start; this runner already fails any page whose command exits non-zero, so a
+      # missing tool a page needs is reported by that page. The second points the
+      # scanners at the cfn-guard rules bundle under the install's home, where
+      # tests/conftest.py's private per-test home would otherwise hide it from the
+      # cfn-lint and cfn-guard tests; no docs page asserts on that bundle. The job ran
+      # green without either (run 43519855835, job 132211507167; run 43525041370, job
+      # 132228975054). Add both here if a page starts to depend on the bundle.
       - name: Run the docs examples
         timeout-minutes: 10
         run: |
