@@ -162,7 +162,7 @@ def refuse_selection_matching_no_scanner(
     registered = sorted({name.lower().strip() for name in registered_names})
     if not requested or not registered:
         return
-    if any(name.lower().strip() in registered for name in requested):
+    if any(_selection_key(name) in registered for name in requested):
         return
     shown = sorted(name for name in requested if name.strip()) or ["(an empty name)"]
     raise ScannerSelectionError(
@@ -251,7 +251,7 @@ def community_scanner_refusal(
     if not requested or not scanner_classes:
         return ""
     known = {str(name).lower().strip() for name in known_names}
-    if any(name.lower().strip() in known for name in requested):
+    if any(_selection_key(name) in known for name in requested):
         return ""
     unloaded = unloaded_community_scanners(requested, known, scanner_classes)
     if not unloaded:
@@ -294,7 +294,7 @@ def exclusions_matching_no_scanner(
         return []
     unmatched: Dict[str, str] = {}
     for name in excluded:
-        key = name.lower().strip()
+        key = _selection_key(name)
         if key and key not in registered:
             unmatched.setdefault(key, name.strip())
     return list(unmatched.values())
