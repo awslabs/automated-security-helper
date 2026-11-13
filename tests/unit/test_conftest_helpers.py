@@ -603,11 +603,13 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         return str(path)
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("name", ["ashv3", "automated-security-helper"])
+    @pytest.mark.parametrize(
+        "name", ["ashv3", "automated-security-helper", "agentic-security-harness"]
+    )
     def test_each_of_ashs_console_scripts_is_an_installer(
         self, home_guard_violations, developer_home, name
     ):
-        """pyproject.toml gives the CLI three names; ``ash`` is only one of them."""
+        """pyproject.toml gives the CLI four names; ``ash`` is only one of them."""
         destination = str(developer_home / ".ash" / "bin")
         argv = [self._console_script(name), "dependencies", "install"]
         argv += ["--bin-path", destination, "--help"]
@@ -617,7 +619,9 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         home_guard_violations.clear()
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("name", ["ashv3", "automated-security-helper"])
+    @pytest.mark.parametrize(
+        "name", ["ashv3", "automated-security-helper", "agentic-security-harness"]
+    )
     def test_each_of_ashs_console_scripts_needs_a_home_of_its_own(
         self, home_guard_violations, developer_home, name
     ):

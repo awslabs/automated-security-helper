@@ -514,19 +514,18 @@ class TestInstallRefsTrackPackagedVersion:
         is how a blind spot gets a green check written over it. `_MINIMUM_VERSION_PINS`
         has the same problem for `_FLAKE_REF_PIN`, so this controls both walks.
 
-        This used to count flake refs in the tree, with a floor of one. The tree no longer
-        carries one, and correctly: `docs/content/how-to/install.md` gives `/main` as the
-        ASH_NIX_FLAKE_REF example because no release up to 3.7.x contains flake.nix, so a
-        flake ref pinned to a release names a tree Nix cannot use. A count of the tree
-        would now need a floor of zero, which controls nothing, and any later doc edit
-        could move it for reasons that have nothing to do with the pattern. So the control
-        puts lines through the same per-file matching the walks apply to every file:
+        This used to count flake refs in the tree, with a floor of one. For a while the
+        tree carried none, and correctly: until a release shipped flake.nix, a flake ref
+        pinned to a release named a tree Nix could not use, so the docs pinned `/main`.
+        The docs pin releases again now, but a count of the tree would still move with
+        doc edits that have nothing to do with the pattern. So the control puts lines
+        through the same per-file matching the walks apply to every file:
 
         * the ref `resolve_flake_ref()` builds when it falls back to the published
           repository. That is where the shape comes from, so it is the form a doc that
           pins a release copies. Both walks must read it, and read the version it embeds.
-        * the `/main` form the install page uses, which names a branch rather than a
-          release. Neither walk may read it as a pin, or the install page fails here.
+        * the `/main` form, which names a branch rather than a release. Neither walk
+          may read one as a pin, or a doc naming a branch's flake would fail here.
 
         The walk itself is unchanged: `_REF_PATTERNS` still carries `_FLAKE_REF`, so a
         flake ref pinned to a release anywhere in the tree is held to the packaged version

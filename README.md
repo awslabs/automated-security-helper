@@ -2,7 +2,7 @@
 
 # Automated Security Helper (ASH)
 
-Open-source orchestration for code, infrastructure, secret, and dependency scanners.
+Automated Security Helper, the agentic security harness: open-source orchestration for code, infrastructure, secret, and dependency scanners.
 
 [![Unified CI](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml)
 [![Install methods](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml)

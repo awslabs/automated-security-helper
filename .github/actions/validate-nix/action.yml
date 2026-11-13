@@ -76,10 +76,10 @@ runs:
       env:
         # Point at the flake in THIS checkout. ASH is pip-installed above, so it lives in
         # site-packages with no flake beside it, and resolve_flake_ref correctly falls back
-        # to the published repository at the running version. That fallback cannot work
-        # here: flake.nix exists only on this branch, so the released tag has no flake and
-        # nix fails with "path '«github:...»/flake.nix' does not exist". CI must exercise
-        # the flake under review in any case, not a previously released one.
+        # to the published repository at the running version. Releases from v3.8.0 ship
+        # flake.nix, so that fallback resolves now -- but to the released flake, not the
+        # one this pull request changes. CI must exercise the flake under review, so the
+        # override stays.
         ASH_NIX_FLAKE_REF: "path:${{ github.workspace }}"
       # ASH's documented exit codes: 0 success, 1 error during execution, 2 actionable
       # findings with fail_on_findings, 3 invalid config or refused input, 4 workspace

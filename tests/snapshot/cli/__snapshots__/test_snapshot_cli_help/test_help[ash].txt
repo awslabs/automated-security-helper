@@ -1,7 +1,7 @@
 
  Usage: ash [OPTIONS] COMMAND [ARGS]...
 
- Automated Security Helper · one workflow for your security scanners.
+ Automated Security Helper, the agentic security harness · one workflow for your scanners.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version                                             Prints version number                      │

@@ -74,8 +74,8 @@ REDIRECTS_FILE = "docs/redirects.yml"
 #: The mkdocs hook that turns REDIRECTS_FILE into redirect pages.
 REDIRECT_HOOK = "docs/hooks/redirects.py"
 
-#: The mkdocs hook that renders the version-pinned pages for the version mike builds,
-#: so the main version's install commands install main.
+#: The mkdocs hook that renders the version-pinned pages for the release mike builds,
+#: and leaves the main version on the committed pages, which pin the current release.
 INSTALL_REFS_HOOK = "docs/hooks/install_refs.py"
 
 #: Renders the version-pinned pages from their templates, and names the forms an
@@ -1992,7 +1992,9 @@ def check_session_variables(
 # The CLI model
 # ---------------------------------------------------------------------------
 
-ASH_PROGRAMS = frozenset({"ash", "ashv3", "automated-security-helper"})
+ASH_PROGRAMS = frozenset(
+    {"ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
+)
 ASH_PACKAGE = "automated-security-helper"
 ASH_MODULE = "automated_security_helper"
 CONTAINER_RUNTIMES = frozenset({"docker", "podman", "finch", "nerdctl"})
@@ -9743,15 +9745,18 @@ def check_nav(root: Path = REPO_ROOT) -> list[Finding]:
 def check_release_placeholders(root: Path = REPO_ROOT) -> list[Finding]:
     """No template names the ref of an install command with the release placeholder.
 
-    A template has two placeholders. ``{{VERSION}}`` is the ref an install command
-    uses, and the docs site's main version renders it as ``main``. ``{{RELEASE}}`` is
-    the current release number on every build, for what ``ash --version`` prints and
-    for sentences about a release. Written as the ref of an install command, it would
-    make the main version's docs install a release, so every form the template
-    manager lists (``@v``, ``--branch v``, ``rev: v``, ``refs/tags/v``, a flake ref,
-    ``--ash-revision-to-install v``, ``ash-version: v``) followed by it is reported.
-    A table row and a ``text`` block may name the release: neither is a command a
-    reader runs.
+    A template has two placeholders, and ``render`` replaces both with the version of
+    the build. ``{{VERSION}}`` is the ref an install command uses: ``convert`` writes
+    it where it recognizes an ASH pin, the round-trip test and the pin readers key on
+    it, and the release tooling moves it at each bump. ``{{RELEASE}}`` is the current
+    release number in prose, for what ``ash --version`` prints and for sentences
+    about a release. Written as the ref of an install command it renders the same,
+    but the template then differs from the one ``convert`` writes, and a ref can no
+    longer be told from a prose number or moved separately from it, so every form the
+    template manager lists (``@v``, ``--branch v``, ``rev: v``, ``refs/tags/v``, a
+    flake ref, ``--ash-revision-to-install v``, ``ash-version: v``) followed by it is
+    reported. A table row and a ``text`` block may name the release: neither is a
+    command a reader runs.
     """
     path = root / TEMPLATE_MANAGER
     if not path.is_file():
@@ -10095,7 +10100,7 @@ def _install_ref_forms(manager: Any) -> list[tuple[str, str, bool, bool]]:
     uses: <owner>/<repo>/<path>@; on its own, @ would match any package's pin. A form
     whose branch rendering differs from its release prefix (refs/heads/ for refs/tags/)
     is listed again, for branches. Both are regular expressions, as the manager's
-    branch_ref_pattern reads them.
+    INSTALL_REF_FORMS spells them.
     """
     forms = []
     for name, prefix, branch in manager.INSTALL_REF_FORMS:

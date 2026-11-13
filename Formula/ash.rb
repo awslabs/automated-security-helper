@@ -81,7 +81,7 @@ class Ash < Formula
     # PATH, the same thing `uvx` does. Node.js goes last, so a node the user put
     # on PATH still wins and this one is there when none is.
     path = "#{libexec}/bin:$PATH:#{Formula["node"].opt_bin}"
-    %w[ash ashv3 automated-security-helper].each do |script|
+    %w[ash ashv3 automated-security-helper agentic-security-harness].each do |script|
       (bin/script).write_env_script libexec/"bin"/script, PATH: path
     end
   end

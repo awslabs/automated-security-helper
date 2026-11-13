@@ -1,7 +1,7 @@
 [project]
 name = "automated-security-helper"
 version = "3.8.0"
-description = "Automated Security Helper for GitHub Actions"
+description = "Automated Security Helper, the agentic security harness: open-source orchestration for code, infrastructure, secret, and dependency scanners"
 requires-python = ">=3.10,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
@@ -237,6 +237,7 @@ Repository = "https://github.com/awslabs/automated-security-helper"
 ash = "automated_security_helper.cli.entrypoint:main"
 ashv3 = "automated_security_helper.cli.entrypoint:main"
 automated-security-helper = "automated_security_helper.cli.entrypoint:main"
+agentic-security-harness = "automated_security_helper.cli.entrypoint:main"
 
 [tool.commitizen]
 name = "cz_conventional_commits"

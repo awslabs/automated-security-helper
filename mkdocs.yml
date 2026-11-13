@@ -1,5 +1,5 @@
 site_name: ASH - Automated Security Helper
-site_description: "Security scanning for code, infrastructure, secrets, and dependencies."
+site_description: "Automated Security Helper, the agentic security harness: security scanning for code, infrastructure, secrets, and dependencies."
 site_url: "https://awslabs.github.io/automated-security-helper"
 repo_name: "awslabs/automated-security-helper"
 repo_url: "https://github.com/awslabs/automated-security-helper"
@@ -28,8 +28,9 @@ strict: true
 
 # Moved pages keep their old URLs: docs/redirects.yml maps each old page to its new
 # one, and the redirects hook writes a redirect page at every old URL. The install_refs
-# hook builds the version-pinned pages from their templates when mike builds a version,
-# so the install commands of the main version install main.
+# hook builds the version-pinned pages from their templates when mike builds a release,
+# and leaves the main version on the committed pages, so every version's install
+# commands pin a release.
 hooks:
   - docs/hooks/redirects.py
   - docs/hooks/install_refs.py

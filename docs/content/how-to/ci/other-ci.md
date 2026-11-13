@@ -125,10 +125,9 @@ build image, running `ash scan --mode local` inside it. Nothing is installed per
 
 ## Nix mode {#nix}
 
-!!! warning "Nix mode is on `main` only"
-    Nix mode is not in any release: v3.7.x rejects `--mode nix`. Install ASH from `main`, as
-    below, or from a source checkout. Pin a commit SHA instead of `main` when you need to
-    know which code ran.
+!!! note "Nix mode needs a current release"
+    Nix mode is in the latest release; v3.7.x and older reject `--mode nix`. Install
+    that release, as below, or use a source checkout.
 
 Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
 ASH's `flake.nix`, so the build host does not need the `ash dependencies install` step or
@@ -141,13 +140,13 @@ the Ruby packages the [recipe](#recipe) uses for cfn-nag. The host needs:
 - Node.js is supplied by the flake. Network access is still needed for the scanners'
   databases and rules.
 
-An install of `main` looks for `flake.nix` at the release tag that matches its version
-number, and no release has one, so set `ASH_NIX_FLAKE_REF` to a flake reference that does:
+An installed release looks for `flake.nix` at its own release tag, so the recipe sets
+no `ASH_NIX_FLAKE_REF`; set it only to scan with a different flake, such as when
+running ASH from `main` or a fork ([Nix mode](../install.md#nix-mode)):
 
-<!-- doctest: illustrative reason="installs ASH from main and needs Nix and the network" -->
+<!-- doctest: illustrative reason="installs ASH from GitHub and needs Nix and the network" -->
 ```bash
-uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
-export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
 ash_exit=0
 ash scan --mode nix --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
