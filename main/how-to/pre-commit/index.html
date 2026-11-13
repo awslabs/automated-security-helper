@@ -1251,6 +1251,17 @@ SOFTWARE.
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#scanner-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing the scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#additional-dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3390,6 +3401,17 @@ SOFTWARE.
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#scanner-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing the scanners
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#additional-dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3601,8 +3623,11 @@ writes a <code>.ash/.gitignore</code> that ignores it, or add the line yourself:
 <h2 id="behavior">What the hook runs<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
 <p>The <code>ash</code> hook runs <code>ashv3 --mode=precommit --staged</code> with your <code>args</code>. Precommit mode:</p>
 <ul>
-<li>runs five scanners: bandit, detect-secrets, checkov, cdk-nag, and npm-audit. <code>--scanners</code>
-  can add others but cannot remove these; <code>--exclude-scanners</code> removes them.</li>
+<li>runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
+  <code>--add-scanners</code> adds others to that set; <code>--only-scanners</code> replaces the set and runs
+  exactly what it names; <code>--exclude-scanners</code> removes names, whichever source added them.
+  The deprecated <code>--scanners</code> behaves like <code>--add-scanners</code> here. See
+  <a href="#scanner-selection">Choosing the scanners</a>.</li>
 <li>with <code>--staged</code> (which the hook passes), scans the staged files instead of the whole
   repository, so a one-file commit pays for one file. See
   <a href="#staged-scope">Staged-file scope</a>.</li>
@@ -3666,6 +3691,30 @@ on every commit. To run without Node.js there, exclude the two scanners:</p>
 is the same hook under another name.</p>
 <p>Do not add <code>--no-fail-on-incomplete-scanners</code> to the hook: with it, a commit passes when a
 scanner did not run, and the output says only <code>Passed</code>.</p>
+<h3 id="scanner-selection">Choosing the scanners<a class="headerlink" href="#scanner-selection" title="Permanent link">&para;</a></h3>
+<p>The selection precommit mode runs is resolved in this order, later entries winning:</p>
+<ol>
+<li>The mode default: the five scanners above.</li>
+<li>The ASH config file: <code>precommit.only_scanners</code> replaces the default set;
+   <code>precommit.add_scanners</code> adds to it. Setting both keys is refused.</li>
+<li>The command line: <code>--only-scanners</code> replaces everything above, mode default and config
+   keys alike; <code>--add-scanners</code>, or the deprecated <code>--scanners</code>, adds to whatever stands.
+   <code>--only-scanners</code> cannot be combined with either additive flag.</li>
+<li><code>--exclude-scanners</code> applies last: an excluded name does not run, whichever source
+   included it.</li>
+</ol>
+<p>So a repository that wants its hook to run only bandit and detect-secrets states it once
+in its ASH config instead of in every clone's hook <code>args</code>:</p>
+<!-- doctest: config kind=ash -->
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">project_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-project</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">precommit</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">only_scanners</span><span class="p">:</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bandit</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">detect-secrets</span>
+</span></code></pre></div>
+<p>A committer can still widen one run with <code>--add-scanners</code>, or override the file entirely
+with <code>--only-scanners</code>. <code>--scanners</code> keeps working with a deprecation warning; it is the
+same additive selection <code>--add-scanners</code> now names explicitly.</p>
 <h3 id="additional-dependencies">Add Python packages to the hook<a class="headerlink" href="#additional-dependencies" title="Permanent link">&para;</a></h3>
 <p><code>additional_dependencies</code> in your configuration replaces the hook's own list rather than
 adding to it. The <code>ash</code> hook's list is <code>.[cdk]</code>, which installs the <code>cdk</code> extra from the
@@ -3674,12 +3723,12 @@ cdk-nag is MISSING in a repository with CloudFormation templates.</p>
 <h2 id="stages">When the hook runs<a class="headerlink" href="#stages" title="Permanent link">&para;</a></h2>
 <p>The hook has no <code>stages</code> setting, so it runs on every commit. To run it less often, set one:</p>
 <!-- doctest: config kind=pre-commit -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">repos</span><span class="p">:</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/awslabs/automated-security-helper</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">rev</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pre-push</span><span class="p p-Indicator">]</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">repos</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/awslabs/automated-security-helper</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">rev</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pre-push</span><span class="p p-Indicator">]</span>
 </span></code></pre></div>
 <p>With <code>stages: [pre-push]</code>, install that hook type with
 <code>pre-commit install --hook-type pre-push</code>, and a failing scan blocks <code>git push</code>. With
@@ -3768,14 +3817,14 @@ pipeline as well; the hook does not replace it.</p>
 <p>If ASH is installed with <code>uv tool install</code> or in a virtual environment outside the
 repository, a local hook runs that installation instead of building one per repository:</p>
 <!-- doctest: config kind=pre-commit -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">repos</span><span class="p">:</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">        </span><span class="nt">entry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash --mode precommit</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">        </span><span class="nt">language</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">        </span><span class="nt">pass_filenames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">repos</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">        </span><span class="nt">entry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash --mode precommit</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">        </span><span class="nt">language</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">        </span><span class="nt">pass_filenames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </span></code></pre></div>
 <p><code>ash</code> must be on <code>PATH</code> when git runs the hook. ASH installs bandit and checkov with the
 <code>uv</code> installed with it, or with a <code>uv</code> on <code>PATH</code>. <code>pass_filenames: false</code> is required.
@@ -3794,16 +3843,16 @@ building the hook environment fails; on Python 3.9 the error is
 <code>No matching distribution found for hatchling&gt;=1.32.4</code>. Install pre-commit on a supported
 interpreter:</p>
 <!-- doctest: illustrative reason="installs pre-commit from PyPI" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span>pre-commit
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span>pre-commit
 </span></code></pre></div>
 <p>Or point the hook at a newer Python that is on your <code>PATH</code>:</p>
 <!-- doctest: config kind=pre-commit -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">repos</span><span class="p">:</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/awslabs/automated-security-helper</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">rev</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">        </span><span class="nt">language_version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python3.12</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">repos</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/awslabs/automated-security-helper</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">rev</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">        </span><span class="nt">language_version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python3.12</span>
 </span></code></pre></div>
 <p><code>default_language_version</code> at the top of the file does the same for every Python hook.</p>
 <h2 id="frozen-rev">A frozen rev is flagged as a secret<a class="headerlink" href="#frozen-rev" title="Permanent link">&para;</a></h2>
@@ -3812,11 +3861,11 @@ detect-secrets reports that line of <code>.pre-commit-config.yaml</code> as a hi
 which fails the hook with exit code 2. Suppress that finding for that file, with the
 reason:</p>
 <!-- doctest: config kind=ash -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">global_settings</span><span class="p">:</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.pre-commit-config.yaml</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SECRET-HEX-HIGH-ENTROPY-STRING</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pre-commit autoupdate --freeze pins hooks to commit SHAs</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">global_settings</span><span class="p">:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">suppressions</span><span class="p">:</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.pre-commit-config.yaml</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">      </span><span class="nt">rule_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SECRET-HEX-HIGH-ENTROPY-STRING</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pre-commit autoupdate --freeze pins hooks to commit SHAs</span>
 </span></code></pre></div>
 <p>Put it in your ASH config file, or, if the repository has none, in a new <code>.ashrc.yaml</code> at
 its root. <a href="../suppress-findings/">Suppress findings</a> covers expiration dates and narrower
@@ -3829,15 +3878,15 @@ carries. It needs a container runtime on the host: finch, docker, nerdctl, or po
 in that order. The first run builds the image and takes several minutes, so give the hook
 <code>stages: [pre-push]</code> or <code>stages: [manual]</code>:</p>
 <!-- doctest: config kind=pre-commit -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">repos</span><span class="p">:</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/awslabs/automated-security-helper</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">rev</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-full-scan</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">manual</span><span class="p p-Indicator">]</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">repos</span><span class="p">:</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/awslabs/automated-security-helper</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">rev</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.8.0</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-full-scan</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">manual</span><span class="p p-Indicator">]</span>
 </span></code></pre></div>
 <!-- doctest: illustrative reason="builds ASH's container image, which needs a container runtime and the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>pre-commit<span class="w"> </span>run<span class="w"> </span>--hook-stage<span class="w"> </span>manual<span class="w"> </span>ash-full-scan<span class="w"> </span>--all-files
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>pre-commit<span class="w"> </span>run<span class="w"> </span>--hook-stage<span class="w"> </span>manual<span class="w"> </span>ash-full-scan<span class="w"> </span>--all-files
 </span></code></pre></div>
 <p><a href="../run-in-a-container/">Run ASH in a container</a> covers container mode.</p>
 <h2 id="nix">Run the hook in Nix mode<a class="headerlink" href="#nix" title="Permanent link">&para;</a></h2>
@@ -3852,19 +3901,19 @@ with the scanners that ASH's <code>flake.nix</code> supplies, add a <code>local<
 <code>ash scan --mode nix</code> on an <code>ash</code> already on <code>PATH</code>, and give it a slow stage like
 <code>ash-full-scan</code>:</p>
 <!-- doctest: config kind=pre-commit -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">repos</span><span class="p">:</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-nix</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH scan in Nix mode</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">        </span><span class="nt">entry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash scan --mode nix --no-progress</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">        </span><span class="nt">language</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">        </span><span class="nt">pass_filenames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">manual</span><span class="p p-Indicator">]</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">repos</span><span class="p">:</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-nix</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH scan in Nix mode</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">        </span><span class="nt">entry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash scan --mode nix --no-progress</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">        </span><span class="nt">language</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">        </span><span class="nt">pass_filenames</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">        </span><span class="nt">stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">manual</span><span class="p p-Indicator">]</span>
 </span></code></pre></div>
 <!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix and the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>pre-commit<span class="w"> </span>run<span class="w"> </span>--hook-stage<span class="w"> </span>manual<span class="w"> </span>ash-nix<span class="w"> </span>--all-files
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0&#39;</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>pre-commit<span class="w"> </span>run<span class="w"> </span>--hook-stage<span class="w"> </span>manual<span class="w"> </span>ash-nix<span class="w"> </span>--all-files
 </span></code></pre></div>
 <p>This is a different hook from <code>ash</code>: it runs the scanners of a normal scan, not the five
 of precommit mode, so it takes longer and belongs on <code>manual</code> or <code>pre-push</code>. It uses the

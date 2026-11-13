@@ -3584,7 +3584,7 @@ SOFTWARE.
 <td><code>NO</code></td>
 <td><code>YES</code> (core)</td>
 <td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_live_progress_enabled</code>)<br><code>automated_security_helper/utils/log.py</code> (<code>get_logger</code>)<br><code>automated_security_helper/utils/scan_source.py</code> (<code>_in_container</code>)</td>
-<td>Set by the ASH image itself (Dockerfile: <code>ENV ASH_IN_CONTAINER="YES"</code>). (<code>automated_security_helper/utils/scan_source.py</code>)</td>
+<td>--only-scanners and --add-scanners folded into the one list the container forwards as --scanners entries: the inner scan runs in local mode, where the three inclusion flags mean the same thing (_folded_scanner_allowlist), and the inner CLI skips the --scanners deprecation line under ASH_IN_CONTAINER. (<code>automated_security_helper/interactions/run_ash_scan.py</code>, <code>_run_container_mode</code>)</td>
 </tr>
 <tr>
 <td><code>ASH_IN_NIX</code></td>
@@ -3647,7 +3647,7 @@ SOFTWARE.
 <td><code>local</code></td>
 <td></td>
 <td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
-<td>Sets <a href="../cli/#scan--mode"><code>ash scan --mode</code></a>. Execution mode preset. 'local' (default) runs the scan in this process with the scanner tools installed on this machine. 'precommit' is a local scan that runs only bandit, detect-secrets, checkov, cdk-nag, npm-audit, plus any --scanners, with simplified output and no progress display; in workspace mode it changes only the output. 'container' builds the ASH container image and runs the scan inside it. 'nix' runs the scan inside <code>nix develop</code>, whose shell supplies pinned scanner versions, and always offline.</td>
+<td>Sets <a href="../cli/#scan--mode"><code>ash scan --mode</code></a>. Execution mode preset. 'local' (default) runs the scan in this process with the scanner tools installed on this machine. 'precommit' is a local scan that runs only bandit, detect-secrets, checkov, cdk-nag, npm-audit, plus any --add-scanners (or the deprecated --scanners); the config file's precommit.only_scanners and the --only-scanners flag replace that set instead. It prints simplified output and no progress display; in workspace mode it changes only the output. 'container' builds the ASH container image and runs the scan inside it. 'nix' runs the scan inside <code>nix develop</code>, whose shell supplies pinned scanner versions, and always offline.</td>
 </tr>
 <tr>
 <td><code>ASH_NIX_FLAKE_REF</code></td>
@@ -3731,7 +3731,7 @@ SOFTWARE.
 <td>not set</td>
 <td></td>
 <td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
-<td>Sets <a href="../cli/#scan--scanners"><code>ash scan --scanners</code></a>. Specific scanner names to run. Defaults to all scanners.</td>
+<td>Sets <a href="../cli/#scan--scanners"><code>ash scan --scanners</code></a>. Deprecated: use --only-scanners to state the whole selection, or --add-scanners to add to the mode's default set. Behavior is unchanged: specific scanner names to run (additive to the precommit set in --mode precommit; the whole selection elsewhere). Cannot be combined with --only-scanners.</td>
 </tr>
 <tr>
 <td><code>ASH_SCAN_SOURCE</code></td>

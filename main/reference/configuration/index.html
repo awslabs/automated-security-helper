@@ -2155,6 +2155,17 @@ SOFTWARE.
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#precommit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        precommit
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3654,6 +3665,17 @@ SOFTWARE.
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#precommit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        precommit
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4019,6 +4041,12 @@ SOFTWARE.
 <td><a href="#section-workspace">section</a></td>
 <td>see the section</td>
 <td>Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision.</td>
+</tr>
+<tr>
+<td><a id="precommit"></a><code>precommit</code></td>
+<td><a href="#section-precommit">section</a></td>
+<td>see the section</td>
+<td>Scanner selection for --mode precommit: only_scanners replaces the mode's default set, add_scanners adds to it; setting both keys at once is refused. The command line's --only-scanners replaces both; --add-scanners and the deprecated --scanners add; --exclude-scanners applies last. Other modes ignore this section.</td>
 </tr>
 <tr>
 <td><a id="extends"></a><code>extends</code></td>
@@ -4582,6 +4610,34 @@ SOFTWARE.
 <td>number or null, greater than 0</td>
 <td><code>null</code></td>
 <td>Seconds to allow a single project. Unset means no limit. On timeout that project is recorded as failed and the remaining projects still complete.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="precommit"><a id="section-precommit"></a><code>precommit</code><a class="headerlink" href="#precommit" title="Permanent link">&para;</a></h3>
+<p>Scanner selection for <code>ash scan --mode precommit</code>.</p>
+<p>A key not listed here is an error when the configuration is loaded.</p>
+<!-- doctest: options of=precommit -->
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a id="precommit.only_scanners"></a><code>only_scanners</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>The whole scanner selection for precommit mode: run exactly these scanners instead of the mode's default set. The command line's --only-scanners replaces this list; --add-scanners and the deprecated --scanners add to it; --exclude-scanners removes names from it. Cannot be set together with add_scanners.</td>
+</tr>
+<tr>
+<td><a id="precommit.add_scanners"></a><code>add_scanners</code></td>
+<td>list of string</td>
+<td><code>[]</code></td>
+<td>Scanner names precommit mode runs in addition to its default set. The command line's --only-scanners replaces this list too; --exclude-scanners removes names from the result. Cannot be set together with only_scanners.</td>
 </tr>
 </tbody>
 </table>
