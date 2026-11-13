@@ -63,18 +63,23 @@ name: ASH - Dependabot Auto-Merge
 # token for ash-automations, the team-managed GitHub App installed on this
 # repository (pull-requests: write plus metadata: read), minted by the pinned
 # create-github-app-token step from the two repository secrets and scoped to
-# this one repository. GITHUB_TOKEN's only remaining job is fetch-metadata's
-# read, so the job's permissions block grants pull-requests: read and nothing
-# else: no step of this workflow holds a long-lived write token, and the
-# workflow level stays `{}` like ash-tag-on-merge.yml (zizmor's
-# excessive-permissions audit flags workflow-level grants).
+# this one repository and to pull-requests: write only (the permission-* input;
+# a mint with no such input inherits every permission the installation holds,
+# which zizmor's github-app audit rightly flags). GITHUB_TOKEN's only remaining
+# job is fetch-metadata's read, so the job's permissions block grants
+# pull-requests: read and nothing else: no step of this workflow holds a
+# long-lived write token, and the workflow level stays `{}` like
+# ash-tag-on-merge.yml (zizmor's excessive-permissions audit flags
+# workflow-level grants).
 #
 # One residual to verify on the first in-scope dependabot PR: if GitHub turns
 # out to require contents: write on the App for the queue-entry step itself,
 # the failure is the same safe shape as before (the PR sits approved with
-# auto-merge requested and a human click is the fallback), and the fix is the
-# App Manager page -- the repository team adds the permission to the
-# ash-automations registration -- not a workflow edit.
+# auto-merge requested and a human click is the fallback). The fix is then two
+# small grants, both named here so neither is hunted for later: the repository
+# team adds contents: write to the ash-automations registration (the App
+# Manager page), and the mint below adds `permission-contents: write` so the
+# downscoped token carries it.
 #
 # WHY THERE IS NO CHECKOUT
 #
@@ -122,9 +127,13 @@ jobs:
       # and the auto-merge enablement run under the app token minted below.
       pull-requests: read
     steps:
-      # Minted fresh per run, expires on its own, and scoped to this one
-      # repository whatever else the installation covers. The two secrets are
-      # the ash-automations App's id and private key.
+      # Minted fresh per run, expires on its own, and scoped twice: to this one
+      # repository whatever else the installation covers, and to the one
+      # permission the two gh calls use, whatever else the App's registration
+      # grants now or gains later. Without the permission-* line the token
+      # would inherit the installation's full permission set, which is zizmor's
+      # github-app finding (this repository's own scan gates on it). The two
+      # secrets are the ash-automations App's id and private key.
       - name: Mint an installation token for the automation app
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -133,6 +142,7 @@ jobs:
           private-key: ${{ secrets.ASH_AUTOMATIONS_PRIVATE_KEY }}
           owner: awslabs
           repositories: automated-security-helper
+          permission-pull-requests: write
 
       - name: Read the update's metadata
         id: metadata
