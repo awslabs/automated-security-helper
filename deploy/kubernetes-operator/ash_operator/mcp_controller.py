@@ -30,7 +30,7 @@ CRD deliberately has no field that would imply otherwise.
 route consecutive requests to different replicas. An image whose ASH predates the
 flag ignores it: the server then runs stateful, answers 404 to every session id
 the platform injects, and still passes a TCP health check. The Deployment's init
-container runs ``COLUMNS=200 ashx mcp --help`` and refuses to start -- exit 65 --
+container runs ``ashx mcp --help`` at COLUMNS=200 and refuses to start -- exit 65 --
 when stateless was asked for and the flag is absent. ``--allowed-host`` warns
 instead of refusing, because an adopter behind a load balancer cannot know the
 hostname in advance and a refusal there would block a working deployment.

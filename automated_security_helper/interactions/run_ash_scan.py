@@ -351,7 +351,9 @@ class ScanOptions(BaseModel):
                 f"min_severity must be one of {', '.join(accepted)} (any case), "
                 f"not {v!r}"
             )
-        return value
+        # Lowercased: the value is forwarded to the container and Nix CLIs, whose
+        # option is a case-sensitive choice, so "HIGH" would be a usage error there.
+        return value.lower()
 
     @field_validator(
         "scanners",
@@ -1332,7 +1334,7 @@ def print_incompleteness_message(
         missing_rows = [
             _name
             for _name, _status in incomplete_scanner_rows
-            if _status.split(" (", 1)[0] == ScannerStatus.MISSING.value
+            if _row_is_missing(_status)
         ]
         # The warning that a relative ASH_BIN_PATH was skipped goes to ash.log,
         # which a reader of this advice may never open.
@@ -1746,7 +1748,19 @@ _INCOMPLETE_SCANNER_REASONS = {
 }
 
 
-def incomplete_scanner_reason(status: str, partial: bool = False) -> str:
+def _row_is_missing(status: str) -> bool:
+    """Whether an ``incomplete_scanners`` display status is a MISSING row: the
+    scanner could not run for lack of a dependency, on every file (``MISSING``) or
+    on one tree (``FAILED (MISSING on some files)``)."""
+    return (
+        status.split(" (", 1)[0] == ScannerStatus.MISSING.value
+        or f"({_MISSING_ON_SOME_FILES})" in status
+    )
+
+
+def incomplete_scanner_reason(
+    status: str, partial: bool = False, missing_dependencies: bool = False
+) -> str:
     """The reason token for a scanner ``incomplete_scanners`` listed, from its status.
 
     A scanner listed with a status the per-scanner pass accepts (PASSED, FAILED,
@@ -1760,7 +1774,13 @@ def incomplete_scanner_reason(status: str, partial: bool = False) -> str:
     telling "the tool never ran" apart from "the tool ran and lost some
     targets" is this token's whole job, and keying it on the status alone made
     every current scan's partial loss read ``error``.
+
+    ``missing_dependencies`` says the row is a ``FAILED (MISSING on some files)``
+    one: the scanner could not run on one tree for lack of its dependencies, which
+    is not a scanner that ran and lost targets, so it outranks ``partial``.
     """
+    if missing_dependencies:
+        return "missing_dependencies"
     if partial:
         return "partial_coverage"
     if status in _INCOMPLETE_SCANNER_REASONS:
@@ -1792,6 +1812,9 @@ class ScanIncompleteness:
     #: payload's reason token reads ``partial_coverage`` for these; see
     #: :func:`incomplete_scanner_reason`.
     partial_coverage: Tuple[str, ...] = ()
+    #: Names from ``scanners`` listed as ``FAILED (MISSING on some files)``: the
+    #: payload's reason token reads ``missing_dependencies`` for these.
+    missing_dependencies: Tuple[str, ...] = ()
     #: Every scanner's recorded status, the raw token rather than the display
     #: string, so a payload can say MISSING or ERROR without parsing prose.
     observed: Tuple[Tuple[str, str], ...] = ()
@@ -1838,7 +1861,9 @@ class ScanIncompleteness:
                     "scanner": name,
                     "status": status,
                     "reason": incomplete_scanner_reason(
-                        status, partial=name in self.partial_coverage
+                        status,
+                        partial=name in self.partial_coverage,
+                        missing_dependencies=name in self.missing_dependencies,
                     ),
                     "detail": detail,
                 }
@@ -1960,10 +1985,7 @@ def scan_incompleteness(
     )
     missing_reasons = []
     for name, status in rows:
-        if (
-            status.split(" (", 1)[0] != ScannerStatus.MISSING.value
-            and f"({_MISSING_ON_SOME_FILES})" not in status
-        ):
+        if not _row_is_missing(status):
             continue
         reason = recorded_reason(results, name, "missing_reason")
         if reason and reason != NO_MISSING_REASON_RECORDED:
@@ -1993,9 +2015,13 @@ def scan_incompleteness(
         for name, metric in partial_audits.items()
         if metric.status == ScannerStatus.ERROR.value
     }
+    missing_dependencies = tuple(
+        name for name, status in rows if f"({_MISSING_ON_SOME_FILES})" in status
+    )
     return ScanIncompleteness(
         scanners=rows,
         partial_coverage=partial_coverage,
+        missing_dependencies=missing_dependencies,
         missing_reasons=tuple(missing_reasons),
         observed=tuple(observed),
         no_scanner_ran=(
@@ -2107,6 +2133,28 @@ def _record_inner_refusal(
         )
 
 
+def _open_a_regular_file_for_text(path: Path):
+    """Open *path* as UTF-8 text only if it is itself a regular file, checked on
+    the descriptor that is read.
+
+    The earlier lstat checks (``not_a_regular_file``, ``_is_a_regular_report_file``)
+    leave a window in which a tool still writing can swap in a link or a pipe, so
+    the open refuses a link (``O_NOFOLLOW``), does not block on a pipe
+    (``O_NONBLOCK``), and ``fstat`` confirms the file. Both flags are absent on
+    Windows, where the open is the plain one and the lstat checks stand.
+    Raises OSError when the path is not a regular file.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        return os.fdopen(fd, mode="r", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
     """Exit 1, without reading it, when a file the inner run left is not a regular file.
 
@@ -2144,7 +2192,7 @@ def _read_back_inner_results(
     if not output_file.exists():
         return None
     try:
-        with open(output_file, mode="r", encoding="utf-8") as f:
+        with _open_a_regular_file_for_text(output_file) as f:
             content = f.read()
         return AshAggregatedResults.model_validate_json(content)
     except (ValidationError, ValueError) as e:
@@ -5067,8 +5115,10 @@ def _names_the_output_directorys_own_results(opts: ScanOptions) -> bool:
     """
     if not opts.existing_results:
         return False
-    named = Path(opts.existing_results).resolve()
-    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    # realpath, not Path.resolve(): before Python 3.13 resolve() raises
+    # RuntimeError for a symbolic link loop, and a loop is just another file here.
+    named = Path(os.path.realpath(opts.existing_results))
+    own = Path(os.path.realpath(Path(opts.output_dir) / "ash_aggregated_results.json"))
     return named == own
 
 
@@ -5556,7 +5606,7 @@ def _run_container_mode(
         # Applied inside only in workspace mode, whose exit code the host
         # returns as the container computed it (below); a one-directory scan's
         # exit code is recomputed on the host, where --min-severity is applied.
-        min_severity=opts.min_severity,
+        min_severity=_forwarded_min_severity(opts),
         # The policy the host resolved into the plan, mounted for the workspace
         # scan inside as --config is (_host_file_in_container).
         workspace_config=workspace_config,
@@ -5790,8 +5840,9 @@ def _refuse_a_results_file_the_shell_cannot_be_handed(
     """
     if not opts.existing_results:
         return
-    named = Path(opts.existing_results).resolve()
-    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    # realpath for the same reason as _names_the_output_directorys_own_results.
+    named = Path(os.path.realpath(opts.existing_results))
+    own = Path(os.path.realpath(Path(opts.output_dir) / "ash_aggregated_results.json"))
     if named == own:
         return
     _logged_refusal(
@@ -5803,6 +5854,15 @@ def _refuse_a_results_file_the_shell_cannot_be_handed(
         f"{named}, is another file. Pass the output "
         "directory that holds the file, or run the report phase with --mode local.",
     )
+
+
+def _forwarded_min_severity(opts: ScanOptions) -> str:
+    """``opts.min_severity`` as the inner CLI's case-sensitive choice spells it.
+
+    The field validator lowercases it, but ``model_copy(update=...)`` and
+    ``model_construct`` skip validators, so the forward points lowercase too.
+    """
+    return str(getattr(opts.min_severity, "value", opts.min_severity)).lower()
 
 
 def _nix_inner_argv(opts: ScanOptions) -> List[str]:
@@ -5920,8 +5980,8 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
             if opts.fail_on_incomplete_scanners
             else "--no-fail-on-incomplete-scanners"
         )
-    if opts.min_severity.lower() != "low":
-        argv.extend(["--min-severity", opts.min_severity])
+    if _forwarded_min_severity(opts) != "low":
+        argv.extend(["--min-severity", _forwarded_min_severity(opts)])
     if opts.changed_files_only:
         argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
     if opts.existing_results:
@@ -6064,6 +6124,18 @@ def _run_nix_mode(
         kept_on_purpose=bool(opts.existing_results),
     )
     output_file = opts.output_dir / "ash_aggregated_results.json"
+    if shell_code == 2 and not output_file.exists():
+        # As in container mode: the scan inside exits 2 for findings only after
+        # writing the results file, and for a usage error without one. The
+        # shell's checkout may be an older ASH that rejects an option this ASH
+        # passes it.
+        logger.error(
+            "The scan inside the Nix shell exited 2 without writing a results "
+            "file, which is how the ASH command line rejects its arguments: the "
+            "ASH the shell runs may be older than this one and not accept an "
+            "option this ASH passes it. Run it from the same checkout as this ASH."
+        )
+        sys.exit(3)
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
@@ -7500,7 +7572,7 @@ def _gating_actionable_count(
         and report_sarif_written_this_run is not False
     ):
         try:
-            with open(sarif_file, encoding="utf-8") as f:
+            with _open_a_regular_file_for_text(sarif_file) as f:
                 sarif_json = json.load(f)  # nosec
 
             sarif_active = 0

@@ -99,7 +99,7 @@ class TestScanArgv:
         # script that runs `"$@"` -- so this refuses to construct an argument no ASH
         # invocation should receive. The previous name claimed these "could become a
         # command", which was the same misreading of `sh -c` positionals that produced
-        # an auth bypass in the MCP path.
+        # an inverted auth check in the MCP path.
         with pytest.raises(contract.ContractError, match="does not belong in a path"):
             contract.build_scan_argv(source_dir=bad, output_dir="/o")
 
@@ -249,7 +249,9 @@ class TestMergeArgv:
 
     def test_an_off_table_severity_is_refused(self):
         with pytest.raises(contract.ContractError, match="minSeverity must be one of"):
-            contract.build_merge_argv(results_dirs=["/r/0"], output_dir="/m", min_severity="SEVERE")
+            contract.build_merge_argv(
+                results_dirs=["/r/0"], output_dir="/m", min_severity="EXTREME"
+            )
 
 
 class TestMcpArgv:
@@ -272,7 +274,7 @@ class TestMcpArgv:
         """Neither the value nor a placeholder for it.
 
         This test replaces one that asserted ``"${ASH_TOKEN}" in argv``, which pinned
-        an auth bypass: a positional parameter's value is never re-expanded, so the
+        an inverted auth check: a positional parameter's value is never re-expanded, so the
         placeholder reached ``ashx`` verbatim and became the expected credential. Any
         occurrence of ``--auth-header-value`` here is the bug returning, whatever the
         value beside it looks like.

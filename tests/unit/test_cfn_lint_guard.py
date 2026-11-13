@@ -24,6 +24,9 @@ from types import ModuleType
 
 import pytest
 
+# The gate's own `run` starts a stub executable as a subprocess, so this is not unit.
+pytestmark = pytest.mark.integration
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "deploy" / "tests" / "cfn-lint-guard.py"
 

@@ -349,19 +349,24 @@ async def _lifespan(_server: MCPServer) -> AsyncIterator[Dict[str, Any]]:
         yield {}
     finally:
         if _serving_stdio:
-            with anyio.CancelScope(shield=True):
-                deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
-                joiner = _begin_stopping_source_jobs()
-                await stop_running_scans(
-                    "the stdio client closed the connection",
-                    timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
-                    promptly=True,
-                )
-                await _wait_for_source_jobs(joiner, deadline)
-            # The process ends next, by the client's SIGTERM if not sooner; a tool
-            # still running then would outlive it (_stop_on_signal).
-            kill_running_groups()
-            _flush_stdout()
+            try:
+                with anyio.CancelScope(shield=True):
+                    deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+                    joiner = _begin_stopping_source_jobs()
+                    await stop_running_scans(
+                        "the stdio client closed the connection",
+                        timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
+                        promptly=True,
+                    )
+                    await _wait_for_source_jobs(joiner, deadline)
+            finally:
+                # The shield stops a cancel, not an exception: these run even
+                # when the stop raised, or the tools' groups would outlive the
+                # server and the block-buffered stdout would reach the client's
+                # pipe once fd 1 is pointed back at it. The process ends next,
+                # by the client's SIGTERM if not sooner (_stop_on_signal).
+                kill_running_groups()
+                _flush_stdout()
 
 
 mcp = MCPServer(name="ASH Security Scanner", lifespan=_lifespan)
@@ -1019,7 +1024,7 @@ async def run_ash_scan(
                 # shapes without one, a session whose delivered source is being
                 # changed and a session at its scan limit, are the "anything
                 # else" case there, with another scan of the same directory.
-                with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
+                result = with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
             return result
         if "scan_id" not in result:
             await _tell_client_error(
@@ -1612,24 +1617,27 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                             with open(result_file, "r", encoding="utf-8") as f:  # noqa: ASYNC230
                                 result_data = json.load(f)
 
-                            scanner_results[scanner_name][target_type] = result_data
-
+                            # This file's counts are gathered apart and merged
+                            # once every one is a non-negative integer, and the
+                            # file's payload is recorded only then: a bad
+                            # count drops the file from the totals and from
+                            # `scanners` alike, so the two never disagree.
+                            contribution: Dict[str, int] = {}
                             if counts_from_files and isinstance(
                                 result_data.get("severity_counts"), dict
                             ):
-                                # This file's counts are gathered apart and
-                                # merged once every one is a number, so a bad
-                                # count leaves the totals as they were.
-                                contribution: Dict[str, int] = {}
                                 for severity, count in result_data[
                                     "severity_counts"
                                 ].items():
                                     # bool is an int; a count is not a flag.
-                                    if not isinstance(count, int) or isinstance(
-                                        count, bool
+                                    if (
+                                        not isinstance(count, int)
+                                        or isinstance(count, bool)
+                                        or count < 0
                                     ):
                                         raise ValueError(
-                                            "a severity count is not an integer"
+                                            "a severity count is not a "
+                                            "non-negative integer"
                                         )
                                     # A count under a key off the ladder is a
                                     # finding too: it goes to the catch-all
@@ -1642,8 +1650,9 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                                     contribution[bucket] = (
                                         contribution.get(bucket, 0) + count
                                     )
-                                for bucket, count in contribution.items():
-                                    severity_counts[bucket] += count
+                            scanner_results[scanner_name][target_type] = result_data
+                            for bucket, count in contribution.items():
+                                severity_counts[bucket] += count
                         except Exception as e:
                             await _tell_client(
                                 ctx,
@@ -1809,8 +1818,10 @@ async def get_scan_results(
         # it to judge the findings.
         if actionable_only:
             results = _add_findings_list(results)
-            results.get("raw_results", {}).pop("sarif", None)
-            results.get("raw_results", {}).pop("severity_thresholds", None)
+            raw_results = results.get("raw_results")
+            if isinstance(raw_results, dict):
+                raw_results.pop("sarif", None)
+                raw_results.pop("severity_thresholds", None)
 
         # Apply response size filter based on parameter. The summary and minimal
         # filters carry the coverage keys of the document themselves, as the
@@ -3429,7 +3440,12 @@ async def _stop_on_signal(signals: Optional[Iterable[int]] = None) -> None:
                     timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
                     promptly=True,
                 )
-                await _wait_for_source_jobs(joiner, deadline)
+                if await _wait_for_source_jobs(joiner, deadline):
+                    logger.warning(
+                        "A source clone or delivery was still running when the "
+                        "server exited: the stdio session workspace may hold a "
+                        "partial tree"
+                    )
             exit_at_once(_STOP_SIGNALS[signum])
 
 
@@ -3546,14 +3562,18 @@ async def stop_scans_at_server_exit(reason: str) -> bool:
     or a source clone or delivery (_begin_stopping_source_jobs) was still
     running when the wait ended.
     """
-    with anyio.CancelScope(shield=True):
-        deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
-        joiner = _begin_stopping_source_jobs()
-        still_running = await stop_running_scans(
-            reason, timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS, promptly=True
-        )
-        jobs_running = await _wait_for_source_jobs(joiner, deadline)
-    kill_running_groups()
+    try:
+        with anyio.CancelScope(shield=True):
+            deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+            joiner = _begin_stopping_source_jobs()
+            still_running = await stop_running_scans(
+                reason, timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS, promptly=True
+            )
+            jobs_running = await _wait_for_source_jobs(joiner, deadline)
+    finally:
+        # Also when the stop raised: the tools' groups must not outlive it.
+        kill_running_groups()
+        _flush_stdout()
     return bool(still_running) or jobs_running
 
 

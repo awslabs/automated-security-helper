@@ -136,7 +136,7 @@ def _ash_mcp_supports(flag: str) -> bool:
     """
     try:
         result = subprocess.run(  # nosec B603 B607 - fixed argv, the image's ash
-            ["ash", "mcp", flag, "3", "--help"],
+            [ASH_CLI, "mcp", flag, "3", "--help"],
             capture_output=True,
             text=True,
             timeout=120,

@@ -643,7 +643,7 @@ def check_completeness_flag(env: dict[str, str]) -> None:
     no effect there. Measured on v3.7.0: bandit and grype both MISSING, the flag
     passed, exit 0.
 
-    So ``ash scan --help`` is asked once whether the option exists. The probe runs
+    So ``ashx scan --help`` is asked once whether the option exists. The probe runs
     with colour off and a wide terminal, and ANSI codes are stripped before the
     match, because rich styles each dash of an option name apart when colour is
     forced and the plain name would then not appear. A probe that fails refuses too
@@ -653,10 +653,10 @@ def check_completeness_flag(env: dict[str, str]) -> None:
     if _completeness_flag_found is None:
         probe_env = dict(env, COLUMNS="200", NO_COLOR="1")
         probe_env.pop("FORCE_COLOR", None)
-        probe = _run(["ash", "scan", "--help"], env=probe_env)
+        probe = _run([ASH_CLI, "scan", "--help"], env=probe_env)
         if probe.returncode != 0:
             raise RuntimeError(
-                f"'ash scan --help' exited {probe.returncode}, so this image's ASH could "
+                f"'{ASH_CLI} scan --help' exited {probe.returncode}, so this image's ASH could "
                 f"not be checked for {COMPLETENESS_FLAG}. Refusing to scan."
             )
         help_text = _ANSI_ESCAPE.sub("", probe.stdout or "")

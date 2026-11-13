@@ -22,7 +22,6 @@ here.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -160,10 +159,7 @@ def test_the_operators_copy_is_read_once_for_the_fill_and_the_trusted_base(
         return real_document(path, *args, **kwargs)
 
     def counting_load(path, *args, **kwargs):
-        # Only resolve_config's own loads: the client policy's check of the
-        # overrides loads the operator's file for its own purpose.
-        if sys._getframe(1).f_code.co_name == "resolve_config":
-            loads.append(path)
+        loads.append(path)
         return real_load(path, *args, **kwargs)
 
     monkeypatch.setattr(module, "read_config_document", counting_document)
@@ -172,8 +168,12 @@ def test_the_operators_copy_is_read_once_for_the_fill_and_the_trusted_base(
         client, trusted_config_path=operator
     ).external_reports_to_include
     assert entries == ["c.sarif", CANARY, "other.sarif"], "the fill is lost"
-    assert len(loads) == 1, (
-        f"resolve_config loaded the operator's copy {len(loads)} times"
+    # Loads of the operator's file by its argument: the client policy's check
+    # of the overrides makes one, resolve_config's own is the other; a third
+    # would be a load the fill added.
+    of_the_operator = [path for path in loads if Path(path) == Path(operator)]
+    assert 1 <= len(of_the_operator) <= 2, (
+        f"the operator's copy was loaded {len(of_the_operator)} times"
     )
     reread = [path for path in standalone_reads if Path(path) == Path(operator)]
     assert not reread, "the operator's copy was read a second time on its own"

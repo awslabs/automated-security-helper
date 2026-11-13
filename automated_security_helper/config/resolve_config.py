@@ -1038,7 +1038,9 @@ def _unknown_entry_keys_are_fatal(
             and key_path.strip().removesuffix("+").replace("-", "_")
             == "fail_on_unknown_keys"
         ):
-            fatal = _flag_is_true(value)
+            # The value as the override application types it, so both sites
+            # read the same thing (1.0 is a float there, and a true to the model).
+            fatal = _flag_is_true(_parse_config_value(value))
     return fatal
 
 
@@ -1058,7 +1060,8 @@ def _flag_is_true(value: Any) -> bool:
     """
     if isinstance(value, bool):
         return value
-    if isinstance(value, int):
+    if isinstance(value, (int, float)):
+        # The model's lax bool reads 1 and 1.0 as true, 0 and 0.0 as false.
         return value == 1
     if isinstance(value, str):
         return value.strip().lower() in _TRUE_WORDS

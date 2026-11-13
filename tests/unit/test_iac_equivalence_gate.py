@@ -41,6 +41,9 @@ from types import ModuleType
 
 import pytest
 
+# Runs the checker script as a subprocess against a scratch tree.
+pytestmark = pytest.mark.integration
+
 REPO = Path(__file__).resolve().parents[2]
 CHECKER_REL = Path("deploy/tests/iac-equivalence.py")
 

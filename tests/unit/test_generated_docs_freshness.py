@@ -184,7 +184,20 @@ def _run_generator(
     script: str, *args: str, env: dict | None = None
 ) -> subprocess.CompletedProcess:
     if env is None:
-        env = {**os.environ, **PLANTED_ENVIRONMENT}
+        # A run with no environment of its own gets the planted one, home and
+        # PATH included, never the developer's: a generator that wrote into its
+        # home (the regression the module docstring records) would otherwise
+        # write into the real one. The planted home must still be empty after.
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            planted, home_dir = _planted_environment(Path(root), "0", None)
+            result = _run_generator(script, *args, env=planted)
+            written = sorted(p.name for p in home_dir.iterdir())
+            assert written == [], (
+                f"scripts/{script} wrote into its home {home_dir}: {written}"
+            )
+            return result
     try:
         return subprocess.run(
             [sys.executable, str(SCRIPTS / script), *args],
@@ -534,11 +547,60 @@ def test_default_cells_keep_to_the_documented_forms(page: str) -> None:
                 raise AssertionError(f"{page}: environment form in {row}")
             match = next((m for f in forms if (m := f.match(cell))), None)
             assert match is not None, f"{page}: Default cell {cell!r} in {row}"
-            value = match.groupdict().get("value")
-            if value:
-                inner = value.strip("`").strip()
-                yaml.safe_load(inner)
+            # Every span the cell holds is read: the one value of the plain form,
+            # and each per-platform value of the "on Linux; ... on Windows" form,
+            # which has no value group.
+            spans = (
+                [match.group("value")]
+                if "value" in match.groupdict() and match.group("value")
+                else [m.group(0) for m in _SPAN_PARTS.finditer(cell)]
+            )
+            assert spans, f"{page}: no code span in Default cell {cell!r}"
+            for span in spans:
+                loaded = yaml.safe_load(_span_text(span))
+                # What a reader gets from the page is a value the generator
+                # writes back as the same value.
+                assert (
+                    yaml.safe_load(_config_generator().yaml_value(loaded)) == loaded
+                ), f"{page}: Default {span!r} does not read back as itself in {row}"
     assert checked > 0, f"{page} has no key or option tables"
+
+
+_SPAN_PARTS = re.compile(r"``(?P<double>.+?)``|`(?P<single>[^`]+)`")
+
+
+def _span_text(span: str) -> str:
+    """The text inside one code span: only its delimiters come off.
+
+    A double-backtick span may hold a backticked value, so the value's own
+    backticks stay. CommonMark's one padding space (a space at both ends of a
+    span that is not all spaces) comes off with the delimiters."""
+    found = _SPAN_PARTS.fullmatch(span)
+    assert found is not None, f"not a code span: {span!r}"
+    if found.group("single") is not None:
+        return found.group("single")
+    inner = found.group("double")
+    if len(inner) >= 2 and inner[0] == " " and inner[-1] == " " and inner.strip():
+        inner = inner[1:-1]
+    return inner
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "span, text",
+    [
+        ("`off`", "off"),
+        ("``a`b``", "a`b"),
+        ("`` `x` ``", "`x`"),
+        ("``  ``", "  "),
+        ("`` a ``", "a"),
+    ],
+)
+def test_a_code_span_is_unwrapped_by_its_delimiters_alone(span, text) -> None:
+    """The must-flag for the Default-cell reader: ``strip("`")`` took a backticked
+    value's own edge backticks with the delimiters."""
+    assert _span_text(span) == text
+    assert "`x`".strip("`") != "`x`"  # the old reading, for the contrast
 
 
 def _config_generator():
@@ -1246,7 +1308,7 @@ def _in_code_tree(tmp_path: Path, source: str, *args: str):
         capture_output=True,
         text=True,
         env={k: v for k, v in os.environ.items() if k != "ASH_CONFIG"},
-        timeout=300,
+        timeout=GENERATOR_TIMEOUT_S,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
@@ -1993,6 +2055,8 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
                     outcome = "refused"
                 except TimeoutError:
                     outcome = "dropped"
+                except OSError as error:
+                    outcome = "os-error: " + type(error).__name__
             print(json.dumps({
                 "env": {n: os.environ.get(n) for n in names},
                 "outcome": outcome,
@@ -2016,13 +2080,19 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
         "no_proxy": "*",
         "UV_CACHE_DIR": str(tmp_path / "planted-cache"),
     }
-    result = subprocess.run(
-        [sys.executable, str(probe), str(SCRIPTS), json.dumps(names)],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(probe), str(SCRIPTS), json.dumps(names)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=GENERATOR_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"the prepare_environment probe did not finish within {GENERATOR_TIMEOUT_S} s"
+        )
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     values = report["env"]
@@ -2109,6 +2179,8 @@ def test_a_hidden_option_in_ash_changes_the_cli_page(tmp_path: Path) -> None:
         return root
 
     page = tmp_path / "cli.md"
+    # The planted environment (its own empty home and tools), not the developer's.
+    planted, _home = _planted_environment(tmp_path / "planted-run", "0", None)
 
     def run(root: Path, *args: str) -> subprocess.CompletedProcess:
         return _run_generator(
@@ -2116,7 +2188,7 @@ def test_a_hidden_option_in_ash_changes_the_cli_page(tmp_path: Path) -> None:
             "--output",
             str(page),
             *args,
-            env={**os.environ, "PYTHONPATH": str(root)},
+            env={**planted, "PYTHONPATH": str(root)},
         )
 
     control = copy("control", plant=False)

@@ -119,7 +119,7 @@ def _pull_request_tree(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 class _ScanCapture:
-    """Stands in for the subprocess runner and records the ``ash scan`` call.
+    """Stands in for the subprocess runner and records the ``ashx scan`` call.
 
     The config file is read at the moment of the call, because that is when ASH would
     read it; a file the gate deletes afterwards is still a file ASH saw.
@@ -130,13 +130,13 @@ class _ScanCapture:
 
     def __call__(self, argv, cwd=None, env=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
+        if argv == ["ashx", "scan", "--help"]:
             # The gate's probe of the image's options; answered as an ASH that has
             # --fail-on-incomplete-scanners, and not a scan.
             return SimpleNamespace(
                 returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
             )
-        if argv[:2] == ["ash", "scan"]:
+        if argv[:2] == ["ashx", "scan"]:
             effective = _effective_config(argv, env or {})
             content: Optional[str] = None
             if effective and pathlib.Path(effective).is_file():
