@@ -287,6 +287,9 @@ class UVToolMixin:
     # resolve_deferred_tool_version clears once the probe has answered.
     _uv_run_failure: Optional[str]
     _deferred_tool_version_probe: Optional[tuple[str, Optional[str]]]
+    # The PATH executable _select_tool_execution verified and chose to run
+    # directly, or None (a PrivateAttr defaulting to None on PluginBase).
+    _verified_pre_installed_executable: Optional[str]
 
     if TYPE_CHECKING:
         # ScannerPluginBase and ConverterPluginBase declare it, defaulting to
@@ -1735,6 +1738,13 @@ class UVToolMixin:
             )
             self.use_uv_tool = False
             self.dependencies_satisfied = True
+            # Remembered so a later validation of this instance (the per-target
+            # one in _pre_scan, or any direct re-check) honors this decision
+            # instead of re-resolving through uv: the consolidated resolver's
+            # fallback flipped use_uv_tool back to True, discarding the copy
+            # verified here, and paid a cold `uv tool run ... --version` probe
+            # per target doing it. See _honored_verified_pre_installed.
+            self._verified_pre_installed_executable = executable
             # The copy that runs is this one, so the version the reports name
             # (SARIF scanner_version) is its own, not the one the uv probe read
             # from uv's environment. Read with a default: a verifier stand-in
@@ -1817,6 +1827,40 @@ class UVToolMixin:
                 if verdict.status == "unsatisfied"
                 else logging.INFO,
             )
+        self.dependencies_satisfied = True
+        return True
+
+    def _honored_verified_pre_installed(self) -> bool:
+        """Whether an earlier validation's verified-PATH decision still stands.
+
+        True when ``_select_tool_execution`` verified a copy on PATH for this
+        instance, chose to run it directly (``use_uv_tool`` False), and that
+        copy is still an executable file; ``dependencies_satisfied`` is set to
+        match. The scanners' ``validate_plugin_dependencies`` consult this
+        before re-running selection: without it, a re-validation (the
+        per-target one in ``_pre_scan``) skipped its ``if self.use_uv_tool``
+        branch -- the earlier decision had set the flag False -- and fell to
+        the consolidated resolver, which spawned a cold
+        ``uv tool run ... --version`` probe and flipped ``use_uv_tool`` back
+        to True, so the scan ran through uv and the verified copy never ran
+        (ash.log showed "Using pre-installed <tool> at ... directly" followed
+        by "Executing <tool> via UV tool run").
+
+        False, with nothing changed, when no such decision was made; False
+        with the record cleared when the verified copy is gone or no longer
+        executable, so the caller re-resolves and a genuinely unusable tool
+        still fails loudly. A decision something re-pointed at uv
+        (``use_uv_tool`` True again) is not honored either: whatever flipped
+        it knew more recent facts than the record here.
+        """
+        executable = getattr(self, "_verified_pre_installed_executable", None)
+        if executable is None:
+            return False
+        if getattr(self, "use_uv_tool", True):
+            return False
+        if not (os.path.isfile(executable) and os.access(executable, os.X_OK)):
+            self._verified_pre_installed_executable = None
+            return False
         self.dependencies_satisfied = True
         return True
 

@@ -422,6 +422,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     # check by content_database_probe_context so the check reads what the scan read.
     _content_db_cache_dir: Optional[Path] = PrivateAttr(default=None)
 
+    # True once a validate_plugin_dependencies of this instance answered True,
+    # so validate_plugin_dependencies_once answers without re-probing; None
+    # before then and after every False answer, which is re-validated (today's
+    # behavior for a failing tool, so a transient probe failure at setup still
+    # gets its per-target retry and a genuinely missing tool still fails
+    # loudly, per target, with the _pre_scan warning).
+    _dependencies_validated: Optional[bool] = PrivateAttr(default=None)
+
     dependency_unavailable_reason: Annotated[
         str | None,
         Field(
@@ -958,6 +966,33 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         )
         return [item for item in args if item is not None and str(item).strip() != ""]
 
+    def validate_plugin_dependencies_once(self) -> bool:
+        """The dependency verdict, from this instance's one satisfied validation.
+
+        ``validate_plugin_dependencies`` runs once per instance and its True
+        verdict is memoized: the scan phase's setup already validated each
+        selected scanner (and, for a tool verified on PATH, decided the route
+        it runs by -- ``use_uv_tool``), yet ``_pre_scan`` validated again per
+        target, after ``start_time``, so the re-validation's probes landed in
+        the scanner's measured duration and, for checkov, discarded the
+        verified-PATH route (the consolidated resolver flipped the scan back
+        through uv). A memoized answer re-runs nothing, so the setup decision
+        stands and the per-target cost is a field read.
+
+        A False verdict is NOT memoized: a scanner that failed validation at
+        setup re-validates per target, as before, so a transient probe failure
+        gets its retry and a genuinely missing tool still fails per target
+        with the warning. ``dependencies_satisfied`` is set to the answer
+        either way, as both callers set it from the un-memoized call.
+        """
+        verdict = self._dependencies_validated
+        if verdict is None:
+            verdict = bool(self.validate_plugin_dependencies())
+            if verdict:
+                self._dependencies_validated = True
+        self.dependencies_satisfied = verdict
+        return verdict
+
     def _pre_scan(
         self,
         target: Path,
@@ -975,7 +1010,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.start_time = datetime.now(timezone.utc)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        self.dependencies_satisfied = self.validate_plugin_dependencies()
+        # Honors the setup phase's validation of this instance (memoized above)
+        # instead of re-probing per target: the probes ran after start_time, so
+        # their cost read as scan time, and a re-run discarded a verified-PATH
+        # route (checkov's measured shape).
+        self.validate_plugin_dependencies_once()
 
         if not self.dependencies_satisfied:
             self._plugin_log(
@@ -1048,6 +1087,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # build recorded. Only a config that differs replaces it.
             if config != self.config.model_dump(by_alias=True):
                 self.config = self.config.__class__.model_validate(config)
+                # A config that differs can change what the dependency check
+                # verifies (tool_version builds the requirement), so the
+                # memoized verdict and the verified-PATH record no longer
+                # answer for it: the next validation re-probes under the new
+                # config, as every scan did before the memo existed.
+                self._dependencies_validated = None
+                self._verified_pre_installed_executable = None
         self._plugin_log(
             f"config setting: {self._setting_names(config)}",
             target_type=target_type,

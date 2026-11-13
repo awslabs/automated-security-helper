@@ -1790,8 +1790,23 @@ class ScanPhase(EnginePhase):
                                 )
                                 if callable(resolve_version):
                                     resolve_version()
+                                # Through the memoizing wrapper where the plugin
+                                # has one (ScannerPluginBase), so the verdict --
+                                # and the execution route it decided, a verified
+                                # PATH copy included -- is honored by the
+                                # per-target _pre_scan instead of re-probed in
+                                # the worker, inside the scanner's measured
+                                # duration. getattr, as for resolve_version: a
+                                # scanner plugin need not inherit PluginBase.
+                                validate_once = getattr(
+                                    plugin_instance,
+                                    "validate_plugin_dependencies_once",
+                                    None,
+                                )
                                 plugin_instance.dependencies_satisfied = (
-                                    plugin_instance.validate_plugin_dependencies()
+                                    validate_once()
+                                    if callable(validate_once)
+                                    else plugin_instance.validate_plugin_dependencies()
                                 )
                         if (
                             not sandbox_refused
