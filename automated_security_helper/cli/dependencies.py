@@ -804,6 +804,14 @@ def _shown_command(args: Iterable[Any], values: Iterable[str]) -> str:
     return text_without_values(shown, value_tuple(values))
 
 
+class _TimedOutExitCode(int):
+    """The exit code of a command stopped at INSTALL_COMMAND_TIMEOUT_SECONDS.
+
+    An ``int`` with the code's own value, so every caller reads it as before;
+    the type alone says the command timed out rather than failed.
+    """
+
+
 def run_command(args: List[str], shell: bool = False):
     """Run a command and return the exit code.
 
@@ -919,7 +927,12 @@ def run_command(args: List[str], shell: bool = False):
             # whatever its code says, and may have no code: the answer is a
             # non-zero number either way.
             code = result.returncode
-            return code if isinstance(code, int) and code != 0 else 1
+            code = code if isinstance(code, int) and code != 0 else 1
+            # A command stopped at its timeout is told apart from one that
+            # exited non-zero: _run_install_command does not retry it.
+            if getattr(result, "timed_out", False) is True:
+                return _TimedOutExitCode(code)
+            return code
         return result.returncode
     except Exception as e:
         print(
@@ -950,6 +963,10 @@ def _run_install_command(cmd: List[str], shell: bool = False) -> int:
     code = run_command(cmd)
     for attempt, delay in enumerate(_APT_RETRY_DELAYS_SECONDS, start=2):
         if code == 0:
+            break
+        if isinstance(code, _TimedOutExitCode):
+            # Stopped after an hour, not failed fast: a stalled apt-get (the
+            # dpkg lock held) would stall again, three hours in all.
             break
         print(
             f"apt-get install failed with exit code {code}; retrying in "
