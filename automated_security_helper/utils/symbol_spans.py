@@ -40,6 +40,7 @@ declaration, so a finding reported on a decorator line is inside the symbol.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import re
 import threading
@@ -47,22 +48,69 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from automated_security_helper.core.constants import ash_extra_install_command
+from automated_security_helper.core.constants import ASH_DOCS_URL
+from automated_security_helper.utils.ash_install import extra_install_command
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.undecodable_text import undecodable_of_text
 
 #: The optional-dependency extra that provides tree-sitter and its grammars.
 SYMBOLS_EXTRA = "symbols"
+
+
+@functools.cache
+def symbols_extra_install_command() -> str:
+    """The command that installs the symbols extra's packages into ASH's environment.
+
+    Used by the scan warning and by the config lint, so ``ash config lint`` and
+    a scan never name different installs. The packages are read from the
+    running distribution's metadata, so the command matches this ASH whatever
+    its version or source.
+
+    Built once per process. Reading the metadata walks every installed
+    distribution (about 0.46 s with 205 of them), and the scan warning is built
+    once per file a symbol suppression is checked against, under the index lock.
+    The answer cannot change while the process runs.
+    """
+    # Names the extra's packages rather than ASH's distribution with the extra
+    # (the earlier "install automated-security-helper[symbols]"): on PyPI that
+    # name belongs to an unrelated project with no such extra, and a git tag
+    # pinned to the version can lack the extra on a build between releases
+    # (v3.7.0 has none).
+    return extra_install_command(SYMBOLS_EXTRA)
+
+
+#: The docs section with the uvx form of the install.
+SYMBOLS_EXTRA_DOCS_URL = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+
+
+def symbols_extra_install_hint() -> str:
+    """The install advice the scan warning and the config lint both print.
+
+    The command runs uv through the interpreter that runs ASH and installs into
+    that interpreter's environment, which covers a virtualenv, a ``uv tool`` or
+    ``pipx`` install and a checkout's ``uv sync`` environment. uvx rebuilds its
+    cached environment from its own arguments, so for uvx the hint links the docs
+    section that gives the uvx form instead.
+    """
+    return (
+        f"install it with `{symbols_extra_install_command()}`, or for an ASH "
+        f"run by uvx see {SYMBOLS_EXTRA_DOCS_URL}"
+    )
+
 
 #: One identifier. ``\w`` is Unicode-aware, so non-ASCII Python identifiers are
 #: allowed; ``$`` covers JavaScript and ``#`` a JavaScript private member.
 _SEGMENT = r"#?(?!\d)[\w$]+"
 SYMBOL_PATTERN = re.compile(rf"^{_SEGMENT}(?:\.{_SEGMENT})*$")
-_SEGMENT_PATTERN = re.compile(rf"^{_SEGMENT}$")
 
 
 def is_valid_symbol(symbol: str) -> bool:
-    """Return True if ``symbol`` is a well-formed dotted qualified name."""
-    return bool(SYMBOL_PATTERN.match(symbol))
+    """Return True if ``symbol`` is a well-formed dotted qualified name.
+
+    Matched whole: the pattern's ``$`` also matches before a trailing newline,
+    so ``match`` accepted a symbol ending in one, which then matched no span.
+    """
+    return bool(SYMBOL_PATTERN.fullmatch(symbol))
 
 
 @dataclass(frozen=True)
@@ -90,6 +138,16 @@ class SymbolGrammar:
     function_values: frozenset[str] = frozenset()
     span_wrappers: frozenset[str] = frozenset()
     """Parent node types whose span counts as the definition's own."""
+    leading_siblings: frozenset[str] = frozenset()
+    """Node types that, placed right before a definition among its siblings,
+    count as the definition's own lines.
+
+    tree-sitter-typescript parses a class member's decorator as a sibling of the
+    member inside ``class_body``, not as the member's child (Python's decorator is
+    a ``decorated_definition`` parent, Java's annotation a ``modifiers`` child, and
+    plain JavaScript's a field of the method), so a span that started at the
+    member left its decorator line out.
+    """
 
 
 _PYTHON = SymbolGrammar(
@@ -135,6 +193,9 @@ _TYPESCRIPT = SymbolGrammar(
             "interface_declaration",
             "internal_module",
             "module",
+            # A type alias contributes a segment, so a member of its type
+            # literal is ``T.member``, not the enclosing scope's ``member``.
+            "type_alias_declaration",
         }
     ),
     member_definitions={
@@ -148,6 +209,7 @@ _TYPESCRIPT = SymbolGrammar(
     },
     function_values=_JS_FUNCTION_VALUES,
     span_wrappers=frozenset({"export_statement"}),
+    leading_siblings=frozenset({"decorator"}),
 )
 
 _TSX = SymbolGrammar(
@@ -159,6 +221,7 @@ _TSX = SymbolGrammar(
     assigned_definitions=_TYPESCRIPT.assigned_definitions,
     function_values=_TYPESCRIPT.function_values,
     span_wrappers=_TYPESCRIPT.span_wrappers,
+    leading_siblings=_TYPESCRIPT.leading_siblings,
 )
 
 _JAVA = SymbolGrammar(
@@ -218,7 +281,9 @@ def _load_language(grammar: SymbolGrammar) -> Any:
     """Return the tree-sitter ``Language`` for ``grammar``.
 
     Raises SymbolsUnavailableError when tree-sitter or the grammar module is not
-    installed, which is the missing-extra case.
+    installed, which is the missing-extra case, or when the installed binding's
+    API is not the one this module calls (a TypeError from ``Language``), which
+    is as much "no usable grammar" as a missing one and fails closed the same way.
     """
     key = (grammar.module, grammar.loader)
     with _language_lock:
@@ -228,7 +293,7 @@ def _load_language(grammar: SymbolGrammar) -> Any:
             tree_sitter = importlib.import_module("tree_sitter")
             module = importlib.import_module(grammar.module)
             language = tree_sitter.Language(getattr(module, grammar.loader)())
-        except (ImportError, AttributeError, ValueError) as exc:
+        except (ImportError, AttributeError, TypeError, ValueError) as exc:
             raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
         _language_cache[key] = language
         return language
@@ -239,14 +304,15 @@ def _new_parser(grammar: SymbolGrammar) -> Any:
 
     Every import of tree-sitter goes through here or ``_load_language``, so a
     missing extra is always SymbolsUnavailableError and never an ImportError
-    escaping into the suppression pass.
+    escaping into the suppression pass; a binding whose ``Parser`` takes other
+    arguments (TypeError) is refused the same way.
     """
     language = _load_language(grammar)
     try:
         tree_sitter = importlib.import_module("tree_sitter")
-    except ImportError as exc:
+        return tree_sitter.Parser(language)
+    except (ImportError, AttributeError, TypeError) as exc:
         raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
-    return tree_sitter.Parser(language)
 
 
 def _normalize_source(source: bytes) -> bytes:
@@ -290,12 +356,25 @@ def _definition_name(node: Any, grammar: SymbolGrammar) -> Optional[str]:
             name_node = node.child_by_field_name(name_field)
     if name_node is None or name_node.text is None:
         return None
-    # A name that is not one identifier -- a computed or string-keyed method,
-    # a destructuring pattern -- cannot be written as a qualified name. Bytes
-    # that are not UTF-8 decode to U+FFFD, which is not an identifier character,
-    # so such a name never matches rather than matching by accident.
+    # A dotted name (TypeScript's ``namespace A.B {}``) contributes its segments,
+    # so a member is ``A.B.member``. A name that is not identifiers -- a
+    # string-named module (``module "x" {}``), a computed or string-keyed
+    # method, a destructuring pattern -- cannot be written as a qualified name,
+    # and neither can anything defined inside it: it is kept as a segment no
+    # symbol can spell, so its members are not indexed under the enclosing scope
+    # and a suppression for an enclosing name does not cover them by that name.
+    # Bytes that are not UTF-8 decode to U+FFFD, which is not an identifier
+    # character, so such a name never matches rather than matching by accident.
     name = name_node.text.decode("utf-8", errors="replace")
-    return name if _SEGMENT_PATTERN.match(name) else None
+    if SYMBOL_PATTERN.fullmatch(name):
+        return name
+    return _UNSPELLABLE + name
+
+
+#: Prefixed to a definition's name that no symbol can spell (``_definition_name``):
+#: a character outside every identifier, so the qualified names under it match no
+#: suppression.
+_UNSPELLABLE = chr(0x00)
 
 
 def _first_error_line(root: Any) -> int:
@@ -341,6 +420,13 @@ def index_symbols(
                 start.parent is not None and start.parent.type in grammar.span_wrappers
             ):
                 start = start.parent
+            # A decorator the grammar places beside the definition, not inside it
+            # (leading_siblings), begins the definition's own lines.
+            while (
+                start.prev_named_sibling is not None
+                and start.prev_named_sibling.type in grammar.leading_siblings
+            ):
+                start = start.prev_named_sibling
             spans.setdefault(".".join(scope), []).append(_line_span(start, node))
         for child in reversed(node.children):
             if child.is_named:
@@ -369,6 +455,16 @@ _INDEX_LOCK = threading.Lock()
 
 
 def _index_file(path: Path) -> Any:
+    """The spans of ``path``, from the cache or a parse.
+
+    A result is cached under the file's stat only when it is the file's own: a
+    parse, clean or not, of bytes whose stat read the same before and after the
+    read. A grammar that is not available and a file that cannot be read are
+    answered but not cached, since both can change without the file changing
+    (the extra installed, a permission fixed), and a file whose stat moved
+    during the read is answered from the bytes read but not cached under the
+    stat read first, which may be another content's.
+    """
     try:
         stat = path.stat()
     except OSError as exc:
@@ -380,6 +476,7 @@ def _index_file(path: Path) -> Any:
             return cached
         grammar = grammar_for_path(path.name)
         result: Any
+        cacheable = True
         if grammar is None:
             result = _Unresolvable(_unsupported_reason(path.name))
         else:
@@ -388,20 +485,30 @@ def _index_file(path: Path) -> Any:
                 spans = index_symbols(source, grammar)
                 result = _Indexed({k: tuple(v) for k, v in spans.items()})
             except SymbolsUnavailableError as exc:
+                cacheable = False
                 result = _Unresolvable(
                     f"the {grammar.language} grammar is not available ({exc}). "
                     f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
-                    f"{ash_extra_install_command(SYMBOLS_EXTRA)}"
+                    f"{symbols_extra_install_hint()}"
                 )
             except SymbolParseError as exc:
                 result = _Unresolvable(f"the file does not parse cleanly: {exc}")
             except OSError as exc:
+                cacheable = False
                 result = _Unresolvable(
                     f"the file cannot be read ({type(exc).__name__}: {exc})"
                 )
-        if len(_INDEX_CACHE) >= _INDEX_CACHE_MAX:
-            _INDEX_CACHE.clear()
-        _INDEX_CACHE[key] = result
+            if cacheable:
+                try:
+                    after = path.stat()
+                except OSError:
+                    cacheable = False
+                else:
+                    cacheable = (after.st_mtime_ns, after.st_size) == key[1:]
+        if cacheable:
+            if len(_INDEX_CACHE) >= _INDEX_CACHE_MAX:
+                _INDEX_CACHE.clear()
+            _INDEX_CACHE[key] = result
         return result
 
 
@@ -448,6 +555,10 @@ class SymbolResolver:
         if not file_path or line_start is None:
             return False
         end = line_end if line_end is not None else line_start
+        if end < line_start:
+            # A region that ends before it starts is no region: fail closed
+            # rather than let its end alone put it inside a span.
+            return False
 
         resolved = self._resolve(file_path)
         if resolved is None:
@@ -468,12 +579,27 @@ class SymbolResolver:
         )
 
     def _resolve(self, file_path: str) -> Optional[Path]:
-        candidate = Path(file_path.replace("\\", "/"))
+        # Opened by the name the file has on disk: a finding holds a file name that
+        # is not UTF-8 in its record form (\udcNN, utils/undecodable_text.py), read
+        # back first. The path is taken as the finding wrote it: on Windows, Path
+        # reads either separator; on POSIX a backslash is a character of a file
+        # name, and rewriting it to "/" checked a suppression against a file other
+        # than the finding's.
+        if "\x00" in file_path:
+            # No file name holds a NUL. Refused here explicitly: whether
+            # Path.resolve() raises ValueError for an embedded NUL varies by
+            # interpreter and platform (3.14 on Windows returns a path), and a
+            # NUL-holding path must never read as inside the source dir.
+            return None
+        candidate = Path(undecodable_of_text(file_path))
         if not candidate.is_absolute():
             candidate = self._source_dir / candidate
         try:
             resolved = candidate.resolve()
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, ValueError):
+            # ValueError: an embedded NUL, or a lone surrogate the file system's
+            # encoding cannot hold (UnicodeEncodeError). Such a path names no
+            # file, and contains() promises never to raise.
             return None
         if not resolved.is_relative_to(self._source_dir):
             return None

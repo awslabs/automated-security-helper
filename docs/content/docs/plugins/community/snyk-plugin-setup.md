@@ -40,6 +40,7 @@ export SNYK_TOKEN=your-snyk-token-here
 ```
 
 ### Option 2: CLI Authentication
+<!-- doctest: illustrative reason="needs the Snyk CLI, a Snyk account and a browser" -->
 ```bash
 snyk auth
 ```
@@ -83,6 +84,14 @@ To troubleshoot issues in the workflow, you can:
 - **Monitoring**: Monitor token usage in your Snyk dashboard
 
 ## Integration Testing
+
+The community plugin legs scan with `.ash/.ash_community_plugins.yaml`. That file is
+inside the scanned tree, and a config file there cannot load the Snyk plugin, so the
+legs pass it with
+`--ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins`
+(see `.github/actions/run-scan-test/action.yml`). `snyk-code` is disabled in that
+file, so the legs install the Snyk CLI and load the plugin without running a Snyk
+Code scan.
 
 The GitHub Actions workflow tests both Snyk and Trivy plugins together to ensure:
 

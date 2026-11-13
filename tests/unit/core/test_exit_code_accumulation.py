@@ -15,6 +15,8 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class _StubConfig(ScannerPluginConfigBase):
     name: str = "stub"

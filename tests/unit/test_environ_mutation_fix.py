@@ -19,6 +19,10 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from tests.utils.env_assertions import differing_names
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,6 +64,7 @@ def _find_environ_assignments(source_path: Path) -> list[ast.Assign]:
 # ---------------------------------------------------------------------------
 # Site: opengrep_scanner.py — scan() must not mutate os.environ
 # ---------------------------------------------------------------------------
+@pytest.mark.unit
 def test_opengrep_scanner_source_has_no_os_environ_mutation():
     path = (
         _REPO_ROOT
@@ -80,6 +85,7 @@ def test_opengrep_scanner_source_has_no_os_environ_mutation():
 # Site 3: grype_scanner.py — _process_config_options must not mutate
 # os.environ (no restoration today; fully leaks offline flags).
 # ---------------------------------------------------------------------------
+@pytest.mark.unit
 def test_grype_scanner_source_has_no_os_environ_mutation():
     path = (
         _REPO_ROOT
@@ -100,6 +106,7 @@ def test_grype_scanner_source_has_no_os_environ_mutation():
 # Site 4: snyk_code_scanner.py — env_vars block was dead; must no longer
 # contain os.environ writes.
 # ---------------------------------------------------------------------------
+@pytest.mark.unit
 def test_snyk_code_scanner_source_has_no_os_environ_mutation():
     path = (
         _REPO_ROOT
@@ -120,6 +127,7 @@ def test_snyk_code_scanner_source_has_no_os_environ_mutation():
 # mutation here, but ONLY inside a try/finally that restores os.environ
 # back to its starting state. A separate behavior test below proves it.
 # ---------------------------------------------------------------------------
+@pytest.mark.unit
 def test_cdk_nag_wrapper_restores_os_environ(no_cdk_kernel):
     """cdk_nag_wrapper must restore os.environ even if the wrapped code
     raises.
@@ -178,8 +186,9 @@ def test_cdk_nag_wrapper_restores_os_environ(no_cdk_kernel):
             k: after.get(k) for k in watched_keys if k in after and k not in before
         }
         assert not leaked, f"cdk_nag_wrapper leaked env vars after exit: {leaked}"
-        assert before == after, (
-            f"cdk_nag_wrapper left os.environ in a different state. "
+        # By names: comparing the two snapshots would print the whole environment.
+        assert differing_names(before, after) == [], (
+            "cdk_nag_wrapper left os.environ in a different state. "
             f"Added: {set(after) - set(before)}, "
             f"Removed: {set(before) - set(after)}"
         )
@@ -201,6 +210,7 @@ def test_cdk_nag_wrapper_restores_os_environ(no_cdk_kernel):
 # Plumbing test: _run_subprocess in plugin_base must accept env= kwarg and
 # forward it to run_command_with_output_handling.
 # ---------------------------------------------------------------------------
+@pytest.mark.unit
 def test_plugin_base_run_subprocess_accepts_and_forwards_env(tmp_path):
     """The plugin base class must plumb env= through to subprocess."""
     import inspect
@@ -240,8 +250,9 @@ def test_plugin_base_run_subprocess_accepts_and_forwards_env(tmp_path):
             env={"FOO": "bar"},
         )
 
-    assert captured.get("env") == {"FOO": "bar"}, (
-        f"env not forwarded to run_command_with_output_handling: {captured.get('env')}"
+    # By names: a failure would print a merged environment's values.
+    assert differing_names(captured.get("env") or {}, {"FOO": "bar"}) == [], (
+        "env not forwarded unchanged to run_command_with_output_handling"
     )
 
 
@@ -249,6 +260,7 @@ def test_plugin_base_run_subprocess_accepts_and_forwards_env(tmp_path):
 # Additional behavioral check: actually run a subprocess via the util with
 # env= and confirm the environment arrives at the child process.
 # ---------------------------------------------------------------------------
+@pytest.mark.integration
 def test_run_command_with_output_handling_forwards_env_to_subprocess(tmp_path):
     """Sanity check: subprocess_utils already accepts env= and subprocess.run
     passes it through. This pins that contract — the scanners depend on it.
@@ -274,7 +286,12 @@ def test_run_command_with_output_handling_forwards_env_to_subprocess(tmp_path):
             "PATH": os.environ.get("PATH", ""),
             "SystemRoot": os.environ.get("SystemRoot", ""),
             "COMSPEC": os.environ.get("COMSPEC", ""),
+            # A Python child needs a home of its own (tests/conftest.py refuses one
+            # with HOME unset, which would find the passwd home).
+            "HOME": str(tmp_path),
+            "USERPROFILE": str(tmp_path),
         },
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert "propagated" in response.get("stdout", ""), (
         f"env= was not forwarded to subprocess. stdout={response.get('stdout')!r}"

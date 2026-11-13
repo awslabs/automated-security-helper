@@ -8,6 +8,18 @@ inputs:
   python-version:
     description: "Python version label for artifact naming"
     required: true
+  marker:
+    description: >-
+      The test tier to run, one of unit, integration or e2e. It is passed to pytest
+      as -m <marker>, so only tests carrying that tier marker run.
+    required: true
+  shard:
+    description: >-
+      Which slice of the tier to run, written <index>of<count> (for example 3of8).
+      The default, empty, runs the whole tier unsharded. Any other value runs only
+      that shard's test files, through tests/utils/sharding.py (ASH_TEST_SHARD).
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -59,6 +71,28 @@ runs:
         echo "label=${label}" >> "$GITHUB_OUTPUT"
         echo "runner.arch=${RUNNER_ARCH} -> ${label}"
 
+    # Fails closed on a marker that is not one of the three tiers. A typo here would
+    # otherwise reach pytest as `-m <typo>`, which selects nothing and exits 5, or worse,
+    # a misspelling that matches a different marker would run the wrong population under
+    # a job name that says another tier. The value goes through env, as every context
+    # value a shell reads does in this repository. The error line does not print the
+    # value: a workflow command may only print a value that is neutralized or listed in
+    # tests/unit/test_workflow_commands_print_no_unchecked_value.py, and the value here is
+    # exactly the one the case below failed to recognize. It is visible in the step's
+    # environment in the log.
+    - name: Validate the tier marker
+      shell: bash
+      env:
+        MARKER: ${{ inputs.marker }}
+      run: |
+        case "${MARKER}" in
+          unit | integration | e2e) echo "tier marker: ${MARKER}" ;;
+          *)
+            echo "::error::the marker input is not one of unit, integration or e2e."
+            exit 1
+            ;;
+        esac
+
     - name: Install dependencies
       shell: bash
       # --extra cdk is required, not cosmetic. A plain `uv sync` installs no optional
@@ -72,39 +106,206 @@ runs:
       # loaded.
       run: uv sync --extra cdk --extra symbols
 
-    # ASH_REQUIRE_SYMBOLS_EXTRA turns the symbol tests' skip-when-absent into a hard
-    # failure, so a leg that stops installing the extra cannot pass by skipping them.
+    # Prints the limits that decide how many processes a macOS job may hold, so that a refused
+    # process start in the tests can be read against them. It only reports and never fails the
+    # job: every command ends in `|| true`.
+    - name: Report the process limits (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "ulimit -u: $(ulimit -u || true)"
+        echo "kern.maxproc / kern.maxprocperuid:"
+        sysctl kern.maxproc kern.maxprocperuid || true
+        echo "hw.logicalcpu: $(sysctl -n hw.logicalcpu || true)"
+        echo "processes owned by $(id -un): $(ps -U "$(id -un)" -o pid= | wc -l || true)"
+
+    # The e2e tier runs the product against real tools: `ash` as a child process over a
+    # target tree, and the docs pages' commands in a shell. Without the scanners installed,
+    # a page that scans with bandit exits 1 with bandit MISSING where it documents exit 2,
+    # and the links-leaving-the-tree scan records cfn-lint MISSING. This step installs them
+    # with the installer users run, before any test starts, the way the integration-test
+    # job in ash-unified-ci.yml does for its own suite. Pinned binaries land in ASH's bin
+    # directory and the uv tools in uv's tool bin directory;
+    # tests/integration/test_e2e_runner_has_its_tools.py asserts both lists, so keep the
+    # two in step.
+    #
+    # The second command completes the cfn-lint that `uv sync` already put in the
+    # environment. It arrives through moto without the `sarif` extra, `uv run` puts
+    # .venv/bin ahead of every other PATH entry so the scanner finds that copy before the
+    # uv tool installed above, and its pre-installed check wants the extra: offline, a
+    # copy without it is MISSING. The added packages survive `uv run`'s inexact sync.
+    #
+    # Windows gets bandit and checkov only. They are the two scanners the external-target
+    # and multi-project gates install on windows-latest, and semgrep publishes no Windows
+    # build (semgrep_scanner.py), so it cannot be in that list.
+    #
+    # The unit tier runs no real scanner. The integration tier gets bandit alone, in the
+    # step after this one. The other real-tool integration tests skip when their tool is
+    # absent, and the integration-test job in ash-unified-ci.yml is the one that
+    # installs those and requires them.
+    - name: Install the scanners the e2e tier runs for real
+      if: inputs.marker == 'e2e'
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = Windows ]; then
+          uv run ash dependencies install --tool bandit --tool checkov
+        else
+          uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+        fi
+        uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
+
+    # The docs tutorial twin (tests/integration/docs/test_local_tutorial_twin.py) fails
+    # rather than skips when bandit is absent, so that a run that scanned nothing cannot
+    # be green. It runs in the integration tier, which installed nothing before this step.
+    - name: Install bandit for the integration tier's real-tool test
+      if: inputs.marker == 'integration'
+      shell: bash
+      run: uv run ash dependencies install --tool bandit
+
+    # ASH_REQUIRE_SYMBOLS_EXTRA and ASH_REQUIRE_CDK_EXTRA turn the skip-when-absent of the
+    # tests that need each extra into a hard failure, so a leg that stops installing an extra
+    # cannot pass by skipping them. A plain `uv sync` on a contributor's machine sets neither,
+    # and those tests skip there and name the `uv sync --extra ...` that installs the extra.
+    # tests/unit/test_unit_test_step_gates.py fails if either variable is dropped here.
+    #
+    # THE ONE PYTEST STEP, AND WHAT SELECTS WHAT IT RUNS
+    #
+    # The step runs one tier of the suite: `-m "$MARKER"` selects the tests that carry that
+    # tier marker (unit, integration or e2e), and a collection hook in tests/conftest.py
+    # refuses the session when a test carries none or more than one of the three. The
+    # integration and e2e tiers are skipped by tests/conftest.py unless --run-integration
+    # and --run-slow are given, so that a contributor's plain `pytest` stays cheap; this
+    # step passes both for those two tiers and for no other.
+    #
+    # Coverage is measured for the unit tier only, with no threshold here: `--cov-report=`
+    # prints and writes no report, and the data stays in pytest-cov's default .coverage.
+    # The 80% gate belongs to the unit-coverage job in ash-unified-ci.yml, which applies it
+    # once per OS family to the unit tier's data
+    # (.github/scripts/combine-unit-coverage.py). The coverage options are passed here
+    # rather than through pytest.ini's addopts, where they would gate every run and fail a
+    # contributor's run of one directory on total coverage with every test passing.
+    # tests/unit/test_unit_test_step_gates.py pins this command's shape.
+    #
+    # ASH_TEST_SHARD makes tests/conftest.py's pytest_ignore_collect hook (tests/utils/
+    # sharding.py) ignore the test modules another shard owns. An empty value is the whole
+    # tier: shard_from_env (tests/utils/sharding.py, the `None if not text` return) reads
+    # an empty string as no shard. No file is named on the command line: a file named
+    # there would skip pytest's own ignore rules and its python_files match, so pytest
+    # collects exactly as it does for the whole suite and the hook only removes modules,
+    # which are then never imported. The variable is read once, in tests/conftest.py's
+    # pytest_configure, and removed from the environment there, so a pytest a test starts
+    # does not inherit it. xdist workers get the setting through workerinput instead.
+    #
+    # ASH_TEST_TIER_FLOOR turns on the executed-test floor (tests/utils/sharding.py,
+    # fail_a_tier_run_that_executed_no_test): a tier leg that selected tests and executed
+    # none of them, because every one was skipped, exits 1 instead of reading green. It
+    # is the only trigger. A shard alone does not turn the floor on, and neither does
+    # GITHUB_ACTIONS, so that a pytest a test starts, a run under act, and a developer
+    # who reproduces a shard by hand all behave the same everywhere. The variable is
+    # read once and removed from the environment in pytest_configure, like
+    # ASH_TEST_SHARD.
+    #
+    # The value is 1 on every leg, so the floor fails any tier leg that executed no
+    # test. The e2e legs ran in a temporary warn mode (the floor printed its line with
+    # a warning prefix and left the exit status alone) until the e2e scanner install
+    # landed in this action; with the tools installed, an e2e leg that still executes
+    # no test is a defect the floor has to fail, not annotate. A leg whose every skip
+    # is a skipif condition that held is admitted with a notice annotation, because an
+    # admitted leg executed no test either.
+    #
+    # --junit-xml names test-results/pytest.junit.xml; the report step's glob matches it.
+    #
+    # PYTEST_DEBUG_TEMPROOT moves pytest's basetemp (tmp_path and friends) off the
+    # runner's shared /tmp. The sandbox backends deliberately treat anything under
+    # /tmp as already covered by --private-tmp and the fresh `--tmpfs /tmp` mount
+    # (automated_security_helper/utils/sandbox/backends.py, _TMP_ROOT), so a fake
+    # home a test builds under tmp_path gets no --blacklist args when basetemp is
+    # /tmp/pytest-of-runner, and a passwd home under /tmp reads the `--tmpfs /tmp`
+    # value as an ancestor grant: 29 sandbox-policy tests fail on the hosted Linux
+    # runners and pass wherever basetemp lives off /tmp. runner.temp is
+    # /home/runner/work/_temp on the Linux images, so the tests measure the
+    # intended scenario, a home that is NOT inside the sandbox's private tmp.
+    # tests/conftest.py sets this knob with setdefault, so the value here wins.
     - name: Run PyTest
       shell: bash
       env:
         ASH_REQUIRE_SYMBOLS_EXTRA: "1"
-      run: uv run pytest
-
-    # Runs the cdk-nag integration tests, which the default pytest invocation above does
-    # NOT run: tests/conftest.py skips anything whose keywords include "integration", and
-    # pytest picks that up from the tests/integration directory name.
-    #
-    # This step is no longer the only thing that passes --run-integration. The rest of the
-    # suite now runs in the `integration-test` job in ash-unified-ci.yml, which covers all
-    # 115 gated items including these 11. So the reason this step stays scoped to one file
-    # has changed, and it is worth stating rather than leaving the old one to rot: it is
-    # here to keep the cdk-nag path exercised on every Python version in the matrix, which
-    # a single-platform, single-version integration job does not do. That is also why the
-    # duplication is deliberate rather than an oversight.
-    #
-    # The old reason -- that enabling the tree surfaced pre-existing failures and would
-    # make this check noise -- was true when written and is not why the scoping remains.
-    #
-    # ASH_REQUIRE_CDK_EXTRA turns a missing extra into a hard failure instead of a skip, so
-    # this step cannot silently stop testing anything if the install step above changes.
-    - name: Run cdk-nag integration tests
-      shell: bash
-      env:
         ASH_REQUIRE_CDK_EXTRA: "1"
+        PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
+        ASH_TEST_SHARD: ${{ inputs.shard }}
+        # 1 on every leg; see the comment block above. The e2e legs' temporary warn
+        # mode ended with the e2e scanner install: an e2e leg that executes no test
+        # now fails the leg, under the same floor as the other tiers.
+        ASH_TEST_TIER_FLOOR: "1"
+        MARKER: ${{ inputs.marker }}
       run: |
-        uv run pytest \
-          tests/integration/scanners/test_cdk_nag_real_pack.py \
-          --run-integration -p no:randomly --no-cov -v
+        args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml)
+        # Only a sharded leg is told to warn on unused snapshots. syrupy reports unused
+        # snapshots in two ways: when every collected test was selected it reports whole
+        # snapshot files nothing used, and when some were deselected (as `-m` deselects
+        # the other tiers' tests on every leg here) it reports only an entry whose own
+        # test ran and no longer asserts it, a real stale entry. A shard collects a
+        # subset of the modules, so a shard whose collected tests all carry the tier
+        # marker takes the first branch and reports the other shards' snapshot files,
+        # which are unused by construction; that failed legs with no failing test, and
+        # the flag turns it into a warning. A whole-tier run always deselects the other
+        # tiers, so it takes the second branch, where every report is a real stale entry
+        # and syrupy's failing default is kept. The flag is passed here and not in
+        # pytest.ini's addopts, so a contributor's run keeps the check too.
+        if [ -n "${ASH_TEST_SHARD:-}" ]; then
+          args+=(--snapshot-warn-unused)
+        fi
+        if [ "$MARKER" = "unit" ]; then
+          args+=(--cov=automated_security_helper --cov-config=.coveragerc --cov-report=)
+        else
+          args+=(--run-integration --run-slow --no-cov)
+        fi
+        if [ "$MARKER" = "e2e" ]; then
+          # The tests' can-run checks look for a scanner on PATH only, so a scanner that
+          # "Install the scanners the e2e tier runs for real" put in ASH's bin directory
+          # or uv's tool bin directory would be skipped as absent. Both directories are
+          # put on PATH for this step only, as the pre-tiers integration job did, not
+          # through GITHUB_PATH, which zizmor's github-env audit reports in a composite
+          # action. ASH's is ASH_BIN_PATH, else ~/.ash/bin (the product's constants module); uv's is
+          # what `uv tool dir --bin` prints. Neither comes from a workflow expression.
+          ash_bin="${ASH_BIN_PATH:-${HOME}/.ash/bin}"
+          tool_dirs=""
+          for tool_dir in "$ash_bin" "$(uv tool dir --bin)"; do
+            if [ "$RUNNER_OS" = Windows ]; then
+              tool_dir="$(cygpath -u "$tool_dir")"
+            fi
+            tool_dirs="${tool_dirs}${tool_dir}:"
+          done
+          export PATH="${tool_dirs}${PATH}"
+          # Without this the links test's cfn-guard check skips with "no database here",
+          # a false green of the kind the PATH export cures. The cfn-guard install puts the
+          # rules bundle next to ASH's bin directory (the product's rules-bundles helper), and tests
+          # run with a home of their own, so the default location is not found from there.
+          export ASH_CFN_GUARD_RULES_DIR="${ASH_CFN_GUARD_RULES_DIR:-$(dirname "$ash_bin")/share/cfn-guard-rules}"
+        fi
+        uv run pytest "${args[@]}"
+
+    # The run's coverage data, where the artifact upload below carries it to the
+    # unit-coverage job. Only the unit tier measures coverage. It runs after a failed test
+    # run too, since that run's data is still the run's. The name has no leading dot on
+    # purpose: upload-artifact leaves out hidden files unless told otherwise.
+    - name: Keep the unit run's coverage data
+      if: (success() || failure()) && inputs.marker == 'unit'
+      shell: bash
+      run: |
+        mkdir -p test-results
+        cp .coverage test-results/coverage.data
+
+    # WHERE THE CDK-NAG INTEGRATION RUN WENT
+    #
+    # A second step used to run tests/integration/scanners/test_cdk_nag_real_pack.py on
+    # its own, once per OS and Python version, because the default run skipped the
+    # integration directory and a single-platform integration job did not cover every
+    # Python version. The integration-test jobs in ash-unified-ci.yml now run
+    # `-m integration` on every OS and Python version with ASH_REQUIRE_CDK_EXTRA set above,
+    # and that file carries the integration marker, so the tier job exercises the cdk-nag
+    # path on every OS and Python version by itself. A second run of the same file here
+    # would repeat the work the old step's comment apologized for.
 
     # No `update_check: true`. It selected the action's update path, which looks up an
     # existing check run by `job_name` -- default `${{ github.job }}`, the job's YAML
@@ -125,9 +326,11 @@ runs:
       uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
       if: success() || failure()
       with:
-        report_paths: "**/pytest.junit.xml"
+        report_paths: "test-results/*.junit.xml"
         include_passed: true
-        check_name: PyTest - ${{ inputs.os }} ${{ steps.runner-arch.outputs.label }} Python ${{ inputs.python-version }}
+        # Distinct per leg: the tier and the shard are in the name, and an unsharded run
+        # reads "shard all".
+        check_name: PyTest - ${{ inputs.os }} ${{ steps.runner-arch.outputs.label }} Python ${{ inputs.python-version }} ${{ inputs.marker }} shard ${{ inputs.shard || 'all' }}
 
     # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
     # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
@@ -150,10 +353,11 @@ runs:
     # queue.
     #
     # coverage.py has rendered Markdown since 7.0 and pytest-cov>=7.1 already pins it, so this
-    # needs no new dependency and no container. `--fail-under=0` is load-bearing: .coveragerc
-    # sets fail_under=80, `coverage report` exits 2 below it, and this step must not become a
-    # second coverage gate. The real gate is the `--cov` run in pytest.ini, which has already
-    # run by this point and fails the leg on its own.
+    # needs no new dependency and no container. `--fail-under=0` keeps this step from becoming
+    # a second coverage gate: `coverage report` exits 2 below any fail_under it is given, and
+    # .coveragerc would supply one if a threshold were ever added there again. The real gate
+    # is `--fail-under 80` on the unit-coverage job's combine command in
+    # ash-unified-ci.yml, which runs once per OS family after the unit legs finish.
     - name: Code coverage summary
       shell: bash
       # `runner.arch == 'X64'`, not a comparison against the derived label. Both select the same
@@ -161,7 +365,14 @@ runs:
       # reads the runner context directly, so the selection does not depend on the mapping in the
       # step above being right. A typo there can only break an artifact name, never silently
       # deselect every leg.
-      if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64'
+      #
+      # Only for the unit tier: it is the only tier that measures coverage. Each of the four
+      # unit shards on this one combination renders a table from its own shard's data (a
+      # quarter of the suite each); the unit-coverage job renders the combined one over the
+      # four. On a pull request this combination does not run at all (the pull-request cover
+      # in ash-unified-ci.yml keeps no ubuntu-latest tier leg), so the combined table is the
+      # one a reader can count on, and only on a push to main or a merge-queue run.
+      if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64' && inputs.marker == 'unit'
       run: |
         {
           echo '## Code coverage'
@@ -173,6 +384,9 @@ runs:
       if: success() || failure()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: test-results-${{ inputs.os }}-${{ steps.runner-arch.outputs.label }}-py${{ inputs.python-version }}
+        # The marker sits before the shard suffix, so combine-unit-coverage.py's
+        # `-shard<i>of<n>` suffix match and its prefix check keep working. An unsharded
+        # run uploads as shard1of1, a complete set of one.
+        name: test-results-${{ inputs.os }}-${{ steps.runner-arch.outputs.label }}-py${{ inputs.python-version }}-${{ inputs.marker }}-shard${{ inputs.shard || '1of1' }}
         path: test-results/
         if-no-files-found: warn

@@ -16,7 +16,7 @@ name: CDK Extra Drift
 # aws-cdk-lib in pyproject.toml alone, and every dependabot bump since has done
 # the same. dependabot/uv/scanner-minor broke that test on every unit-test leg --
 # 18 of them at the time, 25 since ash-unified-ci.yml gained Python 3.14 and
-# dropped its macos-14 exclusions; dependabot/uv/engine-minor broke it twice
+# dropped its macOS 14 exclusions; dependabot/uv/engine-minor broke it twice
 # before that. Each time a human edited the constant by hand.
 #
 # The leg count is written as "every leg" plus the figures because the bare "18"
@@ -98,16 +98,26 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per pull request; pushing again supersedes the previous run.
+  # One in-flight run per pull request or branch; pushing again supersedes the previous
+  # run.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets. A merge_group entry has its own
+  # per-entry ref, so a second run in its group only means the entry was rebuilt and the
+  # earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   cdk-extra-matches-pyproject:
     name: cdk extra fallback matches pyproject
-    runs-on: ubuntu-latest
+    # ubuntu-slim: queue waves on the ubuntu-latest x64 pool read a median 4,310 s
+    # at peak against 21 s on an arm pool, and this job runs 0.2 min. Measured peak
+    # memory is 908,296 kB (about 0.87 GB) against the slim runner's 5 GB (1 CPU,
+    # 15-minute cap). The script is standard-library Python run under a uv-managed
+    # 3.13 with --no-project, so nothing is arch-specific.
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       contents: read
@@ -123,54 +133,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # uv's cache, split into a restore here and a main-only save after the last
-      # uv step, the same split setup-ash uses for pip and ash-typescript-ci uses for
-      # npm. setup-uv's own `enable-cache: true` restored on every event and saved
-      # from every ref. This workflow also runs on tag pushes, and a tag run read
-      # whatever entry the default branch held: the cache-poisoning shape zizmor
-      # reports. The restore is skipped on a tag push, and only a push to main
-      # writes an entry. With setup-uv's cache off, UV_CACHE_DIR is left unset and
-      # uv uses its default, ~/.cache/uv on Linux, which is the path cached here.
+      # No uv cache. The check runs with --no-project, so it installs no packages: a
+      # run leaves about 16 KB of interpreter metadata in ~/.cache/uv, and the 3.13
+      # interpreter uv may download goes to ~/.local/share/uv/python, outside that
+      # path, so a cache step would move nothing worth a step.
+      # setup-uv's own cache stays off for the reason the other workflows give: it
+      # restores on every event and saves from every ref.
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
-
-      - name: Restore the uv cache
-        id: uv-cache
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/uv
-          key: uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
-
-      - name: "Cache report: uv"
-        if: ${{ !cancelled() && steps.uv-cache.outcome == 'success' }}
-        shell: bash
-        env:
-          CACHE_NAME: uv-cdk-extra
-          CACHE_HIT: ${{ steps.uv-cache.outputs.cache-hit }}
-          CACHE_MATCHED: ${{ steps.uv-cache.outputs.cache-matched-key }}
-        run: |
-          # One line per cache per job, same shape everywhere, so hit rates can be
-          # counted across runs from job summaries.
-          if [ "${CACHE_HIT}" = "true" ]; then result=hit
-          elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
-          else result=miss; fi
-          echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # No --fix here. CI reporting drift and silently repairing it would hide the
       # very pairing the constant needs, and would leave the pushed commit still
       # drifted. The script prints the exact command to run locally.
       - name: Check the fallback constant against pyproject
-        run: uv run --python 3.13 python scripts/sync_cdk_extra_fallback.py
-
-      - name: Save the uv cache (main only)
-        if: >-
-          steps.uv-cache.outputs.cache-hit != 'true'
-          && github.event_name == 'push'
-          && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/uv
-          key: uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
+        run: uv run --no-project --python 3.13 python scripts/sync_cdk_extra_fallback.py

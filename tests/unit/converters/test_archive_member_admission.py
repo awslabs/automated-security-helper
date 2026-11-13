@@ -1,0 +1,1104 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Which archive members are extracted, and what the archive is recorded as.
+
+The converter extracts a member only when some scanner would read it. That used
+to be decided by the member's extension alone, against KNOWN_SCANNABLE_EXTENSIONS,
+so a member with no extension (a Dockerfile, a Pipfile, an SSH private key), a
+key or certificate file, a credential settings file, a lockfile or an ES module
+was never extracted and never scanned, and the skip was logged at debug only.
+Those names are admitted now (SCANNABLE_MEMBER_NAMES, SCANNABLE_MEMBER_SUFFIXES).
+
+Two readings of "extracted whole" change with it. A notebook member is extracted
+as it is, but the jupyter converter reads the scan set and not this converter's
+output, so the notebook's code reaches no scanner as code: its archive is not
+recorded whole. And two members written to one path (``vendor//m.js`` after
+``vendor/m.js``, a tar's repeated name, or two spellings of one name on a
+case-insensitive filesystem) no longer overwrite each other silently: the later
+one is written in a numbered directory beside the earlier with its file name kept
+(``vendor/m~2/m.js``), so both are scanned. Refusing the later one and scanning the
+first, the shape before this, scanned the bytes an unpacker that keeps the first
+member would produce and never the bytes one that keeps the last produces, which
+is what a deploy that unpacks the archive with ``tar`` or ``unzip`` gets. The file
+name is kept because scanners find a manifest, a lockfile or a Dockerfile by it:
+renamed to ``package~2.json``, the later copy, the one tar and unzip keep, was
+scanned as a file the dependency scanners skip.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+import os
+import tarfile
+import time
+import zipfile
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Dict, List, Tuple
+
+import pytest
+
+from automated_security_helper.plugin_modules.ash_builtin.converters import (
+    archive_converter,
+)
+from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+    ArchiveConverter,
+    ArchiveConverterConfig,
+)
+from automated_security_helper.utils.sandbox import fs_guard
+
+pytestmark = pytest.mark.unit
+
+ARCHIVE_MODULE = archive_converter.__name__
+
+
+@pytest.fixture
+def ash_log_records():
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    logger = logging.getLogger("ash")
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+
+
+@pytest.fixture
+def ash_records_at_every_level():
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=1)
+    logger = logging.getLogger("ash")
+    level = logger.level
+    logger.setLevel(1)
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+
+def _zip(path: Path, members: List[Tuple[str, bytes]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, data in members:
+            archive.writestr(name, data)
+    return path
+
+
+def _tar(path: Path, members: List[Tuple[str, bytes]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(path, "w") as archive:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return path
+
+
+def _convert(context, monkeypatch, archive: Path):
+    monkeypatch.setattr(f"{ARCHIVE_MODULE}.scan_set", lambda **kwargs: [str(archive)])
+    converter = ArchiveConverter(context=context, config=ArchiveConverterConfig())
+    results = converter.convert()
+    files: Dict[str, bytes] = {
+        p.relative_to(extracted).as_posix(): p.read_bytes()
+        for extracted in results
+        for p in extracted.rglob("*")
+        if p.is_file()
+    }
+    return converter, results, files
+
+
+SCANNED_BY_NAME = [
+    "Dockerfile",
+    "Dockerfile.prod",
+    "deploy/Containerfile",
+    "Pipfile",
+    "Pipfile.lock",
+    "go.mod",
+    "go.sum",
+    ".npmrc",
+    ".netrc",
+    "keys/id_rsa",
+    "certs/server.key",
+    "certs/cert.pem",
+    "src/app.mjs",
+    "src/comp.vue",
+    "src/main.cc",
+]
+
+
+def test_members_scanners_read_by_name_or_an_unlisted_extension_are_extracted(
+    test_plugin_context, monkeypatch
+):
+    members = [(name, b"content\n") for name in SCANNED_BY_NAME]
+    members.append(("assets/logo.png", b"\x89PNG\r\n\x1a\n"))
+    archive = _zip(Path(test_plugin_context.source_dir) / "a.zip", members)
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert sorted(files) == sorted(SCANNED_BY_NAME)
+    assert converter.refused_inputs == []
+    # The image was left out, so the archive is not recorded as extracted whole.
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Dockerfile",
+        "Dockerfile.prod",
+        "Dockerfile-prod",
+        "dockerfile",
+        "MAKEFILE",
+        "Makefile_linux",
+        ".npmrc",
+        "id_rsa",
+        "id_rsa.old",
+        "id_ed25519-2024",
+        "credentials",
+        ".git-credentials",
+        ".pgpass",
+        ".htpasswd",
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        "config/.ENV.Staging",
+        "authorized_keys",
+        "known_hosts",
+        "go.mod",
+        "a.lock",
+        "x.mjs",
+        "identity",
+        ".ssh/identity",
+        "README",
+        "docs/readme",
+    ],
+)
+def test_the_admission_test_names_what_scanners_read(name):
+    assert archive_converter._member_is_scannable(name) is True
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "logo.png",
+        "a.woff",
+        "Dockerfiles",
+        "id_card",
+        "identities",
+        "README-logo.png",
+        ".environment",
+        ".enviro.local",
+        ".gitkeep",
+    ],
+)
+def test_the_admission_test_leaves_out_what_no_scanner_reads(name):
+    assert archive_converter._member_is_scannable(name) is False
+
+
+def test_a_legacy_private_key_and_a_readme_are_extracted(
+    test_plugin_context, monkeypatch
+):
+    """``identity`` is OpenSSH's legacy default private-key name, and a README is a
+    text file the secret scanners read like any other. Both were left out of an
+    archive as members no scanner reads, so a key kept under either name reached
+    neither gitleaks nor detect-secrets."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [
+            (
+                ".ssh/identity",
+                b"-----BEGIN OPENSSH PRIVATE KEY-----\nnot a key\n",
+            ),  # pragma: allowlist secret
+            ("README", b"token: not a token\n"),
+            ("ok.js", b"ok = 1\n"),
+        ],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert sorted(files) == [".ssh/identity", "README", "ok.js"]
+    assert converter.refused_inputs == []
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == {"a.zip"}
+
+
+def test_a_notebook_member_is_extracted_but_its_archive_is_not_recorded_whole(
+    test_plugin_context, monkeypatch
+):
+    """The jupyter converter never sees it, so its code is not scanned as code."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("nb.ipynb", b'{"cells": []}\n'), ("ok.js", b"ok = 1\n")],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert sorted(files) == ["nb.ipynb", "ok.js"]
+    assert converter.refused_inputs == []
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+
+
+@pytest.mark.parametrize(
+    ("kind", "first", "second", "renamed"),
+    [
+        pytest.param(
+            "zip", "vendor//m.js", "vendor/m.js", "vendor/m~2/m.js", id="zip-spellings"
+        ),
+        pytest.param(
+            "tar", "./vendor/m.js", "vendor/m.js", "vendor/m~2/m.js", id="tar-spellings"
+        ),
+        pytest.param(
+            "tar", "vendor/m.js", "vendor/m.js", "vendor/m~2/m.js", id="tar-repeated"
+        ),
+        pytest.param(
+            "zip", "Dockerfile", "Dockerfile", "Dockerfile~2/Dockerfile", id="no-ext"
+        ),
+        pytest.param(
+            "zip",
+            "package-lock.json",
+            "package-lock.json",
+            "package-lock~2/package-lock.json",
+            id="lockfile",
+        ),
+        pytest.param("zip", "lib/M.js", "lib/m.js", "lib/m~2/m.js", id="case-fold"),
+    ],
+)
+def test_two_members_written_to_one_path_are_both_extracted(
+    test_plugin_context, monkeypatch, kind, first, second, renamed, ash_log_records
+):
+    """The later member holds the finding here: it is the one a deploy that unpacks
+    the archive with tar or unzip gets, and it used to be refused unscanned. It
+    keeps its file name, in a numbered directory beside the first: written as
+    ``package-lock~2.json`` or ``Dockerfile~2``, it was a file the scanners that
+    find a lockfile or a Dockerfile by name never read.
+
+    The output filesystem's answer to "does case fold" is set to yes here: the
+    ``case-fold`` id is a pair of spellings that are one file only where it does,
+    and the answer is otherwise this host's own (no on Linux), so the id read red
+    there. The other ids name one path however it is spelled and do not depend on it."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: True
+    )
+    maker = _zip if kind == "zip" else _tar
+    archive = maker(
+        Path(test_plugin_context.source_dir) / f"a.{kind}",
+        [(first, b"m = 1\n"), (second, b"m = 2\n"), ("ok.js", b"ok = 1\n")],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    expected_first = archive_converter._member_written_path(first, kind)
+    assert files == {
+        expected_first: b"m = 1\n",
+        renamed: b"m = 2\n",
+        "ok.js": b"ok = 1\n",
+    }
+    # The duplicate's file name is the name as read; only its directory is new.
+    assert renamed.rsplit("/", 1)[-1] == second.rsplit("/", 1)[-1]
+    assert converter.refused_inputs == []
+    notices = [
+        r.getMessage()
+        for r in ash_log_records
+        if r.levelno >= logging.WARNING and renamed in r.getMessage()
+    ]
+    assert len(notices) == 1 and f"a.{kind}" in notices[0], notices
+    assert "numbered directory" in notices[0] and "file name kept" in notices[0]
+
+
+def test_three_members_written_to_one_path_count_up(test_plugin_context, monkeypatch):
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("m.js", b"1\n"), ("m.js", b"2\n"), ("./m.js", b"3\n")],
+    )
+
+    _, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"m.js": b"1\n", "m~2/m.js": b"2\n", "m~3/m.js": b"3\n"}
+
+
+def test_a_renamed_member_never_takes_a_later_members_own_name(
+    test_plugin_context, monkeypatch
+):
+    """``m~2/m.js`` is the archive's own third member. Picking the placement
+    against the members written so far gave the second ``m.js`` that place, and
+    the real ``m~2/m.js`` was then moved in its turn, so the scan's paths named
+    the wrong bytes. Every member's name is read before any is renamed."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("m.js", b"1\n"), ("m.js", b"2\n"), ("m~2/m.js", b"3\n")],
+    )
+
+    _, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"m.js": b"1\n", "m~3/m.js": b"2\n", "m~2/m.js": b"3\n"}
+
+
+def test_a_renamed_member_never_takes_a_directory_a_member_is_named_as(
+    test_plugin_context, monkeypatch
+):
+    """``m~2`` is the archive's own file: the duplicate cannot be placed in a
+    directory of that name, so it takes the next counter. Every member's name
+    counts, whether or not a scanner reads it."""
+    monkeypatch.setattr(archive_converter, "_member_is_scannable", lambda name: True)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("m.js"), zipfile.ZipInfo("m.js"), zipfile.ZipInfo("m~2")]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert [member.filename for member in admitted] == ["m.js", "m~3/m.js", "m~2"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "order"),
+    [
+        pytest.param("zip", "directory-first", id="zip-directory-first"),
+        pytest.param("zip", "directory-last", id="zip-directory-last"),
+        pytest.param("tar", "directory-first", id="tar-directory-first"),
+        pytest.param("tar", "directory-last", id="tar-directory-last"),
+    ],
+)
+def test_a_renamed_member_never_lands_on_a_directory_of_another_member(
+    test_plugin_context, monkeypatch, kind, order
+):
+    """``m~2/m.js`` is a directory the archive's own ``x.py`` is written below, so
+    the duplicate ``m.js`` cannot be placed there as a file; it takes the next
+    counter whichever way round the members come. Checked against the members
+    written so far alone, the placement landed on that directory: with the
+    directory's member first the extractor failed the whole archive on it
+    (IsADirectoryError, an input error a suppression could waive), and with it
+    last the archive's own ``x.py`` was refused as under a file."""
+    maker = _zip if kind == "zip" else _tar
+    below = ("m~2/m.js/x.py", b"x = 1\n")
+    duplicates = [("m.js", b"1\n"), ("m.js", b"2\n")]
+    members = (
+        [below, *duplicates] if order == "directory-first" else [*duplicates, below]
+    )
+    archive = maker(Path(test_plugin_context.source_dir) / f"a.{kind}", members)
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"m~2/m.js/x.py": b"x = 1\n", "m.js": b"1\n", "m~3/m.js": b"2\n"}
+    assert converter.failed_inputs == []
+    assert converter.refused_inputs == []
+
+
+def test_members_under_a_file_are_listed_up_to_the_cap_and_counted_past_it(
+    test_plugin_context,
+):
+    """Twenty-five pairs ``xN.js`` / ``xN.js/y.js``: the later member of each is
+    refused as under a file. The reason is one constant text, so the listing cap
+    applies: 20 refusals recorded one by one, the other 5 counted in one record.
+    With the colliding path inside the reason every pair was its own reason and
+    25 records and 25 warnings were made, the shape the cap exists to prevent."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = []
+    for index in range(25):
+        members.append(zipfile.ZipInfo(f"x{index}.js"))
+        members.append(zipfile.ZipInfo(f"x{index}.js/y.js"))
+
+    admitted = converter.inspect_members(members, target_path=None, archive="a.zip")
+
+    assert [member.filename for member in admitted] == [
+        f"x{index}.js" for index in range(25)
+    ]
+    listed = [r for r in converter.refused_inputs if r.member is not None]
+    counted = [r for r in converter.refused_inputs if r.member is None]
+    assert len(listed) == archive_converter.MEMBER_REFUSALS_LISTED
+    assert {r.reason for r in listed} == {archive_converter._MEMBER_UNDER_A_FILE}
+    assert "x0.js" not in archive_converter._MEMBER_UNDER_A_FILE
+    (summary,) = counted
+    assert summary.unlisted_members == 25 - archive_converter.MEMBER_REFUSALS_LISTED
+    assert summary.reason == archive_converter._MEMBER_UNDER_A_FILE
+
+
+@pytest.mark.skipif(os.sep != "/", reason="a backslash separates on this host")
+def test_a_backslash_stays_part_of_a_name_where_the_extractor_keeps_it(
+    test_plugin_context, monkeypatch
+):
+    """On POSIX zipfile writes ``a\\b.js`` as one file at the archive's top; the
+    rename used to read the backslash as a separator and put the second member
+    under a directory ``a``, a different place from the member it stood beside.
+    The numbered directory is beside the file, at the top, and the name keeps
+    its backslash."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("a\\b.js", b"1\n"), ("a\\b.js", b"2\n")],
+    )
+
+    _, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"a\\b.js": b"1\n", "a\\b~2/a\\b.js": b"2\n"}
+
+
+def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
+    test_plugin_context, monkeypatch, ash_log_records
+):
+    """N members named alike cost N names and a bounded number of notices. The
+    rename used to try every counter from 2 for each duplicate (N squared key
+    computations: 2,000 duplicates took about two million) and logged a WARNING
+    apiece."""
+    count = 2000
+    calls = {"n": 0}
+    real_key = archive_converter._written_key
+
+    def counting_key(member_name, kind, fold=True):
+        calls["n"] += 1
+        return real_key(member_name, kind, fold)
+
+    monkeypatch.setattr(archive_converter, "_written_key", counting_key)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("m.js") for _ in range(count)]
+
+    started = time.monotonic()
+    admitted = converter.inspect_members(members, target_path=None)
+    elapsed = time.monotonic() - started
+
+    names = [member.filename for member in admitted]
+    assert len(names) == count and len(set(names)) == count
+    assert names[:3] == ["m.js", "m~2/m.js", "m~3/m.js"]
+    # Linear, six keys per renamed member: one before the loop (taken), one for
+    # its destination, one for the written key the rename counts from, two for
+    # the rename (the placement and its directory) and one for the renamed
+    # destination; never a walk over every earlier counter. The renamed path's
+    # directories are answered by component and cost no key, so the bound of
+    # seven per member keeps a margin of one over the six (2 + 6 * 1,999 =
+    # 11,996 for 2,000 members, the first member costing two).
+    assert calls["n"] <= 7 * count, calls["n"]
+    assert elapsed < 10, elapsed
+    notices = [r.getMessage() for r in ash_log_records if r.levelno >= logging.WARNING]
+    single = [n for n in notices if "is written as" in n]
+    aggregate = [n for n in notices if "more members" in n]
+    assert len(single) == archive_converter.MEMBER_REFUSALS_LISTED, len(single)
+    expected = count - 1 - archive_converter.MEMBER_REFUSALS_LISTED
+    assert len(aggregate) == 1 and f"{expected} more members" in aggregate[0], aggregate
+
+
+def test_log_lines_naming_members_and_archives_are_not_read_as_markup(
+    test_plugin_context, ash_records_at_every_level
+):
+    """A member's or an archive's name is the archive's own, and a ``[/x]`` in one
+    is a closing tag if a handler reads the line as markup. The handlers do not by
+    default, so the flag is defensive: it keeps the line text should that default
+    change, as the neighboring record_*_input lines do with NO_MARKUP. Each line
+    that names a member or an archive carries it: a refusal with no archive, the
+    detail of a refusal under one, a rename, a member found, and an archive
+    extracted only in part. The lines are produced, so a missing one fails the test
+    too."""
+    records = ash_records_at_every_level
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+
+    converter.inspect_members([zipfile.ZipInfo("/[/a].js")], target_path=None)
+    converter.inspect_members(
+        [zipfile.ZipInfo("[/x].js"), zipfile.ZipInfo("[/x].js/y.js")],
+        target_path=None,
+        archive="a.zip",
+    )
+    converter.inspect_members(
+        [zipfile.ZipInfo("[/m].js"), zipfile.ZipInfo("[/m].js")],
+        target_path=None,
+        archive="b.zip",
+    )
+    converter._record_extracted_in_part("[/a].tar", [1024], [], archive_file="[/a].tar")
+
+    for fragment in (
+        "Skipped archive member",
+        "runs through",
+        "numbered directory",
+        "Found .js file",
+        "was extracted only in part",
+    ):
+        lines = [
+            r for r in records if fragment in r.getMessage() and "[/" in r.getMessage()
+        ]
+        assert lines, fragment
+        assert all(getattr(r, "markup", True) is False for r in lines), fragment
+
+
+def _lines_naming(records, fragment, sep=os.sep):
+    """The records whose text holds ``fragment`` and a ``[`` ending a path component.
+
+    The path spells that as ``[/`` where the separator is ``/`` and as ``[\\`` where
+    it is a backslash (Windows): the directory ``d[`` is displayed as ``d[<sep>x]``,
+    so the hazard the test names (a bracket then the separator) is spelled with the
+    separator of the host that made the path. A line that shows an archive by its
+    scan-set display name (``d[/x].zip``) always spells it with ``/``, whatever the
+    host, so it passes ``sep="/"``.
+    """
+    hazard = "[" + sep
+    return [
+        r for r in records if fragment in r.getMessage() and hazard in r.getMessage()
+    ]
+
+
+def test_debug_lines_naming_a_scan_set_path_are_not_read_as_markup(
+    test_plugin_context, monkeypatch, ash_records_at_every_level
+):
+    """The debug lines that name a scan-set path carry the flag too, as the
+    warning and verbose lines beside them do: a directory skipped, and an archive
+    kept out by a global ignore path. The directory ``d[`` holds ``x]``, so the
+    path spells ``[/``, which a handler that read the line as markup would take
+    for a closing tag."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    directory = Path(test_plugin_context.source_dir) / "d[" / "x]"
+    directory.mkdir(parents=True)
+    ignored = Path(test_plugin_context.source_dir) / "d[" / "x].zip"
+    monkeypatch.setattr(
+        converter,
+        "_ignore_paths_skipping_scanning",
+        lambda: [SimpleNamespace(path="p", reason="[/r]")],
+    )
+    monkeypatch.setattr(archive_converter, "ignore_path_matches", lambda *_: True)
+
+    assert converter._skipped(str(directory)) is True
+    assert converter._skipped(str(ignored)) is True
+
+    for fragment in ("Skipping directory", "Skipping conversion of ignored path"):
+        lines = _lines_naming(ash_records_at_every_level, fragment)
+        assert lines, fragment
+        assert all(getattr(r, "markup", True) is False for r in lines), fragment
+
+
+def test_the_debug_line_for_an_archive_not_extracted_whole_is_not_read_as_markup(
+    test_plugin_context, monkeypatch, ash_records_at_every_level
+):
+    """An archive with a member no scanner reads is extracted without it, and the
+    debug line that says so names the archive. The archive sits in the directory
+    ``d[`` and is named ``x].zip``, so its displayed path spells ``[/``."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "d[" / "x].zip",
+        [("ok.js", b"ok\n"), ("assets/logo.png", b"\x89PNG\r\n\x1a\n")],
+    )
+
+    _convert(test_plugin_context, monkeypatch, archive)
+
+    lines = _lines_naming(ash_records_at_every_level, "not extracted whole", "/")
+    assert lines
+    assert all(getattr(r, "markup", True) is False for r in lines)
+
+
+def test_the_debug_line_for_an_unsupported_archive_format_is_not_read_as_markup(
+    test_plugin_context, monkeypatch, ash_records_at_every_level
+):
+    """A file named ``.gz`` alone decompresses to no name at all
+    (``_plain_gzip_name`` answers None for an empty inner name), and it is not
+    named as a zip or a tar either, so it is left to the scanners as it is, and
+    the debug line that says so names the file. A gzip-NAMED file whose bytes
+    are not gzip (``x].gz`` of plain text) moved to the failed-input class and
+    no longer reaches this arm. The file sits in the directory ``d[``, so its
+    displayed path spells ``[/``."""
+    path = Path(test_plugin_context.source_dir) / "d[" / ".gz"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"plain text, not gzip data\n")
+
+    _convert(test_plugin_context, monkeypatch, path)
+
+    lines = _lines_naming(ash_records_at_every_level, "unsupported archive format")
+    assert lines
+    assert all(getattr(r, "markup", True) is False for r in lines)
+
+
+def test_a_member_left_out_costs_no_directory_strings(test_plugin_context, monkeypatch):
+    """Every prefix of every member's path used to be built up front, so a name of
+    thousands of components built a string per prefix, each as long as the prefix
+    (a 64 KiB ``a/a/.../a`` is about a gigabyte of characters), even for a member
+    no scanner reads and that is left out unlooked at. A member left out reaches
+    no directory key now: the run's only key for it is the one read before any
+    member is renamed, so the count of keys made is the count of members."""
+    calls = {"n": 0}
+    real = archive_converter._written_key
+
+    def counting(member_name, kind, fold=True):
+        calls["n"] += 1
+        return real(member_name, kind, fold)
+
+    monkeypatch.setattr(archive_converter, "_written_key", counting)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("a/" * 50 + f"logo{i}.png") for i in range(20)]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert admitted == []
+    assert converter.refused_inputs == []
+    assert calls["n"] == len(members)
+
+
+def _windows_like_normcase(path: str) -> str:
+    """What ``ntpath.normcase`` does to a name: lower-cases it and writes ``/`` as
+    a backslash. Stood in for ``os.path.normcase`` so a test reads the shape a
+    Windows host gives the keys on any host."""
+    return path.replace("/", "\\").lower()
+
+
+class _PathAsOnWindows:
+    """``os.path`` as the archive converter sees it, with only ``normcase``
+    replaced; everything else is the real module's."""
+
+    normcase = staticmethod(_windows_like_normcase)
+
+    def __getattr__(self, name):
+        return getattr(os.path, name)
+
+
+class _OsAsOnWindows:
+    """``os`` as the archive converter sees it, with ``path`` replaced. The stand-in
+    is set on the converter's module alone, so nothing else that reads
+    ``os.path.normcase`` (pathlib's case-sensitivity probe, which is cached) meets
+    it."""
+
+    path = _PathAsOnWindows()
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+def _stand_in_windows_normcase(monkeypatch) -> None:
+    monkeypatch.setattr(archive_converter, "os", _OsAsOnWindows())
+
+
+@pytest.mark.parametrize("fold", [True, False], ids=["fold-on", "fold-off"])
+@pytest.mark.parametrize("host", ["posix", "windows-like"])
+def test_a_member_runs_through_a_directory_only_where_a_key_starts_with_it_and_a_separator(
+    fold, host, monkeypatch
+):
+    """The directory test the rename reads: over the sorted keys of every member,
+    one bisect. ``m~2/m.js`` is a directory because a member is written below it;
+    ``m.js`` and ``m`` are not, nor ``m~3/m.js``; and a key that merely starts
+    with the same characters (``ab`` beside ``abc/x``) is not a directory.
+
+    The keys are made by ``_written_key`` with the same switch the test reads them
+    with, on a host that leaves names alone and on one that writes ``/`` as a
+    backslash when it folds them: with the fold off the keys keep ``/`` on both,
+    and the separator the test looks for has to be the one they carry."""
+    if host == "windows-like":
+        _stand_in_windows_normcase(monkeypatch)
+
+    def key(name: str) -> str:
+        return archive_converter._written_key(name, "zip", fold)
+
+    keys = sorted(key(n) for n in ["m.js", "m~2/m.js/x.py", "abc/x", "other"])
+
+    def runs_through(name: str, sorted_keys=keys) -> bool:
+        return archive_converter._a_member_runs_through(key(name), sorted_keys, fold)
+
+    assert runs_through("m~2/m.js") is True
+    assert runs_through("m~2") is True
+    assert runs_through("abc") is True
+    assert runs_through("m.js") is False
+    assert runs_through("m") is False
+    assert runs_through("m~3/m.js") is False
+    assert runs_through("ab") is False
+    assert runs_through("m.js", []) is False
+
+
+@pytest.mark.parametrize("fold", [True, False], ids=["fold-on", "fold-off"])
+def test_a_duplicate_is_not_placed_where_a_later_members_directory_stands_on_a_host_that_folds_names(
+    test_plugin_context, monkeypatch, fold
+):
+    """The same case as the control below it, on a host whose ``normcase`` writes
+    ``/`` as a backslash (Windows), with the output directory measured to fold case
+    (the control) and not to (the case this guards): the keys keep ``/`` when the
+    fold is off, so a directory test that looked for the host's separator found no
+    key under ``m~2/m.js``, placed the second ``m.js`` there, and refused the
+    archive's own ``m~2/m.js/x.py`` as under a file."""
+    _stand_in_windows_normcase(monkeypatch)
+    monkeypatch.setattr(archive_converter, "_filesystem_folds_case", lambda _t: fold)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m~2/m.js/x.py"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert [m.filename for m in admitted] == ["m.js", "m~3/m.js", "m~2/m.js/x.py"]
+    assert converter.refused_inputs == []
+
+
+def test_a_renamed_member_never_takes_a_name_a_later_members_directory_stands_on(
+    test_plugin_context,
+):
+    """The control for the directory test, end to end: the second ``m.js`` would be
+    placed at ``m~2/m.js``, where the later member ``m~2/m.js/x.py`` needs a
+    directory, so it is placed at ``m~3/m.js`` and the later member is kept."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m~2/m.js/x.py"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert [m.filename for m in admitted] == ["m.js", "m~3/m.js", "m~2/m.js/x.py"]
+    assert converter.refused_inputs == []
+
+
+def test_an_admitted_member_costs_no_directory_strings(
+    test_plugin_context, monkeypatch
+):
+    """The cost of a member that is extracted is the length of its name, whatever
+    its depth. Every directory of every admitted member used to be built as a key
+    (a string as long as the directory, one per component) and kept for the whole
+    archive: a 64 KiB ``a/a/.../a.js`` is about a gigabyte of characters on a host
+    with no path limit, and each such member added its own. The count of keys made
+    is the measure: two per member (the one read before any is renamed and the
+    member's destination), where a member of 200 components made 201 more."""
+    calls = {"n": 0}
+    real_key = archive_converter._written_key
+
+    def counting_key(member_name, kind, fold=True):
+        calls["n"] += 1
+        return real_key(member_name, kind, fold)
+
+    monkeypatch.setattr(archive_converter, "_written_key", counting_key)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo(f"d{i}/" + "a/" * 200 + "x.js") for i in range(20)]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert len(admitted) == len(members)
+    assert converter.refused_inputs == []
+    assert calls["n"] <= 2 * len(members), calls["n"]
+
+
+def test_deep_admitted_members_are_still_checked_against_each_other(
+    test_plugin_context,
+):
+    """The checks the directory keys served hold for names of many components: a
+    member below an admitted file and a file where an admitted member's directory
+    stands are each refused alone, and the others are extracted."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    deep = "a/" * 200
+    members = [
+        zipfile.ZipInfo(deep + "x.js"),
+        zipfile.ZipInfo(deep + "x.js/y.js"),
+        zipfile.ZipInfo(deep + "lib.js/z.py"),
+        zipfile.ZipInfo(deep + "lib.js"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=None, archive="a.zip")
+
+    assert [m.filename for m in admitted] == [deep + "x.js", deep + "lib.js/z.py"]
+    assert sorted(r.reason for r in converter.refused_inputs) == sorted(
+        [
+            archive_converter._MEMBER_UNDER_A_FILE,
+            archive_converter._MEMBER_OVER_A_DIRECTORY,
+        ]
+    )
+
+
+@pytest.mark.parametrize("fold", [True, False], ids=["fold-on", "fold-off"])
+@pytest.mark.parametrize("host", ["posix", "windows-like"])
+def test_the_admitted_paths_answer_by_component_on_either_separator(
+    fold, host, monkeypatch
+):
+    """``file_below`` names the admitted file a path runs through (not the path
+    itself), ``is_directory`` says whether an admitted member's path runs through a
+    key, and a key that only starts with the same characters is neither. The keys
+    are made by ``_written_key`` with the switch the tree is made with, so on a
+    host that writes ``/`` as a backslash when it folds names they carry the
+    backslash with the fold on and ``/`` with it off."""
+    if host == "windows-like":
+        _stand_in_windows_normcase(monkeypatch)
+
+    def key(name: str) -> str:
+        return archive_converter._written_key(name, "zip", fold)
+
+    admitted = archive_converter._AdmittedPaths(fold)
+    admitted.add(key("lib/sub/a.js"))
+    admitted.add(key("lib/b.js"))
+
+    assert admitted.file_below(key("lib/sub/a.js/x.py")) == key("lib/sub/a.js")
+    assert admitted.file_below(key("lib/b.js/c/d.py")) == key("lib/b.js")
+    assert admitted.file_below(key("lib/sub/a.js")) is None
+    assert admitted.file_below(key("lib/sub/other.js")) is None
+    assert admitted.file_below(key("other/a.js/x.py")) is None
+    assert admitted.file_below(key("li/b.js/x.py")) is None
+
+    assert admitted.is_directory(key("lib")) is True
+    assert admitted.is_directory(key("lib/sub")) is True
+    assert admitted.is_directory(key("lib/sub/a.js")) is False
+    assert admitted.is_directory(key("lib/b.js")) is False
+    assert admitted.is_directory(key("li")) is False
+    assert admitted.is_directory(key("lib/su")) is False
+    assert admitted.is_directory(key("sub")) is False
+
+
+def _tmp_folds_case(directory: Path) -> bool:
+    """The test's own read of the filesystem under ``directory``: whether a file
+    written in lower case is found by its upper-case spelling."""
+    probe = directory / "case-probe-lower.tmp"
+    probe.write_bytes(b"")
+    try:
+        return (directory / "CASE-PROBE-LOWER.TMP").exists()
+    finally:
+        probe.unlink()
+
+
+def test_the_case_probe_reads_the_output_filesystem_and_leaves_nothing(tmp_path):
+    """The probe's answer for a not-yet-made extraction directory is the answer
+    for its nearest existing ancestor, equal to the test's own read of the same
+    filesystem, and the probe file is gone afterwards. With no target path the
+    answer is True, the side that loses nothing."""
+    expected = _tmp_folds_case(tmp_path)
+
+    answer = archive_converter._filesystem_folds_case(tmp_path / "out" / "a.zip")
+
+    assert answer is expected
+    assert list(tmp_path.iterdir()) == []
+    assert archive_converter._filesystem_folds_case(None) is True
+
+
+def test_the_case_probe_is_written_beside_an_existing_extraction_directory_never_in_it(
+    tmp_path, monkeypatch
+):
+    """The zip and tar routes make the extraction directory before the members are
+    inspected, so a probe written into the nearest existing directory landed inside
+    it, and a probe a failed removal left there was a file the scanners read as part
+    of the archive. The probe goes to the directory's parent, the results
+    directory, whether the extraction directory exists or not."""
+    results = tmp_path / "results"
+    extraction = results / "a.zip"
+    extraction.mkdir(parents=True)
+    probed: List[Path] = []
+    # The probe is written through the write guard (fs_guard.open_for_write, which
+    # _filesystem_folds_case imports when it runs), not through the builtin open,
+    # so the guard's entry point is where the probe's path is seen.
+    real_open_for_write = fs_guard.open_for_write
+
+    def recording_open(path, *args, **kwargs):
+        probed.append(Path(path))
+        return real_open_for_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(fs_guard, "open_for_write", recording_open)
+
+    archive_converter._filesystem_folds_case(extraction)
+    archive_converter._filesystem_folds_case(results / "b.zip")
+
+    assert [p.parent for p in probed] == [results, results]
+    assert list(extraction.iterdir()) == []
+    assert not any(p.exists() for p in probed)
+
+
+def test_a_member_under_a_directory_spelled_like_a_file_is_extracted_where_case_counts(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """``Foo.js`` then ``foo.js/bar.js``: on a case-sensitive filesystem these are
+    a file and a directory with different names, and both are written. The keys
+    used to fold case whatever the filesystem, so the second read as a member
+    under the first's file and was refused for a collision the host never has;
+    ``Foo.js`` and ``foo.js`` were likewise renamed as one path. The filesystem's
+    answer is set here, so the test reads the same on every host. A third member
+    ``foo.js`` is a file where the directory ``foo.js`` stands, which no filesystem
+    writes, so it is refused alone, by its own reason, and is not what the fold
+    decides."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: False
+    )
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("Foo.js"),
+        zipfile.ZipInfo("foo.js/bar.js"),
+        zipfile.ZipInfo("foo.js"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=tmp_path, archive="a.zip")
+
+    assert [m.filename for m in admitted] == ["Foo.js", "foo.js/bar.js"]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "foo.js"
+    assert refused.reason == archive_converter._MEMBER_OVER_A_DIRECTORY
+
+
+def test_two_members_differing_only_in_case_are_both_written_where_case_counts(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """``Foo.js`` and ``foo.js`` are two files on a case-sensitive filesystem: both
+    are admitted under the names they were read with, none renamed or refused. The
+    filesystem's answer is set here, so the test reads the same on every host."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: False
+    )
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo("Foo.js"), zipfile.ZipInfo("foo.js")]
+
+    admitted = converter.inspect_members(members, target_path=tmp_path, archive="a.zip")
+
+    assert [m.filename for m in admitted] == ["Foo.js", "foo.js"]
+    assert converter.refused_inputs == []
+
+
+def test_a_member_under_a_directory_spelled_like_a_file_is_refused_where_case_folds(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The control: where the filesystem folds case, ``foo.js/bar.js`` would be
+    written under the file ``Foo.js`` and is refused alone, and ``foo.js`` is
+    written beside ``Foo.js`` in a numbered directory, as before."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: True
+    )
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("Foo.js"),
+        zipfile.ZipInfo("foo.js/bar.js"),
+        zipfile.ZipInfo("foo.js"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=tmp_path, archive="a.zip")
+
+    assert [m.filename for m in admitted] == ["Foo.js", "foo~2/foo.js"]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "foo.js/bar.js"
+    assert refused.reason == archive_converter._MEMBER_UNDER_A_FILE
+
+
+def test_the_written_key_keeps_case_with_the_fold_off_on_a_host_that_lower_cases_names(
+    monkeypatch,
+):
+    """``os.path.normcase`` lower-cases on Windows (ntpath), so a key that applied
+    it before reading the fold switch folded case whatever the output filesystem
+    was measured to do: a case-sensitive NTFS directory never got the behavior,
+    and the test of ``Foo.js`` beside ``foo.js/bar.js`` failed on the Windows leg.
+    The host's normcase is stood in for here (``str.lower``), so the test reads
+    the same on every host: with the fold off the key keeps the case, with it on
+    the key folds (the control)."""
+    monkeypatch.setattr(os.path, "normcase", str.lower)
+
+    assert archive_converter._written_key("Foo.js", "zip", fold=False) == "Foo.js"
+    assert archive_converter._written_key("Foo.js", "zip", fold=True) == "foo.js"
+    for fold, directory, other_case in (
+        (False, "Lib/Sub", "lib/sub"),
+        (True, "lib/sub", "Lib/Sub"),
+    ):
+        admitted = archive_converter._AdmittedPaths(fold)
+        admitted.add(archive_converter._written_key("Lib/Sub/Foo.js", "zip", fold))
+        assert admitted.is_directory(directory) is True
+        assert admitted.is_directory(other_case) is False
+
+
+def test_a_zip_with_a_file_and_a_directory_differing_in_case_extracts_both_where_case_counts(
+    test_plugin_context, monkeypatch
+):
+    """End to end on this host's filesystem, where it is case-sensitive: the
+    archive is extracted with both members in place. Skipped where the
+    filesystem folds case, since there the refusal is right."""
+    source = Path(test_plugin_context.source_dir)
+    source.mkdir(parents=True, exist_ok=True)
+    if _tmp_folds_case(source):
+        pytest.skip("the filesystem under test folds case")
+    archive = _zip(source / "a.zip", [("Foo.js", b"1\n"), ("foo.js/bar.js", b"2\n")])
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"Foo.js": b"1\n", "foo.js/bar.js": b"2\n"}
+    assert converter.refused_inputs == []
+
+
+def test_members_written_to_distinct_paths_are_all_extracted(
+    test_plugin_context, monkeypatch
+):
+    """The control: ordinary members share no path and none is refused."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "a.zip",
+        [("vendor/m.js", b"m = 1\n"), ("vendor/n.js", b"n = 1\n"), ("m.js", b"m\n")],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert sorted(files) == ["m.js", "vendor/m.js", "vendor/n.js"]
+    assert converter.refused_inputs == []
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == {"a.zip"}
+
+
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_a_member_under_a_file_member_is_refused_alone(
+    test_plugin_context, monkeypatch, kind
+):
+    """``x.js`` and then ``x.js/y.js``: the second cannot be written under a file.
+    The extractor failed on it, and the whole archive was recorded as a failed
+    input, ``x.js`` and ``ok.js`` lost with it, so two members were enough to keep
+    an archive's content from being scanned. The member is refused alone now,
+    with a reason saying its path runs through a file (the log line names which
+    file, so the reason stays one string per kind for the listing cap), and the
+    rest is extracted."""
+    maker = _zip if kind == "zip" else _tar
+    archive = maker(
+        Path(test_plugin_context.source_dir) / f"a.{kind}",
+        [("x.js", b"x\n"), ("x.js/y.js", b"y\n"), ("ok.js", b"ok\n")],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"x.js": b"x\n", "ok.js": b"ok\n"}
+    assert converter.failed_inputs == []
+    (refused,) = converter.refused_inputs
+    assert (refused.path, refused.member) == (f"a.{kind}", "x.js/y.js")
+    assert "runs through a path" in refused.reason, refused.reason
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+
+
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_a_member_written_where_earlier_members_are_extracted_below_is_refused_alone(
+    test_plugin_context, monkeypatch, kind
+):
+    """The reverse order: ``d.js/b.js`` and then a file named ``d.js``. The later
+    member cannot be written where the directory stands (IsADirectoryError failed
+    the whole archive before); it is refused alone and ``d.js/b.js`` is scanned.
+    The file is named as one a scanner reads: a name no scanner reads is left out
+    before the collision check and records nothing."""
+    maker = _zip if kind == "zip" else _tar
+    archive = maker(
+        Path(test_plugin_context.source_dir) / f"a.{kind}",
+        [("d.js/b.js", b"b\n"), ("d.js", b"d\n"), ("ok.js", b"ok\n")],
+    )
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"d.js/b.js": b"b\n", "ok.js": b"ok\n"}
+    assert converter.failed_inputs == []
+    (refused,) = converter.refused_inputs
+    assert (refused.path, refused.member) == (f"a.{kind}", "d.js")
+    assert "below its path" in refused.reason, refused.reason
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()

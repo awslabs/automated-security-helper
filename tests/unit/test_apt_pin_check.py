@@ -15,9 +15,13 @@ says which version to move to.
 The indexes here are recorded: trimmed copies of the real bookworm,
 bookworm-updates, bookworm-security and NodeSource node_22.x ``Packages`` files
 for amd64 and arm64, taken 2026-10-07 and cut down to the stanzas of the pinned
-packages, under ``tests/test_data/apt_indices/<host>/<path>``. The Debian ones are
+packages, under ``tests/test_data/apt_indices/<host>/<path>``. The
+bookworm-security ca-certificates stanza was refreshed on 2026-10-27, when the
+archive replaced 20250419~deb12u1 with 20250419~deb12u2 and the image build
+started failing on the old pin. The Debian ones are
 served xz-compressed, as the archive serves them, so the decompression path runs
-too. No test reaches the network: ``urlopen`` fails the test if anything calls it.
+too. No test reaches the network: the HTTP and HTTPS transports fail the test if
+anything reaches them.
 
 Each assertion that the real Dockerfile is clean is paired with a negative
 control that removes or changes one thing and shows the same check going red.
@@ -27,11 +31,14 @@ from __future__ import annotations
 
 import importlib.util
 import lzma
+import socket
 import sys
 import urllib.request
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_pinned_tool_versions.py"
@@ -56,7 +63,13 @@ def _no_network(monkeypatch):
     def refuse(*args, **kwargs):
         raise AssertionError("a unit test reached the network")
 
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    # At the transport, which every opener goes through, urlopen's and the script's
+    # own redirect-checking opener alike.
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", refuse)
+    monkeypatch.setattr(urllib.request.HTTPHandler, "http_open", refuse)
+    monkeypatch.setattr(urllib.request.FTPHandler, "ftp_open", refuse)
+    # A backstop beneath every transport, the ones not patched above included.
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
 
 
 def _fixture_path(url: str) -> Path:
@@ -304,7 +317,7 @@ class TestAgainstTheRecordedIndexes:
                 _drop(
                     f"deb.nodesource.com/node_22.x/dists/nodistro/main/binary-{arch}/Packages",
                     "nodejs",
-                    "22.23.3-1nodesource1",
+                    "22.23.4-1nodesource1",
                 )
             )
         results = _check(overrides)
@@ -337,16 +350,32 @@ class TestMain:
         # of them is answered with its own value, keeping the exit code the apt pins'
         # alone. Answering only the module's pins left each REPO_PINS lookup failing,
         # which exits 2 whatever the apt pins say.
-        pinned = {
+        pinned_versions = {
             p.project: p.version
             for p in checker.enumerate_pins(checker.load_pins_module())
             + checker.enumerate_repo_pins()
         }
-        monkeypatch.setattr(
-            checker,
-            "DEFAULT_FETCHERS",
-            dict.fromkeys(checker.DEFAULT_FETCHERS, pinned.__getitem__),
-        )
+
+        def pinned(project: str) -> str:
+            return pinned_versions[project]
+
+        def gem_releases(project: str) -> "list[dict[str, object]]":
+            # A RubyGems versions answer listing only the pinned release.
+            return [
+                {
+                    "number": pinned(project),
+                    "prerelease": False,
+                    "platform": "ruby",
+                    "ruby_version": ">= 0",
+                }
+            ]
+
+        # Every ecosystem the checker has a fetcher for is answered, so a fetcher
+        # added later cannot fall through to the network; RubyGems is the one whose
+        # answer is a list of releases rather than a single version.
+        fetchers = dict.fromkeys(checker.DEFAULT_FETCHERS, pinned)
+        fetchers[checker.RUBYGEMS] = gem_releases
+        monkeypatch.setattr(checker, "DEFAULT_FETCHERS", fetchers)
         code = checker.main(list(argv))
         return code, capsys.readouterr().out
 

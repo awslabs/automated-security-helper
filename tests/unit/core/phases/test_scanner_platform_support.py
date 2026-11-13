@@ -50,6 +50,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+pytestmark = pytest.mark.unit
+
 # tests/unit/core/phases/ -> four levels up is the repository root. Asserted rather than
 # trusted: an off-by-one here does not fail at import, it fails once per gate test with a
 # FileNotFoundError naming a path under tests/, which reads as a missing script rather

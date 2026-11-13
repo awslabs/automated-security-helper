@@ -40,6 +40,8 @@ from typing import Any, Dict
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "verify_multi_project_attribution.py"
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
@@ -65,6 +67,11 @@ gate = _load_gate()
 # ---------------------------------------------------------------------------
 
 
+def _producer(rule_id: str) -> str:
+    """The scanner that produces a rule ID: checkov's are CKV, the rest bandit's."""
+    return "checkov" if rule_id.startswith("CKV") else "bandit"
+
+
 def _result(
     rule_id: str,
     *,
@@ -86,7 +93,7 @@ def _result(
         "level": "error",
         "message": {"text": "fixture"},
         "properties": {
-            "scanner_name": "bandit",
+            "scanner_name": _producer(rule_id),
             "workspace_project": project,
             "workspace_uri": f"{relative_path}/{relative}",
         },
@@ -116,12 +123,28 @@ def workspace_root(tmp_path):
 
 @pytest.fixture
 def output_dir(tmp_path, workspace_root):
-    """A per-project output tree of the shape the executor writes."""
+    """A per-project output tree of the shape the executor writes.
+
+    Each project's own results file carries its own ``scanner_results``, with
+    both selected scanners run and tripped, because the gate reads them: the
+    rollup's worst-status and summed-count view cannot show one project in which
+    a selected scanner did not run, so that is asserted per project.
+    """
     out = tmp_path / "output"
     for project in gate.FIXTURE_PROJECTS:
         subtree = out / "projects" / project.key
         (subtree / "scanners" / "bandit" / "source").mkdir(parents=True)
-        (subtree / gate.RESULTS_FILENAME).write_text("{}", encoding="utf-8")
+        (subtree / gate.RESULTS_FILENAME).write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        scanner: {"status": "FAILED", "finding_count": 1}
+                        for scanner in gate.GATE_SCANNERS
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
     return out
 
 
@@ -136,6 +159,12 @@ def healthy(workspace_root, output_dir):
     """
     runs = []
     projects = []
+    # The rollup carries both scanners the gate selects, each with its own share of
+    # the findings, so a check that reads only one of them cannot pass on this file.
+    rollup = {
+        scanner: {"finding_count": 0, "actionable_finding_count": 0}
+        for scanner in gate.GATE_SCANNERS
+    }
     for index, project in enumerate(gate.FIXTURE_PROJECTS):
         results = [
             _result("B307", project=project.key),
@@ -169,7 +198,21 @@ def healthy(workspace_root, output_dir):
         # makes the strict 'src < project-b' inequality hold, and it holds by a
         # margin equal to the number of bandit findings rather than by everything
         # being gated.
-        actionable = 1 if project.threshold == "CRITICAL" else len(live)
+        live_checkov = sum(
+            1 for entry in live if entry["properties"]["scanner_name"] == "checkov"
+        )
+        if project.threshold == "CRITICAL":
+            actionable_by_scanner = {"bandit": 0, "checkov": 1}
+        else:
+            actionable_by_scanner = {
+                "bandit": len(live) - live_checkov,
+                "checkov": live_checkov,
+            }
+        actionable = sum(actionable_by_scanner.values())
+        rollup["bandit"]["finding_count"] += len(live) - live_checkov
+        rollup["checkov"]["finding_count"] += live_checkov
+        for scanner, count in actionable_by_scanner.items():
+            rollup[scanner]["actionable_finding_count"] += count
         runs.append(
             {
                 "tool": {"driver": {"name": "ASH"}},
@@ -210,15 +253,16 @@ def healthy(workspace_root, output_dir):
             "exit_code": 2,
             "projects": projects,
             "unconvertible_finding_paths": 0,
+            # The execution knobs the root config sets, as the real payload
+            # reports them (WorkspaceResults.max_parallel_projects /
+            # project_timeout): check_execution_knobs_reached_the_run reads
+            # them on every evaluation, so a healthy file has to carry them.
+            "max_parallel_projects": gate.ROOT_MAX_PARALLEL_PROJECTS,
+            "project_timeout": float(gate.ROOT_PROJECT_TIMEOUT_SECONDS),
         },
         "scanner_results": {
-            "bandit": {
-                "status": "PASSED",
-                "finding_count": sum(p["finding_count"] for p in projects),
-                "actionable_finding_count": sum(
-                    p["actionable_finding_count"] for p in projects
-                ),
-            },
+            scanner: {"status": "PASSED", **counts}
+            for scanner, counts in rollup.items()
         },
         "sarif": {"version": "2.1.0", "runs": runs},
     }
@@ -239,11 +283,11 @@ class TestHealthyResultsPass:
         assert outcome.violations == []
         assert outcome.passed
 
-    def test_exit_zero_is_also_tolerated(self, healthy, output_dir):
-        """In case a future default turns fail_on_findings off."""
+    def test_exit_zero_with_exceeding_projects_is_refused(self, healthy, output_dir):
+        """The healthy file has projects over their thresholds, so 0 contradicts it."""
         healthy["workspace"]["exit_code"] = 0
         outcome = _evaluate(healthy, output_dir, exit_code=0, repo_root=REPO_ROOT)
-        assert outcome.violations == []
+        assert any("exited 0 although" in v for v in outcome.violations)
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +350,124 @@ class TestAttributionRegression:
         healthy["sarif"]["runs"][0]["properties"].pop("workspace_project")
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("no properties.workspace_project" in v for v in outcome.violations)
+
+
+def _run_of(results: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """The SARIF run attributed to the project ``key``."""
+    return next(
+        run
+        for run in results["sarif"]["runs"]
+        if run["properties"]["workspace_project"] == key
+    )
+
+
+def _attribution_violations(results: Dict[str, Any]) -> list[str]:
+    """What the payload-internal attribution check says about ``results``."""
+    return gate.check_findings_are_attributed_to_their_own_project(
+        gate.collect_runs(results)
+    )
+
+
+#: Every fixture project. The cases below run against each one, because the prefix
+#: test they sharpen behaves differently for the project named ``src``.
+ALL_PROJECT_KEYS = [project.key for project in gate.FIXTURE_PROJECTS]
+
+
+class TestWorkspaceUriNamesTheFindingsOwnFile:
+    """A workspace_uri is the project's path followed by the finding's own file.
+
+    A prefix test alone cannot show that. For the project named ``src`` every
+    fixture file already begins with ``src/``, so a path that was never rebased
+    onto its project still starts with the project's path. And the part after the
+    prefix is never read, so a path that names a different file of the same
+    project passes. Each failing case applies one of those to a payload that
+    passes cleanly; the controls beside them pass on correct output.
+    """
+
+    @pytest.mark.parametrize("key", ALL_PROJECT_KEYS)
+    def test_a_workspace_uri_never_rebased_onto_its_project_fails(self, healthy, key):
+        result = _run_of(healthy, key)["results"][0]
+        artifact = result["locations"][0]["physicalLocation"]["artifactLocation"]
+        result["properties"]["workspace_uri"] = artifact["uri"]
+        violations = _attribution_violations(healthy)
+        assert any(
+            f"'{key}'" in v and "workspace_uri value(s)" in v for v in violations
+        ), violations
+
+    @pytest.mark.parametrize("key", ALL_PROJECT_KEYS)
+    def test_a_workspace_uri_naming_another_file_of_the_project_fails(
+        self, healthy, key
+    ):
+        project = next(p for p in gate.FIXTURE_PROJECTS if p.key == key)
+        result = _run_of(healthy, key)["results"][0]
+        artifact = result["locations"][0]["physicalLocation"]["artifactLocation"]
+        assert artifact["uri"] == gate.FIXTURE_RELATIVE_PATH
+        result["properties"]["workspace_uri"] = (
+            f"{project.relative_path}/{gate.FIXTURE_MARKER_RELATIVE_PATH}"
+        )
+        violations = _attribution_violations(healthy)
+        assert any(f"'{key}'" in v and "own artifact path" in v for v in violations), (
+            violations
+        )
+
+    def test_a_workspace_uri_with_no_location_to_come_from_fails(self, healthy):
+        result = _run_of(healthy, "project-a")["results"][0]
+        result["locations"] = []
+        violations = _attribution_violations(healthy)
+        assert any(
+            "'project-a'" in v and "own artifact path" in v for v in violations
+        ), violations
+
+    def test_the_gate_reports_a_bare_workspace_uri_in_the_project_named_src(
+        self, healthy, output_dir
+    ):
+        """The case the prefix test could not see: ``src/insecure.py`` in ``src``."""
+        result = _run_of(healthy, "src")["results"][0]
+        result["properties"]["workspace_uri"] = gate.FIXTURE_RELATIVE_PATH
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert not outcome.passed
+        assert any(
+            "'src'" in v and "own artifact path" in v for v in outcome.violations
+        ), outcome.violations
+
+    def test_workspace_uris_naming_each_findings_own_file_pass(self, healthy):
+        """Every project, with several different files in each, on correct output."""
+        assert _attribution_violations(healthy) == []
+
+    def test_the_project_named_src_passes_with_a_rebased_workspace_uri(self, healthy):
+        run = _run_of(healthy, "src")
+        uris = {r["properties"]["workspace_uri"] for r in run["results"]}
+        assert f"src/{gate.FIXTURE_RELATIVE_PATH}" in uris
+        assert _attribution_violations({"sarif": {"runs": [run]}}) == []
+
+    def test_a_workspace_uri_naming_any_of_the_findings_own_locations_passes(
+        self, healthy
+    ):
+        """The aggregator uses the first location it can place, so a finding with
+        several locations may name a later one."""
+        result = _run_of(healthy, "project-b")["results"][0]
+        result["locations"].append(
+            {
+                "physicalLocation": {
+                    "artifactLocation": {
+                        "uri": gate.FIXTURE_MARKER_RELATIVE_PATH,
+                        "uriBaseId": "PROJECTROOT",
+                    }
+                }
+            }
+        )
+        result["properties"]["workspace_uri"] = (
+            f"project-b/{gate.FIXTURE_MARKER_RELATIVE_PATH}"
+        )
+        assert _attribution_violations(healthy) == []
+
+    def test_a_backslash_artifact_uri_matches_the_slashed_workspace_uri(self, healthy):
+        """The aggregator writes separators for a Windows project's backslashes."""
+        result = _run_of(healthy, "project-a")["results"][0]
+        artifact = result["locations"][0]["physicalLocation"]["artifactLocation"]
+        artifact["uri"] = "src\\insecure.py"
+        assert result["properties"]["workspace_uri"] == "project-a/src/insecure.py"
+        assert _attribution_violations(healthy) == []
 
 
 class TestMisattributionShapes:
@@ -598,7 +760,103 @@ class TestSuppressionScopeRegression:
                 if entry["ruleId"] != gate.SUPPRESSED_RULE_ID
             ]
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
-        assert any("no longer fires" in v for v in outcome.violations)
+        # The message names the rule as absent "neither live nor suppressed" and
+        # tells the reader which of the two causes to check; "no longer fires"
+        # is the comment's phrase for one of them, not the message's.
+        assert any(
+            "does not appear in" in v and "neither live nor suppressed" in v
+            for v in outcome.violations
+        ), outcome.violations
+
+
+#: Every rule the healthy results show in the suppressing project besides the one
+#: it suppresses: two of the shared file's findings, the project's own marker, and
+#: the terraform finding. Its one suppression names a single rule at a single path,
+#: so none of these may carry a suppression.
+OTHER_RULES_IN_THE_SUPPRESSING_PROJECT = (
+    "B307",
+    "B602",
+    gate.MARKER_RULE_BY_PROJECT[gate.SUPPRESSING_PROJECT],
+    "CKV_AWS_18",
+)
+
+
+class TestSuppressionIsShownToApply:
+    """No unsuppressed occurrence of the rule is not proof its suppression applied.
+
+    In the suppressing project the check used to read a live count of zero as "the
+    suppression applied". Zero is also what a shared file that was never scanned in
+    that project looks like, and what a finding dropped instead of being marked
+    suppressed looks like. The check has to see the rule there with a suppression
+    on it, and has to see no suppression on anything else.
+
+    These call the check itself rather than the whole gate, so each mutation is
+    judged by this check alone and no unrelated assertion can satisfy or break a
+    test.
+    """
+
+    @staticmethod
+    def _suppressing_run(healthy):
+        return next(
+            run
+            for run in healthy["sarif"]["runs"]
+            if run["properties"]["workspace_project"] == gate.SUPPRESSING_PROJECT
+        )
+
+    @staticmethod
+    def _violations(healthy):
+        return gate.check_suppression_is_project_scoped(gate.collect_runs(healthy))
+
+    @pytest.mark.parametrize(
+        "dropped",
+        [
+            pytest.param((gate.SUPPRESSED_RULE_ID,), id="the-rule-alone"),
+            pytest.param(
+                ("B307", "B602", gate.SUPPRESSED_RULE_ID), id="the-whole-shared-file"
+            ),
+        ],
+    )
+    def test_a_suppressing_project_showing_no_trace_of_the_rule_fails(
+        self, healthy, dropped
+    ):
+        run = self._suppressing_run(healthy)
+        run["results"] = [
+            entry for entry in run["results"] if entry["ruleId"] not in dropped
+        ]
+        violations = self._violations(healthy)
+        assert any(
+            "nothing shows that its suppression applied" in v for v in violations
+        ), violations
+
+    @pytest.mark.parametrize("rule", OTHER_RULES_IN_THE_SUPPRESSING_PROJECT)
+    def test_a_suppression_reaching_another_rule_in_its_own_project_fails(
+        self, healthy, rule
+    ):
+        marked = 0
+        for entry in self._suppressing_run(healthy)["results"]:
+            if entry["ruleId"] == rule:
+                entry["suppressions"] = [{"kind": "external"}]
+                marked += 1
+        assert marked == 1, f"the healthy results hold no single {rule} result"
+        violations = self._violations(healthy)
+        assert any(
+            f"rule {rule} is suppressed" in v
+            and "reached beyond its own rule and path" in v
+            for v in violations
+        ), violations
+
+    def test_a_suppression_that_stays_within_its_rule_passes(self, healthy):
+        assert self._violations(healthy) == []
+
+    def test_every_occurrence_of_the_rule_being_suppressed_passes(self, healthy):
+        run = self._suppressing_run(healthy)
+        first = next(
+            entry
+            for entry in run["results"]
+            if entry["ruleId"] == gate.SUPPRESSED_RULE_ID
+        )
+        run["results"].append(copy.deepcopy(first))
+        assert self._violations(healthy) == []
 
 
 class TestThresholdScopeRegression:
@@ -687,6 +945,58 @@ class TestOutputSubtreeRegression:
         assert any("no 'scanners' directory" in v for v in outcome.violations)
 
 
+class TestASelectedScannerSkippedInOneProject:
+    """The rollup hides one project; the project's own results file does not.
+
+    The rollup status is the worst across the projects and its count is their
+    sum, so checkov SKIPPED in one project (its Terraform file lost) sat behind
+    three FAILED projects with non-zero counts, and the rollup-level checks
+    passed. The healthy rollup is left exactly as it is here, so the only thing
+    that can report the gap is the per-project read.
+    """
+
+    def _rewrite_own(self, output_dir, key, scanner_results):
+        (output_dir / "projects" / key / gate.RESULTS_FILENAME).write_text(
+            json.dumps({"scanner_results": scanner_results}), encoding="utf-8"
+        )
+
+    def test_a_skipped_scanner_in_one_project_fails_behind_a_healthy_rollup(
+        self, healthy, output_dir
+    ):
+        self._rewrite_own(
+            output_dir,
+            "project-b",
+            {
+                "bandit": {"status": "FAILED", "finding_count": 3},
+                "checkov": {"status": "SKIPPED", "finding_count": 0},
+            },
+        )
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        gaps = [
+            v
+            for v in outcome.violations
+            if "'project-b'" in v and "'checkov'" in v and "SKIPPED" in v
+        ]
+        assert gaps, outcome.violations
+        # Named as a root cause, like a rollup-level gap, and the rollup checks
+        # themselves stayed quiet: the rollup is the healthy fixture's.
+        assert gaps[0] in outcome.root_violations
+        assert not any("absent from scanner_results" in v for v in outcome.violations)
+        assert not any("in the rollup" in v for v in outcome.violations)
+
+    def test_a_scanner_absent_from_one_projects_own_file_fails(
+        self, healthy, output_dir
+    ):
+        self._rewrite_own(
+            output_dir, "src", {"bandit": {"status": "FAILED", "finding_count": 3}}
+        )
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "'src'" in v and "no scanner_results entry for 'checkov'" in v
+            for v in outcome.violations
+        ), outcome.violations
+
+
 # ---------------------------------------------------------------------------
 # Status, exit code, and fixture scoping
 # ---------------------------------------------------------------------------
@@ -697,7 +1007,8 @@ class TestScannerRollupRegression:
 
     def test_a_rollup_actionable_of_zero_fails(self, healthy, output_dir):
         """The exact shape of the defect: initialised, defaulted, never summed."""
-        healthy["scanner_results"]["bandit"]["actionable_finding_count"] = 0
+        for entry in healthy["scanner_results"].values():
+            entry["actionable_finding_count"] = 0
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any(
             "would conclude this workspace is clean" in v for v in outcome.violations
@@ -715,10 +1026,72 @@ class TestScannerRollupRegression:
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("finding total" in v for v in outcome.violations)
 
+    def test_the_other_selected_scanners_count_is_read_too(self, healthy, output_dir):
+        """The rollup sums both selected scanners, so checkov's share is checked."""
+        healthy["scanner_results"]["checkov"]["finding_count"] += 5
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("finding total" in v for v in outcome.violations)
+
     def test_an_empty_rollup_fails(self, healthy, output_dir):
         healthy["scanner_results"] = {}
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("recorded no scanners" in v for v in outcome.violations)
+
+
+class TestPerScannerRollupReadFromTheAggregatedFile:
+    """The per-scanner count check reads the aggregated file the run wrote.
+
+    The other tests in this module hand the gate the rollup in memory, and the
+    check below reads ``<output>/ash_aggregated_results.json`` instead; with no
+    such file it returns nothing, so the healthy fixture alone never exercises
+    it. Here that file is written beside the per-project subtrees the fixture
+    already carries, and the check is run through ``evaluate_results``.
+    """
+
+    @staticmethod
+    def _write_aggregated(output_dir, counts):
+        (output_dir / gate.RESULTS_FILENAME).write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        scanner: {"status": "FAILED", "finding_count": count}
+                        for scanner, count in counts.items()
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_an_aggregated_file_matching_the_projects_sums_is_clean(
+        self, healthy, output_dir
+    ):
+        # Each project's own file in the fixture reports one finding per scanner.
+        share = len(gate.FIXTURE_PROJECTS)
+        self._write_aggregated(output_dir, {"bandit": share, "checkov": share})
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert outcome.violations == []
+
+    def test_one_scanners_count_moved_into_anothers_is_reported(
+        self, healthy, output_dir
+    ):
+        """The totals across both scanners still agree, so only this check sees it."""
+        share = len(gate.FIXTURE_PROJECTS)
+        self._write_aggregated(output_dir, {"bandit": share + 1, "checkov": share - 1})
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        reported = [
+            v for v in outcome.violations if "the projects' own results sum to" in v
+        ]
+        assert len(reported) == 2, outcome.violations
+        assert any(
+            f"scanner_results['bandit'].finding_count is {share + 1} " in v
+            and f"sum to {share} for it" in v
+            for v in reported
+        )
+        assert any(
+            f"scanner_results['checkov'].finding_count is {share - 1} " in v
+            and f"sum to {share} for it" in v
+            for v in reported
+        )
 
 
 class TestLostWorkspacePathRegression:
@@ -831,11 +1204,33 @@ class TestFailedAndSkippedProjects:
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("status ERROR" in v for v in outcome.violations)
 
-    def test_a_scanner_that_is_missing_is_tolerated(self, healthy, output_dir):
-        """MISSING means the tool is not installed on this runner."""
+    def test_an_unselected_scanner_that_is_missing_is_tolerated(
+        self, healthy, output_dir
+    ):
+        """MISSING on a scanner the gate did not select is a normal runner state."""
         healthy["scanner_results"]["semgrep"] = {"status": "MISSING"}
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert outcome.violations == []
+
+    @pytest.mark.parametrize("status", ["MISSING", "SKIPPED"])
+    def test_a_selected_scanner_that_did_not_run_fails_the_gate(
+        self, healthy, output_dir, status
+    ):
+        """The gate reads checkov's status as well as bandit's."""
+        healthy["scanner_results"]["checkov"]["status"] = status
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("'checkov'" in v and status in v for v in outcome.violations)
+        assert any("'checkov'" in v for v in outcome.root_violations)
+
+    def test_a_selected_scanner_absent_from_the_rollup_fails_the_gate(
+        self, healthy, output_dir
+    ):
+        del healthy["scanner_results"]["checkov"]
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "'checkov'" in v and "absent from scanner_results" in v
+            for v in outcome.violations
+        )
 
 
 class TestFixtureScoping:
@@ -1032,9 +1427,12 @@ class TestWorkflowWiring:
         assert "multi-project-attribution" in workflow["jobs"], sorted(workflow["jobs"])
         return workflow["jobs"]["multi-project-attribution"]
 
-    def test_the_job_runs_on_ubuntu_and_windows(self, job):
+    def test_the_job_runs_on_linux_and_windows(self, job):
+        # The Linux leg is the arm64 Ubuntu image: bandit and checkov are Python tools,
+        # and the ubuntu-latest hosted pool queued this job for 2598 s on one measured
+        # run while the arm64 label queued jobs in seconds (the note on the matrix).
         assert set(job["strategy"]["matrix"]["os"]) == {
-            "ubuntu-latest",
+            "ubuntu-24.04-arm",
             "windows-latest",
         }
 

@@ -217,24 +217,31 @@ concurrency:
   #
   # github.ref is refs/pull/<n>/merge on pull_request, so each pull request has its own
   # group. On push it is a plain branch name, which every push to that branch shares --
-  # and THAT is why github.sha is appended for push events only.
+  # and THAT is why github.sha is appended for push events to main and to tags.
   #
   # GitHub allows one pending run per group. With cancel-in-progress false (which is
-  # what the expression below evaluates to for push), a third run queuing into an
-  # occupied group evicts the second before it starts a single job, and on a push there
-  # is no pull request for the missing verdict to block. Measured in this repository:
-  # run 34418283475, event push, branch main, was cancelled with zero jobs one second
-  # after the next main push queued into the same group. Keying on the commit gives
-  # every pushed commit its own group, so no pushed commit can lose its verdict to a
-  # later one.
+  # what the expression below evaluates to for a push to main or a tag), a third run
+  # queuing into an occupied group evicts the second before it starts a single job, and
+  # on a push there is no pull request for the missing report to block. Measured in this
+  # repository: run 34418283475, event push, branch main, was cancelled with zero jobs
+  # one second after the next main push queued into the same group. Keying on the commit
+  # gives every pushed commit its own group, so no pushed commit can lose its report to
+  # a later one.
   #
-  # Deliberately NOT applied to pull_request: superseding is wanted there, and adding
-  # the sha would give each PR push its own group and defeat cancel-in-progress
-  # entirely -- turning a bounded one-run-per-PR into a run per commit.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
-  # Only pull_request runs may be cancelled. A push run is the sole verdict for the
-  # commit it names, and a workflow_dispatch run was asked for by a person.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Deliberately NOT applied to pull_request, nor to a push on any branch other than
+  # main: superseding is wanted there, and adding the sha would give each push its own
+  # group and defeat cancel-in-progress entirely -- turning a bounded one-run-per-branch
+  # into a run per commit. A branch other than main is a pull request's head, or is about
+  # to be, and the run that matters is the one on its newest commit.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.sha || '' }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets, and the per-commit group above
+  # means such a push has no sibling to supersede anyway. A merge_group entry has its
+  # own per-entry ref, so a second run in its group only means the entry was rebuilt and
+  # the earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   typescript-tests:
@@ -321,7 +328,7 @@ jobs:
       # on every event, tag pushes included, and saves from every ref. No root
       # package.json exists today, so this changes nothing now; it keeps a future
       # one from quietly bypassing the main-only save below.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
@@ -422,7 +429,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ts-coverage-${{ matrix.package }}
           path: ${{ matrix.dir }}/coverage/
@@ -451,7 +458,7 @@ jobs:
       # pinned toolchain as the matrix above -- otherwise the two jobs in one
       # workflow execute the coverage scripts on two different Node versions. No
       # `cache:` here for that same reason: there is no single lockfile to key it on.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           # As in the matrix job above: no setup-node cache on any event.

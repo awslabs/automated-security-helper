@@ -27,6 +27,9 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
 )
 
+# In-process: the unit tier.
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIG = REPO_ROOT / ".ash" / ".ash.yaml"
 FIXTURE = "tests/e2e/fixtures/findings/leak.py"

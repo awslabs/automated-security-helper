@@ -3,8 +3,15 @@
 Builds a VPC with the aws-ia VPC module, builds the ASH image, and runs the MCP
 server as a Fargate service behind an internal Application Load Balancer.
 
+`ash_version` in `main.tf` names the ASH release this example comes from. The
+image's launcher passes `--stateless-http` and `--allowed-host` to `ash mcp`, which
+no release up to v3.7.1 has, so set `ash_version` to a tag or commit whose ASH has
+both, or the container exits at startup. See
+[Which `AshVersion` to use](../../../../../README.md#which-ashversion-to-use).
+
 ## Run it
 
+<!-- doctest: illustrative reason="needs Terraform, network access and AWS credentials" -->
 ```console
 terraform init
 terraform plan
@@ -13,6 +20,7 @@ terraform apply
 
 Then run the first image build, which the service cannot start without:
 
+<!-- doctest: illustrative reason="needs an applied Terraform state" -->
 ```console
 terraform output -raw run_the_first_build
 ```
@@ -20,6 +28,7 @@ terraform output -raw run_the_first_build
 Run the printed command, wait for it to succeed, then force a new deployment so
 the service pulls the now-existing image:
 
+<!-- doctest: illustrative reason="needs AWS credentials" -->
 ```console
 aws ecs update-service --cluster ash-mcp --service ash-mcp --force-new-deployment
 ```

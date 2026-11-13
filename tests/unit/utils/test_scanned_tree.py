@@ -12,7 +12,9 @@ switching the descriptor walk off.
 
 from __future__ import annotations
 
+import ntpath
 import os
+import posixpath
 import stat
 import sys
 import threading
@@ -33,6 +35,8 @@ from automated_security_helper.utils.scanned_tree import (
     refusal_reason,
     relative_display,
 )
+
+pytestmark = pytest.mark.unit
 
 MARKER = b"HOST-ONLY-CONTENT-7c1e"
 IN_TREE = b"in-tree content\n"
@@ -199,6 +203,29 @@ class TestSymlinks:
             assert handle.read() == IN_TREE
         assert refused(tree / "hard.txt", tree).reason == REASON_HARDLINK
 
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+    def test_allowing_hard_links_still_follows_no_symlink(self, walk, layout):
+        """For a reader standing in for a directory walk: a hard-linked file is
+        read, and a symlink, at the file or a parent, is still refused."""
+        tree, host = layout
+        os.link(tree / "top.txt", tree / "hard.txt")
+        with open_in_scanned_tree(
+            tree / "hard.txt", tree, allow_hardlinks=True
+        ) as handle:
+            assert handle.read() == IN_TREE
+        (tree / "inside-link.txt").symlink_to(tree / "top.txt")
+        (tree / "linked-dir").symlink_to(tree / "real", target_is_directory=True)
+        for path, reason in (
+            (tree / "inside-link.txt", REASON_SYMLINK),
+            (tree / "linked-dir" / "deep" / "ok.txt", None),
+        ):
+            with pytest.raises(TreeInputRefused) as excinfo:
+                open_in_scanned_tree(path, tree, allow_hardlinks=True)
+            if reason is not None:
+                assert excinfo.value.reason == reason
+            else:
+                assert "linked-dir" in excinfo.value.reason
+
     def test_refusal_reason_agrees_with_the_open(self, walk, layout):
         tree, host = layout
         (tree / "link.txt").symlink_to(host / "secret.txt")
@@ -246,6 +273,28 @@ class TestFileType:
         except OSError as exc:  # pragma: no cover - filesystem without hard links
             pytest.skip(f"cannot create a hard link here: {exc}")
         assert refused(tree / "hard.txt", tree).reason == REASON_HARDLINK
+
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+    def test_refusal_reason_admits_a_hard_link_only_when_asked_and_no_symlink(
+        self, walk, layout
+    ):
+        """The answer a caller gets with ``allow_hardlinks`` is the answer of the
+        read it then makes: a hard-linked regular file is admitted, a symlink is
+        still refused, and the default answer is unchanged. The template readers
+        ask it this way, so a hard-linked template is counted and read."""
+        tree, host = layout
+        try:
+            os.link(host / "secret.txt", tree / "hard.txt")
+        except OSError as exc:  # pragma: no cover - filesystem without hard links
+            pytest.skip(f"cannot create a hard link here: {exc}")
+        assert refusal_reason(tree / "hard.txt", tree) == REASON_HARDLINK
+        assert refusal_reason(tree / "hard.txt", tree, allow_hardlinks=True) is None
+        if sys.platform != "win32":
+            (tree / "link.txt").symlink_to(host / "secret.txt")
+            assert (
+                refusal_reason(tree / "link.txt", tree, allow_hardlinks=True)
+                == REASON_SYMLINK
+            )
 
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs")
     def test_a_fifo_is_refused_without_blocking(self, walk, layout):
@@ -335,6 +384,24 @@ class TestReplacedAfterTheCheck:
 
 
 class TestHelpers:
+    @pytest.mark.parametrize(
+        "normcase, folds",
+        [(posixpath.normcase, False), (ntpath.normcase, True)],
+        ids=["posix", "windows"],
+    )
+    def test_the_prefix_comparison_folds_case_where_the_platform_does(
+        self, monkeypatch, normcase, folds
+    ):
+        """On Windows ``C:`` and ``c:`` are one drive; normcase is how that is seen.
+
+        Both platforms' ``normcase`` are pinned, so the expectation for each is checked
+        on every host rather than only the one the suite happens to run on.
+        """
+        monkeypatch.setattr(scanned_tree.os.path, "normcase", normcase)
+        assert scanned_tree._starts_with(Path("/A/b/c"), Path("/a/b")) is folds
+        assert scanned_tree._starts_with(Path("/a/b/c"), Path("/a/b"))
+        assert not scanned_tree._starts_with(Path("/a/bc"), Path("/a/b/c"))
+
     def test_relative_display_is_posix_and_relative(self, layout):
         tree, host = layout
         assert relative_display(tree / "real" / "deep" / "ok.txt", tree) == (

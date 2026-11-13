@@ -1,0 +1,86 @@
+name: "Set up Finch (Linux)"
+description: "Run scripts/setup-finch-linux.sh with the downloaded .deb files cached, so a rerun or a DNS outage does not refetch about 200 MB from the Ubuntu mirrors"
+
+# Why: the Finch swap downloads containerd, runc and runfinch-finch (with whatever
+# they pull in) from archive.ubuntu.com and artifact.runfinch.com on every run. On
+# 2026-11-11 a hosted-runner DNS outage failed every leg that did this. The script
+# keeps its .debs in FINCH_DEB_CACHE_DIR; on a full hit it skips the index fetch and
+# installs from that directory with dpkg.
+#
+# Cache key. The Ubuntu package versions and the Finch version are not known before
+# an index fetch, and the fetch is what a hit avoids, so the key stands in for them:
+#   runner OS and architecture
+#   ImageVersion      the runner image build, which fixes the base package set and
+#                     the Ubuntu index snapshot the image was cut from
+#   ISO year-week     bounds how long a cached Finch release outlives a newer one
+#   script hash       a change to the install set invalidates the cache
+# No restore-keys: a partial match could mix debs from two image builds.
+#
+# Limit: within one week and one image build, a newer Finch release is not picked up
+# until the key rolls over. That is the cost of not touching the network on a hit.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Compute the Finch deb cache key
+      id: key
+      shell: bash
+      run: |
+        {
+          echo "image=${ImageVersion:-unknown}"
+          echo "week=$(date -u +%G-W%V)"
+          echo "dir=${RUNNER_TEMP}/finch-debs"
+        } >> "$GITHUB_OUTPUT"
+    - name: Restore the Finch deb cache
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}
+    - name: "Cache report: finch-debs"
+      if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+      shell: bash
+      env:
+        CACHE_NAME: finch-debs
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        CACHE_MATCHED: ${{ steps.cache.outputs.cache-matched-key }}
+      run: |
+        # One line per cache per job, same shape everywhere, so hit rates can be
+        # counted across runs from job summaries.
+        if [ "${CACHE_HIT}" = "true" ]; then result=hit
+        elif [ -n "${CACHE_MATCHED:-}" ]; then result="partial (${CACHE_MATCHED})"
+        else result=miss; fi
+        echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
+    - name: Install Finch
+      shell: bash
+      env:
+        FINCH_DEB_CACHE_DIR: ${{ steps.key.outputs.dir }}
+      run: sudo --preserve-env=FINCH_DEB_CACHE_DIR bash scripts/setup-finch-linux.sh
+    # The script leaves a marker file beside the cache directory when dpkg could not
+    # finish from the cached debs and apt had to repair the install. Those debs are
+    # not saved: a half-working set would be restored for the rest of the week.
+    - name: Check whether the cached debs needed repair
+      id: health
+      shell: bash
+      env:
+        CACHE_DIR: ${{ steps.key.outputs.dir }}
+      run: |
+        if [ -e "${CACHE_DIR}.repaired" ]; then
+          echo "repaired=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::the Finch debs needed an apt repair; the cache is not saved from this run"
+        else
+          echo "repaired=false" >> "$GITHUB_OUTPUT"
+        fi
+    # A composite action has no post phase, so the save is a step of its own after
+    # the install. Pull requests restore and never save; the entry is written by a
+    # push to main.
+    - name: Save the Finch deb cache (main only)
+      if: >-
+        steps.cache.outputs.cache-hit != 'true'
+        && steps.health.outputs.repaired != 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: finch-debs-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.image }}-${{ steps.key.outputs.week }}-${{ hashFiles('scripts/setup-finch-linux.sh', '.github/actions/apt-retry/apt-retry.sh') }}

@@ -21,6 +21,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
@@ -63,8 +64,11 @@ def _repo(tmp_path: Path) -> Path:
 def _ash_rule_ids(tmp_path: Path, source: Path, options=None) -> set:
     output = tmp_path / "out"
     output.mkdir(exist_ok=True)
+    # Built from no config file in the tree: the options here are the operator's.
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
     scanner = TrivyRepoScanner(
-        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig()),
+        context=PluginContext(source_dir=source, output_dir=output, config=config),
         config=TrivyRepoScannerConfig(
             options={"scanners": ["secret"], "offline": True, **(options or {})}
         ),
@@ -160,3 +164,25 @@ def test_a_trivy_secret_yaml_in_the_tree_does_not_disable_rules(tmp_path, monkey
     assert "github-pat" not in control_ids and control_ids
 
     assert "github-pat" in _ash_rule_ids(tmp_path, source)
+
+
+def test_a_read_only_cache_outside_a_sandbox_still_scans(tmp_path, monkeypatch):
+    """A prepared cache can be read-only with no sandbox involved (a shared or
+    image-baked cache). trivy keeps its scan cache, fanal/fanal.db, there unless
+    told otherwise, and trivy 0.75.0 then fails with "unable to initialize fs
+    cache". trivy-repo keeps the scan cache in memory in every run."""
+    _trivy()
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setenv("TRIVY_CACHE_DIR", str(cache))
+    monkeypatch.delenv("TRIVY_IGNOREFILE", raising=False)
+    source = _repo(tmp_path)
+    (source / ".trivyignore").unlink()
+    cache.chmod(0o555)
+    try:
+        if os.access(cache, os.W_OK):  # pragma: no cover - root ignores the mode
+            pytest.skip("this user can write a read-only directory")
+        found = _ash_rule_ids(tmp_path, source)
+    finally:
+        cache.chmod(0o755)
+    assert {"github-pat", "gitlab-pat"} <= found

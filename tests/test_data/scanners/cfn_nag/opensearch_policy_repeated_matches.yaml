@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule and ResourcePolicyStarAccessVerbPolicyRule
+  (automated_security_helper/assets/appsec_cfn_rules). A resource can match a rule more
+  than once: through two statements, or through two actions of one statement. Each rule
+  adds the resource to its list once per match, so without a de-duplication a resource
+  appears in the result as many times as it matched.
+
+  Each resource is reported once per rule that matches it, however many times it matches.
+  StarResourceAccessPolicyRule reports SingleStarStatement and TwoMatchingStatements.
+  ResourcePolicyStarAccessVerbPolicyRule reports StarsInOneAction and
+  TwoMatchingStatements.
+
+  TwoMatchingStatements has two Allow statements that both name a star principal and a
+  star action, so each rule matches it twice. StarsInOneAction matches the verb rule twice
+  through one statement whose action list holds "es:*" and "*". SingleStarStatement is the
+  control for the principal rule: one match, scoped action.
+
+Resources:
+  TwoMatchingStatements:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-two-matching-statements
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action: "es:*"
+            Resource: "*"
+          - Effect: Allow
+            Principal: "*"
+            Action: "*"
+            Resource: "*"
+
+  StarsInOneAction:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-stars-in-one-action
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - "es:*"
+              - "*"
+            Resource: "*"
+
+  SingleStarStatement:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-single-star-statement
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"

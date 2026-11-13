@@ -82,6 +82,7 @@ def _run(program, arch: int, nr: int, *args: int) -> int:
             raise AssertionError(f"instruction {code:#x} at {pc} is not interpreted")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("machine", sorted(KERNEL))
 def test_the_architecture_table_matches_the_kernel(machine):
     kernel = KERNEL[machine]
@@ -94,6 +95,7 @@ def test_the_architecture_table_matches_the_kernel(machine):
     assert le.ARCHES["arm64"] == le.ARCHES["aarch64"]
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("machine", sorted(KERNEL))
 @pytest.mark.parametrize("network", [False, True])
 def test_the_program_is_one_the_kernel_accepts(machine, network):
@@ -108,6 +110,7 @@ def test_the_program_is_one_the_kernel_accepts(machine, network):
             assert k % 4 == 0 and k < 64, f"bad load offset {k} at {pc}"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("machine", sorted(KERNEL))
 @pytest.mark.parametrize("network", [False, True])
 def test_unix_sockets_are_refused_and_pipes_are_not(machine, network):
@@ -141,6 +144,7 @@ def test_unix_sockets_are_refused_and_pipes_are_not(machine, network):
     assert verdict("socket", AF_INET6, SOCK_DGRAM) == expected_ip
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("machine", sorted(KERNEL))
 def test_other_syscall_conventions_are_killed(machine):
     """The numbers above mean other syscalls under another ABI, so it is refused."""
@@ -177,6 +181,7 @@ _CHILD = textwrap.dedent(
 )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="seccomp is Linux")
 @pytest.mark.parametrize(("mode", "inet"), [("unix", "ok"), ("all", errno.EACCES)])
 def test_the_installed_filter_behaves_as_the_program_says(mode, inet):
@@ -214,6 +219,7 @@ def test_the_installed_filter_behaves_as_the_program_says(mode, inet):
     }
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="seccomp is Linux")
 def test_a_malformed_socket_filter_request_runs_nothing():
     result = subprocess.run(  # nosec B603 - fixed argv

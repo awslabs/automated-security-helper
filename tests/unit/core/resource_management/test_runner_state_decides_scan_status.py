@@ -55,6 +55,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerTargetStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 RESULTS_FILE = "ash_aggregated_results.json"
 SCANNERS = ("bandit", "semgrep")
 
@@ -248,7 +250,9 @@ def test_a_workspace_claims_its_project_entries_as_running(tmp_path):
     )
 
     with patch.object(mcp_workspace, "get_scan_registry", return_value=registry):
-        registered = mcp_workspace._register_projects(plan, {"api": project_output})
+        registered = mcp_workspace._register_projects(
+            plan, {"api": project_output}, output_dir=tmp_path / "out"
+        )
 
     assert registry.get_scan(registered["api"]).status is MCScanStatus.RUNNING
 

@@ -42,6 +42,8 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORMULA_PATH = REPO_ROOT / "Formula" / "ash.rb"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"

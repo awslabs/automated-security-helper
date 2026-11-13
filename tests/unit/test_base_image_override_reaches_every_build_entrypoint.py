@@ -95,6 +95,7 @@ from pathlib import Path
 
 import pytest
 
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PS1 = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PY_BUILD = (
@@ -109,6 +110,7 @@ OVERRIDE = "ASH_BASE_IMAGE_OVERRIDE"
 PINNED_REF = "docker.io/library/python@sha256:" + "b" * 64
 
 
+@pytest.mark.unit
 class TestThePowerShellEntrypoint:
     """``utils/ash_helpers.ps1``, which is what the ``powershell`` scan legs run.
 
@@ -126,7 +128,7 @@ class TestThePowerShellEntrypoint:
         )
         assert f'"--build-arg", "BASE_IMAGE=$($env:{OVERRIDE})"' in body, (
             "the override must be appended as a --build-arg/value pair in the same idiom as "
-            "the other build args, so it survives the Invoke-Expression join"
+            "the other build args: two elements of the argument array the runner is given"
         )
 
     def test_it_is_emitted_before_the_callers_own_build_args(self, body: str):
@@ -144,6 +146,7 @@ class TestThePowerShellEntrypoint:
         )
 
 
+@pytest.mark.unit
 class TestEveryBuildEntrypointIsCovered:
     """The completeness guard. One entrypoint left out is the failure mode, not a gap.
 

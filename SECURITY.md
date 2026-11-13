@@ -1,22 +1,19 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported versions
 
 | Version | Supported          |
 | ------- | ------------------ |
 | 3.x     | Yes                |
 | 2.x     | No (end of life)   |
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
 If you discover a security vulnerability in this project, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, use one of the following channels:
-
-- Email: aws-security@amazon.com
-- GitHub Security Advisories: use the "Report a vulnerability" button on the [Security tab](../../security/advisories/new)
+Instead, email aws-security@amazon.com.
 
 ### What to include
 
@@ -46,6 +43,6 @@ Instead, use one of the following channels:
 - Reports that require physical access to the machine running ASH
 - Social engineering attacks against maintainers
 
-## Preferred Languages
+## Preferred languages
 
 We accept vulnerability reports in English.

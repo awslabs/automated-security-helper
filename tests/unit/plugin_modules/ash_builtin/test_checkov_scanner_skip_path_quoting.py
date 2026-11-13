@@ -10,6 +10,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScannerConfigOptions,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_process_config_options_skip_path_arguments_contain_no_literal_quotes(
     test_plugin_context,

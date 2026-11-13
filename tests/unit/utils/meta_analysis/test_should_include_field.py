@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.field_mapping import (
     should_include_field,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_should_include_field():

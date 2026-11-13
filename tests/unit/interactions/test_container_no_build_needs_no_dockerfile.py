@@ -21,6 +21,8 @@ from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
@@ -35,14 +37,16 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
     def fake_build(**_kwargs):
         seen["build"] += 1
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["executed"] += 1
         return create_completed_process(args=list(cmd), returncode=0)
 
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
-    monkeypatch.setattr(rac, "_find_runner", lambda _name: "/usr/bin/docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(
+        rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
+    )
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", missing)
     monkeypatch.setattr(rac, "_build_image", fake_build)
     monkeypatch.setattr(rac, "_execute_container", fake_execute)

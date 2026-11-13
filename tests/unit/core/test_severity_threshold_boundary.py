@@ -41,6 +41,8 @@ from automated_security_helper.utils.severity_ladder import (
     normalize_threshold,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestTheEnvironmentValueIsNormalized:
     """``ASH_DEFAULT_SEVERITY_LEVEL`` is validated before it becomes a default."""
@@ -96,16 +98,18 @@ class TestTheEnvironmentValueIsNormalized:
         Reloaded rather than called directly because the defect was in the
         module-level read, not in any function -- a test of the helper alone would
         pass against the original ``os.environ.get(..., "MEDIUM")`` line. The
-        module is reloaded again afterwards so the rest of the session sees the
-        constant this environment really produces.
+        module's saved attributes are put back afterwards, because a re-deriving
+        reload would rebind every import-time constant (``ASH_BIN_PATH`` among
+        them) under whatever environment is live at that moment.
         """
+        saved = dict(ash_constants.__dict__)
         monkeypatch.setenv("ASH_DEFAULT_SEVERITY_LEVEL", "INFO")
         try:
             reloaded = importlib.reload(ash_constants)
             assert reloaded.ASH_DEFAULT_SEVERITY_LEVEL == "MEDIUM"
         finally:
             monkeypatch.undo()
-            importlib.reload(ash_constants)
+            ash_constants.__dict__.update(saved)
 
     def test_normalize_threshold_reports_the_unrecognized_case_as_none(self):
         """The shared predicate keeps "unrecognized" distinguishable from a value.

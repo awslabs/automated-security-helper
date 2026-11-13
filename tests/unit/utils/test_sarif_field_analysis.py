@@ -1,6 +1,13 @@
 """Tests for utils/sarif_field_analysis.py — verify move from cli/inspect."""
 
+import sys
 
+import pytest
+
+from tests.utils.helpers import importing_this_checkout
+
+
+@pytest.mark.unit
 class TestImportLocation:
     def test_import_from_utils(self):
         from automated_security_helper.utils.sarif_field_analysis import (
@@ -43,6 +50,7 @@ class TestImportLocation:
         assert found, "shim must call warnings.warn with 'deprecated'"
 
 
+@pytest.mark.unit
 class TestAnalyzeSarifFieldsLogic:
     def test_returns_field_set_from_minimal_sarif(self, tmp_path):
         import json
@@ -105,6 +113,7 @@ class TestAnalyzeSarifFieldsLogic:
         assert any("ruleId" in key for key in data)
 
 
+@pytest.mark.unit
 class TestInAggregatePercentage:
     """`% in Aggregate` is the share of a scanner's included fields in the aggregate.
 
@@ -114,8 +123,10 @@ class TestInAggregatePercentage:
     aggregated, and 1 excluded field printed -11.1%.
     """
 
-    # Nine fields that survive should_include_field, plus ruleIndex, which is
-    # intentionally excluded from the comparison.
+    # Ten field paths that survive should_include_field, plus ruleIndex, which is
+    # intentionally excluded from the comparison. Ten, not nine: ``message`` is a
+    # path of its own and so is the ``message.text`` it holds, on purpose (see
+    # test_a_container_is_counted_with_the_fields_it_holds).
     SCANNER_RESULT = {
         "ruleId": "B1",
         "ruleIndex": 0,
@@ -167,21 +178,67 @@ class TestInAggregatePercentage:
     def test_nothing_aggregated_is_zero_not_negative(
         self, tmp_path, monkeypatch, capsys
     ):
-        cells = self._percentage(tmp_path, monkeypatch, capsys, {"foo": "bar"})
-        assert cells[1:] == ["9", "9", "9", "1", "0.0%"]
+        columns = self._percentage(tmp_path, monkeypatch, capsys, {"foo": "bar"})
+        assert columns[1:] == ["10", "10", "10", "1", "0.0%"]
 
     def test_everything_aggregated_is_one_hundred(self, tmp_path, monkeypatch, capsys):
         aggregate = {k: v for k, v in self.SCANNER_RESULT.items() if k != "ruleIndex"}
-        cells = self._percentage(tmp_path, monkeypatch, capsys, aggregate)
-        assert cells[1:] == ["9", "0", "0", "1", "100.0%"]
+        columns = self._percentage(tmp_path, monkeypatch, capsys, aggregate)
+        # Unique Fields counts the scanners that emit a field; the aggregate
+        # carries every field this scanner emits, so it is not one of them.
+        assert columns[1:] == ["10", "10", "0", "1", "100.0%"]
 
     def test_partial_aggregation_counts_only_included_fields(
         self, tmp_path, monkeypatch, capsys
     ):
-        cells = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
-        assert cells[1:] == ["9", "8", "8", "1", "11.1%"]
+        columns = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
+        assert columns[1:] == ["10", "10", "9", "1", "10.0%"]
 
 
+@pytest.mark.unit
+def test_a_container_is_counted_with_the_fields_it_holds():
+    """A container and each field it holds are all counted, on purpose.
+
+    ``flatten_sarif_results`` records every field under its own path, a container
+    as well as a scalar: the loss of a whole ``message`` or ``region`` in
+    aggregation is then reported under its own name, and an empty ``locations``
+    and a filled one are one field. A list is written ``name[]`` for the fields of
+    its elements and is not a path of its own. Counting leaf fields only would
+    drop the container paths and with them that report."""
+    from automated_security_helper.utils.sarif_field_analysis import (
+        flatten_sarif_results,
+    )
+
+    sarif = {
+        "runs": [
+            {
+                "results": [
+                    {
+                        "message": {"text": "m"},
+                        "locations": [
+                            {"physicalLocation": {"region": {"startLine": 1}}}
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+
+    included, excluded = flatten_sarif_results(sarif)
+
+    prefix = "runs[].results[]"
+    assert set(included) == {
+        f"{prefix}.message",
+        f"{prefix}.message.text",
+        f"{prefix}.locations",
+        f"{prefix}.locations[].physicalLocation",
+        f"{prefix}.locations[].physicalLocation.region",
+        f"{prefix}.locations[].physicalLocation.region.startLine",
+    }
+    assert excluded == {}
+
+
+@pytest.mark.unit
 class TestHtmlReportWithNoFindings:
     def test_matched_share_with_zero_findings_does_not_divide_by_zero(self, tmp_path):
         from automated_security_helper.utils.meta_analysis.reporting import (
@@ -202,3 +259,90 @@ class TestHtmlReportWithNoFindings:
         out = tmp_path / "report.html"
         generate_html_report(validation_results, str(out), {})
         assert "Matched Findings: 0 (0.00%)" in out.read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+class TestTheCsvFilesUnderAnAsciiLocale:
+    """The CSV files are UTF-8 whatever the locale, as the JSON files are."""
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="an ASCII locale cannot be chosen on Windows: open() takes its "
+        "encoding from the ANSI code page (cp1252 here), whatever LC_ALL says",
+    )
+    def test_a_non_ascii_field_name_is_written(self, tmp_path):
+        import json
+        import os
+        import subprocess
+        import sys
+
+        # The second character is outside Windows' ANSI code page (cp1252), which
+        # is the locale encoding there and holds the first, so a file opened with
+        # no encoding fails on every platform.
+        field = "café字"
+        sarif_dir = tmp_path / "ash_output"
+        (sarif_dir / "reports").mkdir(parents=True)
+        (sarif_dir / "reports" / "ash.sarif").write_text(
+            json.dumps(
+                {
+                    "version": "2.1.0",
+                    "runs": [
+                        {
+                            "tool": {"driver": {"name": "example-tool"}},
+                            "results": [
+                                {
+                                    "ruleId": "R1",
+                                    "message": {"text": "x", field: "1"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        output_dir = tmp_path / "inspect"
+        # The C locale with coercion and UTF-8 mode off: the locale's encoding is
+        # ASCII, which open() with no encoding uses. The console streams stay UTF-8
+        # (PYTHONIOENCODING), so only the files are under test.
+        env = {
+            **os.environ,
+            "LC_ALL": "C",
+            "LANG": "C",
+            "PYTHONUTF8": "0",
+            "PYTHONCOERCECLOCALE": "0",
+            "PYTHONIOENCODING": "utf-8",
+        }
+        probe = (
+            "import locale, sys\n"
+            "print(locale.getpreferredencoding(False), file=sys.stderr)\n"
+            "from automated_security_helper.utils.sarif_field_analysis import "
+            "analyze_sarif_fields\n"
+            f"analyze_sarif_fields(sarif_dir={str(sarif_dir)!r}, "
+            f"output_dir={str(output_dir)!r})\n"
+        )
+
+        ran = subprocess.run(
+            [sys.executable, "-c", importing_this_checkout(probe)],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+
+        # Windows has no ASCII locale to select; its locale encoding is the ANSI
+        # code page, a "cpNNNN" name, which is not UTF-8 either.
+        locale_name = ran.stderr.strip().lower()
+        not_utf8 = (
+            locale_name.startswith("cp")
+            if sys.platform == "win32"
+            else "ANSI_X3.4-1968" in ran.stderr or "ascii" in locale_name
+        )
+        assert not_utf8, (
+            f"the probe did not run under a non-UTF-8 locale: {ran.stderr[:200]}"
+        )
+        assert ran.returncode == 0, ran.stderr[-2000:]
+        csv_text = (output_dir / "sarif_fields.csv").read_text(encoding="utf-8")
+        assert field in csv_text

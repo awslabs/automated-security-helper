@@ -53,6 +53,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     _missing_cdk_distributions,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _canonical(name):
     """Fold ``-`` and ``_`` the way ``importlib.metadata`` does.
@@ -331,7 +333,12 @@ def test_validate_plugin_dependencies_refuses_a_partial_install(
     # cdk-nag against ``caplog.text`` can never hold and measures the wrong surface.
     warned = " ".join(caplog.messages)
     assert "aws-cdk-lib" in warned
-    assert "cdk_nag" not in warned and "cdk-nag" not in warned, (
+    # The remedy names the scanner by its --tool name; that is a command to run,
+    # not a claim about what is absent, so it is taken out before the check.
+    hint = "ash dependencies install --tool cdk-nag"
+    assert hint in warned
+    claims = warned.replace(hint, "")
+    assert "cdk_nag" not in claims and "cdk-nag" not in claims, (
         "the warning must name what is absent; telling an operator cdk-nag is missing when "
         f"`pip list` shows it reads as an ASH bug and stops them reading further: {warned!r}"
     )

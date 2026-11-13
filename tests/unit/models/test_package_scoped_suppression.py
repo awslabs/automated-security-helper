@@ -24,6 +24,8 @@ from automated_security_helper.config.config_linter import ConfigLinter
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
+pytestmark = pytest.mark.unit
+
 LOCKFILE = "deploy/cdk/package-lock.json"
 RULE = "GHSA-6j4f-fj2g-mc7p-brace-expansion"
 BUNDLED_PATH = "deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion"

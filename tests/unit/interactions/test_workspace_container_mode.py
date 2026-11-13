@@ -54,6 +54,8 @@ from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sa
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

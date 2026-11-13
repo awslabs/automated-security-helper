@@ -1,0 +1,5 @@
+# Not under .github/workflows, so ASH must not pass it to actionlint.
+# If it were linted, every key below would be a syntax-check error.
+name: not-a-workflow
+jobs: []
+steps: 42

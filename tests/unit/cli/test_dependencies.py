@@ -2,12 +2,16 @@
 
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from automated_security_helper.cli.dependencies import (
     get_platform,
     get_architecture,
     run_command,
     dependencies_app,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestGetPlatform:

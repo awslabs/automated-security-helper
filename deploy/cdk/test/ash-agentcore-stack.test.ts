@@ -180,6 +180,29 @@ describe('AgentCore runtime contract', () => {
     expect(isAtLeast('v10.0.0', FIRST_RELEASE_WITH_STATELESS_HTTP)).toBe(true);
   });
 
+  test('the runtime sets no stateless fallback', () => {
+    /*
+     * AshVersion defaults to DEFAULT_ASH_VERSION and McpStatelessHttp defaults to
+     * true. Through v3.7.1 the default release's `ash mcp` had no --stateless-http,
+     * so the runtime set ASH_MCP_STATELESS_FALLBACK=warn to let that pair start
+     * stateful. The default release now has the flag, so the pair starts stateless
+     * on its own and the fallback is gone: a runtime that still set it would keep
+     * a stateful downgrade path for anyone pinning an older AshVersion by hand,
+     * where exit 65 is the right answer.
+     *
+     * The behavioral proof that the shipped pair starts is in
+     * ash-container-scripts.test.ts, which runs the real entrypoint against a fake
+     * ash that has the option.
+     */
+    const environment = new Capture();
+    template.hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
+      EnvironmentVariables: environment,
+    });
+    const variables = environment.asObject();
+    expect(variables).toHaveProperty('ASH_MCP_STATELESS');
+    expect(Object.keys(variables)).not.toContain('ASH_MCP_STATELESS_FALLBACK');
+  });
+
   test('the runtime name contains no hyphens', () => {
     // AgentRuntimeName is matched against [a-zA-Z][a-zA-Z0-9_]{0,47}. Stack names
     // routinely contain hyphens, so they must be stripped rather than passed on.

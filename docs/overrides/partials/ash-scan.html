@@ -1,0 +1,76 @@
+{% from "partials/ash-icons.html" import icon %}
+{% from "partials/generated/plugin-data.html" import plugin_data %}
+<section class="ash-scan" aria-labelledby="scan-title" data-ash-scan data-step="4" data-category="all">
+  <div class="ash-scan__header">
+    <div><h2 id="scan-title">Scan example</h2><span class="ash-scan__state" data-scan-state>Reports ready</span></div>
+    <div class="ash-scan__controls" data-scan-controls>
+      <button type="button" class="ash-scan__all" data-scan-category="all" aria-pressed="true">All files</button>
+      <button type="button" class="ash-scan__play" data-scan-play aria-label="Replay scan example" disabled><span class="ash-scan__play-icon">{{ icon("play-circle-outline", "ash-scan__play-start") }}{{ icon("pause-circle-outline", "ash-scan__play-pause") }}</span><span data-scan-play-label>Replay</span></button>
+    </div>
+  </div>
+  <div class="ash-scan__progress" aria-hidden="true"><span data-scan-progress></span></div>
+
+  <div class="ash-scan__board" data-scan-board>
+    <svg class="ash-scan__routes" aria-hidden="true" focusable="false" data-scan-routes></svg>
+
+    <div class="ash-scan__column ash-scan__column--files" data-scan-column="files">
+      <h3>Files <span>01</span></h3>
+      <div class="ash-scan__stack">
+        {% for t in plugin_data.tracks %}
+        <button class="ash-scan__file is-selected" type="button" data-scan-category="{{ t.category }}" data-scan-source="{{ t.category }}" aria-pressed="false" title="Trace {{ t.label | lower }}: {{ t.file }}" disabled>
+          <span class="ash-scan__file-icon">{{ icon(t.icon) }}</span>
+          <span><span class="ash-scan__file-label">{{ t.label }}</span><code>{{ t.file }}</code>{% if t.category == "notebooks" %}<span class="ash-scan__converted" data-scan-converted>{{ icon("check-circle-outline") }}converted to analysis-converted.py</span>{% endif %}</span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="ash-scan__column ash-scan__column--scanners" data-scan-column="scanners">
+      <h3>Scanners <span>02</span></h3>
+      <div class="ash-scan__stack">
+        {% for t in plugin_data.tracks %}
+        <div class="ash-scan__scanner is-selected" data-scan-engine="{{ t.category }}">
+          <div class="ash-scan__scanner-names">{% for engine in t.engines %}<span>{{ engine }}</span>{% endfor %}</div>
+          <span class="ash-scan__scanner-check" aria-hidden="true">{{ icon("check-circle-outline") }}</span>
+          <span class="ash-scan__scanner-progress" aria-hidden="true"></span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="ash-scan__column ash-scan__column--findings" data-scan-column="findings">
+      <h3>Findings <span>03</span></h3>
+      <div class="ash-scan__findings">
+        {% for t in plugin_data.tracks %}
+        <div class="ash-scan__finding" data-scan-finding="{{ t.category }}">
+          <span class="ash-scan__severity ash-scan__severity--{{ t.severity | lower }}">{{ t.severity }}</span>
+          <span>{{ t.finding }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="ash-scan__coverage" data-scan-coverage>{{ icon("check-circle-outline") }}<span>Coverage recorded</span></div>
+      <div class="ash-scan__report" data-scan-report>
+        <span class="ash-scan__report-label">{{ icon("file-document-outline") }}<span>Aggregated results</span></span>
+        <div class="ash-scan__report-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ash-scan__steps" role="group" aria-label="Select scan example step" data-scan-controls>
+    {% for step, label in [(0, "Files"), (1, "Convert"), (2, "Scanners"), (3, "Findings"), (4, "Reports")] %}
+    <button type="button" data-scan-step="{{ step }}" aria-pressed="{{ 'true' if step == 4 else 'false' }}"><span>0{{ step + 1 }}</span>{{ label }}</button>
+    {% endfor %}
+  </div>
+
+  <div class="ash-scan__formats" aria-label="Example report formats">
+    <span data-scan-formats-label>Reports</span>
+    <div>
+      {% for f in plugin_data.formats %}
+      <a href="{{ f.href | url }}" data-scan-format="{{ f.key }}">{{ f.label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <p class="ash-scan__caption" data-scan-caption>Example data · Scanner coverage depends on configuration.</p>
+  <p class="ash-scan__caption ash-scan__convert-note">Converters turn files scanners cannot read into files they can, so scanners audit the full tree.{% for c in plugin_data.converters %} The {{ c.name }} converter {{ c.description }}.{% endfor %}</p>
+  <span class="ash-sr-only" role="status" aria-live="polite" aria-atomic="true" data-scan-announcement></span>
+</section>

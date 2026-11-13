@@ -142,6 +142,10 @@ export interface ASHScanStepProps {
    * Escape hatch for ASH options this construct does not model. Arguments are
    * passed through verbatim, so quote anything containing whitespace yourself.
    *
+   * An argument ASH does not accept, a typo included, is a usage error: ASH
+   * releases after 3.7.1 exit 5 and fail the step, while the `ash scan` of 3.7.0
+   * and 3.7.1 ignores an unknown option.
+   *
    * Shard and fail-on-findings options are rejected here: the construct decides
    * those, because letting a shard gate on its own findings would replace the
    * aggregate verdict with a partial one.

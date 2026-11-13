@@ -56,6 +56,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.scanner_names import SCANNER_TAG_NAMES
 
+pytestmark = pytest.mark.unit
+
 
 def _declared_config_name(cls):
     """A scanner's config name, read from its class without instantiating it.

@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for ResourcePolicyStarAccessVerbPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  An action in a policy can be written with Fn::Sub and name a parameter, as in
+  "es:${Verb}". ASH passes no parameter values, so cfn-model 0.6.6 leaves the ${...} in
+  the text and applies no Default. The rule used to read that text as the action, find no
+  star in it, and say nothing, while the same parameter written as a Ref was reported.
+
+  The rule now fills each ${Name} that is a parameter of the template from the texts the
+  parameter holds (its Default, split at commas, and every entry of its AllowedValues),
+  and reads each text the substitution can produce. A ${Name} that is not a parameter with
+  text to read (a pseudo parameter, a parameter with no Default, a name that only a
+  long-form substitution map defines) leaves the action unread, and the rule writes one
+  warning line to stderr naming the resource and the shape.
+
+  The principal is one account on every statement, so StarResourceAccessPolicyRule reports
+  nothing on this template and the two rules can be told apart.
+
+  Reported by the rule: SubParameterStar (the whole action is a parameter whose Default
+  is "*"), SubVerbStar ("es:" before a parameter whose Default is "*"), SubAllowedStar
+  (the Default is scoped, and the star is one of the AllowedValues) and SubTwoParameters
+  (two parameters in one action).
+  Not reported: SubParameterScoped, the control for SubVerbStar, and SubNoHole, a
+  substitution with nothing to substitute.
+  Warned about as unread: SubPseudoParameter, SubNoText and SubLongForm.
+
+Parameters:
+  OpenAction:
+    Type: String
+    Default: "*"
+  OpenVerb:
+    Type: String
+    Default: "*"
+  ScopedVerb:
+    Type: String
+    Default: "ESHttpGet"
+  ChosenVerb:
+    Type: String
+    Default: "ESHttpGet"
+    AllowedValues:
+      - "ESHttpGet"
+      - "*"
+  Service:
+    Type: String
+    Default: "es"
+  NoDefaultVerb:
+    Type: String
+
+Resources:
+  SubParameterStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-parameter-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "${OpenAction}"
+            Resource: "*"
+
+  SubVerbStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-verb-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "es:${OpenVerb}"
+            Resource: "*"
+
+  SubAllowedStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-allowed-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "es:${ChosenVerb}"
+            Resource: "*"
+
+  SubTwoParameters:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-two-parameters
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "${Service}:${OpenVerb}"
+            Resource: "*"
+
+  SubParameterScoped:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-parameter-scoped
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "es:${ScopedVerb}"
+            Resource: "*"
+
+  SubNoHole:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-no-hole
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "es:ESHttpGet"
+            Resource: "*"
+
+  SubPseudoParameter:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-pseudo-parameter
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "es:${AWS::Region}"
+            Resource: "*"
+
+  SubNoText:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-no-text
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub: "es:${NoDefaultVerb}"
+            Resource: "*"
+
+  SubLongForm:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-sub-long-form
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "arn:aws:iam::123456789012:root"
+            Action:
+              - Fn::Sub:
+                  - "es:${Verb}"
+                  - Verb:
+                      Ref: OpenVerb
+            Resource: "*"

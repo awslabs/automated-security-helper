@@ -26,6 +26,7 @@ from automated_security_helper.models.core import (
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 
 class TestConverterPlugin:
@@ -42,9 +43,10 @@ class TestConverterPlugin:
         def validate_plugin_dependencies(self) -> bool:
             return True
 
-        def convert(self, target: Path | str) -> list[Path]:
+        def convert(self) -> list[Path]:
             return [Path("test.txt")]
 
+    @pytest.mark.unit
     def test_setup_paths_default(self, test_plugin_context, dummy_converter_config):
         """Test setup_paths with default values."""
         converter = self.DummyConverter(
@@ -54,6 +56,7 @@ class TestConverterPlugin:
         assert converter.context.output_dir == test_plugin_context.output_dir
         assert converter.context.work_dir == test_plugin_context.work_dir
 
+    @pytest.mark.unit
     def test_setup_paths_custom(self, dummy_converter_config):
         """Test setup_paths with custom values."""
         source = Path("/custom/source")
@@ -74,6 +77,7 @@ class TestConverterPlugin:
         assert converter.context.output_dir == output
         assert converter.context.work_dir == output.joinpath(ASH_WORK_DIR_NAME)
 
+    @pytest.mark.unit
     def test_setup_paths_string_conversion(self, dummy_converter_config):
         """Test setup_paths converts string paths to Path objects."""
         # Create a custom context with string paths
@@ -91,6 +95,7 @@ class TestConverterPlugin:
         assert isinstance(converter.context.output_dir, Path)
         assert isinstance(converter.context.work_dir, Path)
 
+    @pytest.mark.unit
     def test_configure_with_config(self, test_plugin_context, dummy_converter_config):
         """Test configure method with config."""
         converter = self.DummyConverter(
@@ -100,6 +105,7 @@ class TestConverterPlugin:
         converter.configure(config)
         assert converter.config == config
 
+    @pytest.mark.unit
     def test_configure_without_config(
         self, test_plugin_context, dummy_converter_config
     ):
@@ -111,6 +117,7 @@ class TestConverterPlugin:
         converter.configure(None)
         assert converter.config == original_config
 
+    @pytest.mark.unit
     def test_validate_implementation(self, test_plugin_context, dummy_converter_config):
         """Test validate method implementation."""
         converter = self.DummyConverter(
@@ -118,15 +125,17 @@ class TestConverterPlugin:
         )
         assert converter.validate_plugin_dependencies() is True
 
+    @pytest.mark.unit
     def test_convert_implementation(self, test_plugin_context, dummy_converter_config):
         """Test convert method implementation."""
         converter = self.DummyConverter(
             context=test_plugin_context, config=dummy_converter_config
         )
-        result = converter.convert(target="test_target")
+        result = converter.convert()
         assert isinstance(result, list)
         assert all(isinstance(p, Path) for p in result)
 
+    @pytest.mark.unit
     def test_abstract_methods_not_implemented(self):
         """Test that abstract methods raise NotImplementedError when not implemented."""
 
@@ -158,6 +167,7 @@ class TestReporterPlugin:
         def report(self, model: AshAggregatedResults) -> str:
             return '{"report": "complete"}'
 
+    @pytest.mark.unit
     def test_setup_paths_default(self, test_plugin_context, dummy_reporter_config):
         """Test setup_paths with default values."""
         reporter = self.DummyReporter(
@@ -166,6 +176,7 @@ class TestReporterPlugin:
         assert reporter.context.source_dir == test_plugin_context.source_dir
         assert reporter.context.output_dir == test_plugin_context.output_dir
 
+    @pytest.mark.unit
     def test_setup_paths_custom(self, dummy_reporter_config):
         """Test setup_paths with custom values."""
         source = Path("/custom/source")
@@ -183,6 +194,7 @@ class TestReporterPlugin:
         assert reporter.context.source_dir == source
         assert reporter.context.output_dir == output
 
+    @pytest.mark.unit
     def test_configure_with_config(self, test_plugin_context, dummy_reporter_config):
         """Test configure method with config."""
         reporter = self.DummyReporter(
@@ -194,6 +206,7 @@ class TestReporterPlugin:
         assert reporter.config.name == config.name
         assert reporter.config.extension == config.extension
 
+    @pytest.mark.unit
     def test_validate_implementation(self, test_plugin_context, dummy_reporter_config):
         """Test validate method implementation."""
         reporter = self.DummyReporter(
@@ -201,6 +214,7 @@ class TestReporterPlugin:
         )
         assert reporter.validate_plugin_dependencies() is True
 
+    @pytest.mark.unit
     def test_pre_report(self, test_plugin_context, dummy_reporter_config):
         """Test _pre_report sets start time."""
         reporter = self.DummyReporter(
@@ -210,6 +224,7 @@ class TestReporterPlugin:
         assert reporter.start_time is not None
         assert isinstance(reporter.start_time, datetime)
 
+    @pytest.mark.unit
     def test_post_report(self, test_plugin_context, dummy_reporter_config):
         """Test _post_report sets end time."""
         reporter = self.DummyReporter(
@@ -219,6 +234,7 @@ class TestReporterPlugin:
         assert reporter.end_time is not None
         assert isinstance(reporter.end_time, datetime)
 
+    @pytest.mark.unit
     def test_report_with_model(self, test_plugin_context, dummy_reporter_config):
         """Test report method with AshAggregatedResults."""
         reporter = self.DummyReporter(
@@ -228,6 +244,7 @@ class TestReporterPlugin:
         result = reporter.report(model)
         assert result == '{"report": "complete"}'
 
+    @pytest.mark.unit
     def test_report_end_to_end(self, test_plugin_context, dummy_reporter_config):
         """Test report method end to end with AshAggregatedResults."""
         reporter = self.DummyReporter(
@@ -243,6 +260,7 @@ class TestReporterPlugin:
         assert reporter.end_time is not None
         assert result == '{"report": "complete"}'
 
+    @pytest.mark.unit
     def test_abstract_methods_not_implemented(self):
         """Test that abstract methods raise NotImplementedError when not implemented."""
 
@@ -296,11 +314,13 @@ class TestScannerPlugin:
                 runs=[],
             )
 
+    @pytest.mark.unit
     def test_model_post_init_no_config(self, test_plugin_context):
         """Test model_post_init with no config raises error."""
         with pytest.raises(ScannerError):
             self.DummyScanner(context=test_plugin_context)
 
+    @pytest.mark.unit
     def test_model_post_init_with_config(self, ash_temp_path, test_plugin_context):
         """Test model_post_init with config."""
         config = self.DummyConfig()
@@ -312,12 +332,14 @@ class TestScannerPlugin:
             "scanners"
         ).joinpath(config.name)
 
+    @pytest.mark.unit
     def test_process_config_options(self, test_plugin_context):
         """Test _process_config_options does nothing by default."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(config=config, context=test_plugin_context)
         scanner._process_config_options()  # Should not raise any error
 
+    @pytest.mark.unit
     def test_resolve_arguments_basic(self, test_plugin_context):
         """Test _resolve_arguments with basic configuration."""
         config = self.DummyConfig()
@@ -328,6 +350,7 @@ class TestScannerPlugin:
         assert args[0] == "dummy-scan"  # Command
         assert "test.txt" in args  # Target path
 
+    @pytest.mark.unit
     def test_resolve_arguments_with_extra_args(self, test_plugin_context):
         """Test _resolve_arguments with extra arguments."""
         config = self.DummyConfig()
@@ -341,6 +364,7 @@ class TestScannerPlugin:
         assert "--debug" in args
         assert "true" in args
 
+    @pytest.mark.unit
     def test_pre_scan_invalid_target(self, test_plugin_context):
         """Test _pre_scan with invalid target."""
         config = self.DummyConfig()
@@ -348,6 +372,7 @@ class TestScannerPlugin:
         with pytest.raises(ScannerError):
             scanner._pre_scan(Path("nonexistent.txt"), target_type="converted")
 
+    @pytest.mark.unit
     def test_pre_scan_creates_dirs(self, ash_temp_path, test_plugin_context):
         """Test _pre_scan creates necessary directories."""
         config = self.DummyConfig()
@@ -361,6 +386,7 @@ class TestScannerPlugin:
         assert scanner.context.work_dir.exists()
         assert scanner.results_dir.exists()
 
+    @pytest.mark.unit
     def test_post_scan_sets_end_time(self, ash_temp_path, test_plugin_context):
         """Test _post_scan sets end_time."""
         config = self.DummyConfig()
@@ -382,6 +408,7 @@ class TestScannerPlugin:
         )
         assert scanner.end_time is not None
 
+    @pytest.mark.unit
     def test_run_subprocess_success(self, test_source_dir, test_plugin_context):
         """Test _run_subprocess with successful command."""
         config = self.DummyConfig()
@@ -395,6 +422,7 @@ class TestScannerPlugin:
         assert scanner.exit_code == 0
         assert len(scanner.output) > 0
 
+    @pytest.mark.unit
     def test_run_subprocess_failure(self, test_source_dir, test_plugin_context):
         """Test _run_subprocess with failing command."""
         config = self.DummyConfig()
@@ -404,13 +432,14 @@ class TestScannerPlugin:
             command="nonexistent-command",
         )
         final_args = scanner._resolve_arguments(test_source_dir)
-        scanner._run_subprocess(final_args)
+        scanner._run_subprocess(final_args, timeout=CHILD_TIMEOUT_SECONDS)
         # 127, not 1: a command that cannot start never ran, and 1 is an accepted
         # exit code for most scanners.
         assert scanner.exit_code == 127
         assert scanner.scan_spawn_failure
         assert len(scanner.errors) > 0
 
+    @pytest.mark.integration
     def test_run_subprocess_with_stdout_stderr(
         self, ash_temp_path, test_plugin_context
     ):
@@ -430,7 +459,7 @@ class TestScannerPlugin:
             ),
         )
         scanner.results_dir = ash_temp_path
-        scanner._run_subprocess(
+        response = scanner._run_subprocess(
             [
                 "python",
                 "-c",
@@ -440,6 +469,11 @@ class TestScannerPlugin:
             cwd=ash_temp_path,  # Use ash_temp_path as the working directory to avoid directory not found errors
             stderr_preference="both",
             stdout_preference="both",
+            timeout=CHILD_TIMEOUT_SECONDS,
+        )
+        assert response.get("timed_out") is not True, (
+            f"the python child did not exit within {CHILD_TIMEOUT_SECONDS}s and was "
+            f"killed: {response.get('stderr')}"
         )
         assert len(scanner.output) > 0
         assert len(scanner.errors) > 0
@@ -454,6 +488,7 @@ class TestScannerPlugin:
             .exists()
         )
 
+    @pytest.mark.unit
     def test_run_subprocess_binary_not_found(self, test_plugin_context):
         """Test _run_subprocess when binary is not found."""
         config = self.DummyConfig()
@@ -462,11 +497,12 @@ class TestScannerPlugin:
             config=config,
             command="nonexistent-binary",
         )
-        scanner._run_subprocess(["nonexistent-binary"])
+        scanner._run_subprocess(["nonexistent-binary"], timeout=CHILD_TIMEOUT_SECONDS)
         assert scanner.exit_code == 127
         assert scanner.scan_spawn_failure
         assert len(scanner.errors) > 0
 
+    @pytest.mark.unit
     def test_abstract_methods_not_implemented(self):
         """Test that abstract methods raise NotImplementedError when not implemented."""
 

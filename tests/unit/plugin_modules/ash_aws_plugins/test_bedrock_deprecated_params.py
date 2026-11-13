@@ -42,6 +42,9 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline i
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 def _validation_error(message: str) -> botocore.exceptions.ClientError:
     return botocore.exceptions.ClientError(
         {"Error": {"Code": "ValidationException", "Message": message}},
@@ -138,8 +141,9 @@ class TestDeprecatedParametersAreDropped:
     def test_underscore_and_camel_spellings_both_match(self):
         """Bedrock names top_k with an underscore and topP in camelCase.
 
-        A literal key comparison would fail to find one of them, and the retry
-        would resend the same request until the bound gave up.
+        A literal key comparison would fail to find one of them, so nothing
+        would be dropped and the call would return the refusal instead of
+        retrying without the parameter.
         """
         runtime = _FakeRuntime(reject=["top_p"])
 
@@ -209,3 +213,30 @@ class TestOtherErrorsAreUnchanged:
 
         assert "Error" in result
         assert _Runtime.calls == 1
+
+    def test_a_runtime_that_writes_into_its_arguments_cannot_keep_the_loop_going(
+        self,
+    ):
+        """converse() gets its own copy of the request each call. A runtime
+        that writes a dropped parameter back into the dict it was handed
+        (botocore does not) then changes no later request, and the loop still
+        ends after one retry per parameter. With the request shared, the
+        dropped key was back before each retry, and the loop never ended. The
+        stub gives up after 10 calls, so a regression fails instead of hanging."""
+
+        class _Runtime:
+            calls = 0
+
+            def converse(self, **kwargs):
+                type(self).calls += 1
+                if type(self).calls > 10:
+                    raise AssertionError("the retry loop did not end")
+                kwargs["inferenceConfig"]["temperature"] = 0.5
+                raise _deprecated("temperature")
+
+        result = _client(_Runtime()).try_call("prompt", "system")
+
+        assert "Validation error" in result, result
+        # The first refusal drops temperature; the second names it again, and
+        # with nothing left to drop the call returns it.
+        assert _Runtime.calls == 2, _Runtime.calls

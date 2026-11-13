@@ -26,6 +26,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.helpers import checkout_env
+
+pytestmark = pytest.mark.integration
+
 FIXTURE = """\
 import subprocess
 
@@ -115,8 +119,11 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
             "--no-progress",
             "--no-fail-on-findings",
         ],
+        env=checkout_env(),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     log = f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\nSTDERR:\n{proc.stderr[-4000:]}"

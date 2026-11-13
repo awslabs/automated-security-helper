@@ -11,6 +11,7 @@ nothing examined.
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,7 +20,12 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
 )
 from automated_security_helper.models.workspace import SkippedProjectReason
-from automated_security_helper.workspace.resolver import resolve_workspace
+from automated_security_helper.workspace.resolver import (
+    _validate_scanner_pins,
+    resolve_workspace,
+)
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
@@ -158,27 +164,77 @@ def test_allow_missing_projects_still_refuses_when_nothing_is_left(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 3. Incompatible scanner pins refuse the workspace
+# 3. Scanner pins come from the operator; recorded pins that conflict refuse
 # ---------------------------------------------------------------------------
 
 
-def test_incompatible_scanner_pins_refuse_and_name_both_constraints(tmp_path):
+def _recorded(key, **pins):
+    """A stand-in for a ProjectPlan, with only what the pin check reads."""
+    return SimpleNamespace(key=key, scanner_pins=pins)
+
+
+def test_incompatible_project_pins_are_ignored_rather_than_refused(tmp_path):
+    """A project's own config does not choose tool_version, so its pin is not
+    recorded and cannot conflict with another project's. checkov declares no
+    default ``tool_version``, so a pin of its own could only come from a project's
+    config, and the absence of one is the rule at work."""
     _project(
         tmp_path,
         "api",
-        "project_name: api\nscanners:\n  bandit:\n"
-        '    options:\n      tool_version: ">=1.7.0,<2.0.0"\n',
+        "project_name: api\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=3.2.0,<4.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        "project_name: web\nscanners:\n  bandit:\n"
-        '    options:\n      tool_version: ">=2.0.0"\n',
+        "project_name: web\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=4.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
+    plan = resolve_workspace(workspace)
+
+    projects = _by_key(plan)
+    assert "checkov" not in projects["api"].scanner_pins
+    assert "checkov" not in projects["web"].scanner_pins
+
+
+def test_the_operators_override_pins_every_project(tmp_path):
+    """The pin is recorded only for a scanner that is on, so each project enables
+    checkov in so many words: the override's pin is the subject."""
+    _project(
+        tmp_path,
+        "api",
+        "project_name: api\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=3.2.0"\n',
+    )
+    _project(
+        tmp_path,
+        "web",
+        "project_name: web\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=4.0.0"\n',
+    )
+    workspace = _workspace(tmp_path, ["api", "web"])
+
+    plan = resolve_workspace(
+        workspace,
+        config_overrides=("scanners.checkov.options.tool_version=>=3.2.0",),
+    )
+
+    projects = _by_key(plan)
+    assert projects["api"].scanner_pins["checkov"] == ">=3.2.0"
+    assert projects["web"].scanner_pins["checkov"] == ">=3.2.0"
+
+
+def test_incompatible_recorded_pins_refuse_and_name_both_constraints(tmp_path):
+    definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
+    projects = [
+        _recorded("api", bandit=">=1.7.0,<2.0.0"),
+        _recorded("web", bandit=">=2.0.0"),
+    ]
+
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
-        resolve_workspace(workspace)
+        _validate_scanner_pins(definition, projects)
 
     message = str(excinfo.value)
     assert "bandit" in message
@@ -188,68 +244,38 @@ def test_incompatible_scanner_pins_refuse_and_name_both_constraints(tmp_path):
     assert ">=2.0.0" in message
 
 
-def test_compatible_but_different_pins_are_accepted_and_recorded(tmp_path):
-    _project(
-        tmp_path,
-        "api",
-        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.7.0,<2.0.0"\n',
-    )
-    _project(
-        tmp_path,
-        "web",
-        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.8.0"\n',
-    )
-    workspace = _workspace(tmp_path, ["api", "web"])
+def test_compatible_but_different_recorded_pins_are_accepted(tmp_path):
+    definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
+    projects = [
+        _recorded("api", bandit=">=1.7.0,<2.0.0"),
+        _recorded("web", bandit=">=1.8.0"),
+    ]
 
-    plan = resolve_workspace(workspace)
-
-    projects = _by_key(plan)
-    assert projects["api"].scanner_pins["bandit"] == ">=1.7.0,<2.0.0"
-    assert projects["web"].scanner_pins["bandit"] == ">=1.8.0"
+    _validate_scanner_pins(definition, projects)
 
 
-def test_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
+def test_recorded_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
     """Undecidable is refused, not assumed compatible: a project scanned by a
     version it excluded is the outcome worth designing against."""
-    _project(
-        tmp_path,
-        "api",
-        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.8.0rc1"\n',
-    )
-    _project(
-        tmp_path,
-        "web",
-        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=2.0.0"\n',
-    )
-    workspace = _workspace(tmp_path, ["api", "web"])
+    definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
+    projects = [
+        _recorded("api", bandit=">=1.8.0rc1"),
+        _recorded("web", bandit=">=2.0.0"),
+    ]
 
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
-        resolve_workspace(workspace)
+        _validate_scanner_pins(definition, projects)
 
     assert "bandit" in str(excinfo.value)
 
 
-def test_a_single_project_pin_is_never_a_conflict(tmp_path):
-    """One project declaring an exotic pin has nothing to conflict with.
+def test_a_single_recorded_pin_is_never_a_conflict(tmp_path):
+    """One project with an exotic pin has nothing to conflict with."""
+    definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
 
-    checkov because its options declare no default ``tool_version``: the
-    unpinned project contributes no effective checkov pin, so api's exotic
-    prerelease floor is the only pin for the scanner and there is no pair to
-    compare. (bandit would not show this: its built-in default is an effective
-    pin on every project.)
-    """
-    _project(
-        tmp_path,
-        "api",
-        'project_name: api\nscanners:\n  checkov:\n    options:\n      tool_version: ">=3.2.0rc1"\n',
+    _validate_scanner_pins(
+        definition, [_recorded("api", checkov=">=3.2.0rc1"), _recorded("web")]
     )
-    _project(tmp_path, "web")
-    workspace = _workspace(tmp_path, ["api", "web"])
-
-    plan = resolve_workspace(workspace)
-
-    assert _by_key(plan)["api"].scanner_pins["checkov"] == ">=3.2.0rc1"
-    assert "checkov" not in _by_key(plan)["web"].scanner_pins
 
 
 def test_shared_default_pins_do_not_conflict(tmp_path):
@@ -262,20 +288,6 @@ def test_shared_default_pins_do_not_conflict(tmp_path):
 
     projects = _by_key(plan)
     assert projects["api"].scanner_pins == projects["web"].scanner_pins
-
-
-def test_pins_from_a_skipped_project_are_not_compared(tmp_path):
-    """A project that will not be scanned cannot conflict with one that will."""
-    _project(
-        tmp_path,
-        "api",
-        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=2.0.0"\n',
-    )
-    workspace = _workspace(tmp_path, ["api", "absent"])
-
-    plan = resolve_workspace(workspace, allow_missing_projects=True)
-
-    assert _by_key(plan)["api"].scanner_pins["bandit"] == ">=2.0.0"
 
 
 # ---------------------------------------------------------------------------

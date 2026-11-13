@@ -9,11 +9,15 @@ exported from the reporters package. Plugins outside this list are not
 discovered at runtime.
 """
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin import ASH_REPORTERS
 from automated_security_helper.plugin_modules.ash_builtin.reporters import (
     GitLabSASTReporter,
     UnusedSuppressionsReporter,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_gitlab_sast_reporter_is_discoverable():

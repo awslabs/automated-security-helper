@@ -8,7 +8,11 @@ that is_expired can return True at runtime. The old behaviour (warn + return
 None) was removed.
 """
 
+import pytest
+
 from automated_security_helper.models.core import AshSuppression
+
+pytestmark = pytest.mark.unit
 
 
 def test_past_expiration_accepted_not_discarded():

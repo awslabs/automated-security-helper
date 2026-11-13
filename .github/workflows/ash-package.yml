@@ -142,9 +142,13 @@ concurrency:
   # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets. A merge_group entry has its own
+  # per-entry ref, so a second run in its group only means the entry was rebuilt and the
+  # earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
@@ -159,26 +163,16 @@ jobs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # Default fetch-depth (1) on purpose. hatch_build.py stamps
-      # automated_security_helper/assets/ASH_INSTALLED_REVISION during the build,
-      # and despite the name of the function that produces it (_get_commit_sha)
-      # what it actually runs is `git rev-parse --abbrev-ref HEAD` -- a branch
-      # name, deliberately, per the NOTE at hatch_build.py:78 saying the Dockerfile
-      # needs the branch rather than a commit. That needs no history, so a full
-      # clone would buy nothing here.
-      #
-      # Worth knowing when reading a built artifact: on a pull_request event the
-      # checkout leaves HEAD detached, and `--abbrev-ref HEAD` on a detached HEAD
-      # prints the literal string "HEAD". So the wheel this job builds records
-      # "HEAD" as its revision. That is pre-existing behavior of the build hook,
-      # not something this workflow introduces, and it does not fail the build --
-      # "HEAD" is not one of the values the hook's fallback rejects. It is noted
-      # here so nobody reads that string as corruption.
+      # automated_security_helper/assets/ASH_INSTALLED_REVISION during the build
+      # with `git rev-parse HEAD`, the full commit id, which a container image
+      # built from the installed package fetches by id. That needs no history,
+      # so a full clone would buy nothing here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -274,7 +268,7 @@ jobs:
       #
       #   unpinned-asset                    a file in automated_security_helper/
       #                                     assets/ that is not in
-      #                                     ASSETS_ALLOWLIST (14 entries)
+      #                                     ASSETS_ALLOWLIST (18 entries)
       #   unpinned-package-subdirectory     a new directory directly under
       #                                     automated_security_helper/
       #                                     (PACKAGE_SUBDIRECTORIES, 12 entries)
@@ -336,6 +330,12 @@ jobs:
           # rpm, MSIX, Flatpak, Chocolatey and winget packages put on PATH, and it
           # is declared in wheel metadata that a plain import would not exercise.
           "${venv}/bin/ashx" --version
+          # The wheel carries the GenAI guide for its own version, so the command
+          # writes it with no network: every proxy points at a closed port here, and
+          # the copy must be the docs page the wheel was built from.
+          HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 NO_PROXY='' \
+            "${venv}/bin/ashx" get-genai-guide --output "${RUNNER_TEMP}/ash-genai-guide.md"
+          cmp "${RUNNER_TEMP}/ash-genai-guide.md" docs/content/docs/genai-steering-guide.md
           # The wheel also declares the deprecated `ash` alias, which pip, pipx and
           # Homebrew installs still put on PATH: same exit code and --version output
           # as `ashx`, plus exactly one deprecation line on stderr.
@@ -343,7 +343,7 @@ jobs:
 
       - name: Upload wheel and sdist
         id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # run_attempt is in the name because artifact names are immutable within a
           # run from upload-artifact v4 onward, and this is pinned at v7. "Re-run all

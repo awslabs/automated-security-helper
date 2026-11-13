@@ -47,6 +47,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
@@ -72,6 +74,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+
+pytestmark = pytest.mark.unit
 
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
 

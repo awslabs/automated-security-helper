@@ -53,6 +53,9 @@ variable "ash_offline_mode" {
 
     Offline images are larger and take longer to build, but a scan does not
     depend on reaching an external package index or ruleset host.
+
+    It does not restrict where the workload can connect. Egress is decided by
+    the subnets, routes and security groups each target module runs in.
   EOT
   type        = bool
   default     = false

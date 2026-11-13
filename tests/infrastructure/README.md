@@ -17,10 +17,13 @@ CDK stack that provisions an air-gapped VPC for validating ASH offline mode.
 - Python 3.10+
 - AWS CDK CLI (`npm install -g aws-cdk`)
 - AWS credentials configured (`aws configure` or environment variables)
-- ASH project dependencies installed (`pip install -e '.[dev]'` from repo root)
+- ASH project dependencies installed (`uv sync --extra cdk` from repo root: the dev
+  group, which `uv sync` installs by default, and the `cdk` extra, which provides the
+  `aws_cdk` and `constructs` packages the stack imports)
 
 ## Deploy the stack
 
+<!-- doctest: illustrative reason="needs the AWS CDK CLI and AWS credentials" -->
 ```bash
 cd tests/infrastructure
 
@@ -39,6 +42,7 @@ cdk deploy \
 
 ## Parameters
 
+<!-- doctest: options of=python.tests.infrastructure.offline_test_stack.OfflineTestStack -->
 | Name | Default | Description |
 |------|---------|-------------|
 | `vpc_cidr` | `10.0.0.0/16` | CIDR block for the isolated VPC |
@@ -52,6 +56,7 @@ Pass parameters via `--context key=value` on the `cdk` command line.
 ### Option A -- EC2 instance (interactive)
 
 1. Connect via SSM Session Manager (the instance has no public IP):
+   <!-- doctest: illustrative reason="needs AWS credentials and the deployed stack" -->
    ```bash
    aws ssm start-session --target <instance-id>
    ```
@@ -63,6 +68,7 @@ Pass parameters via `--context key=value` on the `cdk` command line.
 
 1. Upload a pre-built ASH bundle + test repos to the artifact S3 bucket.
 2. Start a build:
+   <!-- doctest: illustrative reason="needs AWS credentials and the deployed stack" -->
    ```bash
    aws codebuild start-build --project-name <project-name>
    ```
@@ -70,6 +76,7 @@ Pass parameters via `--context key=value` on the `cdk` command line.
 
 ## Tear down
 
+<!-- doctest: illustrative reason="needs the AWS CDK CLI and AWS credentials" -->
 ```bash
 cdk destroy
 ```

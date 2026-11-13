@@ -7,12 +7,15 @@ test process and see the scan. What those patches observed -- the file list hand
 request, so :func:`capturing_worker_command` records the request and then runs the
 real worker. The other two replace the worker with one that fails or hangs.
 
+Each returns the interpreter's arguments without the interpreter itself, as
+``_worker_command`` does: the scanner starts ASH's own through
+``utils/python_child.py``.
+
 Install with
 ``monkeypatch.setattr(DetectSecretsScanner, "_worker_command", staticmethod(cmd))``.
 """
 
 import json
-import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -31,7 +34,6 @@ def capturing_worker_command(capture_file: Path) -> WorkerCommand:
 
     def command(request_file: Path, output_file: Path) -> List[str]:
         return [
-            sys.executable,
             "-c",
             code,
             str(request_file),
@@ -51,7 +53,7 @@ def failing_worker_command(message: str) -> WorkerCommand:
     """A worker that raises RuntimeError(message) before scanning anything."""
 
     def command(request_file: Path, output_file: Path) -> List[str]:
-        return [sys.executable, "-c", f"raise RuntimeError({message!r})"]
+        return ["-c", f"raise RuntimeError({message!r})"]
 
     return command
 
@@ -60,6 +62,6 @@ def hanging_worker_command(seconds: float) -> WorkerCommand:
     """A worker that sleeps for ``seconds`` and writes nothing."""
 
     def command(request_file: Path, output_file: Path) -> List[str]:
-        return [sys.executable, "-c", f"import time; time.sleep({seconds!r})"]
+        return ["-c", f"import time; time.sleep({seconds!r})"]
 
     return command

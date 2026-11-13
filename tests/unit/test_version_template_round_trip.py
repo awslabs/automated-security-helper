@@ -32,8 +32,14 @@ edit away.
 
 What this asserts, and what it deliberately does not
 ----------------------------------------------------
-It asserts the round trip: ``template`` with ``{{VERSION}}`` replaced by the packaged
-version is byte-identical to the committed doc. That is the whole invariant
+It asserts the round trip: ``template`` with ``{{VERSION}}`` and ``{{RELEASE}}`` replaced
+by the packaged version is byte-identical to the committed doc. Every build renders both
+placeholders as its version, which is why rendering goes through
+``VersionTemplateManager.render``; the two stay distinct so an install command's ref can
+be told from a prose release number (scripts/docs_checks.py check_release_placeholders).
+The committed doc is also what the docs site's main version serves (see
+docs/hooks/install_refs.py), so this round trip is also what keeps the main docs' install
+commands pinned to the current release. That is the whole invariant
 ``generate`` establishes, so checking it on every pull request means a doc-only edit
 fails here instead of at the next release.
 
@@ -44,17 +50,19 @@ comparison is done in memory.
 Where the version comes from
 ----------------------------
 ``[tool.commitizen] version``, not ``version_management.get_version()``.
-``get_version()`` prefers installed package metadata, so in any environment where ASH
-is installed from outside this checkout it returns a version unrelated to the tree
-being tested, and this file would fail for a reason that has nothing to do with
-template drift. ``tests/unit/test_agent_plugin_ash_version.py`` records the same
-hazard and resolves it the same way, and it separately asserts that
-``[project] version`` and ``[tool.commitizen] version`` agree.
+``get_version()`` used to prefer installed package metadata, so in any environment
+where ASH was installed from outside this checkout it returned a version unrelated to
+the tree being tested, and this file would have failed for a reason that has nothing
+to do with template drift. It now reads the checkout's pyproject.toml first, but this
+file keeps reading the file itself: it tests the templates, not the version lookup.
+``tests/unit/test_agent_plugin_ash_version.py`` records the same hazard and resolves
+it the same way, and it separately asserts that ``[project] version`` and
+``[tool.commitizen] version`` agree.
 
-The consequence to be aware of: ``generate`` substitutes ``get_version()``, so this
-file checks what a release *should* produce rather than replaying the substitution
-``generate`` performs. Those coincide whenever the installed distribution is this
-checkout, which is the case in CI.
+The consequence to be aware of: ``generate`` substitutes ``get_version()`` of the
+project root it is given, so this file checks what a release *should* produce rather
+than replaying the substitution ``generate`` performs. Those coincide whenever that
+root is this checkout, which is the case in CI.
 """
 
 from __future__ import annotations
@@ -70,9 +78,13 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
-PLACEHOLDER = "{{VERSION}}"
+#: Both placeholders the manager renders. Kept here as well as in the manager so a
+#: rename in one place fails test_the_manager_renders_these_placeholders.
+PLACEHOLDERS = ("{{VERSION}}", "{{RELEASE}}")
 
 # Floor for the positive control. The manager names eleven targets today; a floor rather
 # than an equality so adding another templated doc does not need an edit here, while
@@ -192,27 +204,57 @@ class TestTheRoundTripCheckCanFail:
             "than failing."
         )
 
-    def test_the_placeholder_is_actually_substituted_somewhere(self):
+    def test_the_manager_renders_these_placeholders(self):
+        manager = VersionTemplateManager(REPO_ROOT)
+        assert (
+            manager.version_placeholder,
+            manager.release_placeholder,
+        ) == PLACEHOLDERS
+
+    @pytest.mark.parametrize("placeholder", PLACEHOLDERS)
+    def test_the_placeholder_is_actually_substituted_somewhere(self, placeholder: str):
         """Otherwise the comparison degenerates into "two identical files are equal".
 
-        If ``{{VERSION}}`` appeared in no template, ``_render`` would be the identity
-        function and every case above would pass without exercising substitution at
-        all -- so a renamed placeholder would read as success while `generate` quietly
-        stopped inserting the version.
+        If a placeholder appeared in no template, ``_render`` would not exercise it, and
+        every case above would pass while `generate` quietly stopped inserting the
+        version for it.
         """
         with_placeholder = [
             relative
             for relative in _targets()
             if (REPO_ROOT / f"{relative}.template").is_file()
-            and PLACEHOLDER
+            and placeholder
             in (REPO_ROOT / f"{relative}.template").read_text(encoding="utf-8")
         ]
 
         assert with_placeholder, (
-            f"No template contains {PLACEHOLDER}. Either the placeholder was renamed "
-            "-- in which case VersionTemplateManager.version_placeholder and this file "
-            "disagree -- or the templates no longer carry a version at all."
+            f"No template contains {placeholder}. Either the placeholder was renamed "
+            "-- in which case VersionTemplateManager and this file disagree -- or the "
+            "templates no longer carry it at all."
         )
+
+    def test_no_placeholder_survives_rendering(self):
+        """A misspelled placeholder, such as ``{{RELASE}}``, would render as itself.
+
+        The round trip cannot see it: the committed doc, generated from the same
+        template, carries the same text. So every rendered template must be free of
+        anything shaped like a placeholder.
+        """
+        import re
+
+        survivors = {
+            relative: sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", _render(text))))
+            for relative in _targets()
+            if (REPO_ROOT / f"{relative}.template").is_file()
+            for text in [
+                (REPO_ROOT / f"{relative}.template").read_text(encoding="utf-8")
+            ]
+        }
+        survivors = {relative: names for relative, names in survivors.items() if names}
+        assert not survivors, (
+            f"These placeholders are not ones the manager renders: {survivors}"
+        )
+        assert re.findall(r"\{\{[A-Z_]+\}\}", _render("{{RELASE}}")) == ["{{RELASE}}"]
 
     def test_a_mutated_template_is_detected(self):
         """The check must fail on drift, demonstrated rather than asserted.
@@ -237,3 +279,23 @@ class TestTheRoundTripCheckCanFail:
             "committed doc. If it does not, the comparison is not reading what it "
             "believes it is reading."
         )
+
+
+class TestPackagedRelease:
+    """``packaged_release`` reads ``[tool.commitizen] version`` with either parser."""
+
+    def test_both_parsers_read_the_commitizen_version(self, monkeypatch):
+        """tomllib on 3.11 and later, tomli on 3.10: both arms, on one interpreter.
+
+        The 3.10 arm is reached here by reporting 3.10 for the one call and giving
+        it a ``tomli`` module, which has tomllib's API (tomllib is tomli, moved into
+        the standard library). On the 3.10 cell of the unit-test matrix both calls
+        take that arm with the real tomli.
+        """
+        manager = VersionTemplateManager(REPO_ROOT)
+        expected = _packaged_version()
+        assert manager.packaged_release() == expected
+        with monkeypatch.context() as patched:
+            patched.setattr(sys, "version_info", (3, 10, 0, "final", 0))
+            patched.setitem(sys.modules, "tomli", tomllib)
+            assert manager.packaged_release() == expected

@@ -11,6 +11,8 @@ from automated_security_helper.models.scanner_validation import (
 )
 from automated_security_helper.core.enums import ScannerStatus
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_plugin_context():

@@ -6,8 +6,8 @@ body:
     id: problem
     attributes:
       label: Problem Description
-      description: What problem does this solve?
-      placeholder: I'm frustrated when...
+      description: What are you trying to accomplish, and where does the current workflow get in the way?
+      placeholder: "When I… I need to… so that…"
     validations:
       required: true
 
@@ -15,7 +15,7 @@ body:
     id: solution
     attributes:
       label: Proposed Solution
-      description: How would you like this to work?
+      description: Describe the behavior or interaction you want, including what a successful result would look like.
 
   - type: textarea
     id: alternatives

@@ -1,0 +1,90 @@
+# Stands in for github/codeql-action/upload-sarif when the docs' workflows run under act
+# in the Docs CI Runners workflow. It uploads nothing and calls no API. Like the real
+# action it fails when the SARIF path does not exist, when a directory holds no .sarif
+# file, or when a file is not SARIF; otherwise it records the file it was given, its
+# category and its sha256 in the directory DOCTEST_STUB_RECORDS names, which only the
+# runner tests set.
+name: upload-sarif stand-in
+description: Records the SARIF file it is given instead of uploading it to code scanning.
+inputs:
+  sarif_file:
+    description: The SARIF file, or a directory of SARIF files.
+    required: false
+    default: ../results
+  category:
+    description: The analysis category.
+    required: false
+    default: ""
+  wait-for-processing:
+    description: Accepted and ignored.
+    required: false
+    default: "true"
+  checkout_path:
+    description: Accepted and ignored.
+    required: false
+    default: ""
+  token:
+    description: Accepted and ignored; the stand-in calls no API.
+    required: false
+    default: ""
+outputs:
+  sarif-id:
+    description: A fixed id for the recorded upload.
+    value: ${{ steps.record.outputs.sarif-id }}
+runs:
+  using: composite
+  steps:
+    - id: record
+      shell: bash
+      env:
+        STUB_SARIF_FILE: ${{ inputs.sarif_file }}
+        STUB_CATEGORY: ${{ inputs.category }}
+      run: |
+        python3 -I - <<'PYTHON'
+        import hashlib
+        import json
+        import os
+        import sys
+        from pathlib import Path
+
+        records = os.environ.get("DOCTEST_STUB_RECORDS", "")
+        if not records:
+            sys.exit("DOCTEST_STUB_RECORDS is not set: this stand-in runs only under the docs CI-runner tests")
+        given = os.environ.get("STUB_SARIF_FILE", "")
+        path = Path(given)
+        if not path.is_absolute():
+            path = Path(os.environ.get("GITHUB_WORKSPACE", ".")) / given
+        if not path.exists():
+            sys.exit(f"Path does not exist: {given}")
+        files = [path] if path.is_file() else sorted(p for p in path.rglob("*.sarif") if p.is_file())
+        if not files:
+            sys.exit(f"No SARIF files found to upload in {given}")
+        digests = {}
+        for sarif in files:
+            data = sarif.read_bytes()
+            try:
+                document = json.loads(data)
+            except ValueError as error:
+                sys.exit(f"Invalid SARIF in {sarif}: {error}")
+            if not isinstance(document, dict) or not isinstance(document.get("runs"), list):
+                sys.exit(f"Invalid SARIF in {sarif}: no runs")
+            digests[str(sarif)] = hashlib.sha256(data).hexdigest()
+        record = {
+            "action": "github/codeql-action/upload-sarif",
+            "job": os.environ.get("GITHUB_JOB", ""),
+            "sarif_file": given,
+            "path": str(path),
+            "category": os.environ.get("STUB_CATEGORY", ""),
+            "sha256": digests[str(path)] if path.is_file() else None,
+            "files": digests,
+        }
+        out = Path(records)
+        out.mkdir(parents=True, exist_ok=True)
+        number = len(list(out.glob("upload-sarif-*.json"))) + 1
+        (out / f"upload-sarif-{number}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        output = os.environ.get("GITHUB_OUTPUT")
+        if output:
+            with open(output, "a", encoding="utf-8") as handle:
+                handle.write(f"sarif-id=doctest-upload-{number}\n")
+        print(f"recorded {given} ({len(files)} file(s)) as upload {number}")
+        PYTHON

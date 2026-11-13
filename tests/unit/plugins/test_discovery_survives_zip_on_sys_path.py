@@ -26,6 +26,8 @@ import pytest
 
 from automated_security_helper.plugins.discovery import discover_plugins
 
+pytestmark = pytest.mark.unit
+
 _PLUGIN = "zipcache_probe_ash_plugins"
 _LOOKALIKE = _PLUGIN + "_evil"
 _NAMESPACE_ONLY = "zipcache_nsonly_ash_plugins"

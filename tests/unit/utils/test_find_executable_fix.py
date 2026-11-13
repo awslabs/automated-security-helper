@@ -3,7 +3,11 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.utils.subprocess_utils import find_executable
+
+pytestmark = pytest.mark.unit
 
 
 def test_returns_none_only_after_exhausting_all_variants():

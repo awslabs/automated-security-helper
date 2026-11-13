@@ -53,11 +53,14 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from automated_security_helper.interactions.run_ash_container import (
     _OCI_RUNNER_CANDIDATES,
 )
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"

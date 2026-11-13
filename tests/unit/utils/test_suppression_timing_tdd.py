@@ -17,6 +17,8 @@ from pathlib import Path
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport, Run
 from automated_security_helper.utils.sarif_utils import (
@@ -25,6 +27,8 @@ from automated_security_helper.utils.sarif_utils import (
 )
 from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 
 def _make_finding(uri: str, rule_id: str = "CKV_AWS_56") -> dict:

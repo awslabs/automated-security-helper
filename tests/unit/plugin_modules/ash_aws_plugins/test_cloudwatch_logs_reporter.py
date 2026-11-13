@@ -1,10 +1,12 @@
 """Unit tests for the CloudWatch Logs reporter plugin."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 import json
 import os
 from datetime import datetime, timezone
+
+import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.base.plugin_context import PluginContext
@@ -13,6 +15,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_re
     CloudWatchLogsReporterConfig,
     CloudWatchLogsReporterConfigOptions,
 )
+
+pytestmark = pytest.mark.unit
 
 # Rebuild models to resolve forward references
 AshConfig.model_rebuild()
@@ -60,7 +64,8 @@ def test_cloudwatch_logs_reporter_config_defaults():
     config = CloudWatchLogsReporterConfig()
     assert config.name == "cloudwatch-logs"
     assert config.extension == "cwlog.json"
-    assert config.enabled is True
+    # Off by default: it sends findings to AWS, so only the operator turns it on.
+    assert config.enabled is False
     assert isinstance(config.options, CloudWatchLogsReporterConfigOptions)
 
 
@@ -245,7 +250,7 @@ def test_cloudwatch_logs_reporter_report_success(
         result = reporter.report(model)
 
     # Verify CloudWatch Logs calls
-    mock_boto3.client.assert_called_with("logs", region_name="us-west-2")
+    mock_boto3.client.assert_called_with("logs", region_name="us-west-2", config=ANY)
     mock_cwlogs_client.create_log_stream.assert_called_once_with(
         logGroupName="test-log-group", logStreamName="test-stream"
     )
@@ -369,12 +374,12 @@ def test_cloudwatch_logs_reporter_report_put_events_error(mock_boto3, ash_temp_p
     ):
         result = reporter.report(model)
 
-    # Verify error was logged
+    # Verify error was logged, with the failure's own text
     reporter._plugin_log.assert_called_once()
-    assert (
-        "Error when publishing results to CloudWatch Logs"
-        in reporter._plugin_log.call_args[0][0]
-    )
+    logged = reporter._plugin_log.call_args[0][0]
+    assert "Error when publishing results to CloudWatch Logs" in logged
+    assert "Invalid sequence token" in logged
 
-    # Verify result contains error message
-    assert "Invalid sequence token" in result
+    # A failed publish produces no report: None, never the error text, which
+    # the report phase would write to ash.cwlog.json as a report.
+    assert result is None

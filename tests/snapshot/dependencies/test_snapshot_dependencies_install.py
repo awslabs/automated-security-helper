@@ -21,19 +21,49 @@ every OS.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 from rich.console import Console
 
 from automated_security_helper.utils import uv_tool_runner
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
-from tests.snapshot.support.cli import ALL_HOSTS, run_cli, simulated_host
+from tests.snapshot.support.cli import (
+    ALL_HOSTS,
+    DISPLAYED_CWD,
+    displayed_cwd,
+    run_cli,
+    simulated_host,
+)
+
+pytestmark = pytest.mark.unit
 
 PINNED_PYTHON = "python3"
 REAL_PYTHON = sys.executable
+
+#: The snapshots are POSIX text by construction: the commands they record name POSIX
+#: paths.
+_POSIX_TEXT = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the recorded install output is POSIX by construction: its commands name POSIX paths",
+)
+
+
+def _hosts(*left_unmarked: str) -> list:
+    """ALL_HOSTS as parameters, skipped on Windows except the hosts named.
+
+    The hosts left unmarked are ones whose Windows ids fail in some other way than
+    by reading differently from the recorded POSIX text.
+    """
+    return [
+        pytest.param(
+            host, id=host.id, marks=() if host.id in left_unmarked else _POSIX_TEXT
+        )
+        for host in ALL_HOSTS
+    ]
 
 
 @dataclass
@@ -68,13 +98,34 @@ SCENARIOS = {
 
 
 @pytest.fixture
-def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def project_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, snapshot_normalizer
+) -> Path:
     project = tmp_path / "demo-project"
     project.mkdir()
     monkeypatch.chdir(project)
+    # The bin path is printed absolute in every install command that names it (the
+    # panel shows it as given); displayed_cwd keeps the absolute form's length, and so
+    # the wrapping, the same on every machine.
+    for spelling in (PurePosixPath(DISPLAYED_CWD), PureWindowsPath(DISPLAYED_CWD)):
+        snapshot_normalizer.add_root(spelling, "WORKSPACE")
     # install_dependencies writes os.environ["ASH_BIN_PATH"] itself; setting it here
-    # first means monkeypatch restores the real value afterwards.
-    monkeypatch.setenv("ASH_BIN_PATH", "bin")
+    # first means monkeypatch restores the real value afterwards. The absolute form
+    # of the --bin-path the tests pass, as the command computes it under
+    # displayed_cwd, so the run ends without the ASH_BIN_PATH hint: it quotes a
+    # Windows path differently from a POSIX one, and
+    # tests/unit/cli/test_dependencies_bin_path.py checks it.
+    #
+    # On Windows the command computes that absolute form with ``ntpath.abspath``,
+    # which asks the OS for the real cwd rather than ``os.getcwd``, so
+    # displayed_cwd does not reach it; and a drive-less ``\workspace\...`` is not
+    # anchored there, so the command would read it as unset (core.constants
+    # ``is_anchored``). The anchored real path is what the command compares with.
+    if os.name == "nt":
+        bin_path = os.path.abspath(project / "bin")
+    else:
+        bin_path = str(Path(DISPLAYED_CWD, "bin"))
+    monkeypatch.setenv("ASH_BIN_PATH", bin_path)
     # cfn-nag's Windows check reads it; pinned unset so the warning is the same on
     # a developer machine with a Ruby DevKit as on CI.
     monkeypatch.delenv("RI_DEVKIT", raising=False)
@@ -89,6 +140,14 @@ def _fake_machine(monkeypatch: pytest.MonkeyPatch, scenario: Scenario) -> None:
     for module in list(sys.modules.values()):
         if getattr(module, "find_executable", None) is real_find_executable:
             monkeypatch.setattr(module, "find_executable", scenario.find_executable)
+    # The install command looks a tool up as a scan of the tree would
+    # (find_executable_for_scan, anchored to the source directory), which does not
+    # route through find_executable; the scenario answers that lookup too.
+    monkeypatch.setattr(
+        dependencies,
+        "find_executable_for_scan",
+        lambda command, root: scenario.find_executable(command),
+    )
     monkeypatch.setattr(dependencies, "run_command", scenario.run_command)
     monkeypatch.setattr(dependencies, "clear_find_executable_cache", lambda: None)
     monkeypatch.setattr(sys, "executable", PINNED_PYTHON)
@@ -114,6 +173,31 @@ def _fake_machine(monkeypatch: pytest.MonkeyPatch, scenario: Scenario) -> None:
         list(cdk_nag_scanner._CDK_REQUIRED_DISTRIBUTIONS),
     )
     monkeypatch.setattr(cdk_nag_scanner, "_cdk_nag_version", "unavailable")
+    # Whether cfn-nag's gem can build its native extension is read from the real
+    # machine, not from the faked PATH: on macOS by the developer directory on disk
+    # (`_macos_developer_tools_present`), on Linux by ruby.h beside the ruby on PATH
+    # (`_ruby_headers_present`). Regenerated on a Linux machine, the darwin goldens
+    # recorded the gem install as having no path (no developer directory there) and
+    # read red on a macOS machine, where it does. Pinned to a buildable toolchain,
+    # the case whose output names the gem install a user would run.
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cfn_nag_scanner,
+    )
+
+    monkeypatch.setattr(cfn_nag_scanner, "_macos_developer_tools_present", lambda: True)
+    monkeypatch.setattr(
+        cfn_nag_scanner, "_ruby_headers_present", lambda *args, **kwargs: True
+    )
+    # Which installer adds cdk-nag's packages depends on the environment running the
+    # test: pip where it is importable, uv where it is not (a `uv sync` venv). Pinned
+    # to pip, the command a user of a pip or pipx install sees.
+    from automated_security_helper.utils import python_installer
+
+    monkeypatch.setattr(python_installer, "pip_is_importable", lambda: True)
+    monkeypatch.setattr(python_installer, "is_uv_tool_environment", lambda: False)
+    # CI's venv is a uv project's `.venv`, which would add the `uv sync` note; a pip
+    # or pipx install has no such note.
+    monkeypatch.setattr(python_installer, "uv_project_directory", lambda: None)
 
 
 class _FakeUvRunner(UVToolRunner):
@@ -123,16 +207,27 @@ class _FakeUvRunner(UVToolRunner):
         super().__init__()
         self._uv_available_cache = True
 
-    def is_uv_available(self) -> bool:
-        return True
+    def uv_availability(self):
+        return True, None
 
     def get_tool_version(self, tool_name, package_name=None, *args, **kwargs):
         return "0.0.0-snapshot"
 
+    def is_tool_installed(self, tool_name):
+        # Asked after the install for a uv-managed tool the scenario left off
+        # PATH; uv lists nothing on the fake machine.
+        return False
+
     def __getattribute__(self, name):
         # Anything else that would start a subprocess is a probe this fake does not
         # pin yet; fail loudly rather than let it reach the real machine.
-        allowed = {"is_uv_available", "get_tool_version", "uv_executable"}
+        allowed = {
+            "is_uv_available",
+            "uv_availability",
+            "get_tool_version",
+            "is_tool_installed",
+            "uv_executable",
+        }
         if (
             not name.startswith("_")
             and name not in allowed
@@ -142,7 +237,7 @@ class _FakeUvRunner(UVToolRunner):
         return super().__getattribute__(name)
 
 
-@pytest.mark.parametrize("host", ALL_HOSTS, ids=lambda h: h.id)
+@pytest.mark.parametrize("host", _hosts("freebsd-riscv64"))
 @pytest.mark.parametrize(
     "scenario_name, exit_code",
     [
@@ -159,7 +254,7 @@ def test_dependencies_install(
     )
     _fake_machine(monkeypatch, scenario)
 
-    with simulated_host(monkeypatch, host):
+    with simulated_host(monkeypatch, host), displayed_cwd(monkeypatch):
         run = run_cli(["dependencies", "install", "--bin-path", "bin"])
 
     assert run.exit_code == exit_code, run.output
@@ -176,7 +271,7 @@ def test_dependencies_install_bad_selection(
     scenario = Scenario()
     _fake_machine(monkeypatch, scenario)
 
-    with simulated_host(monkeypatch, host):
+    with simulated_host(monkeypatch, host), displayed_cwd(monkeypatch):
         run = run_cli(
             [
                 "dependencies",
@@ -195,14 +290,14 @@ def test_dependencies_install_bad_selection(
     assert text_snapshot("txt") == run.document
 
 
-@pytest.mark.parametrize("host", ALL_HOSTS, ids=lambda h: h.id)
+@pytest.mark.parametrize("host", _hosts("freebsd-riscv64", "windows-arm64"))
 def test_dependencies_install_selected_tool(
     host, project_dir, monkeypatch, text_snapshot
 ):
     scenario = Scenario()
     _fake_machine(monkeypatch, scenario)
 
-    with simulated_host(monkeypatch, host):
+    with simulated_host(monkeypatch, host), displayed_cwd(monkeypatch):
         run = run_cli(
             [
                 "dependencies",

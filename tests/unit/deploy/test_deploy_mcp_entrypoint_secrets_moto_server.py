@@ -171,6 +171,7 @@ def secretsmanager(moto_endpoint: str):
     )
 
 
+@pytest.mark.integration
 class TestSecretRead:
     def test_the_secret_value_is_read_byte_exact(
         self, stack, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
@@ -203,9 +204,10 @@ class TestSecretRead:
         captured = tmp_path / "captured"
 
         assert wanted["ARN"].startswith("arn:aws:secretsmanager:"), wanted["ARN"]
-        assert (
-            run_secret_read(stack, child_env, wanted["ARN"], captured).returncode == 0
-        )
+        returncode = run_secret_read(
+            stack, child_env, wanted["ARN"], captured
+        ).returncode
+        assert returncode == 0
         assert captured.read_text(encoding="utf-8") == "the-right-secret"
 
     def test_an_absent_secret_fails_the_entrypoint(
@@ -246,12 +248,14 @@ class TestSecretRead:
         )
         captured = tmp_path / "captured"
 
-        assert (
-            run_secret_read(stack, child_env, created["ARN"], captured).returncode == 0
-        )
+        returncode = run_secret_read(
+            stack, child_env, created["ARN"], captured
+        ).returncode
+        assert returncode == 0
         assert captured.read_bytes() == b"value-with-newline"
 
 
+@pytest.mark.unit
 class TestReadShape:
     def test_at_least_one_stack_emits_the_entrypoint(self):
         """The parametrization must not be able to cover nothing.

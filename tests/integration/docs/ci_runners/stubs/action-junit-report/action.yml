@@ -1,0 +1,110 @@
+# Stands in for mikepenz/action-junit-report when the docs' workflows run under act in
+# the Docs CI Runners workflow. It creates no check run and calls no API. It reads the
+# JUnit files the real action would publish and, like it, fails when require_tests is
+# set and none are found, or when fail_on_failure is set and a test failed; otherwise it
+# records the files, the test count and the failure count in the directory
+# DOCTEST_STUB_RECORDS names, which only the runner tests set.
+name: action-junit-report stand-in
+description: Records the JUnit results it is given instead of publishing a check run.
+inputs:
+  report_paths:
+    description: Glob patterns of the JUnit files, separated by commas or new lines.
+    required: false
+    default: "**/junit-reports/TEST-*.xml"
+  check_name:
+    description: The check run's name.
+    required: false
+    default: JUnit Test Report
+  include_passed:
+    description: Accepted and ignored.
+    required: false
+    default: "false"
+  summary:
+    description: Accepted and ignored.
+    required: false
+    default: ""
+  fail_on_failure:
+    description: Fail the step when a test failed.
+    required: false
+    default: "false"
+  require_tests:
+    description: Fail the step when no test results are found.
+    required: false
+    default: "false"
+  token:
+    description: Accepted and ignored; the stand-in calls no API.
+    required: false
+    default: ""
+outputs:
+  total:
+    description: The number of tests read.
+    value: ${{ steps.record.outputs.total }}
+  failed:
+    description: The number of failed tests read.
+    value: ${{ steps.record.outputs.failed }}
+runs:
+  using: composite
+  steps:
+    - id: record
+      shell: bash
+      env:
+        STUB_REPORT_PATHS: ${{ inputs.report_paths }}
+        STUB_CHECK_NAME: ${{ inputs.check_name }}
+        STUB_FAIL_ON_FAILURE: ${{ inputs.fail_on_failure }}
+        STUB_REQUIRE_TESTS: ${{ inputs.require_tests }}
+      run: |
+        python3 -I - <<'PYTHON'
+        import glob
+        import hashlib
+        import json
+        import os
+        import re
+        import sys
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+
+        records = os.environ.get("DOCTEST_STUB_RECORDS", "")
+        if not records:
+            sys.exit("DOCTEST_STUB_RECORDS is not set: this stand-in runs only under the docs CI-runner tests")
+        workspace = Path(os.environ.get("GITHUB_WORKSPACE", "."))
+        patterns = [p.strip() for p in re.split(r"[,\n]", os.environ.get("STUB_REPORT_PATHS", "")) if p.strip()]
+        files = {}
+        tests = failures = 0
+        for pattern in patterns:
+            for match in sorted(glob.glob(str(workspace / pattern), recursive=True)):
+                path = Path(match)
+                if not path.is_file():
+                    continue
+                data = path.read_bytes()
+                try:
+                    root = ET.fromstring(data)
+                except ET.ParseError as error:
+                    sys.exit(f"{path} is not JUnit XML: {error}")
+                cases = list(root.iter("testcase"))
+                tests += len(cases)
+                failures += sum(1 for c in cases if c.find("failure") is not None or c.find("error") is not None)
+                files[Path(os.path.relpath(path, workspace)).as_posix()] = hashlib.sha256(data).hexdigest()
+        if not tests:
+            print("No test results found!")
+            if os.environ.get("STUB_REQUIRE_TESTS") == "true":
+                sys.exit("require_tests is set and no test results were found")
+        record = {
+            "action": "mikepenz/action-junit-report",
+            "job": os.environ.get("GITHUB_JOB", ""),
+            "check_name": os.environ.get("STUB_CHECK_NAME", ""),
+            "files": files,
+            "tests": tests,
+            "failures": failures,
+        }
+        out = Path(records)
+        out.mkdir(parents=True, exist_ok=True)
+        number = len(list(out.glob("action-junit-report-*.json"))) + 1
+        (out / f"action-junit-report-{number}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        output = os.environ.get("GITHUB_OUTPUT")
+        if output:
+            with open(output, "a", encoding="utf-8") as handle:
+                handle.write(f"total={tests}\nfailed={failures}\n")
+        print(f"recorded {tests} tests, {failures} failed, as check run {number}")
+        if failures and os.environ.get("STUB_FAIL_ON_FAILURE") == "true":
+            sys.exit(f"{failures} tests failed and fail_on_failure is set")
+        PYTHON

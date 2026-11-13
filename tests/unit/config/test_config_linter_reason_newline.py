@@ -50,6 +50,8 @@ from automated_security_helper.config.config_linter import (
     LintSeverity,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _write_config(tmp_path: Path, suppressions_yaml: str) -> Path:
     body = textwrap.indent(textwrap.dedent(suppressions_yaml).rstrip("\n"), " " * 4)

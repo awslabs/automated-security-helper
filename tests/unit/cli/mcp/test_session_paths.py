@@ -23,6 +23,8 @@ from automated_security_helper.cli.mcp.session_paths import (
     validated_path_component,
 )
 
+pytestmark = pytest.mark.unit
+
 #: Forms the allowlist has to refuse. Each is a distinct reason rather than a
 #: variation on one: a drive-letter prefix, a bare drive, both relative
 #: components, separators in both directions, a NUL and other control characters,

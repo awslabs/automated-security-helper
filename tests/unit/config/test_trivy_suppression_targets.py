@@ -31,6 +31,9 @@ from typing import Any
 import pytest
 import yaml
 
+# In-process over the checkout's config files: the unit tier.
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIG = ".ash/.ash_community_plugins.yaml"
 

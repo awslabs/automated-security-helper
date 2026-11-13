@@ -11,10 +11,13 @@ from __future__ import annotations
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
+import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -37,7 +40,6 @@ def _make_plugin_context(tmp_path):
 def _make_progress():
     prog = MagicMock()
     prog.add_task.return_value = "task-id"
-    prog.phase_task = None
     return prog
 
 
@@ -123,7 +125,7 @@ class TestSequentialCompletedScanners:
         assert len(executor.completed_scanners) == 3
 
     def test_inner_scan_failure_excluded_from_completed(self, tmp_path):
-        # DA r2 #1: scan() raises mid-target — _execute_scanner produces a container
+        # scan() raises mid-target — _execute_scanner produces a container
         # with status=ERROR. Even though _safe_execute_scanner returns succeeded=True,
         # the ERROR-status container must exclude the scanner from completed_scanners.
         executor = _make_executor(
@@ -191,7 +193,7 @@ class TestParallelCompletedScanners:
             seen.add(key)
 
     def test_inner_scan_failure_excluded_from_completed_parallel(self, tmp_path):
-        # DA r2 #1: scan() raises mid-target → ERROR-status container.
+        # scan() raises mid-target → ERROR-status container.
         # The append predicate must reject ERROR-status containers in parallel too.
         executor = _make_executor(
             tmp_path,

@@ -1,0 +1,1275 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "results": [
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "importance": "essential",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "does not set persist-credentials: false",
+                                "feature_kind": "Normal",
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": ".github/workflows/vulnerable.yml"
+                                  }
+                                },
+                                "kind": "Primary",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "jobs"
+                                    },
+                                    {
+                                      "Key": "greet"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 0
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "does not set persist-credentials: false"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": ".github/workflows/vulnerable.yml"
+                          },
+                          "region": {
+                            "endColumn": 57,
+                            "endLine": 12,
+                            "snippet": {
+                              "text": "uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 9,
+                            "startLine": 10
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "kind": "fail",
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "properties": {
+                    "symbolic": {
+                      "annotation": "does not set persist-credentials: false",
+                      "feature_kind": "Normal",
+                      "key": {
+                        "Local": {
+                          "verbatim_path": ".github/workflows/vulnerable.yml"
+                        }
+                      },
+                      "kind": "Primary",
+                      "route": {
+                        "route": [
+                          {
+                            "Key": "jobs"
+                          },
+                          {
+                            "Key": "greet"
+                          },
+                          {
+                            "Key": "steps"
+                          },
+                          {
+                            "Index": 0
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {
+                "text": "does not set persist-credentials: false"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/vulnerable.yml"
+                },
+                "region": {
+                  "endColumn": 57,
+                  "endLine": 12,
+                  "snippet": {
+                    "text": "uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}"
+                  },
+                  "sourceLanguage": "yaml",
+                  "startColumn": 9,
+                  "startLine": 10
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "credential persistence through GitHub Actions artifacts: does not set persist-credentials: false"
+          },
+          "properties": {
+            "zizmor/confidence": "Low",
+            "zizmor/persona": "Regular",
+            "zizmor/severity": "Medium"
+          },
+          "ruleId": "zizmor/artipacked"
+        },
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "importance": "important",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "this job",
+                                "feature_kind": "Normal",
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": ".github/workflows/vulnerable.yml"
+                                  }
+                                },
+                                "kind": "Related",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "jobs"
+                                    },
+                                    {
+                                      "Key": "greet"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "this job"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": ".github/workflows/vulnerable.yml"
+                          },
+                          "region": {
+                            "endColumn": 1,
+                            "endLine": 15,
+                            "snippet": {
+                              "text": "  greet:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n      - name: echo title\n        run: echo \"${{ github.event.issue.title }}\"\n"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 3,
+                            "startLine": 7
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "importance": "essential",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "default permissions used due to no permissions: block",
+                                "feature_kind": "Normal",
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": ".github/workflows/vulnerable.yml"
+                                  }
+                                },
+                                "kind": "Primary",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "jobs"
+                                    },
+                                    {
+                                      "Key": "greet"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "default permissions used due to no permissions: block"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": ".github/workflows/vulnerable.yml"
+                          },
+                          "region": {
+                            "endColumn": 1,
+                            "endLine": 15,
+                            "snippet": {
+                              "text": "  greet:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n      - name: echo title\n        run: echo \"${{ github.event.issue.title }}\"\n"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 3,
+                            "startLine": 7
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "kind": "fail",
+          "level": "warning",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "properties": {
+                    "symbolic": {
+                      "annotation": "default permissions used due to no permissions: block",
+                      "feature_kind": "Normal",
+                      "key": {
+                        "Local": {
+                          "verbatim_path": ".github/workflows/vulnerable.yml"
+                        }
+                      },
+                      "kind": "Primary",
+                      "route": {
+                        "route": [
+                          {
+                            "Key": "jobs"
+                          },
+                          {
+                            "Key": "greet"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {
+                "text": "default permissions used due to no permissions: block"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/vulnerable.yml"
+                },
+                "region": {
+                  "endColumn": 1,
+                  "endLine": 15,
+                  "snippet": {
+                    "text": "  greet:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n      - name: echo title\n        run: echo \"${{ github.event.issue.title }}\"\n"
+                  },
+                  "sourceLanguage": "yaml",
+                  "startColumn": 3,
+                  "startLine": 7
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "overly broad permissions: default permissions used due to no permissions: block"
+          },
+          "properties": {
+            "zizmor/confidence": "Medium",
+            "zizmor/persona": "Regular",
+            "zizmor/severity": "Medium"
+          },
+          "ruleId": "zizmor/excessive-permissions"
+        },
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "importance": "essential",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "pull_request_target is almost always used insecurely",
+                                "feature_kind": "Normal",
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": ".github/workflows/vulnerable.yml"
+                                  }
+                                },
+                                "kind": "Primary",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "on"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "pull_request_target is almost always used insecurely"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": ".github/workflows/vulnerable.yml"
+                          },
+                          "region": {
+                            "endColumn": 20,
+                            "endLine": 5,
+                            "snippet": {
+                              "text": "on:\n  pull_request_target:\n  issues:\n    types: [opened]"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 1,
+                            "startLine": 2
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "kind": "fail",
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "properties": {
+                    "symbolic": {
+                      "annotation": "pull_request_target is almost always used insecurely",
+                      "feature_kind": "Normal",
+                      "key": {
+                        "Local": {
+                          "verbatim_path": ".github/workflows/vulnerable.yml"
+                        }
+                      },
+                      "kind": "Primary",
+                      "route": {
+                        "route": [
+                          {
+                            "Key": "on"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {
+                "text": "pull_request_target is almost always used insecurely"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/vulnerable.yml"
+                },
+                "region": {
+                  "endColumn": 20,
+                  "endLine": 5,
+                  "snippet": {
+                    "text": "on:\n  pull_request_target:\n  issues:\n    types: [opened]"
+                  },
+                  "sourceLanguage": "yaml",
+                  "startColumn": 1,
+                  "startLine": 2
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "use of fundamentally insecure workflow trigger: pull_request_target is almost always used insecurely"
+          },
+          "properties": {
+            "zizmor/confidence": "Medium",
+            "zizmor/persona": "Regular",
+            "zizmor/severity": "High"
+          },
+          "ruleId": "zizmor/dangerous-triggers"
+        },
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "importance": "essential",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "may expand into attacker-controllable code",
+                                "feature_kind": {
+                                  "Subfeature": {
+                                    "after": 7,
+                                    "fragment": {
+                                      "Raw": "github.event.issue.title"
+                                    }
+                                  }
+                                },
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": ".github/workflows/vulnerable.yml"
+                                  }
+                                },
+                                "kind": "Primary",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "jobs"
+                                    },
+                                    {
+                                      "Key": "greet"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 1
+                                    },
+                                    {
+                                      "Key": "run"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "may expand into attacker-controllable code"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": ".github/workflows/vulnerable.yml"
+                          },
+                          "region": {
+                            "endColumn": 48,
+                            "endLine": 14,
+                            "snippet": {
+                              "text": "echo \"${{ github.event.issue.title }}\""
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 24,
+                            "startLine": 14
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "importance": "important",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "this run block",
+                                "feature_kind": "KeyOnly",
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": ".github/workflows/vulnerable.yml"
+                                  }
+                                },
+                                "kind": "Related",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "jobs"
+                                    },
+                                    {
+                                      "Key": "greet"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 1
+                                    },
+                                    {
+                                      "Key": "run"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "this run block"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": ".github/workflows/vulnerable.yml"
+                          },
+                          "region": {
+                            "endColumn": 12,
+                            "endLine": 14,
+                            "snippet": {
+                              "text": "run"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 9,
+                            "startLine": 14
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "kind": "fail",
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "properties": {
+                    "symbolic": {
+                      "annotation": "may expand into attacker-controllable code",
+                      "feature_kind": {
+                        "Subfeature": {
+                          "after": 7,
+                          "fragment": {
+                            "Raw": "github.event.issue.title"
+                          }
+                        }
+                      },
+                      "key": {
+                        "Local": {
+                          "verbatim_path": ".github/workflows/vulnerable.yml"
+                        }
+                      },
+                      "kind": "Primary",
+                      "route": {
+                        "route": [
+                          {
+                            "Key": "jobs"
+                          },
+                          {
+                            "Key": "greet"
+                          },
+                          {
+                            "Key": "steps"
+                          },
+                          {
+                            "Index": 1
+                          },
+                          {
+                            "Key": "run"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {
+                "text": "may expand into attacker-controllable code"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/vulnerable.yml"
+                },
+                "region": {
+                  "endColumn": 48,
+                  "endLine": 14,
+                  "snippet": {
+                    "text": "echo \"${{ github.event.issue.title }}\""
+                  },
+                  "sourceLanguage": "yaml",
+                  "startColumn": 24,
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "code injection via template expansion: may expand into attacker-controllable code"
+          },
+          "properties": {
+            "zizmor/confidence": "High",
+            "zizmor/persona": "Regular",
+            "zizmor/severity": "High"
+          },
+          "ruleId": "zizmor/template-injection"
+        },
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "importance": "essential",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "action is not pinned to a hash (required by blanket policy)",
+                                "feature_kind": {
+                                  "Subfeature": {
+                                    "after": 0,
+                                    "fragment": {
+                                      "Raw": "actions/checkout@v4"
+                                    }
+                                  }
+                                },
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": ".github/workflows/vulnerable.yml"
+                                  }
+                                },
+                                "kind": "Primary",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "jobs"
+                                    },
+                                    {
+                                      "Key": "greet"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 0
+                                    },
+                                    {
+                                      "Key": "uses"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "action is not pinned to a hash (required by blanket policy)"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": ".github/workflows/vulnerable.yml"
+                          },
+                          "region": {
+                            "endColumn": 34,
+                            "endLine": 10,
+                            "snippet": {
+                              "text": "actions/checkout@v4"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 15,
+                            "startLine": 10
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "kind": "fail",
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "properties": {
+                    "symbolic": {
+                      "annotation": "action is not pinned to a hash (required by blanket policy)",
+                      "feature_kind": {
+                        "Subfeature": {
+                          "after": 0,
+                          "fragment": {
+                            "Raw": "actions/checkout@v4"
+                          }
+                        }
+                      },
+                      "key": {
+                        "Local": {
+                          "verbatim_path": ".github/workflows/vulnerable.yml"
+                        }
+                      },
+                      "kind": "Primary",
+                      "route": {
+                        "route": [
+                          {
+                            "Key": "jobs"
+                          },
+                          {
+                            "Key": "greet"
+                          },
+                          {
+                            "Key": "steps"
+                          },
+                          {
+                            "Index": 0
+                          },
+                          {
+                            "Key": "uses"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {
+                "text": "action is not pinned to a hash (required by blanket policy)"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/vulnerable.yml"
+                },
+                "region": {
+                  "endColumn": 34,
+                  "endLine": 10,
+                  "snippet": {
+                    "text": "actions/checkout@v4"
+                  },
+                  "sourceLanguage": "yaml",
+                  "startColumn": 15,
+                  "startLine": 10
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "unpinned action reference: action is not pinned to a hash (required by blanket policy)"
+          },
+          "properties": {
+            "zizmor/confidence": "High",
+            "zizmor/persona": "Regular",
+            "zizmor/severity": "High"
+          },
+          "ruleId": "zizmor/unpinned-uses"
+        },
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "importance": "essential",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "may expand into attacker-controllable code",
+                                "feature_kind": {
+                                  "Subfeature": {
+                                    "after": 13,
+                                    "fragment": {
+                                      "Raw": "github.event.issue.title"
+                                    }
+                                  }
+                                },
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": "actions/greet/action.yml"
+                                  }
+                                },
+                                "kind": "Primary",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "runs"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 0
+                                    },
+                                    {
+                                      "Key": "run"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "may expand into attacker-controllable code"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "actions/greet/action.yml"
+                          },
+                          "region": {
+                            "endColumn": 52,
+                            "endLine": 11,
+                            "snippet": {
+                              "text": "echo \"hello ${{ github.event.issue.title }} ${{ inputs.who }}\""
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 28,
+                            "startLine": 11
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "importance": "important",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "this run block",
+                                "feature_kind": "KeyOnly",
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": "actions/greet/action.yml"
+                                  }
+                                },
+                                "kind": "Related",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "runs"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 0
+                                    },
+                                    {
+                                      "Key": "run"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "this run block"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "actions/greet/action.yml"
+                          },
+                          "region": {
+                            "endColumn": 10,
+                            "endLine": 11,
+                            "snippet": {
+                              "text": "run"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 7,
+                            "startLine": 11
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "kind": "fail",
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "properties": {
+                    "symbolic": {
+                      "annotation": "may expand into attacker-controllable code",
+                      "feature_kind": {
+                        "Subfeature": {
+                          "after": 13,
+                          "fragment": {
+                            "Raw": "github.event.issue.title"
+                          }
+                        }
+                      },
+                      "key": {
+                        "Local": {
+                          "verbatim_path": "actions/greet/action.yml"
+                        }
+                      },
+                      "kind": "Primary",
+                      "route": {
+                        "route": [
+                          {
+                            "Key": "runs"
+                          },
+                          {
+                            "Key": "steps"
+                          },
+                          {
+                            "Index": 0
+                          },
+                          {
+                            "Key": "run"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {
+                "text": "may expand into attacker-controllable code"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "actions/greet/action.yml"
+                },
+                "region": {
+                  "endColumn": 52,
+                  "endLine": 11,
+                  "snippet": {
+                    "text": "echo \"hello ${{ github.event.issue.title }} ${{ inputs.who }}\""
+                  },
+                  "sourceLanguage": "yaml",
+                  "startColumn": 28,
+                  "startLine": 11
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "code injection via template expansion: may expand into attacker-controllable code"
+          },
+          "properties": {
+            "zizmor/confidence": "High",
+            "zizmor/persona": "Regular",
+            "zizmor/severity": "High"
+          },
+          "ruleId": "zizmor/template-injection"
+        },
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "importance": "essential",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "may expand into attacker-controllable code",
+                                "feature_kind": {
+                                  "Subfeature": {
+                                    "after": 45,
+                                    "fragment": {
+                                      "Raw": "inputs.who"
+                                    }
+                                  }
+                                },
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": "actions/greet/action.yml"
+                                  }
+                                },
+                                "kind": "Primary",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "runs"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 0
+                                    },
+                                    {
+                                      "Key": "run"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "may expand into attacker-controllable code"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "actions/greet/action.yml"
+                          },
+                          "region": {
+                            "endColumn": 70,
+                            "endLine": 11,
+                            "snippet": {
+                              "text": "echo \"hello ${{ github.event.issue.title }} ${{ inputs.who }}\""
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 60,
+                            "startLine": 11
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "importance": "important",
+                      "location": {
+                        "logicalLocations": [
+                          {
+                            "properties": {
+                              "symbolic": {
+                                "annotation": "this run block",
+                                "feature_kind": "KeyOnly",
+                                "key": {
+                                  "Local": {
+                                    "verbatim_path": "actions/greet/action.yml"
+                                  }
+                                },
+                                "kind": "Related",
+                                "route": {
+                                  "route": [
+                                    {
+                                      "Key": "runs"
+                                    },
+                                    {
+                                      "Key": "steps"
+                                    },
+                                    {
+                                      "Index": 0
+                                    },
+                                    {
+                                      "Key": "run"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "message": {
+                          "text": "this run block"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "actions/greet/action.yml"
+                          },
+                          "region": {
+                            "endColumn": 10,
+                            "endLine": 11,
+                            "snippet": {
+                              "text": "run"
+                            },
+                            "sourceLanguage": "yaml",
+                            "startColumn": 7,
+                            "startLine": 11
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "kind": "fail",
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "properties": {
+                    "symbolic": {
+                      "annotation": "may expand into attacker-controllable code",
+                      "feature_kind": {
+                        "Subfeature": {
+                          "after": 45,
+                          "fragment": {
+                            "Raw": "inputs.who"
+                          }
+                        }
+                      },
+                      "key": {
+                        "Local": {
+                          "verbatim_path": "actions/greet/action.yml"
+                        }
+                      },
+                      "kind": "Primary",
+                      "route": {
+                        "route": [
+                          {
+                            "Key": "runs"
+                          },
+                          {
+                            "Key": "steps"
+                          },
+                          {
+                            "Index": 0
+                          },
+                          {
+                            "Key": "run"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "message": {
+                "text": "may expand into attacker-controllable code"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "actions/greet/action.yml"
+                },
+                "region": {
+                  "endColumn": 70,
+                  "endLine": 11,
+                  "snippet": {
+                    "text": "echo \"hello ${{ github.event.issue.title }} ${{ inputs.who }}\""
+                  },
+                  "sourceLanguage": "yaml",
+                  "startColumn": 60,
+                  "startLine": 11
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "code injection via template expansion: may expand into attacker-controllable code"
+          },
+          "properties": {
+            "zizmor/confidence": "High",
+            "zizmor/persona": "Regular",
+            "zizmor/severity": "High"
+          },
+          "ruleId": "zizmor/template-injection"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "downloadUri": "https://github.com/zizmorcore/zizmor",
+          "informationUri": "https://docs.zizmor.sh",
+          "name": "zizmor",
+          "rules": [
+            {
+              "help": {
+                "markdown": "`artipacked`: credential persistence through GitHub Actions artifacts\n\nDocs: <https://docs.zizmor.sh/audits/#artipacked>",
+                "text": "credential persistence through GitHub Actions artifacts"
+              },
+              "helpUri": "https://docs.zizmor.sh/audits/#artipacked",
+              "id": "zizmor/artipacked",
+              "name": "artipacked",
+              "properties": {
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "help": {
+                "markdown": "`excessive-permissions`: overly broad permissions\n\nDocs: <https://docs.zizmor.sh/audits/#excessive-permissions>",
+                "text": "overly broad permissions"
+              },
+              "helpUri": "https://docs.zizmor.sh/audits/#excessive-permissions",
+              "id": "zizmor/excessive-permissions",
+              "name": "excessive-permissions",
+              "properties": {
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "help": {
+                "markdown": "`dangerous-triggers`: use of fundamentally insecure workflow trigger\n\nDocs: <https://docs.zizmor.sh/audits/#dangerous-triggers>",
+                "text": "use of fundamentally insecure workflow trigger"
+              },
+              "helpUri": "https://docs.zizmor.sh/audits/#dangerous-triggers",
+              "id": "zizmor/dangerous-triggers",
+              "name": "dangerous-triggers",
+              "properties": {
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "help": {
+                "markdown": "`template-injection`: code injection via template expansion\n\nDocs: <https://docs.zizmor.sh/audits/#template-injection>",
+                "text": "code injection via template expansion"
+              },
+              "helpUri": "https://docs.zizmor.sh/audits/#template-injection",
+              "id": "zizmor/template-injection",
+              "name": "template-injection",
+              "properties": {
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "help": {
+                "markdown": "`unpinned-uses`: unpinned action reference\n\nDocs: <https://docs.zizmor.sh/audits/#unpinned-uses>",
+                "text": "unpinned action reference"
+              },
+              "helpUri": "https://docs.zizmor.sh/audits/#unpinned-uses",
+              "id": "zizmor/unpinned-uses",
+              "name": "unpinned-uses",
+              "properties": {
+                "tags": [
+                  "security"
+                ]
+              }
+            }
+          ],
+          "semanticVersion": "1.30.1",
+          "version": "1.30.1"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

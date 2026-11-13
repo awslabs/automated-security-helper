@@ -1,8 +1,9 @@
 """Unit tests for CloudWatchLogsReporter to increase coverage."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import ANY, patch, MagicMock
 
+import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -12,6 +13,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_re
     CloudWatchLogsReporterConfigOptions,
 )
 from automated_security_helper.config.ash_config import AshConfig
+
+pytestmark = pytest.mark.unit
 
 # Rebuild models to resolve forward references
 AshConfig.model_rebuild()
@@ -159,7 +162,9 @@ def test_cloudwatch_logs_reporter_report_success(mock_boto3):
     result = reporter.report(mock_model)
 
     # Verify logs client was called
-    mock_boto3.client.assert_called_once_with("logs", region_name="us-west-2")
+    mock_boto3.client.assert_called_once_with(
+        "logs", region_name="us-west-2", config=ANY
+    )
     mock_logs_client.create_log_stream.assert_called_once_with(
         logGroupName="test-log-group", logStreamName="test-stream"
     )
@@ -209,11 +214,16 @@ def test_cloudwatch_logs_reporter_report_create_stream_error(mock_boto3):
     mock_model.to_simple_dict.return_value = {"test": "data"}
 
     # Call report
+    reporter._plugin_log = MagicMock()
     result = reporter.report(mock_model)
 
-    # The actual implementation returns the exception string when put_log_events fails
-    # Since both create_log_stream and put_log_events fail, we get the put_log_events error
-    assert "Put events error" in result
+    # A failed publish produces no report (None, which the report phase records
+    # as a reporter that produced nothing); the error is logged, not returned.
+    # Since both create_log_stream and put_log_events fail, the put_log_events
+    # error is the one logged.
+    assert result is None
+    logged = reporter._plugin_log.call_args[0][0]
+    assert "Put events error" in logged, logged
 
 
 @patch(
@@ -254,7 +264,10 @@ def test_cloudwatch_logs_reporter_report_put_events_error(mock_boto3):
     mock_model.to_simple_dict.return_value = {"test": "data"}
 
     # Call report
+    reporter._plugin_log = MagicMock()
     result = reporter.report(mock_model)
 
-    # The actual implementation returns the exception string when put_log_events fails
-    assert "Put events error" in result
+    # A failed publish produces no report; the error is logged, not returned.
+    assert result is None
+    logged = reporter._plugin_log.call_args[0][0]
+    assert "Put events error" in logged, logged

@@ -1,0 +1,341 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Why a source or output directory a run was given cannot be used, in one wording.
+
+A --source-dir that names no directory ASH can scan, and an --output-dir that
+ASH cannot make or use, are usage errors: each surface refuses them with exit 5
+and the same text, so a script or an operator reading ./ash, Invoke-ASH, the
+Python CLI or the MCP server sees one message for one input. The texts name
+which case it is and no flag, since the MCP server's parameter is
+``directory_path``:
+
+- ``Source directory does not exist: <path>``
+- ``Source directory is not a directory: <path>``
+- ``Source directory cannot be entered: <path>``
+- ``Source directory is not a valid path: <path>``, for a path the OS cannot
+  take at all (an embedded NUL, which a ``--cli-json-input`` document can carry
+  and a command line cannot); the surface that prints it shows the NUL as
+  ``\x00``, as it shows every control character
+- ``Output directory is not a directory: <path>``
+- ``Output directory cannot be entered: <path>``
+- ``Output directory is not a valid path: <path>``, for a path the OS cannot
+  take at all, as for the source directory above
+- ``Output directory cannot be created: <path> (<reason>)``, where the reason is
+  the system's own text for the error (its strerror), such as ``Not a
+  directory`` for a file on the way to it
+- ``Output directory cannot be written: <path> (<reason>)``, for one that is
+  there and can be entered, when a file cannot be made in it (``Permission
+  denied``, ``Read-only file system``)
+
+./ash and Invoke-ASH write the same texts themselves, and the MCP server's
+source_directory_error gives the same answer for each source directory case.
+The path is the one given, and each surface shows it its own way (the CLI's
+sinks show it once). A missing output directory is not refused: every surface
+creates it, and refuses it only when that fails. Whether one that is there can
+be written is found by making a file in it and removing it, on every surface,
+before anything else is written there.
+
+A source directory is checked in one order everywhere: whether the path can be
+reached (stat), whether it is a directory, and whether its entries can be both
+listed and entered (read and search permission). A path under a directory that
+cannot be searched is not one that does not exist: stat answers EACCES for it,
+whether or not it is there, so it "cannot be entered". os.path.exists answers
+False for it, as bash's ``-e`` does, which is why the stat error is read here and
+./ash looks at the nearest ancestor it can see.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import errno
+import os
+import secrets
+import stat
+from typing import Optional, Union
+
+from typing_extensions import Self
+
+PathLike = Union[str, "os.PathLike[str]"]
+
+#: What a :class:`DirectoryRefusal` says went wrong with an output directory.
+REFUSED_NOT_A_DIRECTORY = "not_a_directory"
+REFUSED_CANNOT_BE_ENTERED = "cannot_be_entered"
+REFUSED_CANNOT_BE_CREATED = "cannot_be_created"
+REFUSED_CANNOT_BE_WRITTEN = "cannot_be_written"
+REFUSED_NOT_A_VALID_PATH = "not_a_valid_path"
+
+#: The Windows error codes (``OSError.winerror``) stat gives a name that cannot
+#: exist: ERROR_INVALID_PARAMETER, ERROR_INVALID_NAME and ERROR_BAD_PATHNAME.
+_WINDOWS_INVALID_NAME_ERRORS = frozenset({87, 123, 161})
+
+
+class DirectoryRefusal(str):
+    """The text of an output directory's refusal, which also says why.
+
+    A ``str`` equal to the one-line message every surface shows, so each caller
+    that prints, compares or joins it is unchanged. ``kind`` is one of the
+    ``REFUSED_*`` words and ``error_number`` the errno of the system error behind
+    it, or None when none was involved. A caller that must tell a full disk from
+    a missing permission reads these; before them it could only look at the path
+    again and guess, and ``ENOSPC`` on a directory that exists read as a refused
+    permission.
+    """
+
+    __slots__ = ("kind", "error_number")
+
+    kind: str
+    error_number: Optional[int]
+
+    @classmethod
+    def of(cls, text: str, kind: str, error_number: Optional[int] = None) -> Self:
+        """The refusal reading *text*, for the reason *kind* (and *error_number*).
+
+        Made from the text alone and given its reason after, so the class keeps no
+        constructor of its own: a copy or a pickle carries the reason in its
+        instance state, with the text from ``str``'s own reduction.
+        """
+        refusal = cls(text)
+        refusal.kind = kind
+        refusal.error_number = error_number
+        return refusal
+
+
+def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
+    """Why *source_dir* cannot be scanned, or None when it can."""
+    path = os.fspath(source_dir)
+    try:
+        mode = os.stat(path).st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return f"Source directory does not exist: {path}"
+    except ValueError:
+        # A path the OS cannot take at all (an embedded NUL) is not a valid
+        # path, which is its own refusal: "does not exist" would send a reader
+        # checking the filesystem for a path no call can ever name
+        # (exit-codes.md, ash scan, code 5). The path stays as given; the
+        # surface that prints the text writes the NUL as ``\x00``, as it does
+        # for every control character (utils/terminal_text.py).
+        return f"Source directory is not a valid path: {path}"
+    except OSError as error:
+        # A link that leads back to itself names nothing, as a link to nothing does.
+        if error.errno == errno.ELOOP:
+            return f"Source directory does not exist: {path}"
+        # Windows answers a name it cannot hold (a control character such as a
+        # newline, or characters a name may not carry) with a WinError instead
+        # of ENOENT: 87 (invalid parameter), 123 (invalid name) or 161 (bad
+        # path). POSIX answers ENOENT for the same name, which is "does not
+        # exist"; a name that cannot exist is not one that cannot be entered.
+        if getattr(error, "winerror", None) in _WINDOWS_INVALID_NAME_ERRORS:
+            return f"Source directory does not exist: {path}"
+        return f"Source directory cannot be entered: {path}"
+    if not stat.S_ISDIR(mode):
+        return f"Source directory is not a directory: {path}"
+    if not os.access(path, os.R_OK | os.X_OK):
+        return f"Source directory cannot be entered: {path}"
+    return None
+
+
+def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
+    """Why *output_dir* cannot be written into, or None when it can or will be made.
+
+    A directory that is there but cannot be entered (no search permission) is
+    refused too, as ./ash's cd refuses it, and so is one that can be entered but
+    that a file cannot be made in (:func:`_write_refused`). One that cannot be
+    reached cannot be
+    made either, and is refused with the reason stat gives, as mkdir would fail
+    with it: a file on the way to it (``Not a directory``) or a directory on the
+    way that cannot be searched (``Permission denied``). One that is simply not
+    there is not checked further: whether it can be made is known only by making
+    it, so the caller that makes it refuses it with :func:`output_dir_unmakeable`.
+    An empty path is refused as mkdir refuses it (``No such file or directory``):
+    stat answers the same, and nothing was about to make it, while the run that
+    took it would have written into the current directory. A path the OS cannot
+    take at all (an embedded NUL, which a ``--cli-json-input`` document can carry
+    and a command line cannot) is "not a valid path", the same refusal the source
+    directory gets, since no mkdir could ever make it (exit-codes.md, ``ash
+    scan``'s output-directory lines and ``ash merge``).
+    """
+    path = os.fspath(output_dir)
+    try:
+        mode = os.stat(path).st_mode
+    except FileNotFoundError as error:
+        if not path:
+            return output_dir_unmakeable(
+                path, error.strerror or "No such file", error.errno
+            )
+        return _obstacle_on_the_way(path)
+    except ValueError:
+        # The OS takes no such path, so nothing could ever make or enter it:
+        # its own refusal, worded as the source directory's is.
+        return DirectoryRefusal.of(
+            f"Output directory is not a valid path: {path}", REFUSED_NOT_A_VALID_PATH
+        )
+    except OSError as error:
+        return output_dir_unmakeable(
+            path, error.strerror or type(error).__name__, error.errno
+        )
+    if not stat.S_ISDIR(mode):
+        return DirectoryRefusal.of(
+            f"Output directory is not a directory: {path}", REFUSED_NOT_A_DIRECTORY
+        )
+    if not os.access(path, os.X_OK):
+        return DirectoryRefusal.of(
+            f"Output directory cannot be entered: {path}",
+            REFUSED_CANNOT_BE_ENTERED,
+            errno.EACCES,
+        )
+    failed = _write_refused(path)
+    if failed is not None:
+        return output_dir_unwritable(
+            path, failed.strerror or type(failed).__name__, failed.errno
+        )
+    return None
+
+
+def output_dir_invalid_path(output_dir: PathLike) -> Optional[DirectoryRefusal]:
+    """The refusal of *output_dir* when the OS can take no such path, else None.
+
+    For a caller that resolves or joins the path before any stat of it:
+    ``Path.resolve`` raises the same ``ValueError`` an embedded NUL gives
+    ``os.stat``, so without this first question ``ash merge`` ended in that
+    traceback where exit-codes.md promises the ``Output directory is not a
+    valid path`` line and exit 5. :func:`output_dir_refusal` answers the same
+    for the same path; this asks only the one question that must come first.
+    """
+    path = os.fspath(output_dir)
+    if "\x00" in path:
+        return DirectoryRefusal.of(
+            f"Output directory is not a valid path: {path}", REFUSED_NOT_A_VALID_PATH
+        )
+    return None
+
+
+def _obstacle_on_the_way(path: str) -> Optional[str]:
+    """The refusal of *path*, which is not there, when making it would fail on what
+    is already on the way to it: the nearest part of it that is there. None when
+    that is a directory, so the path can be made.
+
+    - A link to nothing, a Windows junction to a removed directory included:
+      mkdir cannot make a directory where a link is, and fails with EEXIST, as
+      mkdir -p does in ./ash.
+    - Something that is not a directory, such as a file: ``Not a directory``
+      (ENOTDIR). POSIX stat says this itself for ``<file>/x``, before this runs.
+      Windows stat only says that ``<file>\\x`` is not found, and mkdir then
+      fails with "Cannot create a file when that file already exists", for a
+      scan that was already registered. Walking up to the first part that is
+      there gives every platform the same reason, and the same stage, which is
+      before anything is registered.
+
+    The path is walked as written, made absolute with the working directory and
+    no more: ``os.path.abspath`` folds a ``..`` lexically, so after a symbolic
+    link to a directory it named a sibling of the link, not of the directory
+    the link leads to, which is the one mkdir reaches. Each ``lexists`` here
+    hands the path to the OS, which resolves such a ``..`` as mkdir does."""
+    current = path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+    while not os.path.lexists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    if not os.path.exists(current) and _is_a_link(current):
+        return output_dir_unmakeable(path, os.strerror(errno.EEXIST), errno.EEXIST)
+    if not os.path.isdir(current):
+        return output_dir_unmakeable(path, os.strerror(errno.ENOTDIR), errno.ENOTDIR)
+    return None
+
+
+def _is_a_link(path: str) -> bool:
+    """Whether *path* is a link, a Windows directory junction included.
+
+    ``os.path.islink`` is False for a junction, a reparse point that is no symbolic
+    link, so one that leads to a removed directory would read as a plain
+    non-directory. ``os.path.isjunction`` is Python 3.12 and later, so the
+    reparse-point attribute of ``lstat`` is read instead (``st_file_attributes``
+    exists on Windows only, and is 0 here elsewhere)."""
+    if os.path.islink(path):
+        return True
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except (OSError, ValueError):
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+#: The start of the name of the file :func:`_write_refused` makes and removes. It is
+#: none of the names a scan writes, reads back or counts as its output
+#: (``core/previous_results.RESULT_ENTRIES``), so one left behind by a process
+#: killed between the two steps is not taken for results. ./ash and Invoke-ASH name
+#: theirs the same way.
+WRITE_CHECK_PREFIX = ".ash-write-check."
+
+
+def _write_refused(directory: str) -> Optional[OSError]:
+    """Why a file cannot be made in *directory*, as the error, or None when one can.
+
+    Made with ``O_CREAT | O_EXCL`` and not through a link, under a name of its own,
+    and removed at once. ``os.access(W_OK)`` is not asked: it answers for the real
+    user rather than the effective one, and knows nothing of ACLs or a read-only
+    mount.
+    """
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    for _ in range(3):
+        probe = os.path.join(directory, WRITE_CHECK_PREFIX + secrets.token_hex(8))
+        try:
+            descriptor = os.open(probe, flags, 0o600)
+        except FileExistsError:
+            continue
+        except OSError as error:
+            return error
+        try:
+            os.close(descriptor)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(probe)
+        return None
+    return None
+
+
+def output_dir_unmakeable(
+    output_dir: PathLike, reason: str, error_number: Optional[int] = None
+) -> DirectoryRefusal:
+    """The refusal for *output_dir* when making it failed with *reason*.
+
+    *reason* is the error's strerror alone, never its message, which names the path
+    again: ``Output directory cannot be created: blocker/out (Not a directory)``.
+    *error_number* is the error's errno, kept on the refusal for a caller that
+    sorts refusals (:class:`DirectoryRefusal`).
+    """
+    return DirectoryRefusal.of(
+        f"Output directory cannot be created: {os.fspath(output_dir)} ({reason})",
+        REFUSED_CANNOT_BE_CREATED,
+        error_number,
+    )
+
+
+def output_dir_unwritable(
+    output_dir: PathLike, reason: str, error_number: Optional[int] = None
+) -> DirectoryRefusal:
+    """The refusal for *output_dir* when no file could be made in it, *reason* being
+    the error's strerror, such as ``Permission denied``, and *error_number* its
+    errno (``ENOSPC`` for a full disk, which is not a permission)."""
+    return DirectoryRefusal.of(
+        f"Output directory cannot be written: {os.fspath(output_dir)} ({reason})",
+        REFUSED_CANNOT_BE_WRITTEN,
+        error_number,
+    )
+
+
+__all__ = [
+    "REFUSED_CANNOT_BE_CREATED",
+    "REFUSED_CANNOT_BE_ENTERED",
+    "REFUSED_CANNOT_BE_WRITTEN",
+    "REFUSED_NOT_A_DIRECTORY",
+    "REFUSED_NOT_A_VALID_PATH",
+    "WRITE_CHECK_PREFIX",
+    "DirectoryRefusal",
+    "output_dir_invalid_path",
+    "output_dir_refusal",
+    "output_dir_unmakeable",
+    "output_dir_unwritable",
+    "source_dir_refusal",
+]

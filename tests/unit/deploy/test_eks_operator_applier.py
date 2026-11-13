@@ -45,6 +45,9 @@ import types
 import pytest
 import yaml
 
+# In-process against stubbed AWS clients: the unit tier.
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TEMPLATE = REPO_ROOT / "deploy/cdk/templates/AshEksOperator.template.json"
 OPERATOR_YAML = REPO_ROOT / "deploy/kubernetes-operator/manifests/operator.yaml"

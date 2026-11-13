@@ -1,0 +1,275 @@
+# Launch shapes the child-import guard must catch, one per function. Never run; the
+# guard reads this file as text.
+import asyncio
+import functools
+import multiprocessing
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import sys as _sys
+from sys import executable
+from pathlib import Path
+
+from tests.utils.helpers import checkout_env
+from tests.utils.plant_env import scrub_env
+from tests.utils.plant_run_with import run_with
+
+ASH_MOD = "automated_security_helper.cli.main"
+
+
+def test_s01_run_list():
+    subprocess.run([sys.executable, "-m", "automated_security_helper.cli.main"])
+
+
+def test_s02_popen_list():
+    subprocess.Popen([sys.executable, "-m", "automated_security_helper.cli.main"])
+
+
+def test_s03_check_output_list():
+    subprocess.check_output([sys.executable, "-m", "automated_security_helper"])
+
+
+def test_s04_call_list():
+    subprocess.call([sys.executable, "-m", "automated_security_helper"])
+
+
+def test_s05_os_system():
+    os.system(f"{sys.executable} -m automated_security_helper.cli.main --help")
+
+
+def test_s06_os_execv_list():
+    os.execv(sys.executable, [sys.executable, "-m", "automated_security_helper"])
+
+
+def test_s07_os_execl_varargs():
+    os.execl(sys.executable, sys.executable, "-m", "automated_security_helper")
+
+
+def test_s08_os_spawnv_list():
+    os.spawnv(os.P_WAIT, sys.executable, [sys.executable, "-m", ASH_MOD])
+
+
+def test_s09_os_spawnl_varargs():
+    os.spawnl(os.P_WAIT, sys.executable, sys.executable, "-m", ASH_MOD)
+
+
+def test_s10_posix_spawn_list():
+    os.posix_spawn(sys.executable, [sys.executable, "-m", ASH_MOD], dict(os.environ))
+
+
+async def test_s11_asyncio_exec_varargs():
+    await asyncio.create_subprocess_exec(sys.executable, "-m", ASH_MOD)
+
+
+async def test_s12_asyncio_exec_starred_list():
+    await asyncio.create_subprocess_exec(*[sys.executable, "-m", ASH_MOD])
+
+
+async def test_s13_asyncio_shell():
+    await asyncio.create_subprocess_shell(f"{sys.executable} -m {ASH_MOD}")
+
+
+def _ash_target():
+    import automated_security_helper  # noqa: F401
+
+
+def test_s14_multiprocessing_spawn():
+    multiprocessing.get_context("spawn").Process(target=_ash_target).start()
+
+
+def test_s15_pexpect():
+    import pexpect
+
+    pexpect.spawn(sys.executable, ["-m", ASH_MOD])
+
+
+def test_s16_sh():
+    import sh
+
+    sh.Command(sys.executable)("-m", ASH_MOD)
+
+
+def test_s17_plumbum():
+    from plumbum import local
+
+    local[sys.executable]["-m", ASH_MOD]()
+
+
+def test_s18_list_in_variable():
+    cmd = [sys.executable, "-m", ASH_MOD]
+    subprocess.run(cmd)
+
+
+def test_s19_list_in_variable_renamed():
+    cmd = [sys.executable, "-m", ASH_MOD]
+    argv = cmd
+    subprocess.run(argv)
+
+
+def test_s20_list_appended_after_interpreter():
+    cmd = [sys.executable]
+    cmd += ["-m", ASH_MOD]
+    subprocess.run(cmd)
+
+
+def test_s21_module_appended_after_mode():
+    cmd = [sys.executable, "-m"]
+    cmd.append(ASH_MOD)
+    subprocess.run(cmd)
+
+
+def test_s22_args_keyword_literal():
+    subprocess.run(args=[sys.executable, "-m", ASH_MOD])
+
+
+def test_s23_args_keyword_variable():
+    cmd = [sys.executable, "-m", ASH_MOD]
+    subprocess.run(args=cmd)
+
+
+def test_s24_tuple():
+    subprocess.run((sys.executable, "-m", ASH_MOD))
+
+
+def test_s25_shlex_split():
+    subprocess.run(shlex.split(f"{sys.executable} -m {ASH_MOD}"))
+
+
+def _cmd():
+    return [sys.executable, "-m", ASH_MOD]
+
+
+def test_s26_list_returned_by_a_function():
+    subprocess.run(_cmd())
+
+
+def test_s27_list_concatenated():
+    subprocess.run([sys.executable, "-m"] + [ASH_MOD])
+
+
+def test_s28_from_sys_import_executable():
+    subprocess.run([executable, "-m", ASH_MOD])
+
+
+def test_s29_sys_imported_as_alias():
+    subprocess.run([_sys.executable, "-m", ASH_MOD])
+
+
+def test_s30a_base_executable():
+    subprocess.run([sys._base_executable, "-m", ASH_MOD])
+
+
+def test_s30b_which_python():
+    subprocess.run([shutil.which("python"), "-m", ASH_MOD])
+
+
+def test_s31_helper_in_tests_utils_given_the_interpreter():
+    run_with(sys.executable, "-m", ASH_MOD)
+
+
+def test_s32a_pytester_runpytest_subprocess(pytester):
+    pytester.runpytest_subprocess("-p", "no:cacheprovider")
+
+
+def test_s32b_pytester_run(pytester):
+    pytester.run(sys.executable, "-m", ASH_MOD)
+
+
+def test_s33a_env_dict_without_the_helper():
+    subprocess.run([sys.executable, "-m", ASH_MOD], env={**os.environ, "X": "1"})
+
+
+def test_s33b_routed_env_then_overwritten():
+    env = checkout_env()
+    env["PYTHONPATH"] = "/elsewhere"
+    subprocess.run([sys.executable, "-m", ASH_MOD], env=env)
+
+
+def test_s34a_partial_holding_the_argv():
+    run = functools.partial(subprocess.run, [sys.executable, "-m", ASH_MOD])
+    run()
+
+
+def test_s34b_partial_args_keyword():
+    run = functools.partial(subprocess.run, args=[sys.executable, "-m", ASH_MOD])
+    run()
+
+
+def test_s34c_partial_routed_then_env_overridden():
+    run = functools.partial(
+        subprocess.run, [sys.executable, "-m", ASH_MOD], env=checkout_env()
+    )
+    run(env=dict(os.environ))
+
+
+def test_s35_console_script_by_os_path_join():
+    ash = os.path.join(os.path.dirname(sys.executable), "ash")
+    subprocess.run([ash, "--help"])
+
+
+def test_s36_console_script_by_path_parts():
+    subprocess.run([str(Path(sys.prefix, "bin", "ash")), "--help"])
+
+
+def _python():
+    return [sys.executable]
+
+
+def test_s37_starred_call():
+    subprocess.run([*_python(), "-m", ASH_MOD])
+
+
+def test_s38_control_routed():
+    subprocess.run([sys.executable, "-m", ASH_MOD], env=checkout_env())
+
+
+def test_s39_os_system_of_a_joined_list():
+    os.system(" ".join([sys.executable, "-m", ASH_MOD]))
+
+
+def test_s40_shlex_join_run_by_a_shell():
+    subprocess.run(shlex.join([sys.executable, "-m", ASH_MOD]), shell=True)
+
+
+def test_s41_percent_formatting_run_by_a_shell():
+    os.system("%s -m %s" % (sys.executable, ASH_MOD))
+
+
+def test_s42_str_format_run_by_a_shell():
+    os.system("{} -m {}".format(sys.executable, ASH_MOD))
+
+
+def test_s43_routed_env_rewritten_through_an_alias():
+    env = checkout_env()
+    alias = env
+    alias["PYTHONPATH"] = "/elsewhere"
+    subprocess.run([sys.executable, "-m", ASH_MOD], env=env)
+
+
+def _drop_pythonpath(env):
+    env.pop("PYTHONPATH")
+
+
+def test_s44_routed_env_rewritten_by_a_helper():
+    env = checkout_env()
+    _drop_pythonpath(env)
+    subprocess.run([sys.executable, "-m", ASH_MOD], env=env)
+
+
+def test_s45_routed_env_given_to_a_call_that_may_rewrite_it():
+    env = checkout_env()
+    scrub_env(env)
+    subprocess.run([sys.executable, "-m", ASH_MOD], env=env)
+
+
+def test_s46_one_command_line_started_routed_then_unrouted():
+    cmd = [sys.executable, "-m", ASH_MOD]
+    subprocess.run(cmd, env=checkout_env())
+    subprocess.run(cmd)
+
+
+def test_s47_control_child_env_routed():
+    env = started.child_env(checkout_env())
+    subprocess.run([sys.executable, "-m", ASH_MOD], env=env)

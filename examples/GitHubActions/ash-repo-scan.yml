@@ -1,31 +1,42 @@
 name: Run ASH
 on:
   push:
-    branches:
-      - "!main"
+    branches-ignore:
+      - main
   pull_request:
     branches:
       - "*"
   workflow_dispatch: {}
-env:
-  PYTHON_VERSION: "3.12"
 
 permissions:
   contents: read
 
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v4.0.0
     permissions:
       contents: read # Required to read the repository contents in order to scan them with ASH
       checks: write # Required for writing CI check runs
       pull-requests: write # Required for writing comments with scan results to pull requests
-      security-events: write # Required for collection of SARIF code scanning results for GitHub Advanced Security checks
+      # No security-events: write. A called workflow can only narrow the token its
+      # caller grants, and this one does not request it, so it would never reach
+      # the SARIF upload step.
     with:
-      ash-version: v3
+      # Name the same ref here as in `uses:` above, so the workflow's steps run
+      # against the ASH they were written for. The workflow in releases after
+      # 3.7.1 does that by itself when ash-version is unset; naming it keeps the
+      # two visibly in step.
+      ash-version: v4.0.0
       fail-on-findings: true
       collect-junit-xml-report: true
-      collect-sarif-report: true
+      # The workflow's own SARIF upload can only succeed on a pull_request event:
+      # it holds no security-events: write, and code scanning accepts an upload
+      # without it only from a pull_request run, a fork's included. So ask for it
+      # only there. 3.7.1 fails the job on push and workflow_dispatch; later
+      # releases skip the upload there with a notice. To upload on every event,
+      # releases after 3.7.1 add upload-ash-sarif.yml, called from a second job
+      # that grants security-events: write; its header shows how.
+      collect-sarif-report: ${{ github.event_name == 'pull_request' }}
       post-pr-comment: true
       verbose: true
       output-dir: '.ash/ash_output'

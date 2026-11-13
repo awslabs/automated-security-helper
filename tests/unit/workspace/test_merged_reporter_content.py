@@ -45,6 +45,8 @@ from automated_security_helper.models.workspace import (
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
+pytestmark = pytest.mark.unit
+
 PROJECTS = ("api", "web")
 
 #: The skipped project used by the skip fixtures below. Named distinctly from
@@ -848,7 +850,9 @@ class TestEveryReporterNamesASkippedProject:
 
         report = _report(HtmlReporter, skipped_workspace_model, context)
         assert f"<td>{SKIPPED_PROJECT}</td>" in report
-        assert "<td>SKIPPED (no-changes)</td>" in report
+        # The Result column carries the row's state as a class, so a skipped
+        # project is styled as skipped rather than as a failure.
+        assert '<td class="status-skipped">SKIPPED (no-changes)</td>' in report
 
 
 class TestASyntheticRowIsMarkedAndFilterable:

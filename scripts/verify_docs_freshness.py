@@ -7,7 +7,8 @@ CI check: verify documentation stays in sync with source code.
 
 Run with: uv run python scripts/verify_docs_freshness.py
 
-Exit code 0 if all checks pass, exit code 1 with a detailed report if any fail.
+Exit code 0 if all checks pass, exit code 1 with a detailed report if any fail, and
+exit code 2 if any check raised and so did not run (an ERROR line names it).
 """
 
 from __future__ import annotations
@@ -24,19 +25,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_SERVER_PY = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
-README_MD = REPO_ROOT / "README.md"
-
-# README.md is GENERATED. scripts/version_template_manager.py renders
-# README.md.template over it on every release that bumps the version, so an edit
-# made to README.md alone is discarded at the next bump -- which is exactly what
-# happened to a `@v3.0,1` typo fix that survived six releases (see
-# tests/unit/test_version_template_round_trip.py for the measurement).
-#
-# Every check below that looks for a NAME therefore reads the template, so a
-# contributor sent here by a failure edits the file that survives.
-# check_version_consistency is the deliberate exception: it asserts the rendered
-# version string, which by construction exists only in the generated file.
-README_TEMPLATE_MD = REPO_ROOT / "README.md.template"
 DOCS_DIR = REPO_ROOT / "docs"
 CLI_REFERENCE_MD = DOCS_DIR / "content" / "docs" / "cli-reference.md"
 OUTPUT_FORMATS_MD = DOCS_DIR / "content" / "docs" / "output-formats.md"
@@ -57,6 +45,26 @@ FLATPAK_MANIFEST = (
 FLATPAK_BUILD_SH = PACKAGING_DIR / "flatpak" / "build.sh"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
 RELEASE_ASSETS_PY = PACKAGING_DIR / "release-assets.py"
+
+# The name inventories (scanners, reporters, MCP tools) are compared against the
+# reference pages, which scripts/generate_*.py write from the code. A row there is
+# fixed by fixing the code or the generator and regenerating, never by editing the
+# page: tests/unit/test_generated_docs_freshness.py fails when a page differs from
+# its generator's output. These checks are the other half: the generator could
+# itself drop or invent a name, and here the page is held against a second source
+# (the config models, the plugin registry, the @mcp.tool decorators).
+REFERENCE_DIR = DOCS_DIR / "content" / "reference"
+SCANNERS_REFERENCE_MD = REFERENCE_DIR / "scanners.md"
+REPORTERS_REFERENCE_MD = REFERENCE_DIR / "reporters.md"
+MCP_TOOLS_REFERENCE_MD = REFERENCE_DIR / "mcp-tools.md"
+
+# The version pin is checked in the generated files, not their templates:
+# scripts/version_template_manager.py renders README.md.template and
+# docs/content/how-to/install.md.template with the release version, so the
+# rendered string exists only in the generated file. These are the two pages that
+# tell a reader which ref to install.
+README_MD = REPO_ROOT / "README.md"
+INSTALL_MD = DOCS_DIR / "content" / "how-to" / "install.md"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,12 +140,33 @@ _EXCLUDED_MD_DIRS = frozenset(
         "venv",
         "node_modules",
         "site",  # mkdocs build output
+        "public",  # configured MkDocs build output
+        ".previews",
+        "playwright-report",
         ".pytest_cache",
         ".ruff_cache",
         ".mypy_cache",
         "test-results",
         "__pycache__",
+        # Gitignored caches: the docs build's privacy plugin and the jsii package
+        # cache the cdk-nag tests extract, which holds the README of every bundled
+        # npm package. The docs-example runner would otherwise run their examples.
+        ".cache",
+        # syrupy's golden files. A markdown reporter snapshot is generated output, so
+        # checking it as a docs page reports the fixture's text, not the docs.
+        "__snapshots__",
     }
+)
+
+# Directories excluded by their path below REPO_ROOT, not by name, for prose that
+# is a dated record rather than documentation a reader is sent to.
+_EXCLUDED_MD_PATHS = (
+    # ferret-scan's spec/ notes are the analysis and work log of one upgrade,
+    # kept as their authors wrote them. They quote ferret-scan's own flags and
+    # its earlier behavior, which the checks here would report as ASH options
+    # and as current claims. The plugin's README.md and DEVELOPMENT.md beside
+    # them are documentation and stay in the corpus.
+    "automated_security_helper/plugin_modules/ash_ferret_plugins/spec/",
 )
 
 
@@ -161,14 +190,34 @@ def collect_md_files() -> list[Path]:
     is also what caught the omission that this docstring is the record of: the
     first version of this change edited docs/content/faq.md and not
     docs/content/faq.md.template, and the round-trip test is what noticed.
+
+    The exclusions are matched against the path below REPO_ROOT (the docs root with
+    --docs-root), never the absolute path: a checkout that itself sits under a
+    directory named .cache, site or venv used to collect nothing, and every check
+    reading the corpus then passed on zero files. An empty corpus raises instead.
+
+    The list comes from git (docs_checks.listed_files): every tracked file, plus every
+    untracked one that is not ignored, so a new doc is checked before it is added. git
+    never enters an ignored directory. A walk did, and the unit tests call this on the
+    real checkout under xdist: ``REPO_ROOT.rglob`` descended into tests/pytest-temp,
+    which is ignored, while other workers created and removed directories there. It
+    raised FileNotFoundError when one went away mid-walk, and it returned the markdown
+    those workers had written. tests/unit/test_repo_walkers_skip_scratch.py shows both.
+    A tree git cannot list raises here rather than yielding no docs.
     """
-    patterns = ("*.md", "*.md.template")
     files = [
         path
-        for pattern in patterns
-        for path in REPO_ROOT.rglob(pattern)
-        if not _EXCLUDED_MD_DIRS.intersection(path.parts)
+        for path in _docs_checks().listed_files(
+            REPO_ROOT, ["**/*.md", "**/*.md.template"]
+        )
+        if not _EXCLUDED_MD_DIRS.intersection(path.relative_to(REPO_ROOT).parts[:-1])
+        and not path.relative_to(REPO_ROOT).as_posix().startswith(_EXCLUDED_MD_PATHS)
     ]
+    if not files:
+        raise RuntimeError(
+            f"no markdown files were collected under {REPO_ROOT}, so every check "
+            "that reads the docs would pass on nothing"
+        )
     return sorted(set(files))
 
 
@@ -193,6 +242,160 @@ def normalize_name(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", _MD_LINK.sub(r"\1", text).lower())
 
 
+_TRAILING_PARENTHETICAL = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _row_name(row: str) -> str:
+    """A table row's first cell without a trailing parenthetical qualifier."""
+    return _TRAILING_PARENTHETICAL.sub("", row.strip())
+
+
+class _EnvReference(str):
+    """The text of an ``!ENV`` scalar, marked so value validation can skip it.
+
+    ASH substitutes the variable before it validates the config, so the
+    documented ``${VAR}`` text is not the value the field will hold: an
+    ``!ENV`` on an int, bool, enum or patterned string field is valid config
+    that would fail ``model_validate`` here. The key still has to be a field of
+    the model, so the text is kept (it compares equal to a plain str) and only
+    the value check leaves it out.
+    """
+
+    __slots__ = ()
+
+
+def _options_loader():
+    """A SafeLoader that keeps an ``!ENV`` scalar as its own text."""
+    import yaml
+
+    class _KeepsEnvTag(yaml.SafeLoader):
+        pass
+
+    _KeepsEnvTag.add_constructor(
+        "!ENV", lambda loader, node: _EnvReference(loader.construct_scalar(node))
+    )
+    return _KeepsEnvTag
+
+
+def _load_options_yaml(body: str):
+    """Parse a documented YAML block, keeping an ``!ENV`` scalar as its own text.
+
+    ``yaml.safe_load`` raises on ASH's ``!ENV`` tag, and that error used to be read
+    as a deliberately invalid block, so every options block that referenced the
+    environment was skipped and its option keys were never validated. The tag is
+    the config's own syntax, so it is accepted here as text; YAML that does not
+    parse still returns None.
+    """
+    import yaml
+
+    try:
+        return yaml.load(body, Loader=_options_loader())  # nosec B506 - a SafeLoader subclass
+    except yaml.YAMLError:
+        return None
+
+
+def _load_options_documents(body: str) -> list:
+    """Every document of a documented YAML block, read as ``_load_options_yaml`` reads one.
+
+    A block holding two documents (a ``---`` between two configs) raised in the
+    single-document load and was skipped as deliberately invalid YAML, so neither
+    document's option keys were checked. YAML that does not parse yields no
+    document.
+    """
+    import yaml
+
+    try:
+        return list(yaml.load_all(body, Loader=_options_loader()))  # nosec B506 - a SafeLoader subclass
+    except yaml.YAMLError:
+        return []
+
+
+def _alias_names(alias: object) -> list[str]:
+    """The key spellings a pydantic alias declaration accepts."""
+    if alias is None:
+        return []
+    if isinstance(alias, str):
+        return [alias]
+    choices = getattr(alias, "choices", None)
+    if choices is not None:
+        names: list[str] = []
+        for choice in choices:
+            names.extend(_alias_names(choice))
+        return names
+    path = getattr(alias, "path", None)
+    if path:
+        return [str(path[0])]
+    return []
+
+
+def _accepted_option_keys(model: type) -> set[str]:
+    """The field names of an options model plus every alias the runtime reads.
+
+    The key test used to consult ``model_fields`` names only, while a model may
+    declare an ``alias`` or a ``validation_alias`` and ASH reads a config written
+    under either, so an option documented under its alias was reported as one
+    the plugin does not declare.
+    """
+    keys: set[str] = set()
+    for name, info in model.model_fields.items():
+        keys.add(name)
+        keys.update(_alias_names(getattr(info, "alias", None)))
+        keys.update(_alias_names(getattr(info, "validation_alias", None)))
+    return keys
+
+
+def _validation_detail(exc: Exception) -> str:
+    """The first validation error as ``<field>: <message>``.
+
+    The detail used to be the first non-empty line after pydantic's title line,
+    which for a wrong value is the field-location line alone, so the report
+    named the field and not what was wrong with its value.
+    """
+    errors = getattr(exc, "errors", None)
+    if callable(errors):
+        for error in errors():
+            location = ".".join(str(part) for part in error.get("loc", ()))
+            message = str(error.get("msg", "")).strip()
+            return f"{location or 'options'}: {message}".rstrip(": ")
+    return str(exc).splitlines()[0]
+
+
+def _model_for(models: dict[str, type], plugin_name: str) -> type | None:
+    """The options model for a documented plugin key, under either spelling.
+
+    ASH accepts ``cdk_nag`` and ``cdk-nag`` for one scanner (the config field and
+    its alias), and the docs use both. Looking the model up by the exact key
+    skipped every block written under the spelling the registry does not use, so
+    four documented scanner blocks were never validated.
+    """
+    for candidate in (
+        plugin_name,
+        plugin_name.replace("_", "-"),
+        plugin_name.replace("-", "_"),
+    ):
+        model = models.get(candidate)
+        if model is not None:
+            return model
+    return None
+
+
+def _is_delimiter_row(line: str) -> bool:
+    """Whether ``line`` is a markdown table delimiter row such as ``|---|:--:|``.
+
+    A delimiter row is non-empty and holds at least one dash and one pipe. The
+    subset test alone passed a blank line, because the empty set is a subset of
+    anything, so a data row whose first entry matched the header text and sat
+    before a blank line was taken as a header row.
+    """
+    stripped = line.strip()
+    return (
+        bool(stripped)
+        and "-" in stripped
+        and "|" in stripped
+        and set(stripped) <= set("|-: ")
+    )
+
+
 def table_first_column(text: str, header_cell: str) -> list[str] | None:
     """Return the first cell of each data row of one specific markdown table.
 
@@ -212,10 +415,12 @@ def table_first_column(text: str, header_cell: str) -> list[str] | None:
         cells = [cell.strip() for cell in stripped.strip("|").split("|")]
         if not cells or cells[0].lower() != want:
             continue
-        # A header row is only a header row when a delimiter row follows it.
+        # A header row is only a header row when a delimiter row follows it. A
+        # data row named like the header, followed by a blank line at its table's
+        # end, used to pass as one and shadow the real table.
         if index + 1 >= len(lines):
             continue
-        if not set(lines[index + 1].strip()) <= set("|-: "):
+        if not _is_delimiter_row(lines[index + 1]):
             continue
 
         rows: list[str] = []
@@ -267,19 +472,25 @@ def compare_inventories(
             )
         ]
 
-    normalized_rows = {row: normalize_name(row) for row in rows}
+    # Whole names, never substrings. A substring test let one row cover two
+    # names whenever one name contained another: a table with only a
+    # gitlab-cyclonedx row satisfied the cyclonedx entry, and a leftover
+    # cyclonedx row was covered by the gitlab-cyclonedx entry, so a missing or
+    # stale row was hidden in both directions. A trailing parenthetical on a
+    # row ("cfn-nag (CloudFormation)") is not part of the name.
+    normalized_rows = {row: normalize_name(_row_name(row)) for row in rows}
     normalized_code = {name: normalize_name(name) for name in code_names}
 
     for name, origin in sorted(code_names.items()):
         needle = normalized_code[name]
-        if not any(needle in row for row in normalized_rows.values()):
+        if needle not in normalized_rows.values():
             failures.append(
                 f"{label}: '{name}' (from {origin}) is in the code but no row of "
                 f"the '{header_cell}' table in {doc_label} names it"
             )
 
     for row, normalized in sorted(normalized_rows.items()):
-        if not any(needle in normalized for needle in normalized_code.values()):
+        if normalized not in normalized_code.values():
             failures.append(
                 f"{label}: the '{header_cell}' table in {doc_label} has a row "
                 f"'{row}' that names nothing in the code -- it was removed or "
@@ -290,8 +501,22 @@ def compare_inventories(
 
 
 # ---------------------------------------------------------------------------
-# Check 1: CLI flags in docs match source
+# CLI options: no check here
 # ---------------------------------------------------------------------------
+#
+# "CLI flags in docs match source" grepped scan.py for --flags and required each to
+# appear somewhere in the hand-written docs/content/docs/cli-reference.md. That
+# page is gone. Its replacement, docs/content/reference/cli.md, is written by
+# scripts/generate_cli_docs.py from the click tree of every command, and
+# tests/unit/test_generated_docs_freshness.py fails when the page differs from the
+# generator's output, so every option of every command is on it by construction.
+# Every other mention of an option in the docs is parsed and checked against the
+# same click tree by "ASH commands in docs match the CLI" (docs_checks.check_cli).
+# A grep of one command's source file against the generated page would be a weaker
+# copy of the freshness test, so main() no longer runs the check below.
+#
+# The helpers stay because tests/unit/test_verify_docs_freshness_cli_flags.py
+# drives them with an explicit docs body; they read no file unless called bare.
 
 
 def cli_option_spellings() -> set[str]:
@@ -400,7 +625,7 @@ def check_cli_flags(
 
 
 # ---------------------------------------------------------------------------
-# Check 2: Reporter list in docs matches code
+# Check 1: Reporter list in docs matches code
 # ---------------------------------------------------------------------------
 
 
@@ -465,32 +690,49 @@ def reporter_names() -> dict[str, str]:
 
 
 def check_reporters() -> list[str]:
-    """The registered reporter set and the output-formats table must be the same set."""
+    """The registered reporter set and the built-in reporters table must be the same set.
+
+    The first table headed Reporter in reference/reporters.md lists the built-in
+    reporters; the plugin-module reporters come in a second table after it.
+    """
     names = reporter_names()
     if not names:
         return [
             (
                 "Reporter: the plugin registry returned no reporters, so there is "
-                "nothing to compare the output-formats table against"
+                "nothing to compare the reporters reference against"
             )
         ]
 
     return compare_inventories(
         "Reporter",
         names,
-        read_text(OUTPUT_FORMATS_MD),
-        "Format",
-        "docs/content/docs/output-formats.md",
+        read_text(REPORTERS_REFERENCE_MD),
+        "Reporter",
+        "docs/content/reference/reporters.md",
     )
 
 
 # ---------------------------------------------------------------------------
-# Check 3: Scanner list in docs matches code
+# Check 2: Scanner list in docs matches code
 # ---------------------------------------------------------------------------
 
 
+def scanner_names() -> dict[str, str]:
+    """Every scanner ASH ships, by config name: the fields of ScannerConfigSegment
+    (the built-in scanners) and the scanner config classes of the community plugin
+    modules in the package, which are configured under the same ``scanners`` key."""
+    from automated_security_helper.config.ash_config import ScannerConfigSegment
+
+    names = _segment_names(ScannerConfigSegment)
+    models = _docs_checks().load_config_models()
+    for name, config_cls in sorted(models.plugin_configs.get("scanners", {}).items()):
+        names.setdefault(name, f"{config_cls.__module__}.{config_cls.__name__}")
+    return names
+
+
 def check_scanners() -> list[str]:
-    """The scanner inventory and README's scanner table must be the same set.
+    """The scanners ASH ships and the scanners reference's inventory must be the same set.
 
     The three "variants" this used to try were one variant and two no-ops: the
     third was ``field_name.replace("_", "_")``, which is the field name
@@ -499,19 +741,250 @@ def check_scanners() -> list[str]:
     README, so `bandit` matched the word inside an unrelated code sample.
     normalize_name plus a table-scoped comparison replaces all of it.
     """
-    from automated_security_helper.config.ash_config import ScannerConfigSegment
-
+    names = scanner_names()
+    _print_skipped(_docs_checks().load_config_models().skipped_notes())
     return compare_inventories(
         "Scanner",
-        _segment_names(ScannerConfigSegment),
-        read_text(README_TEMPLATE_MD),
+        names,
+        read_text(SCANNERS_REFERENCE_MD),
         "Scanner",
-        "README.md.template",
+        "docs/content/reference/scanners.md",
     )
 
 
 # ---------------------------------------------------------------------------
-# Check 4: MCP tool names in docs match code
+# Check 2b: the plugin data behind the home page graphics, and the counts in prose
+# ---------------------------------------------------------------------------
+
+PLUGIN_DATA_PARTIAL = (
+    DOCS_DIR / "overrides" / "partials" / "generated" / "plugin-data.html"
+)
+HOW_ASH_WORKS_MD = DOCS_DIR / "content" / "concepts" / "how-ash-works.md"
+CHOOSE_SCANNERS_MD = DOCS_DIR / "content" / "how-to" / "choose-scanners.md"
+
+
+def _partial_block(text: str, key: str) -> str | None:
+    """The text of the list ``"key": [ ... ]`` in the plugin data partial, or None."""
+    match = re.search(rf'"{re.escape(key)}": \[(.*?)\]', text, re.DOTALL)
+    return match.group(1) if match else None
+
+
+def check_plugin_data() -> list[str]:
+    """scripts/generate_plugin_data_partial.py wrote the registry's names, and prose agrees.
+
+    The partial is held against a second source here (the config segments, which
+    are what ``scanner_names`` reads), the way the reference pages are, so a
+    generator that dropped or invented a name is caught even though its own
+    ``--check`` compares only against itself. The prose counts that used to be
+    typed by hand ("16 built-in scanners", the converters in the phases diagram)
+    are compared with the same registry. Every link the partial gives into the
+    scanner and reporter references must name a heading that exists there.
+    """
+    from automated_security_helper.config.ash_config import (
+        ConverterConfigSegment,
+        ScannerConfigSegment,
+    )
+
+    failures: list[str] = []
+    where = "docs/overrides/partials/generated/plugin-data.html"
+    text = read_text(PLUGIN_DATA_PARTIAL)
+    builtin = set(_segment_names(ScannerConfigSegment))
+    expected_lists = {
+        "builtin": builtin,
+        "all": set(scanner_names()),
+    }
+    for key, expected in expected_lists.items():
+        block = _partial_block(text, key)
+        listed = set(re.findall(r'"([^"]+)"', block)) if block is not None else set()
+        if block is None:
+            failures.append(f"{where}: no {key!r} list of scanner names")
+        elif listed != expected:
+            failures.append(
+                f"{where}: {key!r} scanners differ from the registry: "
+                f"missing {sorted(expected - listed)}, extra {sorted(listed - expected)}"
+            )
+
+    converters = set(_segment_names(ConverterConfigSegment))
+    block = _partial_block(text, "converters")
+    listed = (
+        set(re.findall(r'"name": "([^"]+)"', block)) if block is not None else set()
+    )
+    if listed != converters:
+        failures.append(
+            f"{where}: converters {sorted(listed)} differ from the registry "
+            f"{sorted(converters)}"
+        )
+
+    for page, heading_page in (
+        ("reference/scanners/", SCANNERS_REFERENCE_MD),
+        ("reference/reporters/", REPORTERS_REFERENCE_MD),
+    ):
+        headings = set(
+            re.findall(r"^## `([^`]+)`$", read_text(heading_page), re.MULTILINE)
+        )
+        anchors = re.findall(rf'"href": "{re.escape(page)}#([^"]+)"', text)
+        if not anchors:
+            # A link shape that changed would otherwise read as nothing to check.
+            failures.append(f"{where}: no links into {page} to check")
+        for anchor in anchors:
+            if anchor not in headings:
+                failures.append(
+                    f"{where}: links to {page}#{anchor}, which is not a heading there"
+                )
+
+    prose = (
+        (HOW_ASH_WORKS_MD, r"ASH ships (\d+) built-in scanners", len(builtin)),
+        (CHOOSE_SCANNERS_MD, r"all (\d+) built-in scanners", len(builtin)),
+    )
+    for page, pattern, count in prose:
+        rel = page.relative_to(REPO_ROOT).as_posix()
+        matches = list(re.finditer(pattern, read_text(page)))
+        if not matches:
+            failures.append(f"{rel}: no sentence matching {pattern!r}")
+        for match in matches:
+            if int(match.group(1)) != count:
+                failures.append(
+                    f"{rel}: says {match.group(1)} built-in scanners, "
+                    f"the registry has {count}"
+                )
+
+    how = "docs/content/concepts/how-ash-works.md"
+    diagrams = list(
+        re.finditer(r"Convert phase<br/>([^\]]+)\]", read_text(HOW_ASH_WORKS_MD))
+    )
+    if not diagrams:
+        failures.append(f"{how}: no Convert phase node")
+    for diagram in diagrams:
+        named = {n.strip() for n in diagram.group(1).split(",")}
+        if named != converters:
+            failures.append(
+                f"{how}: the Convert phase node names {sorted(named)}, "
+                f"the registry has {sorted(converters)}"
+            )
+
+    failures += _managed_tool_failures(text, where)
+    return failures
+
+
+#: The tools ``ash dependencies install`` installs for the CI snippets and guides,
+#: sorted. ``ash dependencies install --tool`` validates a name against the whole plugin
+#: registry (an unknown name is an error), which is the registry the partial is derived
+#: from, so it is no independent source for WHICH tools are managed. This list is
+#: therefore pinned by hand: a change to the managed set (a scanner that gains or loses
+#: install commands, MANAGED_TOOL_EXTRAS, NOT_MANAGED in
+#: scripts/generate_plugin_data_partial.py) must change this tuple, and the CI guides'
+#: install lines, in the same PR.
+MANAGED_TOOLS_PINNED = (
+    "actionlint",
+    "cfn-guard",
+    "cfn-nag",
+    "gitleaks",
+    "grype",
+    "opengrep",
+    "syft",
+    "trivy",
+)
+#: Guides whose install lines name the managed tools (each as .md and .md.template).
+CI_GUIDE_NAMES = ("github-actions", "gitlab-ci", "other-ci")
+#: Other pages, under docs/content (each as .md and, where it exists, .md.template),
+#: that may name the managed tools in a ``--tool`` run, with whether the page must
+#: carry one. Every stem must resolve to at least one file. A required page
+#: (scale-large-repos, which installs the whole set in its job) is held to the full
+#: list in the registry's order, like the CI guides. An optional page (the CLI
+#: reference and the advanced-usage page show short examples of one or two tools,
+#: under _INSTALL_RUN_MIN) is held only if a long run appears, and then to an
+#: in-order subset of the registry's order, so a three-tool example is fine and a
+#: re-ordered one is not.
+#: Known uncovered: docs/content/contributing/testing.md carries a three-tool run
+#: that this list does not read.
+INSTALL_LINE_PAGES = (
+    ("docs/advanced-usage", False),
+    ("how-to/scale-large-repos", True),
+    ("reference/cli", False),
+)
+#: A run of ``--tool NAME`` options, across line continuations and folded lines.
+_TOOL_RUN = re.compile(
+    r"(?:--tool[ \t]+[\w-]+(?:[ \t]*\\?[ \t]*\n[ \t]*|[ \t]+))+--tool[ \t]+[\w-]+"
+    r"|--tool[ \t]+[\w-]+"
+)
+#: A run shorter than this is an example about one tool, not the install line.
+_INSTALL_RUN_MIN = 3
+
+
+def _managed_tool_failures(partial_text: str, where: str) -> list[str]:
+    """The managed tools in the partial and in the CI guides' install lines.
+
+    The partial's list is held to ``MANAGED_TOOLS_PINNED``, and every long run of
+    ``--tool`` options in the guides (both the page and its template) is held to the
+    partial's list, in order. Each guide must have at least one such run.
+    """
+    failures: list[str] = []
+    block = _partial_block(partial_text, "managed_tools")
+    managed = re.findall(r'"([^"]+)"', block) if block is not None else None
+    if managed is None:
+        return [f"{where}: no 'managed_tools' list"]
+    if managed != list(MANAGED_TOOLS_PINNED):
+        failures.append(
+            f"{where}: managed_tools {managed} differ from MANAGED_TOOLS_PINNED "
+            f"{list(MANAGED_TOOLS_PINNED)} in scripts/verify_docs_freshness.py; "
+            "a change to the managed set touches both"
+        )
+    content = DOCS_DIR / "content"
+    pages = [
+        (content / "how-to" / "ci" / f"{name}{suffix}", True)
+        for name in CI_GUIDE_NAMES
+        for suffix in (".md", ".md.template")
+    ]
+    for stem, required in INSTALL_LINE_PAGES:
+        found = [
+            content / f"{stem}{suffix}"
+            for suffix in (".md", ".md.template")
+            if (content / f"{stem}{suffix}").exists()
+        ]
+        if not found:
+            # A stem that matches nothing would leave the page unchecked and the
+            # gate green, so a renamed or removed page fails here.
+            failures.append(
+                f"docs/content/{stem}(.md|.md.template): listed in "
+                "INSTALL_LINE_PAGES but no such file exists"
+            )
+        # A required page is held whether or not its template exists (read_text
+        # then fails loudly); an optional one only where a file exists, as the CLI
+        # reference has no template.
+        pages.extend((page, required) for page in found)
+    for page, required in pages:
+        rel = page.relative_to(REPO_ROOT).as_posix()
+        runs = [
+            re.findall(r"--tool[ \t]+([\w-]+)", match.group(0))
+            for match in _TOOL_RUN.finditer(read_text(page))
+        ]
+        runs = [run for run in runs if len(run) >= _INSTALL_RUN_MIN]
+        if not runs and required:
+            failures.append(f"{rel}: no install line naming the managed tools")
+        for run in runs:
+            # A required page installs the whole set, so its run is the full list.
+            # An optional page may show any in-order subset of it.
+            if required and run != managed:
+                failures.append(
+                    f"{rel}: an install line names {run}; expected the "
+                    f"registry's alphabetical order: {managed}"
+                )
+            elif not required and not _is_ordered_subset(run, managed):
+                failures.append(
+                    f"{rel}: an install line names {run}; expected an in-order "
+                    f"subset of the registry's alphabetical order: {managed}"
+                )
+    return failures
+
+
+def _is_ordered_subset(run: list[str], managed: list[str]) -> bool:
+    """Whether ``run`` is ``managed`` with some entries left out, order kept."""
+    remaining = iter(managed)
+    return all(name in remaining for name in run)
+
+
+# ---------------------------------------------------------------------------
+# Check 3: MCP tool names in docs match code
 # ---------------------------------------------------------------------------
 
 
@@ -524,10 +997,11 @@ def mcp_tool_names() -> dict[str, str]:
     invisible to it. A decorator is a property of the function, not of the line
     after it, so the only way to read it correctly is from the syntax tree.
 
-    Accepts both ``@mcp.tool`` and ``@mcp.tool(...)``, since either registers.
+    Accepts both ``@mcp.tool`` and ``@mcp.tool(...)``, since either registers. A
+    ``name=`` argument to the decorator is the name the tool is registered under,
+    and the one the reference documents; the function's own name was taken
+    before, so such a tool was demanded of the page under a name no client sees.
     """
-    import ast
-
     tree = ast.parse(read_text(MCP_SERVER_PY))
     names: dict[str, str] = {}
 
@@ -542,14 +1016,34 @@ def mcp_tool_names() -> dict[str, str]:
                 and isinstance(target.value, ast.Name)
                 and target.value.id == "mcp"
             ):
-                names[node.name] = f"mcp_server.py:{node.lineno}"
+                registered = _registered_tool_name(decorator, node.name)
+                names[registered] = f"mcp_server.py:{node.lineno}"
                 break
 
     return names
 
 
+def _registered_tool_name(decorator: ast.expr, function_name: str) -> str:
+    """The name ``@mcp.tool`` registers: its ``name=`` argument, else the function's."""
+    if isinstance(decorator, ast.Call):
+        for keyword in decorator.keywords:
+            if (
+                keyword.arg == "name"
+                and isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, str)
+            ):
+                return keyword.value.value
+    return function_name
+
+
+#: A tool's section in the MCP tools reference: ``## run_ash_scan``.
+_TOOL_HEADING = re.compile(r"^## ([a-z][a-z0-9_]*)\s*$", re.MULTILINE)
+
+
 def check_mcp_tools() -> list[str]:
-    """The registered MCP tool set and README's tool table must be the same set.
+    """The registered MCP tool set and the MCP tools reference's sections must be the
+    same set. The reference gives each tool a ``## <tool>`` section; other sections
+    (Resources, Severity levels) are not identifiers and are not compared.
 
     Overlaps deliberately with tests/unit/cli/mcp/test_tool_surface_parity.py,
     and neither subsumes the other. That test derives the registered side from
@@ -559,23 +1053,71 @@ def check_mcp_tools() -> list[str]:
     documentation-only pull request gets its answer. The shared property is the
     set of names; if they ever disagree, the runtime one is right.
     """
-    failures = ["MCP tool inventory is empty; the parse found nothing to check"]
     tools = mcp_tool_names()
     if not tools:
-        return failures
-
-    return compare_inventories(
-        "MCP tool",
-        tools,
-        read_text(README_TEMPLATE_MD),
-        "Tool",
-        "README.md.template",
-    )
+        return ["MCP tool inventory is empty; the parse found nothing to check"]
+    label = "docs/content/reference/mcp-tools.md"
+    sections = set(_TOOL_HEADING.findall(read_text(MCP_TOOLS_REFERENCE_MD)))
+    if not sections:
+        return [
+            (
+                f"MCP tool: {label} has no '## <tool>' sections. The page was "
+                "renamed, moved or restructured; this check cannot run and must not "
+                "report success."
+            )
+        ]
+    failures = [
+        f"MCP tool: '{name}' (from {origin}) is registered but {label} has no "
+        f"'## {name}' section"
+        for name, origin in sorted(tools.items())
+        if name not in sections
+    ]
+    failures += [
+        f"MCP tool: {label} has a '## {name}' section, but no @mcp.tool is named "
+        f"{name}; it was removed or renamed and the section was left behind"
+        for name in sorted(sections - set(tools))
+    ]
+    return failures
 
 
 # ---------------------------------------------------------------------------
-# Check 5: Version consistency
+# Check 4: Version consistency
 # ---------------------------------------------------------------------------
+
+
+#: A release pin as the install pages write it, read as a whole token: ``@v3.7.0``
+#: and whatever a tag carries after the patch number (``@v3.7.0-beta``,
+#: ``@v3.7.0rc1``). Stopping at the patch number read a pre-release pin as the
+#: release whose digits it starts with.
+_VERSION_PIN = re.compile(r"@v\d[0-9A-Za-z.+-]*")
+
+
+def _version_pins(content: str) -> list[str]:
+    """Every ``@v...`` pin in ``content`` as a whole token, sentence punctuation dropped.
+
+    Both the outdated-pin search and the presence test used to stop at the patch
+    number, so ``@v3.0.0-beta.1`` satisfied a current ``@v3.0.0`` and was
+    never reported as the stale pin it is.
+    """
+    return [match.rstrip(".,;:") for match in _VERSION_PIN.findall(content)]
+
+
+def _is_floating_tag(pin: str, version: str) -> bool:
+    """Whether ``pin`` is a major or minor tag of ``version``.
+
+    The install pages mention ``@v3`` beside the exact pin, whether they offer it
+    as a tag the release process moves or describe it as retired and frozen at a
+    release, so ``@v3`` (or ``@v3.7``) is not a stale pin while the version it
+    abbreviates is current. A pre-release or build suffix is a tag of its own and
+    never floats; an exact pin of another release is outdated.
+    """
+    parts = pin.removeprefix("@v").split(".")
+    current = version.split(".")
+    if not parts or len(parts) >= len(current):
+        return False
+    if not all(part.isdigit() for part in parts):
+        return False
+    return parts == current[: len(parts)]
 
 
 def check_version_consistency() -> list[str]:
@@ -586,32 +1128,35 @@ def check_version_consistency() -> list[str]:
 
     files_to_check = [
         (README_MD, "README.md"),
-        (DOCS_INDEX_MD, "docs/content/index.md"),
+        (INSTALL_MD, "docs/content/how-to/install.md"),
     ]
 
     for path, label in files_to_check:
         if not path.exists():
             failures.append(f"File {label} does not exist")
             continue
-        content = read_text(path)
-        if version_tag not in content:
-            # Check if ANY version tag is present (might just be outdated)
-            old_tags = re.findall(r"@v\d+\.\d+\.\d+", content)
-            if old_tags:
-                outdated = set(old_tags) - {version_tag}
-                if outdated:
-                    failures.append(
-                        f"{label} references outdated version(s) {sorted(outdated)} "
-                        f"instead of {version_tag}"
-                    )
-            else:
-                failures.append(f"{label} does not reference version {version_tag}")
+        pins = set(_version_pins(read_text(path)))
+        # Every older pin is reported, whether or not the current one is also on the
+        # page: a reader who copies the one stale command installs the wrong release.
+        # A floating major or minor tag of the current version is not a stale pin.
+        outdated = {
+            pin
+            for pin in pins
+            if pin != version_tag and not _is_floating_tag(pin, version)
+        }
+        if outdated:
+            failures.append(
+                f"{label} references outdated version(s) {sorted(outdated)} "
+                f"instead of {version_tag}"
+            )
+        elif version_tag not in pins:
+            failures.append(f"{label} does not reference version {version_tag}")
 
     return failures
 
 
 # ---------------------------------------------------------------------------
-# Check 6: Config file path consistency
+# Check 5: Config file path consistency
 # ---------------------------------------------------------------------------
 
 
@@ -620,9 +1165,82 @@ def check_version_consistency() -> list[str]:
 # prose that happens to mention a filename is not mistaken for a published
 # inventory.
 _CONFIG_LIST_ITEM = re.compile(
-    r"^\s*(?:[-*+]|\d+[.)])\s+`(?:\./)?(?:\.ash/)?"
+    r"^\s*(?:[-*+]|\d+[.)])\s+`(?:\./)?(\.ash/)?"
     r"([A-Za-z0-9_.-]+\.(?:ya?ml|json|toml))`\s*$"
 )
+
+
+def _config_list_problems(
+    rel_path: str,
+    lines: list[str],
+    supported: set[str],
+    newer: set[str],
+) -> tuple[list[str], int]:
+    """Check every config-discovery list in one page; return (failures, lists).
+
+    The ``.ash/`` prefix is kept, not stripped: ASH searches for the
+    ASH_CONFIG_FILE_NAMES names under ``.ash/`` but discovers the ashrc names and
+    pyproject.toml at the project root only, so a list placing one of those
+    under ``.ash/`` sends a reader to a file ASH never reads there. Stripping the
+    prefix before comparing let exactly that list pass.
+    """
+    failures: list[str] = []
+    lists_found = 0
+    run: list[tuple[int, str, str]] = []
+
+    def close_run() -> None:
+        nonlocal lists_found, run
+        # A run of one is a single example, not an inventory.
+        if len(run) >= 2:
+            lists_found += 1
+            names = {name for _, _, name in run}
+            start = run[0][0]
+
+            missing = sorted(supported - names)
+            if names & newer:
+                missing += sorted(newer - names)
+            if missing:
+                failures.append(
+                    f"{rel_path}:{start} publishes a config-discovery list of "
+                    f"{len(names)} name(s) but omits {missing}, which ASH does "
+                    f"search for (ASH_CONFIG_FILE_NAMES, or ASH_RC_FILE_NAMES and "
+                    f"pyproject.toml). A reader cannot "
+                    f"discover a working config filename from this list."
+                )
+            unknown = sorted(names - supported - newer)
+            if unknown:
+                failures.append(
+                    f"{rel_path}:{start} publishes a config-discovery list "
+                    f"naming {unknown}, which ASH does NOT search for "
+                    f"(ASH_CONFIG_FILE_NAMES, ASH_RC_FILE_NAMES, pyproject.toml). "
+                    f"A file with that name is "
+                    f"silently ignored unless --config points at it."
+                )
+            misplaced = sorted(
+                f"{prefix}{name}" for _, prefix, name in run if prefix and name in newer
+            )
+            if misplaced:
+                failures.append(
+                    f"{rel_path}:{start} publishes a config-discovery list placing "
+                    f"{misplaced} under .ash/, where ASH never looks for them: the "
+                    f"ashrc names and pyproject.toml are discovered at the project "
+                    f"root only. A reader who puts the file there is silently ignored."
+                )
+        run = []
+
+    for lineno, line in enumerate(lines, start=1):
+        match = _CONFIG_LIST_ITEM.match(line)
+        if match:
+            run.append((lineno, match.group(1) or "", match.group(2)))
+            continue
+        # A blank line between items makes a loose list, not two lists. It used
+        # to close the run, so a loose inventory was read as several runs of one
+        # item and none of them was checked.
+        if not line.strip():
+            continue
+        close_run()
+    close_run()
+    return failures, lists_found
 
 
 def check_config_path() -> list[str]:
@@ -668,42 +1286,12 @@ def check_config_path() -> list[str]:
     for md_file in collect_md_files():
         rel_path = md_file.relative_to(REPO_ROOT)
         lines = read_text(md_file).splitlines()
-
         # Group consecutive matching list items into one published inventory.
-        run: list[tuple[int, str]] = []
-        for lineno, line in enumerate(lines + [""], start=1):
-            match = _CONFIG_LIST_ITEM.match(line)
-            if match:
-                run.append((lineno, match.group(1)))
-                continue
-
-            # A run of one is a single example, not an inventory.
-            if len(run) >= 2:
-                lists_found += 1
-                names = {name for _, name in run}
-                start = run[0][0]
-
-                missing = sorted(supported - names)
-                if names & newer:
-                    missing += sorted(newer - names)
-                if missing:
-                    failures.append(
-                        f"{rel_path}:{start} publishes a config-discovery list of "
-                        f"{len(names)} name(s) but omits {missing}, which ASH does "
-                        f"search for (ASH_CONFIG_FILE_NAMES, or ASH_RC_FILE_NAMES and "
-                        f"pyproject.toml). A reader cannot "
-                        f"discover a working config filename from this list."
-                    )
-                unknown = sorted(names - supported - newer)
-                if unknown:
-                    failures.append(
-                        f"{rel_path}:{start} publishes a config-discovery list "
-                        f"naming {unknown}, which ASH does NOT search for "
-                        f"(ASH_CONFIG_FILE_NAMES, ASH_RC_FILE_NAMES, pyproject.toml). "
-                        f"A file with that name is "
-                        f"silently ignored unless --config points at it."
-                    )
-            run = []
+        page_failures, page_lists = _config_list_problems(
+            str(rel_path), lines, supported, newer
+        )
+        failures.extend(page_failures)
+        lists_found += page_lists
 
     if not lists_found:
         failures.append(
@@ -716,51 +1304,76 @@ def check_config_path() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 7: Suppression field name
+# Check 6: Suppression field name
 # ---------------------------------------------------------------------------
 
 
-# Matches a YAML mapping key "file_path:", optionally as a list item, and not
-# an expression that merely ends in "file_path:" (Python if-statements etc).
-_YAML_FILE_PATH_KEY = re.compile(r"^\s*-?\s*file_path\s*:(\s|$)")
+# A ``file_path`` mapping key: a YAML block key, optionally a list item; a quoted
+# JSON key; or a key inside a flow mapping (``{rule_id: B101, file_path: x}``).
+# An expression that merely ends in ``file_path:`` (a Python if-statement) is not
+# a key, and a Python annotation ``file_path: str`` never reaches this regex,
+# because only YAML and JSON blocks are read.
+_FILE_PATH_KEY = re.compile(r"""(?:^\s*-?\s*|[{,]\s*)["']?file_path["']?\s*:(?:\s|$)""")
+
+#: The fence languages a suppression example is written in. A block with no
+#: language is read too; a Python or shell block never is.
+_SUPPRESSION_BLOCK_LANGS = frozenset({"yaml", "yml", "json", "jsonc", "json5", ""})
+
+#: The mapping key that makes a block a suppression config.
+_SUPPRESSIONS_KEY = re.compile(
+    r"""(?:^\s*|[{,]\s*)["']?suppressions["']?\s*:""", re.MULTILINE
+)
 
 
 def check_suppression_field_name() -> list[str]:
-    """Flag docs using 'file_path:' in suppression context (should be 'path:')."""
+    """Flag docs using 'file_path:' as a suppression key (the key is 'path:').
+
+    Read per fenced block, through the parser the other docs checks use, and only
+    in YAML and JSON blocks that declare a ``suppressions`` mapping. The earlier
+    form scanned every line of a page for a YAML-shaped key and then looked twenty
+    lines around it for the substring ``suppress`` or ``rule_id``. That reported
+    three correct shapes: a Python annotation ``file_path: str`` near the word
+    ``rule_id``; ASH's own flat finding output, whose records carry ``file_path``,
+    ``rule_id`` and ``is_suppressed`` fields side by side; and any config example
+    within twenty lines of ``unused-suppressions``. It also missed a JSON or
+    flow-mapping suppression written ``"file_path":``, which the block-style key
+    regex never matched. The block is the context: a ``file_path`` key is a wrong
+    suppression key when the same block configures ``suppressions``, and nothing
+    about the lines around the block says so.
+    """
     failures: list[str] = []
 
     for md_file in collect_md_files():
-        content = read_text(md_file)
-        lines = content.splitlines()
-
-        for i, line in enumerate(lines):
-            # Only flag YAML mapping keys. A bare substring test also matches
-            # Python inside fenced code blocks, e.g. "if rule_id and file_path:",
-            # where file_path is a local variable and the colon ends an if-statement.
-            if not _YAML_FILE_PATH_KEY.match(line):
+        page = _docs_checks().parse_page(md_file, REPO_ROOT, read_text(md_file))
+        rel_path = md_file.relative_to(REPO_ROOT)
+        for block in page.blocks:
+            if (block.lang or "").lower() not in _SUPPRESSION_BLOCK_LANGS:
                 continue
-
-            # Check surrounding context (20 lines before/after) for suppression keywords
-            context_start = max(0, i - 20)
-            context_end = min(len(lines), i + 20)
-            context_block = "\n".join(lines[context_start:context_end]).lower()
-
-            if "suppress" in context_block or "rule_id" in context_block:
-                rel_path = md_file.relative_to(REPO_ROOT)
-                failures.append(
-                    f"{rel_path}:{i + 1} uses 'file_path:' in suppression context "
-                    f"(should be 'path:')"
-                )
+            if not _SUPPRESSIONS_KEY.search(block.body):
+                continue
+            for offset, line in enumerate(block.body.splitlines()):
+                if _FILE_PATH_KEY.search(line):
+                    # as_posix(), as the path comparisons above: a native
+                    # Windows rendering would read "docs\\page.md".
+                    failures.append(
+                        f"{rel_path.as_posix()}:{block.body_line + offset} uses "
+                        f"'file_path:' as a suppression key (the key is 'path:')"
+                    )
 
     return failures
 
 
 # ---------------------------------------------------------------------------
-# Check 8: documented plugin options exist and validate
+# Check 7: documented plugin options exist and validate
 # ---------------------------------------------------------------------------
 
 
-def _plugin_option_models(config_suffix: str, options_base: type) -> dict[str, type]:
+def _plugin_option_models(
+    config_suffix: str,
+    options_base: type,
+    package: object = None,
+    notes: list[str] | None = None,
+) -> dict[str, type]:
     """Map each built-in plugin's config name to its options model.
 
     Keyed on the ``name`` Literal of the plugin's config class, because that is the
@@ -772,23 +1385,31 @@ def _plugin_option_models(config_suffix: str, options_base: type) -> dict[str, t
     convention (``s3_reporter.py`` but also ``github_ghas_reporter.py``,
     ``archive_converter.py``), and a suffix filter silently shrinks the model set,
     which would make this check pass by simply not knowing about a plugin.
+
+    A module whose import raises ImportError is skipped and named in ``notes``:
+    an optional dependency missing from this environment is not a documentation
+    problem, but a check that passed without seeing a plugin has to say so, and
+    the skip used to be silent. Any other exception propagates, so a built-in
+    plugin broken at import makes the check ERROR instead of leaving its
+    documented options unchecked behind a passing gate. ``package`` is the
+    package to walk; the tests pass one of their own.
     """
     import importlib
     import pkgutil
 
-    from automated_security_helper import plugin_modules
+    if package is None:
+        from automated_security_helper import plugin_modules as package
 
     models: dict[str, type] = {}
-    for mod in pkgutil.walk_packages(
-        plugin_modules.__path__, plugin_modules.__name__ + "."
-    ):
+    for mod in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
         try:
             module = importlib.import_module(mod.name)
-        except Exception:  # noqa: BLE001, S112  # nosec B112 -- see below
-            # Deliberately broad and deliberately silent. A plugin module whose
-            # optional dependency is missing in this environment is not a
-            # documentation problem, and failing the docs gate on it would make
-            # the gate depend on which extras happen to be installed.
+        except ImportError as err:
+            if notes is not None:
+                notes.append(
+                    f"{mod.name} did not import ({err}); the options it documents "
+                    "are not checked in this environment"
+                )
             continue
 
         config_name = None
@@ -813,15 +1434,20 @@ def _plugin_option_models(config_suffix: str, options_base: type) -> dict[str, t
 def check_plugin_option_keys() -> list[str]:
     """Every documented <section>.<name>.options block must validate.
 
+    Each option key in such a block must be a field of the plugin's options model,
+    and the whole mapping must validate against that model. The check reports a key
+    that is not a field whatever the model does with it, so it gives the same answer
+    on an ASH that accepts the key and never reads it and on one that refuses the
+    config.
+
     Why this check exists
     ---------------------
-    The three options bases -- scanner, reporter, converter -- all set
-    ``extra="allow"``, so an option name that does not
-    exist is accepted and then never read. A reader who copies it gets no error and
-    no effect. That let 46 invented option keys accumulate across the configuration
-    guide and the built-in plugin pages -- ``severity_level`` for bandit (the field
-    is ``severity_threshold``), ``rules`` and ``timeout`` for semgrep (``config`` and
-    ``scan_timeout``), ``framework`` for checkov (``frameworks``), and others.
+    A plugin never reads an option it does not declare. 46 invented option keys
+    accumulated across the configuration guide and the built-in plugin pages --
+    ``severity_level`` for bandit (the field is ``severity_threshold``), ``rules``
+    and ``timeout`` for semgrep (``config`` and ``scan_timeout``), ``framework`` for
+    checkov (``frameworks``), and others -- and a reader who copied one got nothing
+    the page promised.
 
     Validating rather than only checking key names also catches wrong *values*,
     which fail loudly at runtime instead of silently: ``confidence_level`` is
@@ -842,10 +1468,14 @@ def check_plugin_option_keys() -> list[str]:
     Only blocks that parse as a mapping with one of these section keys are
     considered, and only for plugins this build knows about, so a snippet documenting
     a third-party plugin is skipped rather than reported.
-    """
-    import yaml
-    from pydantic import ValidationError
 
+    A block marked ``config kind=ash-invalid`` is skipped. It shows a config ASH
+    refuses, such as an option the plugin does not declare, and "Config blocks in
+    docs validate" (docs_checks.config_block_problems) already requires that it be
+    invalid, so a valid config marked that way is still reported. Blocks are found
+    with docs_checks.parse_page, the parser that check and the docs runner use, so
+    the three agree on which marker governs which block.
+    """
     from automated_security_helper.base.options import (
         ConverterOptionsBase,
         ReporterOptionsBase,
@@ -861,70 +1491,304 @@ def check_plugin_option_keys() -> list[str]:
 
     failures: list[str] = []
     models: dict[str, dict[str, type]] = {}
+    notes: list[str] = []
     for section, config_suffix, base in kinds:
-        found = _plugin_option_models(config_suffix, base)
+        found = _plugin_option_models(config_suffix, base, notes=notes)
         if not found:
             return [f"Could not import any built-in {section} options model"]
         models[section] = found
-
-    fence = re.compile(r"```ya?ml\n(.*?)```", re.DOTALL)
+    _print_skipped(sorted(set(notes)))
 
     for md_file in collect_md_files():
-        content = read_text(md_file)
+        page = _docs_checks().parse_page(md_file, REPO_ROOT, read_text(md_file))
         rel_path = md_file.relative_to(REPO_ROOT)
 
-        for block in fence.finditer(content):
-            body = block.group(1)
-            line_no = content[: block.start()].count("\n") + 2
-            try:
-                parsed = yaml.safe_load(body)
-            except yaml.YAMLError:
-                # Deliberately-invalid YAML is documented on purpose in places.
+        for block in page.blocks:
+            if block.lang not in ("yaml", "yml") or block.config_kind == "ash-invalid":
                 continue
-            if not isinstance(parsed, dict):
-                continue
-
-            for section, _config_suffix, _base in kinds:
-                entries = parsed.get(section)
-                if not isinstance(entries, dict):
+            line_no = block.body_line
+            # Deliberately-invalid YAML is documented on purpose in places and
+            # yields no document; an !ENV reference is valid ASH config and
+            # parses. A block of several documents is checked document by
+            # document.
+            for parsed in _load_options_documents(block.body):
+                if not isinstance(parsed, dict):
                     continue
-
-                for plugin_name, plugin_cfg in entries.items():
-                    if not isinstance(plugin_cfg, dict):
-                        continue
-                    options = plugin_cfg.get("options")
-                    if not isinstance(options, dict):
-                        continue
-                    model = models[section].get(plugin_name)
-                    if model is None:
-                        continue
-
-                    for key in options:
-                        if key not in model.model_fields:
-                            failures.append(
-                                f"{rel_path}:~{line_no} {section}.{plugin_name}"
-                                f".options.{key} is not a field on "
-                                f"{model.__name__}; extra='allow' means it is "
-                                f"accepted and ignored"
-                            )
-
-                    try:
-                        model.model_validate(options)
-                    except ValidationError as exc:
-                        detail = next(
-                            (
-                                ln.strip()
-                                for ln in str(exc).splitlines()[1:]
-                                if ln.strip() and "further information" not in ln
-                            ),
-                            str(exc).splitlines()[0],
-                        )
-                        failures.append(
-                            f"{rel_path}:~{line_no} {section}.{plugin_name}.options "
-                            f"does not validate against {model.__name__}: {detail}"
-                        )
+                failures.extend(
+                    _options_block_problems(
+                        parsed, models, kinds, f"{rel_path}:~{line_no}"
+                    )
+                )
 
     return failures
+
+
+def _options_block_problems(
+    parsed: dict, models: dict[str, dict[str, type]], kinds, where: str
+) -> list[str]:
+    """The option-key and validation problems of one parsed config document."""
+    from pydantic import ValidationError
+
+    failures: list[str] = []
+    for section, _config_suffix, _base in kinds:
+        entries = parsed.get(section)
+        if not isinstance(entries, dict):
+            continue
+
+        for plugin_name, plugin_cfg in entries.items():
+            if not isinstance(plugin_cfg, dict):
+                continue
+            options = plugin_cfg.get("options")
+            if not isinstance(options, dict):
+                continue
+            model = _model_for(models[section], plugin_name)
+            if model is None:
+                continue
+
+            accepted = _accepted_option_keys(model)
+            for key in options:
+                if key not in accepted:
+                    failures.append(
+                        f"{where} {section}.{plugin_name}"
+                        f".options.{key} is not a field of "
+                        f"{model.__name__}. Use an option {plugin_name} "
+                        "declares, or mark a block that shows the mistake "
+                        "config kind=ash-invalid"
+                    )
+
+            # An !ENV value is substituted by ASH before it validates, so the
+            # documented text is not what the field will hold; its key was
+            # checked above, its value is left to the runtime. A required field
+            # documented through !ENV would read as missing here; none of the
+            # options models declares one, and such a block is marked
+            # kind=ash-invalid if it ever has to be documented.
+            concrete = {
+                key: value
+                for key, value in options.items()
+                if not isinstance(value, _EnvReference)
+            }
+            try:
+                model.model_validate(concrete)
+            except ValidationError as exc:
+                failures.append(
+                    f"{where} {section}.{plugin_name}.options "
+                    f"does not validate against {model.__name__}: "
+                    f"{_validation_detail(exc)}"
+                )
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Checks 9-16: doc blocks, commands, environment variables, links, navigation
+# ---------------------------------------------------------------------------
+#
+# Implemented in scripts/docs_checks.py, which the docs-example runner in
+# tests/integration/docs/ loads too, so the checks and the runner agree on what a
+# block and its marker are. Each wrapper below hands that module this script's corpus
+# and root, so a test that monkeypatches collect_md_files or REPO_ROOT here steers
+# these checks the same way it steers the eight above.
+
+DOCS_CHECKS = REPO_ROOT / "scripts" / "docs_checks.py"
+_docs_checks_module = None
+
+
+def _docs_checks():
+    """Load scripts/docs_checks.py by path, once.
+
+    Registered in sys.modules before it runs: its dataclasses resolve their
+    annotations through the module's entry there.
+    """
+    global _docs_checks_module
+    name = "_ash_docs_checks"
+    if _docs_checks_module is None and name in sys.modules:
+        # The docs runner loads the same file under the same name; one module per
+        # process, so a patch or a cache in one is seen by the other.
+        _docs_checks_module = sys.modules[name]
+    if _docs_checks_module is None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(name, DOCS_CHECKS)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load {DOCS_CHECKS}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        _docs_checks_module = module
+    return _docs_checks_module
+
+
+def check_doc_markers() -> list[str]:
+    return [str(f) for f in _docs_checks().check_markers(collect_md_files(), REPO_ROOT)]
+
+
+def check_doc_cli() -> list[str]:
+    return [str(f) for f in _docs_checks().check_cli(collect_md_files(), REPO_ROOT)]
+
+
+#: Set by --verbose: checks that can say why something passed print it.
+_VERBOSE = False
+
+
+def _print_skipped(notes: list[str]) -> None:
+    """What a check could not look at, printed whether or not --verbose is set.
+
+    A plugin module that does not import (an optional extra that is not installed)
+    is not a docs finding, but a check that passes without having seen its plugins
+    has to say so.
+    """
+    for note in notes:
+        print(f"        skipped: {note}")
+
+
+def check_doc_env_vars() -> list[str]:
+    notes: list[str] | None = [] if _VERBOSE else None
+    findings = _docs_checks().check_env_vars(collect_md_files(), REPO_ROOT, notes=notes)
+    for note in notes or []:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+def check_doc_config_blocks() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_config_blocks(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    _print_skipped(notes)
+    return [str(f) for f in findings]
+
+
+def check_doc_python_blocks() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_python_blocks(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_links() -> list[str]:
+    return [str(f) for f in _docs_checks().check_links(collect_md_files(), REPO_ROOT)]
+
+
+def check_doc_nav() -> list[str]:
+    return [str(f) for f in _docs_checks().check_nav(REPO_ROOT)]
+
+
+def check_doc_site_build() -> list[str]:
+    return [str(f) for f in _docs_checks().check_site_build(REPO_ROOT)]
+
+
+def check_doc_release_placeholders() -> list[str]:
+    return [str(f) for f in _docs_checks().check_release_placeholders(REPO_ROOT)]
+
+
+def check_doc_code_links() -> list[str]:
+    return [str(f) for f in _docs_checks().check_code_links(REPO_ROOT)]
+
+
+def check_doc_mcp_contract() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_mcp_contract(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    for note in notes:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+def check_doc_install_commands() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_install_commands(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_option_tables() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_option_tables(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    _print_skipped(notes)
+    return [str(f) for f in findings]
+
+
+def check_doc_report_files() -> list[str]:
+    return [
+        str(f) for f in _docs_checks().check_report_files(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_scanner_names() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_scanner_names(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    for note in notes:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+def check_doc_session_variables() -> list[str]:
+    return [
+        str(f)
+        for f in _docs_checks().check_session_variables(collect_md_files(), REPO_ROOT)
+    ]
+
+
+def check_doc_workflow_inputs() -> list[str]:
+    notes: list[str] = []
+    findings = _docs_checks().check_workflow_inputs(
+        collect_md_files(), REPO_ROOT, notes=notes
+    )
+    for note in notes:
+        print(f"        note: {note}")
+    return [str(f) for f in findings]
+
+
+# ---------------------------------------------------------------------------
+# Docs from one tree, code from another
+# ---------------------------------------------------------------------------
+#
+# A docs rewrite describes code that is not on main yet, so its pages have to be
+# checked against another checkout's code. `--docs-root <tree>` reads every markdown
+# file, the nav, mkdocs.yml and the redirect map from <tree>, while everything about
+# the code comes from the ASH this interpreter imports: run it as
+#
+#     <code-tree>/.venv/bin/python <docs-tree>/scripts/verify_docs_freshness.py \
+#         --docs-root <docs-tree>
+#
+# The path constants at the top of this file are rebased here rather than rewritten,
+# so they stay the single statement of where each file is.
+
+#: Constants naming a file the docs tree owns, and ones naming a package source file.
+_DOCS_PATHS = (
+    "README_MD",
+    "DOCS_DIR",
+    "REFERENCE_DIR",
+    "SCANNERS_REFERENCE_MD",
+    "REPORTERS_REFERENCE_MD",
+    "MCP_TOOLS_REFERENCE_MD",
+    "INSTALL_MD",
+    "PLUGIN_DATA_PARTIAL",
+    "HOW_ASH_WORKS_MD",
+    "CHOOSE_SCANNERS_MD",
+)
+#: Code files, by their path inside the package, so a rebase never depends on where
+#: the previous one put them.
+_CODE_PATHS = {"MCP_SERVER_PY": Path("cli") / "mcp_server.py"}
+
+
+def _use_trees(docs_root: Path) -> None:
+    """Read docs from docs_root and code from the installed ASH, for every check."""
+    names = globals()
+    old_root = names["REPO_ROOT"]
+    docs_root = docs_root.resolve()
+    package = _docs_checks().installed_package_dir()
+    code = _docs_checks().code_root(docs_root)
+    for name in _DOCS_PATHS:
+        names[name] = docs_root / names[name].relative_to(old_root)
+    for name, inside in _CODE_PATHS.items():
+        names[name] = package / inside
+    names["PYPROJECT_TOML"] = code / "pyproject.toml"
+    names["REPO_ROOT"] = docs_root
 
 
 # ---------------------------------------------------------------------------
@@ -1105,16 +1969,21 @@ def _release_asset_keys() -> set[str]:
                         if not line.lstrip().startswith("#")
                     )
                 )
-    creates = [run for run in runs if "gh release create" in run]
+    # Command position only: an error message that QUOTES `gh release create`
+    # (the curated-notes recovery text does) must not be read as the command.
+    creates = []
+    for run in runs:
+        lines = run.splitlines()
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("gh release create"):
+                creates.append(lines[i:])
     if len(creates) != 1:
         raise ValueError(
             f"expected one step running `gh release create` in "
             f"{RELEASE_WORKFLOW.name}, found {len(creates)}"
         )
-    text = creates[0]
-    start = text.find("gh release create")
     command: list[str] = []
-    for line in text[start:].splitlines():
+    for line in creates[0]:
         command.append(line)
         if not line.rstrip().endswith("\\"):
             break
@@ -1479,11 +2348,37 @@ def check_no_index_name_install() -> list[str]:
     return failures
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    parser.add_argument(
+        "--docs-root",
+        type=Path,
+        help="check the docs in this checkout against the installed ASH's code "
+        "(default: the checkout this script is in)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="also say which known set each accepted environment variable matched",
+    )
+    args = parser.parse_args(argv)
+    global _VERBOSE
+    _VERBOSE = args.verbose
+    if args.docs_root is not None:
+        _use_trees(args.docs_root)
+    print(f"ASH package: {_docs_checks().installed_package_dir()}")
+    print(f"Docs root:   {REPO_ROOT}")
+    print()
+
     checks = [
-        ("CLI flags in docs match source", check_cli_flags),
         ("Reporter list in docs matches code", check_reporters),
         ("Scanner list in docs matches code", check_scanners),
+        (
+            "Plugin data behind the home page graphics matches code",
+            check_plugin_data,
+        ),
         ("MCP tool names in docs match code", check_mcp_tools),
         ("Version consistency", check_version_consistency),
         ("Config file path consistency", check_config_path),
@@ -1491,17 +2386,62 @@ def main() -> int:
         ("Plugin options in docs exist and validate", check_plugin_option_keys),
         ("Native package install pages match packaging", check_native_package_docs),
         ("Nothing installs ASH by its PyPI name", check_no_index_name_install),
+        ("Doc block markers are well formed", check_doc_markers),
+        ("ASH commands in docs match the CLI", check_doc_cli),
+        ("ASH environment variables in docs are read by ASH", check_doc_env_vars),
+        ("Config blocks in docs validate", check_doc_config_blocks),
+        ("Python blocks in docs parse and import", check_doc_python_blocks),
+        ("Links and anchors in docs resolve", check_doc_links),
+        ("Docs navigation and redirects resolve", check_doc_nav),
+        ("Docs site build is strict, offline and versioned", check_doc_site_build),
+        (
+            "Release numbers in templates stay out of install commands",
+            check_doc_release_placeholders,
+        ),
+        ("Docs links in the ASH source resolve", check_doc_code_links),
+        (
+            "Option tables and config paths in docs match the models",
+            check_doc_option_tables,
+        ),
+        (
+            "MCP error types and example responses in docs match the tools",
+            check_doc_mcp_contract,
+        ),
+        (
+            "Install commands in docs name real extras, Pythons and refs",
+            check_doc_install_commands,
+        ),
+        ("Report file names in docs are files ASH writes", check_doc_report_files),
+        (
+            "Scanner names in docs tables are scanners ASH ships",
+            check_doc_scanner_names,
+        ),
+        (
+            "Shell variables in docs examples are set in the session that reads them",
+            check_doc_session_variables,
+        ),
+        (
+            "Values docs examples pass the scan workflow pass its input check",
+            check_doc_workflow_inputs,
+        ),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []
     passed = 0
     failed = 0
+    not_run = 0
 
     for name, check_fn in checks:
         try:
             failures = check_fn()
-        except Exception as e:
-            failures = [f"Check raised an exception: {e}"]
+        except Exception as e:  # noqa: BLE001 -- reported as a check that did not run
+            # Not a finding: the check never got as far as the docs. Printed apart
+            # from findings, counted apart and exited on apart, so that two runs
+            # where it raised the same way cannot compare as two runs that agree.
+            not_run += 1
+            print(f"ERROR {name}")
+            print(f"        - the check did not run: {type(e).__name__}: {e}")
+            continue
 
         if failures:
             failed += 1
@@ -1514,12 +2454,24 @@ def main() -> int:
             print(f"PASS  {name}")
 
     print()
-    print(f"Results: {passed} passed, {failed} failed, {passed + failed} total")
+    did_not_run = f"{not_run} did not run, " if not_run else ""
+    print(
+        f"Results: {passed} passed, {failed} failed, {did_not_run}"
+        f"{passed + failed + not_run} total"
+    )
 
     if all_failures:
         print()
         print("Documentation is out of sync with source code.")
         print("Fix the issues above and re-run this script.")
+
+    if not_run:
+        print()
+        print("A check that did not run checked nothing, so its docs are unverified.")
+        print("Fix what stopped it (the ERROR above) and re-run this script.")
+        return 2
+
+    if all_failures:
         return 1
 
     print()

@@ -5,6 +5,10 @@ PR#274 Bug #14: re.sub replaces all occurrences without count=1.
 
 import re
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestVersionReSubCount:
     """re.sub without count=1 replaces all 'version = ...' lines."""

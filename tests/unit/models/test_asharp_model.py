@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ReportMetadata,
@@ -23,6 +25,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Level,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_report_metadata_initialization():
@@ -164,8 +168,9 @@ def test_ash_aggregated_results_load_model(mock_exists, mock_json_load, mock_ope
     assert result.description == "Test Description"
     assert result.metadata.project_name == "Test Project"
 
-    # Verify that the file was opened
-    mock_open.assert_called_once_with(json_path)
+    # Verify that the file was opened, as UTF-8 (the encoding every writer of
+    # the file uses; the platform default misread it on Windows).
+    mock_open.assert_called_once_with(json_path, encoding="utf-8")
 
 
 @patch("pathlib.Path.exists", return_value=False)
@@ -262,4 +267,5 @@ def test_ash_aggregated_results_to_flat_vulnerabilities_with_sarif():
     assert len(flat_vulns) == 1
     assert flat_vulns[0].title == "TEST001"
     assert flat_vulns[0].description == "Test finding"
-    assert flat_vulns[0].severity == "HIGH"
+    # error with no declared severity: CRITICAL, as the summary and gate grade it.
+    assert flat_vulns[0].severity == "CRITICAL"

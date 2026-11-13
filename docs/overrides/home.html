@@ -1,0 +1,170 @@
+{% extends "main.html" %}
+{% from "partials/ash-icons.html" import icon, action %}
+{% from "partials/generated/plugin-data.html" import plugin_data %}
+{% set version = page.meta.ash_version %}
+
+{% block extrahead %}
+  {{ super() }}
+  <script type="module" src="{{ 'assets/javascripts/ash-scan.js' | url }}"></script>
+  <script defer src="{{ 'assets/javascripts/ash-snippet-builder.js' | url }}"></script>
+{% endblock %}
+
+{% block site_nav %}{% endblock %}
+{% block container %}
+<div class="ash-home" id="main-content" tabindex="-1" data-md-component="content">
+  <section class="ash-hero" id="automated-security-helper" aria-labelledby="hero-title">
+    <div class="ash-wrap ash-hero__inner">
+      <div class="ash-hero__copy">
+        <a class="ash-eyebrow ash-release" href="{{ 'docs/quick-start-guide/' | url }}">ASH v{{ version }} {{ icon("arrow-top-right") }}</a>
+        <h1 id="hero-title">Automated Security Helper</h1>
+        <p class="ash-hero__description">Scan code, infrastructure, secrets, and dependencies.</p>
+        <div class="ash-hero__buttons">
+          {{ action("Start scanning", "#quickstart") }}
+          {{ action("Documentation", 'docs/quick-start-guide/' | url, false, "book-open-variant") }}
+        </div>
+        <div class="ash-hero__command">
+          <span aria-hidden="true">$</span><code>ash --mode container</code>
+          <button type="button" class="ash-copy" data-ash-copy="ash --mode container" aria-label="Copy container scan command">{{ icon("content-copy") }}</button>
+        </div>
+        <div class="ash-hero__note">Open source <span>·</span> Apache 2.0</div>
+      </div>
+
+      {% include "partials/ash-scan.html" %}
+    </div>
+    <div class="ash-wrap ash-hero__foot">
+      <span>{{ icon("source-branch") }} <strong>AWS Labs</strong></span>
+      <a href="#workflow">Scan workflow {{ icon("arrow-down") }}</a>
+      <span class="ash-hero__version">ASH v{{ version }} <span class="ash-status-dot"></span></span>
+    </div>
+  </section>
+
+  <section class="ash-scanner-strip" aria-label="Built-in scanner ecosystem">
+    <div class="ash-wrap">
+      <p>Built-in scanners</p>
+      <div class="ash-scanner-strip__names">
+        {% for s in plugin_data.scanners.home if s.strip %}
+        <a href="{{ s.href | url }}">{% if s.strip == "icon" %}{{ icon(s.icon) }}{% endif %}{{ s.display }}</a>
+        {% endfor %}
+        <a href="#scanners" class="ash-scanner-strip__more">All scanners {{ icon("arrow-right") }}</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="ash-section ash-workflow" id="workflow" aria-labelledby="workflow-title">
+    <div class="ash-wrap">
+      <div class="ash-section-heading" data-ash-reveal>
+        <div><h2 id="workflow-title">Scan workflow</h2></div>
+      </div>
+      <div class="ash-feature-grid">
+        <a class="ash-feature ash-feature--wide" href="{{ plugin_data.scanners.reference_href | url }}" data-ash-reveal>
+          <div class="ash-feature__inner">
+          <span class="ash-feature__icon">{{ icon("radar") }}</span>
+          <span class="ash-feature__topline">Scanning {{ icon("arrow-top-right") }}</span>
+          <h3>Built-in scanners</h3>
+          <p>Enabled scanners run through one command.</p>
+          <div class="ash-coverage" aria-hidden="true"><span>{{ icon("code-braces") }} Code</span><span>{{ icon("cloud-outline") }} Infrastructure</span><span>{{ icon("key-outline") }} Secrets</span><span>{{ icon("package-variant-closed") }} Dependencies</span></div>
+          </div>
+        </a>
+        <a class="ash-feature" href="{{ 'docs/output-formats/' | url }}" data-ash-reveal>
+          <div class="ash-feature__inner">
+          <span class="ash-feature__icon">{{ icon("filter-variant") }}</span>
+          <span class="ash-feature__topline">Results {{ icon("arrow-top-right") }}</span>
+          <h3>Report formats</h3>
+          <p>Filter findings by severity, scanner, or suppression status.</p>
+          <div class="ash-format-chips" aria-hidden="true"><span>SARIF</span><span>HTML</span><span>JSON</span><span>CSV</span></div>
+          </div>
+        </a>
+        <a class="ash-feature" href="{{ 'docs/plugins/development-guide/' | url }}" data-ash-reveal>
+          <div class="ash-feature__inner">
+          <span class="ash-feature__icon">{{ icon("puzzle-outline") }}</span>
+          <span class="ash-feature__topline">Settings {{ icon("arrow-top-right") }}</span>
+          <h3>Configuration and plugins</h3>
+          <p>Set thresholds, ignore paths, and suppression rules.</p>
+           <div class="ash-plugin-visual" aria-hidden="true"><span>{{ icon("puzzle-outline") }}</span><code>.ash/.ash.yaml</code></div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="ash-section ash-quickstart" id="quickstart" aria-labelledby="quickstart-title">
+    <div class="ash-wrap ash-quickstart__grid">
+      <div data-ash-reveal>
+        <h2 id="quickstart-title">Install and scan</h2>
+        <div class="ash-steps">
+          <div><span>01</span><div><h3>Pick a workflow</h3><p>A local scan, pre-commit, CI, or an MCP server.</p></div></div>
+          <div><span>02</span><div><h3>Pick how you run ASH</h3><p>uv tool, uvx, pipx, pip, a container, Nix, or Homebrew. Python 3.10+.</p></div></div>
+          <div><span>03</span><div><h3>Review results</h3><p>Open the HTML report or run <code>ash inspect findings</code>.</p></div></div>
+        </div>
+        <a class="ash-text-link" href="{{ 'docs/installation-guide/' | url }}">Full installation guide {{ icon("arrow-right") }}</a>
+        <a class="ash-text-link" href="{{ 'integrations/' | url }}">Integrations overview {{ icon("arrow-right") }}</a>
+      </div>
+      <div class="ash-terminal" data-ash-reveal>
+        <div class="ash-terminal__chrome"><span>Build a command</span>{{ icon("console") }}</div>
+        {% include "partials/ash-snippet-builder.html" %}
+        <div class="ash-demo">
+          <div class="ash-demo__heading"><span>Example output</span><button type="button" data-ash-run aria-label="Replay example scan">{{ icon("play-circle-outline") }} Replay</button></div>
+          <div class="ash-demo__lines" data-ash-demo aria-label="Example scan output">
+            <div><span class="ash-demo__check">✓</span><span>Discovering project files</span><span>complete</span></div>
+            <div><span class="ash-demo__check">✓</span><span>Running security scanners</span><span>complete</span></div>
+            <div><span class="ash-demo__check">✓</span><span>Aggregating findings</span><span>complete</span></div>
+            <div class="ash-demo__result">{{ icon("file-document-outline") }} Reports ready in <code>.ash/ash_output/</code></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="ash-section ash-ecosystem" id="scanners" aria-labelledby="scanners-title">
+    <div class="ash-wrap">
+      <div class="ash-section-heading" data-ash-reveal>
+        <div><h2 id="scanners-title">Scanners</h2></div>
+        <a class="ash-text-link" href="{{ plugin_data.scanners.reference_href | url }}">Scanner reference {{ icon("arrow-right") }}</a>
+      </div>
+      <div class="ash-filter" role="group" aria-label="Filter scanners by category">
+        <button type="button" aria-pressed="true" data-ash-filter="all">All tools <span>{{ plugin_data.scanners.home_count }}</span></button>
+        {% for c in plugin_data.scanners.categories %}
+        <button type="button" aria-pressed="false" data-ash-filter="{{ c.slug }}">{{ c.label }}</button>
+        {% endfor %}
+      </div>
+      <div class="ash-scanner-grid">
+        {% for s in plugin_data.scanners.home %}
+        <a class="ash-scanner" href="{{ s.href | url }}" data-ash-category="{{ s.category }}">
+          <div class="ash-scanner__top">{{ icon(s.icon) }}<span>{{ s.tag }}</span>{{ icon("arrow-top-right", "ash-scanner__arrow") }}</div>
+          <h3>{{ s.display }}</h3><p>{{ s.tagline }}</p><span class="ash-scanner__detail">{{ s.covers }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      <p class="ash-filter-status ash-sr-only" role="status" data-ash-filter-status>Showing all {{ plugin_data.scanners.home_count }} scanners.</p>
+      <div class="ash-ecosystem__foot"><a class="ash-text-link" href="{{ 'docs/plugins/development-guide/' | url }}">Add a scanner plugin {{ icon("arrow-right") }}</a></div>
+    </div>
+  </section>
+
+  <section class="ash-section ash-fit" aria-labelledby="fit-title">
+    <div class="ash-wrap">
+      <div class="ash-section-heading" data-ash-reveal><div><h2 id="fit-title">Integrations</h2></div></div>
+      <div class="ash-fit-grid">
+        <a href="{{ 'tutorials/running-ash-locally/' | url }}" data-ash-reveal><div class="ash-fit__visual">{{ icon("laptop") }}<code>$ ash --mode local</code></div><h3>Local development {{ icon("arrow-top-right") }}</h3><p>Terminal findings explorer and offline reports.</p></a>
+        <a href="{{ 'tutorials/running-ash-in-ci/' | url }}" data-ash-reveal><div class="ash-fit__visual ash-fit__pipeline" aria-hidden="true"><span>{{ icon("source-branch") }}</span><i></i><span>Scan</span><i></i><span>{{ icon("rocket-launch-outline") }}</span></div><h3>CI/CD {{ icon("arrow-top-right") }}</h3><p>Exit codes, pull request comments, and report artifacts.</p></a>
+        <a href="{{ 'docs/mcp-server-guide/' | url }}" data-ash-reveal><div class="ash-fit__visual ash-fit__agent" aria-hidden="true">{{ icon("console") }}<span class="ash-fit__agent-line"></span><span>MCP</span></div><h3>MCP clients {{ icon("arrow-top-right") }}</h3><p>Scan tools and result access for coding assistants.</p></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="ash-section ash-faq" aria-labelledby="faq-title">
+    <div class="ash-wrap ash-faq__grid">
+      <div data-ash-reveal><h2 id="faq-title">FAQ</h2><a class="ash-text-link" href="{{ 'faq/' | url }}">All questions {{ icon("arrow-right") }}</a></div>
+      <div class="ash-faq__items">
+        <details><summary>Do I need an AWS account? {{ icon("plus") }}</summary><p>No. Core ASH scanning runs locally or in a container. An AWS account is needed only for optional integrations with services such as Security Hub or S3.</p></details>
+        <details><summary>Which scan mode should I use? {{ icon("plus") }}</summary><p>Use <code>container</code> for a consistent environment with all scanner dependencies, <code>local</code> for your development machine, and <code>precommit</code> for a faster subset before commits. <a href="{{ 'docs/quick-start-guide/' | url }}">Compare execution modes.</a></p></details>
+        <details><summary>Can I customize the rules and reports? {{ icon("plus") }}</summary><p>Set scanners, thresholds, ignore paths, and suppressions in <code>.ash.yaml</code>. <a href="{{ 'docs/configuration-guide/' | url }}">Configuration reference.</a></p></details>
+        <details><summary>Does ASH replace a security review? {{ icon("plus") }}</summary><p>No. Coverage depends on enabled scanners, language, file type, and configuration.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="ash-cta" aria-labelledby="cta-title">
+    <div class="ash-wrap ash-cta__inner" data-ash-reveal><div><h2 id="cta-title">Run a scan</h2></div><div>{{ action("Install ASH", "#quickstart") }}<a class="ash-cta__github" href="{{ config.repo_url }}">{{ icon("source-branch") }} Source on GitHub {{ icon("arrow-top-right") }}</a></div></div>
+  </section>
+</div>
+{% endblock %}

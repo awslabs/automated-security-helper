@@ -1,11 +1,30 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+
+# Without this, every hook that declares no stages of its own also runs at the
+# commit-msg stage, where the file set is the commit message, so each commit's
+# output ends with a second block of the same hooks reading "(no files to
+# check) Skipped". The skip is correct and the gate is intact either way; the
+# block just reads like the hooks skipped the commit. Hooks that mean another
+# stage say so themselves (commitizen and check-snapshot-trailer at commit-msg,
+# the ash hook at manual), and a per-hook stages key still overrides this default.
+default_stages: [pre-commit]
+
+# A commit-msg hook is installed only when its hook type is: without this, a plain
+# `pre-commit install` installs the pre-commit stage alone and leaves the two
+# commit-msg hooks (commitizen, check-snapshot-trailer) inert.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: local
     hooks:
+      # --frozen because this hook runs under the committer's own uv. Without it, a uv
+      # that disagrees with uv.lock re-resolves and rewrites the lockfile as part of the
+      # commit, so a commit can carry pin changes nobody asked for. --frozen reads the
+      # lock as committed and fails the hook when it does not satisfy pyproject.toml.
       - id: generate-schemas
         name: Generate ASH JSON schemas
-        entry: uv run python -m automated_security_helper.schemas.generate_schemas
+        entry: uv run --frozen python -m automated_security_helper.schemas.generate_schemas
         language: system
         verbose: true
         pass_filenames: false
@@ -14,17 +33,139 @@ repos:
       # test_fallback_matches_installed_metadata both only ever *reported* it, and
       # a human edited the constant by hand on every dependabot bump.
       #
-      # --python 3.13 is explicit because the script needs tomllib (3.11+) while
-      # requires-python starts at 3.10. It never runs inside ASH, so that is a
-      # constraint on this hook and not on the supported interpreter range -- which
-      # is the whole reason this is codegen rather than a runtime pyproject read.
+      # --python 3.13 is explicit so this hook reads pyproject with tomllib, the
+      # parser of record. The script itself runs on the whole supported range:
+      # on 3.10, where tomllib is not yet in the standard library, it falls back
+      # to a strict parse of the one key it owns. So the pin picks the best
+      # parser; it is not a floor the script needs.
+      #
+      # --no-project because the script uses only the standard library. Without it,
+      # `uv run` syncs the project environment on 3.13: it removed a contributor's
+      # .venv built on another interpreter and recreated it without the cdk and
+      # symbols extras, on every run of this hook. tests/unit/test_pre_commit_hook_commands.py
+      # fails on a hook that picks an interpreter inside the project.
       - id: sync-cdk-extra-fallback
         name: Sync the cdk extra fallback constant with pyproject
-        entry: uv run --python 3.13 python scripts/sync_cdk_extra_fallback.py --fix
+        entry: uv run --no-project --python 3.13 python scripts/sync_cdk_extra_fallback.py --fix
         language: system
         verbose: true
         pass_filenames: false
         files: ^(pyproject\.toml|automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner\.py|scripts/sync_cdk_extra_fallback\.py)$
+      # The CI lint gate (ash-unified-ci.yml) runs `uv run --group dev ruff check .`
+      # and `uv run --group dev ruff format --check .` over the whole tree, and these
+      # two run the same commands here, so a commit that would fail that gate fails
+      # before it is made. The scope is the working tree, not the commit: ruff's `.`
+      # also lints untracked, non-ignored .py files, which pre-commit never stashes,
+      # so a scratch file beside the checkout can fail a commit CI would pass. When a
+      # scratch file is the only failure, delete or gitignore it, or commit with
+      # SKIP=ruff-check-project,ruff-format-check-project.
+      # They complement rather than repeat the ruff-pre-commit
+      # hooks below: those run ruff-pre-commit's own pinned binary in --fix mode over
+      # the staged files, these run the ruff uv.lock resolves, in check-only mode,
+      # over the whole tree -- a tree that fails `ruff check` fails CI whichever
+      # commit introduced the violation, so the file set is the gate's, not the
+      # commit's (pass_filenames: false, and the explicit `.`).
+      #
+      # --frozen for the reason given on generate-schemas: these run under the
+      # committer's own uv, and without it a uv that disagrees with uv.lock
+      # re-resolves and rewrites the lockfile as part of the commit. --frozen reads
+      # the lock as committed, which is also what makes "the same ruff as CI" true:
+      # both sides resolve ruff from uv.lock, not from whatever is newest.
+      # tests/unit/test_pre_commit_hook_commands.py holds these entries equal to the
+      # gate's commands.
+      - id: ruff-check-project
+        name: ruff check (the locked ruff, whole tree, as CI runs it)
+        entry: uv run --frozen --group dev ruff check .
+        language: system
+        pass_filenames: false
+      - id: ruff-format-check-project
+        name: ruff format --check (the locked ruff, whole tree, as CI runs it)
+        entry: uv run --frozen --group dev ruff format --check .
+        language: system
+        pass_filenames: false
+      # CI's multi-project attribution gate (ash-unified-ci.yml), same script and
+      # timeout. It runs a REAL workspace scan -- four generated projects through
+      # bandit and checkov -- which takes minutes, not seconds, so unlike the ruff
+      # hooks above it must not fire on every commit. The `files:` list scopes it to
+      # the machinery the gate proves, which is what its own docstring and checks
+      # name: the workspace package end to end (plan, resolver, execution,
+      # aggregation, policy, reporting, pins, the workspace file), the sarif
+      # attribution path with the basename heuristic (#361), the workspace model
+      # whose status discriminates exit code 2, the workspace config model the
+      # --workspace run loads, the workspace path helpers, and the gate script
+      # itself. The gate needs bandit and checkov runnable, as the CI job installs
+      # them; a missing scanner fails the gate rather than passing quietly, which
+      # is the gate's own rule.
+      #
+      # --frozen for the reason given on generate-schemas: it never rewrites uv.lock.
+      - id: verify-multi-project-attribution
+        name: Multi-project attribution gate (real workspace scan, minutes)
+        entry: uv run --frozen python scripts/verify_multi_project_attribution.py --timeout 1200
+        language: system
+        verbose: true
+        pass_filenames: false
+        files: |
+          (?x)^(
+            scripts/verify_multi_project_attribution\.py
+            |automated_security_helper/workspace/.*
+            |automated_security_helper/models/workspace\.py
+            |automated_security_helper/config/ash_workspace_config\.py
+            |automated_security_helper/utils/sarif_utils\.py
+            |automated_security_helper/utils/workspace_paths\.py
+          )$
+      # CI's deploy-tree AWS helpers gate (the "moto server" job in
+      # ash-unified-ci.yml), same script and worker count: it runs the
+      # tests/unit/deploy moto suite against a real ThreadedMotoServer and asserts
+      # on the RUN (per-module floors, zero skips, both S3 parametrizations), not
+      # just the exit status. About 30 seconds at 4 workers, and the dev group's
+      # moto[server] is what provides the server, which --frozen syncs. The helpers
+      # under test are POSIX-shell commands materialized from the deploy tree (the
+      # CDK templates synthesized from deploy/cdk/lib and the Terraform modules'
+      # files/ copies), so a Linux or macOS committer gets the full value; the hook
+      # still runs elsewhere, because the suite carries its own platform guards and
+      # the gate counts a widened skip as a failure rather than hiding it. The
+      # `files:` list is the helpers' sources (the deploy tree), their behavior
+      # tests (the moto suite modules and their shared stubs under
+      # tests/unit/deploy/), and the gate script itself.
+      #
+      # --frozen for the reason given on generate-schemas: it never rewrites uv.lock.
+      - id: verify-moto-server-suite
+        name: Deploy-tree AWS helpers against a moto server (~30 s)
+        entry: uv run --frozen python scripts/verify_moto_server_suite.py --workers 4
+        language: system
+        verbose: true
+        pass_filenames: false
+        files: |
+          (?x)^(
+            scripts/verify_moto_server_suite\.py
+            |tests/unit/deploy/.*
+            |deploy/.*
+          )$
+      # The commit-msg half of the Snapshot-Update convention. CI's
+      # .github/scripts/check-snapshot-trailers.py fails a pull request whose golden
+      # files changed without a `Snapshot-Update: <reason>` trailer on the commit
+      # that changed them -- a rule that is per commit, so by the time CI reports it
+      # the fix is a rebase with --exec amends. This hook says the same thing while
+      # the message is still being written: when the staged files include snapshot
+      # output (a path with a __snapshots__/ directory component; on a merge, only
+      # one that differs from both parents, as CI's combined diff counts it) and the
+      # message carries no such trailer, it fails and prints the exact line to add.
+      # The CI script stays the authority and checks the wider golden set (schemas,
+      # MCP goldens, generated reference pages); this covers the subset a
+      # contributor regenerates routinely with syrupy's --snapshot-update.
+      #
+      # --no-project for the reason given on sync-cdk-extra-fallback: the script is
+      # standard library only, and `uv run` inside the project would sync the
+      # committer's environment just to read a commit message. No --python pin:
+      # unlike the sync script, nothing here wants a particular parser, so any
+      # interpreter uv finds will do. pass_filenames stays on (the default) because
+      # at the commit-msg stage the "filename" pre-commit passes IS the message
+      # file the script reads as argv[1].
+      - id: check-snapshot-trailer
+        name: Snapshot changes carry a Snapshot-Update trailer
+        entry: uv run --no-project python scripts/check_snapshot_trailer.py
+        language: system
+        stages: [commit-msg]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -65,13 +206,37 @@ repos:
         # scripts/e2e/inspector is the fourth: the MCP Inspector the MCPB e2e leg
         # installs with `npm ci`.
         #
-        # ash-agent-plugins/agentic-coding/plugins/ is `agentic-plugins build` output,
-        # and the transpiler owns its bytes: the Agent Plugins Drift gate rebuilds the
-        # tree and byte-compares it to what is committed. The transpiler writes
-        # insertion-ordered keys and literal non-ASCII; this hook sorts keys and
-        # escapes them, so a reformat here fails that gate. The _base/ sources it
-        # reads are outside the pattern and still formatted.
-        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^(deploy|editors)/[^/]+/package(-lock)?\.json$|^scripts/e2e/inspector/package(-lock)?\.json$|^tests/snapshot/.*/__snapshots__/|^ash-agent-plugins/agentic-coding/plugins/'
+        # ash-agent-plugins/agentic-coding/plugins/ is the transpiler's output, and
+        # `agentic-plugins check` (ash-agent-plugins-drift.yml) rebuilds it and
+        # byte-compares it against the committed tree, so this hook's rewrite of the
+        # twelve JSON files there failed that gate. transpiler/_base/mcp.json is
+        # hand-written but copied byte for byte into five of them, so formatting it
+        # fails the same gate until every plugin is rebuilt, and reorders the MCP
+        # config users get.
+        # The rest of _base/ and schemas/schemas.json are hand-written and formatted
+        # here; the check passes with them formatted.
+        #
+        # transpiler/schemas/*.schema.json are vendored: `refresh-schemas` writes the
+        # upstream bytes as fetched, so a reformat is undone by the next refresh and
+        # makes the copy differ from its source.
+        #
+        # deploy/cdk/tsconfig.json has comments, which tsc allows and JSON does not,
+        # so this hook cannot parse it and failed on every run.
+        #
+        # tests/unit/test_pre_commit_json_scope.py checks each of these against the
+        # tracked tree, and that the hand-written files stay in scope.
+        exclude: |
+          (?x)^(
+            .*\.vscode/.*
+            |deploy/cdk/templates/.*\.template\.json
+            |(deploy|editors)/[^/]+/package(-lock)?\.json
+            |scripts/e2e/inspector/package(-lock)?\.json
+            |deploy/cdk/tsconfig\.json
+            |tests/snapshot/.*/__snapshots__/.*
+            |ash-agent-plugins/agentic-coding/plugins/.*
+            |ash-agent-plugins/agentic-coding/transpiler/_base/mcp\.json
+            |ash-agent-plugins/agentic-coding/transpiler/schemas/.*\.schema\.json
+          )$
         args:
           - "--autofix"
           - "--indent=2"
@@ -204,10 +369,12 @@ repos:
       #
       # Manual-staged means it never fires from a git hook. Invoke it deliberately:
       #   pre-commit run --hook-stage manual ash
+      #
+      # --frozen for the reason given on generate-schemas: it never rewrites uv.lock.
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
-        entry: uv run ashx --mode=precommit
+        entry: uv run --frozen ashx --mode=precommit
         pass_filenames: false
         verbose: true
         language: system

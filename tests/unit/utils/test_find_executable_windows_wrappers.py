@@ -43,15 +43,24 @@ from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
 )
+from tests.utils.tool_guard import use_the_real_candidate_names
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _isolate_lookup_cache():
+def _isolate_lookup_cache(monkeypatch):
     """find_executable memoizes into a module-global dict.
 
     Cleared on both sides so a name resolved under a mocked Windows does not leak into
     a POSIX test, or into anything else sharing this xdist worker.
+
+    The candidate list is the subject here, so it is the lookup's own: on Windows
+    the unit tests' tool guard narrows a guarded name (cfn_nag_scan, npm) to its
+    ``.bat`` stand-in, which these cells' ``.exe``, ``.cmd`` and bare-name
+    expectations cannot be read through.
     """
+    use_the_real_candidate_names(monkeypatch)
     clear_find_executable_cache()
     yield
     clear_find_executable_cache()
@@ -75,6 +84,9 @@ def gem_bindir(tmp_path, monkeypatch):
         "#!/usr/bin/env ruby\n# a Ruby binstub: text, not a PE image\n",
         encoding="utf-8",
     )
+    # Executable, as RubyGems leaves it: on POSIX a file without the bit is not one
+    # find_executable may answer with.
+    (bindir / "cfn_nag_scan").chmod(0o755)
     (bindir / "cfn_nag_scan.bat").write_text(
         '@ECHO OFF\n@"ruby.exe" "%~dpn0" %*\n', encoding="utf-8"
     )

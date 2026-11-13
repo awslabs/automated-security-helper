@@ -28,6 +28,7 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.models.workspace import WorkspaceExitCode
 
+pytestmark = pytest.mark.unit
 
 runner = CliRunner()
 
@@ -263,7 +264,12 @@ def test_absent_workspace_file_is_a_workspace_error(tmp_path, no_scan):
     assert not no_scan
 
 
-def test_incompatible_scanner_pins_are_a_workspace_error(tmp_path, no_scan):
+def test_project_pins_are_ignored_rather_than_a_workspace_error(tmp_path, no_scan):
+    """A project's config does not choose tool_version, so its pins cannot conflict.
+
+    The two pins below are incompatible; both are ignored (with a warning) and the
+    plan resolves, with neither recorded.
+    """
     _project(
         tmp_path,
         "api",
@@ -278,8 +284,8 @@ def test_incompatible_scanner_pins_are_a_workspace_error(tmp_path, no_scan):
 
     result = _invoke("--workspace", str(workspace), "--dry-run")
 
-    assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
-    assert "bandit" in result.output
+    assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
+    assert ">=2.0.0" not in result.stdout
     assert not no_scan
 
 

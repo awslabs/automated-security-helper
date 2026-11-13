@@ -11,6 +11,8 @@ AshAggregatedResults.to_flat_vulnerabilities().
 
 import json
 
+import pytest
+
 from automated_security_helper.models.flat_vulnerability import (
     FlatVulnerability,
     _extract_location_info,
@@ -33,6 +35,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_result(
@@ -146,11 +150,11 @@ class TestFromSarifResultSeverity:
         assert vuln.severity == "CRITICAL"
 
     def test_level_error_maps_without_issue_severity(self):
-        # Preserves original to_flat_vulnerabilities() behavior: error -> HIGH
-        # (see test_ash_aggregated_results_to_flat_vulnerabilities_with_sarif)
+        # The gate's reading: error -> CRITICAL. This was HIGH, one band below
+        # the summary and the exit code.
         result = _make_result(level="error")
         vuln = FlatVulnerability.from_sarif_result(result, "bandit", "SAST")
-        assert vuln.severity == "HIGH"
+        assert vuln.severity == "CRITICAL"
 
     def test_level_warning_maps_to_medium(self):
         result = _make_result(level="warning")
@@ -236,6 +240,51 @@ class TestFromSarifResultTags:
         result = _make_result()
         vuln = FlatVulnerability.from_sarif_result(result, "bandit", "SAST")
         assert vuln.tags is None
+
+
+class TestFromSarifResultFixAvailability:
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (True, True),
+            (False, False),
+            ({"name": "npm-package", "version": "2.0.0"}, True),
+            (
+                {"name": "npm-package", "version": "2.0.0", "isSemVerMajor": True},
+                True,
+            ),
+            (None, None),
+            ({}, None),
+            ({"name": "npm-package"}, None),
+            ({"version": "2.0.0"}, None),
+            ({"name": "", "version": "2.0.0"}, None),
+            ({"name": "npm-package", "version": " "}, None),
+            ({"name": 42, "version": "2.0.0"}, None),
+            ({"name": "npm-package", "version": 2}, None),
+            ({"available": True}, None),
+            ("true", None),
+            ("false", None),
+            (1, None),
+            (0, None),
+            ([], None),
+        ],
+    )
+    def test_normalizes_without_changing_source_properties(self, value, expected):
+        result = _make_result()
+        result.properties = PropertyBag(fix_available=value)
+        before = result.model_dump(mode="json")
+
+        vuln = FlatVulnerability.from_sarif_result(result, "npm-audit", "SCA")
+
+        assert vuln.fix_available is expected
+        assert result.model_dump(mode="json") == before
+        if value is not None:
+            assert json.loads(vuln.properties)["fix_available"] == value
+            assert json.loads(vuln.raw_data)["properties"]["fix_available"] == value
+
+    def test_missing_property_stays_unknown(self):
+        vuln = FlatVulnerability.from_sarif_result(_make_result(), "bandit", "SAST")
+        assert vuln.fix_available is None
 
 
 class TestFromSarifResultScannerType:
@@ -351,9 +400,9 @@ class TestResolveSeverityHelper:
         result = _make_result(level="warning", issue_severity="HIGH")
         assert _resolve_severity(result) == "HIGH"
 
-    def test_error_level_maps_to_high(self):
+    def test_error_level_maps_to_critical(self):
         result = _make_result(level="error")
-        assert _resolve_severity(result) == "HIGH"
+        assert _resolve_severity(result) == "CRITICAL"
 
     def test_warning_level_maps_to_medium(self):
         result = _make_result(level="warning")
@@ -363,12 +412,12 @@ class TestResolveSeverityHelper:
         result = _make_result(level="note")
         assert _resolve_severity(result) == "LOW"
 
-    def test_absent_level_key_maps_to_high_not_medium(self):
-        """A scanner that omits ``level`` gets the field default, which is error.
+    def test_absent_level_key_maps_to_the_missing_level_not_info(self):
+        """A scanner that omits ``level`` gets the field default, warning.
 
         Every flattened reporter -- CSV, HTML, text, JUnit -- and
         ``FlatVulnerability.is_actionable`` read this value, so resolving to the
-        unknown-level MEDIUM fallback moves the finding two bands down.
+        no-level INFO reading would move the finding four bands down.
         ``model_validate`` is the path third-party SARIF takes and the only one
         that exercises the default.
         """
@@ -376,14 +425,15 @@ class TestResolveSeverityHelper:
             {"ruleId": "B105", "message": {"text": "hardcoded password string"}}
         )
 
-        assert _resolve_severity(result) == "HIGH"
+        # MISSING_SARIF_LEVEL (SARIF 3.27.10), not error.
+        assert _resolve_severity(result) == "MEDIUM"
 
-    def test_level_held_as_an_enum_member_maps_to_high(self):
+    def test_level_held_as_an_enum_member_maps_to_critical(self):
         """Assignment is unvalidated too, so the reader must not trust the type."""
         result = _make_result(level="warning")
         result.level = Level.error
 
-        assert _resolve_severity(result) == "HIGH"
+        assert _resolve_severity(result) == "CRITICAL"
 
 
 class TestLocationDisplayProperty:

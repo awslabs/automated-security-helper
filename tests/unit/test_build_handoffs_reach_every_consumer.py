@@ -42,7 +42,10 @@ import re
 from pathlib import Path
 from typing import Any, Iterator
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GITHUB_DIR = REPO_ROOT / ".github"

@@ -9,6 +9,11 @@
 #   error    -- the scanner ran and failed on every target it attempted (ERROR).
 #   missing  -- the scanner's tool is not installed (MISSING).
 #   excluded -- the operator excluded the scanner (SKIPPED).
+#
+# exit_code (ran and error entries): the code the scanner's tool exited with,
+# recorded on the container the way the executor records it for a tool that
+# started. Defaults to 0; an entry whose story is a nonzero exit says so here,
+# so the recorded data matches the entry's own error text.
 scanners:
   - name: bandit
     outcome: ran
@@ -44,6 +49,7 @@ scanners:
     outcome: error
     version: "0.8.10"
     duration_seconds: 0.25
+    exit_code: 1
     failed_target: infra/main.tf
     error: "cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation template"
   - name: npm-audit

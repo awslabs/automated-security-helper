@@ -1,0 +1,5 @@
+A small project for the documentation examples to scan.
+
+app.py holds two deliberate findings: a hardcoded password, which detect-secrets
+reports with no network and no extra tools, and a shell=True subprocess call,
+which bandit reports when it is installed.

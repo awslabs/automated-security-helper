@@ -16,6 +16,7 @@ import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
+import { ASH_PARAMETER_NAMES, DEFAULT_ASH_VERSION } from '../lib/ash-config';
 import {
   ASH_CLI,
   ASH_CLI_V3,
@@ -124,12 +125,15 @@ describe('CodeCommit gate handler', () => {
   });
 
   test('distinguishes findings from scanner failure', () => {
-    // ASH exit 2 means a scan completed and found something; 1 and 3 mean it could
-    // not do its job. Collapsing them would report a broken scanner as a clean
-    // repository, which is the worst possible failure for a security gate.
+    // ASH exit 2 means a scan completed and found something; 1, 3 and 5 mean it
+    // could not do its job. Collapsing them would report a broken scanner as a
+    // clean repository, which is the worst possible failure for a security gate.
+    // 5 is the usage error of ASH releases after 3.7.1, which 3.7.0 and 3.7.1 report as 2.
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_ACTIONABLE_FINDINGS = 2');
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_SCANNER_ERROR = 1');
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_INVALID_CONFIG = 3');
+    expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_USAGE_ERROR = 5');
+    expect(CODECOMMIT_GATE_HANDLER).toContain('if exit_code == EXIT_USAGE_ERROR:');
     expect(CODECOMMIT_GATE_HANDLER).toContain('"errored"');
   });
 
@@ -155,7 +159,7 @@ describe('CodeCommit gate handler', () => {
     expect(CODECOMMIT_GATE_HANDLER).toContain('PullRequestCannotBeApprovedByAuthorException');
   });
 
-  test('narrows the scan to the pull request diff against the destination commit', () => {
+  test('reports only the findings in the pull request diff against the destination commit; every file is still scanned', () => {
     expect(CODECOMMIT_GATE_HANDLER).toContain('"--changed-files-only", "--base-ref", destination_commit');
   });
 
@@ -446,6 +450,14 @@ done
 exit 0
 `;
 
+  /**
+   * The two explicit Host decisions a 0.0.0.0 bind now needs; one of them is required.
+   * Tests about something else supply one so that the Host refusal does not decide
+   * their outcome. See ash-mcp-entrypoint-trust.test.ts for the decisions themselves.
+   */
+  const HOST_ALLOWLIST = { ASH_MCP_ALLOWED_HOST: 'alb.example.com' };
+  const HOST_CHECK_UPSTREAM = { ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true' };
+
   /** Broken-install variant: `mcp --help` itself fails. */
   const FAKE_ASH_BROKEN_HELP = `#!/bin/sh
 echo "ImportError: cannot import name 'mcp'" >&2
@@ -524,7 +536,9 @@ exit 1
   });
 
   test('passes --stateless-http when the ASH in the image supports it', () => {
-    const { status, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' });
+    // A Host allowlist, because a 0.0.0.0 bind with neither an allowlist nor an
+    // explicit opt-out now refuses; see ash-mcp-entrypoint-trust.test.ts.
+    const { status, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1', ...HOST_ALLOWLIST });
     expect(status).toBe(0);
     expect(argv).toContain('--stateless-http');
     expect(argv).not.toContain('--no-stateless-http');
@@ -536,7 +550,9 @@ exit 1
     // session id it issued at initialize -- so a client that adopts the id
     // AgentCore returns on each response is refused on its third call, and behind
     // a load balancer routing to different replicas it fails sooner.
-    const { status, stderr, argv } = runEntrypoint({});
+    //
+    // The Host opt-out is supplied so the stateless refusal is the only one in play.
+    const { status, stderr, argv } = runEntrypoint({ ...HOST_CHECK_UPSTREAM });
     expect(status).toBe(65);
     expect(stderr).toContain('--stateless-http');
     expect(argv).toEqual([]);
@@ -544,8 +560,15 @@ exit 1
 
   test('ignores a leftover ASH_MCP_STATELESS_FALLBACK=warn and still refuses', () => {
     // A deployment that kept the removed fallback variable must not get the old
-    // stateful downgrade back.
-    expect(runEntrypoint({ ASH_MCP_STATELESS_FALLBACK: 'warn' }).status).toBe(65);
+    // stateful downgrade back. The Host opt-out is supplied so the stateless
+    // refusal is the only one that can produce the 65.
+    const { status, stderr, argv } = runEntrypoint({
+      ASH_MCP_STATELESS_FALLBACK: 'warn',
+      ...HOST_CHECK_UPSTREAM,
+    });
+    expect(status).toBe(65);
+    expect(stderr).toContain('--stateless-http');
+    expect(argv).toEqual([]);
   });
 
   /**
@@ -556,7 +579,10 @@ exit 1
    * that parameter's declared `Default`. A hand-written fixture would keep
    * agreeing with itself after the stack stopped agreeing with it.
    */
-  function agentCoreDefaultEnvironment(): { env: Record<string, string> } {
+  function agentCoreDefaultEnvironment(): {
+    env: Record<string, string>;
+    parameters: Record<string, { Default?: unknown }>;
+  } {
     const app = new App({ analyticsReporting: false });
     const json = Template.fromStack(new AshAgentCoreStack(app, 'AshAgentCore')).toJSON();
 
@@ -585,7 +611,7 @@ exit 1
         env[name] = parameter && typeof parameter.Default === 'string' ? parameter.Default : '';
       }
     }
-    return { env };
+    return { env, parameters };
   }
 
   test('the AgentCore stack ships a default combination that starts stateless', () => {
@@ -597,10 +623,22 @@ exit 1
      * environment has to start STATELESS against an ASH that advertises it, with
      * nothing to warn about. ash-agentcore-stack.test.ts holds the default
      * AshVersion at or above the first release that has the option.
+     *
+     * The fake ash here has the option, as the default release's does. A
+     * git-resolving test -- checking that DEFAULT_ASH_VERSION's tree really has the
+     * flag -- is not added: the TypeScript CI job checks out at the default depth
+     * with no tags, so it could only skip, and
+     * tests/unit/deploy/test_agentcore_stateless_fallback_tripwire.py holds that
+     * premise from the Python side.
      */
-    const { env } = agentCoreDefaultEnvironment();
+    const { env, parameters } = agentCoreDefaultEnvironment();
+
+    // The two shipped defaults, so a reader can see the fixture really is the
+    // shipped pair rather than something neutral; the version is the constant
+    // `cz bump` moves, not a literal a bump turns red.
     expect(env.ASH_MCP_STATELESS).toBe('true');
     expect(Object.keys(env)).not.toContain('ASH_MCP_STATELESS_FALLBACK');
+    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe(DEFAULT_ASH_VERSION);
 
     const { status, stderr, argv } = runEntrypoint({ ...env, FAKE_ASH_MODERN: '1' });
     expect(status).toBe(0);
@@ -612,8 +650,13 @@ exit 1
   test('the same environment on an ASH without the option refuses with 65', () => {
     // The mutation control for the test above. It shows the default starts
     // because the ASH it names has the option, not because something downgrades
-    // quietly: on a v3-era option set the identical environment must refuse.
+    // quietly: on a v3-era option set the identical environment must refuse
+    // (an AshVersion pinned to v3.7.1 or earlier by hand). Without it, the test
+    // above would still pass if the entrypoint had simply stopped refusing -- the
+    // one regression that would make every other target unsafe too, since the
+    // refusal is what Fargate relies on.
     const { env } = agentCoreDefaultEnvironment();
+    expect(Object.keys(env)).not.toContain('ASH_MCP_STATELESS_FALLBACK');
     const { status, argv } = runEntrypoint(env);
     expect(status).toBe(65);
     expect(argv).toEqual([]);
@@ -622,7 +665,7 @@ exit 1
   test('runs without either stateless flag when stateful was asked for explicitly', () => {
     // An ASH with no stateless mode is already stateful, so this is the one
     // combination that is genuinely satisfiable on an older release.
-    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false' });
+    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false', ...HOST_CHECK_UPSTREAM });
     expect(status).toBe(0);
     expect(argv).not.toContain('--stateless-http');
     expect(argv).not.toContain('--no-stateless-http');
@@ -633,6 +676,7 @@ exit 1
     const { status, argv } = runEntrypoint({
       FAKE_ASH_MODERN: '1',
       ASH_MCP_STATELESS: 'false',
+      ...HOST_ALLOWLIST,
     });
     expect(status).toBe(0);
     expect(argv).toContain('--no-stateless-http');
@@ -678,25 +722,144 @@ exit 1
     }
   });
 
-  test('warns but still starts when a Host allowlist cannot be enforced', () => {
-    // Deliberately NOT a refusal: the Fargate stack substitutes the load
-    // balancer DNS name whenever McpAllowedHost is empty, so refusing here would
-    // leave no parameter value that lets that target deploy.
+  test('refuses to start when a Host allowlist was asked for and this ASH cannot enforce it', () => {
+    // A stack that asks for an allowlist runs with one or does not start. The
+    // Fargate stack always supplies its load balancer's name, so the way to satisfy
+    // this there is an AshVersion whose `ash mcp` accepts --allowed-host.
     const { status, stderr, argv } = runEntrypoint({
       ASH_MCP_STATELESS: 'false',
       ASH_MCP_ALLOWED_HOST: 'alb.example.com',
     });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain('--allowed-host');
+    expect(argv).toEqual([]);
+  });
+
+  test('refuses with neither Host decision even on an ASH that has no Host check of its own', () => {
+    // An older ASH would start and serve every Host here, so the absence of a check
+    // to opt out of is not a reason to start. Stateful, so the stateless refusal is
+    // not what stops it.
+    const { status, stderr, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false' });
+    expect(status).toBe(65);
+    expect(stderr).toContain('ASH_MCP_TRUST_UPSTREAM_HOST_CHECK');
+    expect(argv).toEqual([]);
+  });
+
+  test('an allowlist that names no host refuses rather than passing no --allowed-host', () => {
+    const { status, stderr, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1', ASH_MCP_ALLOWED_HOST: ' , ,' });
+    expect(status).toBe(65);
+    expect(stderr).toContain('names no host');
+    expect(argv).toEqual([]);
+  });
+
+  test('the host-check statement is not passed to an ASH that does not list it', () => {
+    // A flag the image's `ash mcp` does not accept would stop the server binding.
+    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false', ...HOST_CHECK_UPSTREAM });
     expect(status).toBe(0);
-    expect(stderr).toContain('WARNING');
-    expect(stderr).toContain('EVERY Host header will be accepted');
-    expect(argv).not.toContain('--allowed-host');
+    expect(argv).toContain('mcp');
+    expect(argv).not.toContain('--trust-upstream-host-check');
+  });
+
+  test('an unrecognized trust value is not read as a statement', () => {
+    // Only the exact word `true` states that something upstream checks Host.
+    const { status, argv } = runEntrypoint({
+      FAKE_ASH_MODERN: '1',
+      ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'yes',
+    });
+    expect(status).toBe(65);
+    expect(argv).toEqual([]);
   });
 
   test('distinguishes a broken ASH install from a missing option', () => {
     // Reading a failed `ashx mcp --help` as "the flag is absent" would report the
     // wrong cause and, worse, would let the stateful path look satisfiable.
-    const { status, stderr } = runEntrypoint({}, FAKE_ASH_BROKEN_HELP);
+    const { status, stderr } = runEntrypoint({ ...HOST_CHECK_UPSTREAM }, FAKE_ASH_BROKEN_HELP);
     expect(status).toBe(69);
     expect(stderr).toContain('cannot serve MCP at all');
+  });
+});
+
+/**
+ * The shared secret goes to `ash mcp` on descriptor 3 when the image's ASH takes
+ * `--auth-header-value-fd`, so it is on no command line. Run for real, with a
+ * stand-in `ash` that records its argv and what it reads from descriptor 3, and a
+ * stand-in `python3` in place of the Secrets Manager read.
+ */
+describe('MCP entrypoint keeps the shared secret off the command line', () => {
+  const os = require('os') as typeof import('os');
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+  const { spawnSync } = require('child_process') as typeof import('child_process');
+
+  const SECRET = 'probe-secret-value'; // pragma: allowlist secret
+
+  const FAKE_ASH = `#!/bin/sh
+if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+  echo "  --auth-header-name TEXT"
+  echo "  --auth-header-value TEXT"
+  if [ -n "\${FAKE_ASH_FD:-}" ]; then
+    echo "  --auth-header-value-fd INTEGER"
+  fi
+  exit 0
+fi
+: > "\${FAKE_ASH_ARGV}"
+for fake_arg in "$@"; do
+  echo "\${fake_arg}" >> "\${FAKE_ASH_ARGV}"
+done
+if [ -n "\${FAKE_ASH_FD:-}" ]; then
+  cat <&3 > "\${FAKE_ASH_ARGV}.fd3"
+fi
+exit 0
+`;
+
+  const FAKE_PYTHON = `#!/bin/sh
+printf '%s' '${SECRET}'
+`;
+
+  function run(withFd: boolean): { status: number | null; argv: string[]; fd3: string | null } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-secret-'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'ash'), FAKE_ASH, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'python3'), FAKE_PYTHON, { mode: 0o755 });
+    const entrypoint = path.join(dir, 'entrypoint.sh');
+    fs.writeFileSync(entrypoint, MCP_ENTRYPOINT_SCRIPT);
+    const argvFile = path.join(dir, 'argv');
+
+    const result = spawnSync('sh', [entrypoint], {
+      encoding: 'utf-8',
+      env: {
+        PATH: `${bin}:${process.env.PATH}`,
+        FAKE_ASH_ARGV: argvFile,
+        FAKE_ASH_FD: withFd ? '1' : '',
+        ASH_MCP_STATELESS: 'false',
+        ASH_MCP_TRUST_UPSTREAM_HOST_CHECK: 'true',
+        ASH_MCP_AUTH_HEADER_NAME: 'X-Ash-Token',
+        // Only checked for being set; the stand-in python3 answers for the read.
+        ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN: 'probe-secret-arn', // pragma: allowlist secret
+      },
+    });
+
+    const argv = fs.existsSync(argvFile)
+      ? fs.readFileSync(argvFile, 'utf-8').split('\n').filter((line: string) => line !== '')
+      : [];
+    const fd3 = fs.existsSync(`${argvFile}.fd3`) ? fs.readFileSync(`${argvFile}.fd3`, 'utf-8') : null;
+    return { status: result.status, argv, fd3 };
+  }
+
+  test('an ASH with --auth-header-value-fd gets the secret on descriptor 3, not argv', () => {
+    const { status, argv, fd3 } = run(true);
+    expect(status).toBe(0);
+    expect(argv).toContain('--auth-header-value-fd');
+    expect(argv).not.toContain('--auth-header-value');
+    expect(argv.join(' ')).not.toContain(SECRET);
+    expect(fd3).toBe(`${SECRET}\n`);
+  });
+
+  test('an older ASH still gets the secret, on argv, the only form it takes', () => {
+    const { status, argv } = run(false);
+    expect(status).toBe(0);
+    expect(argv).not.toContain('--auth-header-value-fd');
+    expect(argv[argv.indexOf('--auth-header-value') + 1]).toBe(SECRET);
   });
 });

@@ -13,85 +13,36 @@ that does not exist, which is the defect this repo has already shipped once.
 import json
 import logging
 from pathlib import Path
-from typing import ClassVar, Literal, Optional
+from typing import ClassVar, Optional
 from unittest.mock import create_autospec, patch
 
 import pytest
 
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     _STDERR_EXCERPT_LIMIT,
     ScannerPluginBase,
-    ScannerPluginConfigBase,
 )
-from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.unit.base.scanner_support import (
+    MINIMAL_SARIF,
+    StubConfig,
+    build_scanner,
+    execute_writing,
+    populated_target,
+)
+
+pytestmark = pytest.mark.unit
 
 
-class StubConfig(ScannerPluginConfigBase):
-    name: Literal["stub"] = "stub"
-
-
-@pytest.fixture
-def plugin_context(tmp_path):
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    work_dir = output_dir / ASH_WORK_DIR_NAME
-    work_dir.mkdir()
-    return PluginContext(
-        source_dir=source_dir,
-        output_dir=output_dir,
-        work_dir=work_dir,
-        config=AshConfig(project_name="test"),
-    )
-
-
-def _scanner(plugin_context, execute_scan=None, deps_ok=True, **fields):
-    """Build a concrete ScannerPluginBase subclass over the real init path."""
-
-    class StubScanner(ScannerPluginBase):
-        offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
-
-        def model_post_init(self, context):
-            self.command = "stub-tool"
-            self.tool_type = ScannerToolType.SAST
-            super().model_post_init(context)
-
-        def validate_plugin_dependencies(self) -> bool:
-            return deps_ok
-
-        def _execute_scan(self, target, target_type, global_ignore_paths):
-            if execute_scan is None:
-                raise NotImplementedError
-            return execute_scan(self, target, target_type, global_ignore_paths)
-
-    return StubScanner(config=StubConfig(), context=plugin_context, **fields)
-
-
-def _populated_target(tmp_path, name="target") -> Path:
-    target = tmp_path / name
-    target.mkdir()
-    (target / "app.py").write_text("x = 1\n")
-    return target
-
-
-MINIMAL_SARIF = {
-    "version": "2.1.0",
-    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-    "runs": [
-        {
-            "tool": {"driver": {"name": "stub-tool", "version": "1.0.0"}},
-            "results": [],
-        }
-    ],
-}
+# The helpers moved to scanner_support; the old names stay here for the test
+# modules that still import them from this one.
+_scanner = build_scanner
+_populated_target = populated_target
+_execute_writing = execute_writing
 
 
 # ---------------------------------------------------------------------------
@@ -259,21 +210,18 @@ def test_reading_a_missing_results_file_raises(plugin_context, tmp_path):
         scanner._read_results_file(tmp_path / "never-written.json")
 
 
-def test_handle_empty_results_returns_an_empty_sarif_report(plugin_context):
+def test_handle_empty_results_raises_by_default(plugin_context):
+    """An empty results file is nothing to grade, so the default raises."""
     scanner = _scanner(plugin_context)
 
-    report = scanner._handle_empty_results()
-
-    assert isinstance(report, SarifReport)
-    assert report.version == "2.1.0"
-    assert report.runs == []
+    with pytest.raises(ScannerError, match="nothing to grade"):
+        scanner._handle_empty_results()
 
 
-def test_the_default_ensure_runs_and_post_process_hooks_are_inert(plugin_context):
+def test_the_default_post_process_hooks_are_inert(plugin_context):
     scanner = _scanner(plugin_context)
     report = SarifReport.model_validate(MINIMAL_SARIF)
 
-    assert scanner._ensure_runs(report) is None
     assert scanner._post_process_sarif(report, ["stub-tool"], Path(".")) is report
     assert scanner._invocation_extras(report, ["stub-tool"], Path(".")) == {}
 
@@ -367,19 +315,6 @@ def test_an_uncoercible_scan_timeout_means_unbounded(plugin_context, raw):
 # ---------------------------------------------------------------------------
 
 
-def _execute_writing(content=None):
-    """Return an _execute_scan impl that writes ``content`` to the results file."""
-
-    def _impl(scanner, target, target_type, global_ignore_paths):
-        results = scanner.results_dir / "results.json"
-        results.parent.mkdir(parents=True, exist_ok=True)
-        if content is not None:
-            results.write_text(content)
-        return ["stub-tool", "--scan"], results, None
-
-    return _impl
-
-
 def test_a_timed_out_tool_is_reported_as_a_timeout_not_a_missing_file(
     plugin_context, tmp_path
 ):
@@ -397,11 +332,12 @@ def test_a_timed_out_tool_is_reported_as_a_timeout_not_a_missing_file(
         scanner.scan(target=target, target_type="source")
 
     message = str(excinfo.value)
-    assert "timed out after 5.0s" in message
+    assert "timed out after '5' s" in message
     assert "scanners.stub.options.scan_timeout" in message
 
 
-def test_an_empty_results_file_yields_the_empty_sarif_report(plugin_context, tmp_path):
+def test_an_empty_results_file_fails_the_scan(plugin_context, tmp_path):
+    """An empty results file is a failed scan, not an empty report graded PASSED."""
     scanner = _scanner(plugin_context, execute_scan=_execute_writing(""))
     target = _populated_target(tmp_path)
 
@@ -409,11 +345,10 @@ def test_an_empty_results_file_yields_the_empty_sarif_report(plugin_context, tmp
     with (
         patch.object(type(scanner), "_run_subprocess", return_value={"returncode": 0}),
         patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError, match="nothing to grade"),
     ):
-        report = scanner.scan(target=target, target_type="source")
+        scanner.scan(target=target, target_type="source")
 
-    assert isinstance(report, SarifReport)
-    assert report.runs == []
     assert "results file is empty" in logger.warning.call_args.args[0]
     assert "No stderr output captured." in logger.warning.call_args.args[0]
 
@@ -427,36 +362,40 @@ def test_the_empty_results_warning_quotes_captured_stderr_when_present(
     logger = create_autospec(ASH_LOGGER)
 
     def _run(self, **kwargs):
+        # A returned stderr, as the real _run_subprocess hands it back: in the
+        # response and in self.errors.
         self.errors.append("tool said no")
-        return {"returncode": 1}
+        return {"returncode": 1, "stderr": "tool said no"}
 
     with (
         patch.object(type(scanner), "_run_subprocess", _run),
         patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError, match="tool said no"),
     ):
         scanner.scan(target=target, target_type="source")
 
     assert "Stderr: tool said no" in logger.warning.call_args.args[0]
 
 
-def test_a_results_file_that_is_not_sarif_is_returned_raw_with_a_warning(
-    plugin_context, tmp_path
-):
-    """Unparsable output degrades to the raw dict rather than failing the scan."""
+def test_a_results_file_that_is_not_sarif_fails_the_scan(plugin_context, tmp_path):
+    """Unparsable output is a failed scan, not a dict that reads as a clean one.
+
+    Returned as the raw dict, it would carry no verdict, and the executor would grade
+    it on its zero findings.
+    """
     scanner = _scanner(
         plugin_context, execute_scan=_execute_writing(json.dumps({"not": "sarif"}))
     )
     target = _populated_target(tmp_path)
 
-    logger = create_autospec(ASH_LOGGER)
     with (
         patch.object(type(scanner), "_run_subprocess", return_value={"returncode": 0}),
-        patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError) as excinfo,
     ):
-        result = scanner.scan(target=target, target_type="source")
+        scanner.scan(target=target, target_type="source")
 
-    assert result == {"not": "sarif"}
-    assert "Failed to parse" in logger.warning.call_args.args[0]
+    assert "is not SARIF ASH can read" in str(excinfo.value)
+    assert "could not be graded" in str(excinfo.value)
 
 
 def test_a_valid_sarif_results_file_is_returned_as_a_report(plugin_context, tmp_path):
@@ -524,18 +463,51 @@ def test_the_failure_message_reads_the_stderr_log_when_errors_are_empty(
     assert "Stderr: tool wrote this" in detail
 
 
-def test_a_long_stderr_is_truncated_in_the_failure_message(plugin_context):
+def test_a_long_stderr_is_shortened_in_the_failure_message(plugin_context):
     scanner = _scanner(plugin_context)
-    scanner.errors = ["x" * (_STDERR_EXCERPT_LIMIT + 500)]
+    stderr = "x" * (_STDERR_EXCERPT_LIMIT + 500)
+    # The run's returned stderr, recorded with its exit code, and in self.errors,
+    # as the real run leaves both.
+    scanner._record_target_exit_code({"returncode": 2, "stderr": stderr})
+    scanner.errors = [stderr]
 
     detail = scanner._describe_scan_failure(RuntimeError("broke"), None)
 
-    assert " ...[truncated]" in detail
+    assert "characters omitted]" in detail
     assert len(detail) < _STDERR_EXCERPT_LIMIT + 500
+
+
+def test_a_long_stderr_keeps_its_last_line_in_the_failure_message(
+    plugin_context, tmp_path
+):
+    """A tool says why it failed last: trivy prints download progress, then the error.
+
+    The shape of the podman CI failure: a config line, a long progress bar, and the
+    reason at the very end. The message used to keep only the first 2000
+    characters, which ended inside the progress output.
+    """
+    scanner = _scanner(plugin_context)
+    results_file = tmp_path / "scanners" / "stub" / "results.json"
+    results_file.parent.mkdir(parents=True)
+    progress = "".join(
+        f"{n}.00 MiB / 120.19 MiB [---->____] {n}% ? p/s ?" for n in range(400)
+    )
+    reason = "FATAL Fatal error: unable to extract the vulnerability DB: no space left"
+    (results_file.parent / "StubScanner.stderr.log").write_text(
+        f'INFO Loaded file_path="/out/trivy-config.yaml"\n{progress}\n{reason}\n'
+    )
+
+    detail = scanner._describe_scan_failure(RuntimeError("broke"), results_file)
+
+    assert detail.endswith(reason)
+    assert 'Loaded file_path="/out/trivy-config.yaml"' in detail
+    assert "characters omitted]" in detail
+    assert len(detail) < _STDERR_EXCERPT_LIMIT + 400
 
 
 def test_a_short_stderr_is_not_truncated(plugin_context):
     scanner = _scanner(plugin_context)
+    scanner._record_target_exit_code({"returncode": 2, "stderr": "short and sweet"})
     scanner.errors = ["short and sweet"]
 
     detail = scanner._describe_scan_failure(RuntimeError("broke"), None)
@@ -638,9 +610,11 @@ def test_validate_plugin_explains_offline_mode_for_a_uv_managed_tool(plugin_cont
     ):
         assert scanner.validate_plugin() is False
 
-    hints = [msg for msg, _ in logged if "ASH_OFFLINE=true" in msg]
+    hints = [msg for msg, _ in logged if "Offline mode is enabled" in msg]
     assert len(hints) == 1
     assert "stub-tool" in hints[0]
+    assert "ASH_OFFLINE" in hints[0]
+    assert "options.offline" in hints[0]
 
 
 def test_no_offline_hint_is_logged_when_the_tool_is_not_uv_managed(plugin_context):
@@ -662,7 +636,7 @@ def test_no_offline_hint_is_logged_when_the_tool_is_not_uv_managed(plugin_contex
     ):
         scanner.validate_plugin()
 
-    assert not any("ASH_OFFLINE=true" in msg for msg, _ in logged)
+    assert not any("Offline mode is enabled" in msg for msg, _ in logged)
 
 
 def test_no_offline_hint_is_logged_when_offline_mode_is_off(plugin_context):
@@ -684,7 +658,7 @@ def test_no_offline_hint_is_logged_when_offline_mode_is_off(plugin_context):
     ):
         scanner.validate_plugin()
 
-    assert not any("ASH_OFFLINE=true" in msg for msg, _ in logged)
+    assert not any("Offline mode is enabled" in msg for msg, _ in logged)
 
 
 # ---------------------------------------------------------------------------

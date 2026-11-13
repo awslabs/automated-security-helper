@@ -62,6 +62,12 @@ from typing import Any
 import pytest
 import yaml
 
+# The unit-test matrix is three jobs, one per runner pool, so each pool has its own
+# max-parallel cap. tests/unit/test_unit_test_shards.py holds the three to one another.
+from tests.utils.ci_tiers import UNIT_TEST_JOB_IDS
+
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 ACTIONS = REPO_ROOT / ".github" / "actions"
@@ -651,9 +657,12 @@ class TestUnitTestArchIsDerived:
     """The arch label was not merely cosmetic, so its removal is asserted harder."""
 
     def test_the_matrix_carries_no_hand_written_arch_table(self):
-        job = _job(UNIFIED_CI, "unit-test")
-        rows = _matrix(job).get("include") or []
-        offenders = [row for row in rows if "arch" in row]
+        offenders = [
+            row
+            for job_id in UNIT_TEST_JOB_IDS
+            for row in _matrix(_job(UNIFIED_CI, job_id)).get("include") or []
+            if "arch" in row
+        ]
         assert not offenders, (
             f"{len(offenders)} unit-test include row(s) carry an `arch` label. Those "
             "labels are not read from the runner and one had already gone wrong: "
@@ -669,25 +678,29 @@ class TestUnitTestArchIsDerived:
         turns an include into a cell-defining one, this catches the leg count moving for
         a reason nobody intended.
         """
-        job = _job(UNIFIED_CI, "unit-test")
-        axes = _axes(job)
-        product = 1
-        for values in axes.values():
-            product *= len(values)
-        assert product >= 20, (
-            f"unit-test's axis product is {product}, too small for this comparison to "
-            "mean anything -- the matrix has been gutted."
-        )
-        assert len(_effective_matrix(job)) == product, (
-            f"unit-test's effective matrix ({len(_effective_matrix(job))}) no longer "
-            f"equals its axis product ({product}). An `include` or an `exclude` has "
-            "appeared on the job. Either changes the leg count, and that count is what "
-            "the comment on required-checks reconciles against measured run data -- so a "
-            "matrix edit that moves it needs a new measurement rather than arithmetic. "
-            "Note this file's matrix expansion appends every `include` entry rather than "
-            "merging the key-only ones, so a re-added label table trips this too, which "
-            "is the intent."
-        )
+        for job_id in UNIT_TEST_JOB_IDS:
+            job = _job(UNIFIED_CI, job_id)
+            axes = _axes(job)
+            product = 1
+            for values in axes.values():
+                product *= len(values)
+            # The smallest job (windows) is one runner image by five Python versions
+            # by four shards; the bound stays at the pre-shard five so a job that lost
+            # its shard axis is still measured.
+            assert product >= 5, (
+                f"{job_id}'s axis product is {product}, too small for this comparison "
+                "to mean anything -- the matrix has been gutted."
+            )
+            assert len(_effective_matrix(job)) == product, (
+                f"{job_id}'s effective matrix ({len(_effective_matrix(job))}) no longer "
+                f"equals its axis product ({product}). An `include` or an `exclude` has "
+                "appeared on the job. Either changes the leg count, and that count is "
+                "what the comment on required-checks reconciles against measured run "
+                "data -- so a matrix edit that moves it needs a new measurement rather "
+                "than arithmetic. Note this file's matrix expansion appends every "
+                "`include` entry rather than merging the key-only ones, so a re-added "
+                "label table trips this too, which is the intent."
+            )
 
     def test_run_unit_tests_derives_the_arch_label_from_the_runner(self):
         action = _load(RUN_UNIT_TESTS)

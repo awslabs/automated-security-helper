@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     extract_result_summary,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_extract_result_summary_complete():

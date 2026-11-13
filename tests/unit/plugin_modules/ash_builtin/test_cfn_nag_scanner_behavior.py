@@ -20,11 +20,11 @@ without letting it masquerade as a pass.
 
 import json
 import logging
+import os
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -35,6 +35,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScannerConfig,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import exit_status
+
+pytestmark = pytest.mark.unit
 
 CFN_TEMPLATE = """Resources:
   MyRole:
@@ -241,23 +244,25 @@ def test_custom_rule_exceptions_are_isolated(scanner):
     )
 
 
-@pytest.mark.parametrize(
-    "level, verbose_expected",
-    [(logging.DEBUG, True), (logging.INFO, False), (logging.WARNING, False)],
-)
-def test_verbose_flag_is_added_only_at_debug_level(
-    plugin_context, monkeypatch, level, verbose_expected
-):
-    """``--verbose`` is passed to cfn_nag only when ASH itself is at DEBUG."""
+@pytest.mark.parametrize("level", [logging.DEBUG, logging.INFO, logging.WARNING])
+def test_no_log_level_flag_is_passed_to_cfn_nag(plugin_context, monkeypatch, level):
+    """No ``--verbose`` (or ``--debug``) at any ASH log level, DEBUG included.
+
+    cfn_nag_scan defines no ``--verbose`` option, so passing it at DEBUG made
+    every invocation exit 255 with no stdout and the whole scan fail as "no
+    output". Its ``--debug`` writes to stdout, which is parsed as SARIF, so it
+    is not passed either.
+    """
     monkeypatch.setattr(ASH_LOGGER, "level", level)
 
     scanner = CfnNagScanner(context=plugin_context, config=CfnNagScannerConfig())
     keys = [arg.key for arg in scanner.args.extra_args]
 
-    assert ("--verbose" in keys) is verbose_expected, (
-        f"at level {logging.getLevelName(level)} expected verbose="
-        f"{verbose_expected}; extra_args keys were {keys}"
+    assert "--verbose" not in keys, (
+        f"at level {logging.getLevelName(level)} cfn_nag_scan would be given "
+        f"--verbose, which it does not define; extra_args keys were {keys}"
     )
+    assert "--debug" not in keys, keys
 
 
 def test_config_defaults_are_applied_when_config_is_none(plugin_context):
@@ -284,26 +289,16 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValidationError,
-    reason=(
-        "get_shortest_name() returns its input unchanged when the path does not "
-        "exist, so a Path argument comes back as a Path rather than the str the "
-        "final 'return Path(input).as_posix()' would produce. ArtifactLocation.uri "
-        "requires a str, so scan() raises ValidationError at the report-skeleton "
-        "step and never reaches its own 'target is empty or doesn't exist' branch. "
-        "Remove this xfail once get_shortest_name normalizes its early return."
-    ),
-)
 def test_missing_target_directory_returns_an_empty_report(
     scanner, deps_available, subprocess_double, tmp_path
 ):
-    """A target that does not exist should yield a report, not an exception.
+    """A target that does not exist yields an empty report, not an exception.
 
-    The scan body has an explicit branch for a missing target, but it is
-    unreachable today: the report skeleton is built first and passes the target
-    through get_shortest_name, which returns a Path for a non-existent input.
+    The report skeleton is built first and passes the target through
+    get_shortest_name; a missing path now comes back as text, so
+    ArtifactLocation.uri validates and scan() reaches its own "target is empty
+    or doesn't exist" branch. This was an expected failure while
+    get_shortest_name handed a missing Path back unchanged.
     """
     report = scanner.scan(target=tmp_path / "does-not-exist", target_type="converted")
 
@@ -311,13 +306,12 @@ def test_missing_target_directory_returns_an_empty_report(
     subprocess_double.assert_not_called()
 
 
-def test_get_shortest_name_early_return_does_not_normalize_to_str():
-    """Pin the root cause of the xfail above at its own source.
+def test_get_shortest_name_answers_in_text_for_a_missing_path():
+    """The early return for a missing path is text, like the resolved return.
 
-    The final ``return Path(input).as_posix()`` yields a str, but the
-    not-exists early return hands back whatever it was given. Callers that feed
-    the result into a pydantic str field therefore work for existing paths and
-    fail for missing ones.
+    Callers feed the result into pydantic str fields (ArtifactLocation.uri), so
+    a missing path that came back as a Path failed validation where an existing
+    one passed; both are str now.
     """
     from automated_security_helper.utils.get_shortest_name import get_shortest_name
 
@@ -325,10 +319,7 @@ def test_get_shortest_name_early_return_does_not_normalize_to_str():
     assert isinstance(existing, str)
 
     missing = get_shortest_name(input=Path.cwd() / "no-such-file-exists-here")
-    assert isinstance(missing, Path), (
-        "if this now returns str, get_shortest_name was fixed -- drop the "
-        "xfail on test_missing_target_directory_returns_an_empty_report"
-    )
+    assert isinstance(missing, str)
 
 
 def test_empty_target_directory_returns_an_empty_report(
@@ -451,8 +442,8 @@ def test_each_template_is_passed_to_the_subprocess_as_the_input_path(
     """The resolved argv names one template, not the containing directory.
 
     The path is a copy of the text ASH read and checked, kept under the template's
-    results directory with the template's file name, and removed afterwards; see
-    ``_stage_cfn_nag_input``.
+    results directory under a fixed name with the template's extension, and removed
+    afterwards; see ``_stage_cfn_nag_input``.
     """
     template = scanner.context.work_dir / "role.yaml"
     template.write_text(CFN_TEMPLATE)
@@ -472,7 +463,7 @@ def test_each_template_is_passed_to_the_subprocess_as_the_input_path(
     assert command[0] == "cfn_nag_scan"
     assert "--input-path" in command
     ((staged, text),) = given
-    assert staged.name == template.name
+    assert staged.name == "template.yaml"
     assert staged != template
     assert text == CFN_TEMPLATE
     assert not staged.exists(), "the copy is removed once cfn_nag_scan has run"
@@ -510,15 +501,16 @@ def test_unparseable_yaml_is_skipped_without_failing_the_scan(
 def test_empty_stdout_is_a_hard_scanner_failure(
     scanner, deps_available, subprocess_double, caplog
 ):
-    """cfn_nag writing nothing is a tool fault, so the scanner fails, not the target.
+    """cfn_nag writing nothing for the only template fails the scan itself.
 
     This test's predecessor asserted the opposite -- that the scan returned a report
-    and raised nothing -- and that is the behavior being corrected. Counting it as
-    one failed target among many left ``targets_failed < targets_attempted``, so a
-    repository with one crashed template and nine clean ones reported PASSED with
-    the crashed template's findings silently absent. An invocation that renders zero
-    bytes did not fail to find anything; it failed to run, and the process dying
-    before rendering is a property of the tool rather than of that one template.
+    and raised nothing -- and that is the behavior being corrected: an invocation
+    that renders zero bytes did not find nothing, it failed to run. With the only
+    attempted template unrendered, nothing at all was evaluated, so the scan raises
+    as a whole-run failure. One unrendered template among rendered ones is the
+    partial case: the scan returns, the rendered findings are kept, and the
+    executor refuses a PASSED verdict over the recorded name
+    (test_one_empty_stdout_among_two_templates_is_named_unevaluated below).
 
     The subprocess is still invoked -- the emptiness is in its output, which is
     exactly the case that must not silently become a passing scan.
@@ -618,21 +610,62 @@ def test_invocation_replaces_the_placeholder_and_records_the_exit_code(
 
 @pytest.mark.parametrize(
     "exit_code, successful",
-    [(0, True), (1, True), (2, False), (137, False)],
+    [
+        (0, True),
+        (1, True),
+        (2, True),
+        (137, True),
+        (127, True),
+        pytest.param(
+            -9,
+            False,
+            marks=pytest.mark.skipif(
+                os.name == "nt",
+                reason="Windows has no signal deaths: signal_ending reads a negative "
+                "code as a signal on POSIX only",
+            ),
+        ),
+    ],
 )
 def test_execution_successful_treats_zero_and_one_as_success(
     scanner, deps_available, subprocess_double, exit_code, successful
 ):
-    """cfn_nag exits 1 when it finds violations, so 1 is still a success."""
+    """cfn_nag's exit status is its count of failing violations, so any
+    non-negative count from a run that rendered results is a success. This
+    cell previously pinned (2, False) and (137, False) from the base
+    {0, 1} set; both runs here rendered results and evaluated their target,
+    so the count is findings, not failure -- 137 included, because through
+    ``_run_subprocess`` a signal death arrives as a NEGATIVE code, never as
+    128+N, and 127 included, because cfn_nag returns that number for 127
+    (mod 256) failing violations: whether the tool ran at all is read from the
+    recorded spawn failure, not from the code (see
+    ``test_a_clean_run_whose_code_counts_violations_is_successful``). A negative
+    code is no count: the plugin keeps a signal death as the run's cause, which
+    is read before any count, and records its code as the shell reports it
+    (``exit_status``, 128+N), so the recorded 137 of a SIGKILL is never a count
+    either.
+
+    The code arrives the way the real ``_run_subprocess`` delivers it, through
+    ``_process_command_response``: scan() starts each target with no exit code, so
+    one set on the plugin beforehand is not cfn_nag's.
+    """
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
-    subprocess_double.side_effect = stdout_sequence(cfn_nag_sarif())
-    scanner.exit_code = exit_code
+
+    def run(self, **kwargs):
+        # The code is recorded as the real _run_subprocess records it.
+        response = {"stdout": cfn_nag_sarif(), "stderr": "", "returncode": exit_code}
+        self._process_command_response(response)
+        return response
+
+    subprocess_double.side_effect = run
 
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     invocation = report.runs[0].invocations[0]
     assert invocation.executionSuccessful is successful
-    assert invocation.exitCode == exit_code
+    # A signal death is recorded as the shell reports it; every other code as given.
+    recorded = exit_status(exit_code) if exit_code < 0 else exit_code
+    assert invocation.exitCode == recorded
 
 
 # ---------------------------------------------------------------------------
@@ -681,7 +714,9 @@ def test_source_target_type_scans_the_source_tree(
         call.kwargs["command"][call.kwargs["command"].index("--input-path") + 1]
         for call in subprocess_double.call_args_list
     ]
-    assert any(path.endswith("role.yaml") for path in scanned), (
+    # The copy cfn_nag reads has a fixed name; the directory it sits in is named
+    # after the template.
+    assert any("role__yaml" in path for path in scanned), (
         f"the source template was never scanned; scanned={scanned}"
     )
     assert not any("should-not-be-scanned" in path for path in scanned), (
@@ -723,10 +758,11 @@ def test_empty_stdout_is_recorded_as_a_failed_target_and_then_raises(
     """cfn_nag producing nothing must not resolve to a passing scan.
 
     The counter assertions are the ones this test always made and they still hold.
-    What changed is the tail: the scan now raises rather than returning, because the
-    counters alone only reach ERROR when *every* template is in this state. The
+    What changed is the tail: with its only template unrendered, every attempted
+    template is in this state, so the scan raises as a whole-run failure. The
     counters are still set so the failure is also visible to
-    ``--fail-on-incomplete-scanners``, which reads ``targets_failed``.
+    ``--fail-on-incomplete-scanners``, which reads ``targets_failed``. A partial
+    run returns instead and is refused through ``unevaluated_targets``.
     """
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
     subprocess_double.return_value = {"stdout": "   ", "stderr": "", "returncode": 1}
@@ -747,16 +783,22 @@ def test_empty_stdout_is_recorded_as_a_failed_target_and_then_raises(
     assert status == ScannerStatus.ERROR
 
 
-def test_one_empty_stdout_among_two_templates_still_fails_the_scanner(
+def test_one_empty_stdout_among_two_templates_is_named_unevaluated(
     scanner, deps_available, subprocess_double
 ):
     """The case the counters alone cannot reach.
 
-    One crashed template of two leaves ``targets_failed`` (1) below
-    ``targets_attempted`` (2), so ``determine_status`` falls through to the severity
-    gate over the surviving findings and reports PASSED. This is the specific hole
-    that makes an empty-stdout invocation a scanner failure rather than a target
-    statistic, and it is why the two tests above were inverted.
+    One unrendered template of two is a property of that template, not of the
+    tool, so the scan returns rather than raising, and the rendered template's
+    findings are kept; raising here threw them away with the verdict. The run is
+    still not a clean one: the unrendered template is recorded on
+    ``unevaluated_targets`` and in ``errors``, which the executor reads off the
+    plugin to name the template on the results row and to refuse a PASSED
+    verdict over it (test_scanners_name_a_file_that_is_not_utf8.py's
+    test_cfn_nag_keeps_the_other_templates_findings drives that path end to
+    end). The counters now read the run fail-closed too -- one failed target
+    of two is not a succeeded scan -- and the executor's refusal is still what
+    NAMES the unevaluated template, which a counter cannot.
     """
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
     (scanner.context.work_dir / "queue.yaml").write_text(SECOND_CFN_TEMPLATE)
@@ -764,15 +806,21 @@ def test_one_empty_stdout_among_two_templates_still_fails_the_scanner(
         cfn_nag_sarif(rule_id="F38", uri="role.yaml"), ""
     )
 
-    with pytest.raises(ScannerError):
-        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    # Both templates were attempted before the verdict; only the crashed one failed,
-    # which is precisely the ratio that used to read as a successful scan.
+    # The rendered template's findings survive the other template's failure.
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    # Both templates were attempted; only the unrendered one failed, which is
+    # precisely the ratio that used to read as a successful scan.
     assert (scanner.targets_attempted, scanner.targets_failed) == (2, 1)
-    assert _status_for(scanner)[1].scan_succeeded, (
-        "the counters alone still read this as a succeeded scan, which is why the "
-        "raise is the load-bearing part of the fix"
+    # Exactly one of the two is unevaluated (whichever the walk reached second),
+    # and it is named in the errors the results row carries.
+    (unrendered,) = scanner.unevaluated_targets
+    assert Path(unrendered).name in {"role.yaml", "queue.yaml"}, unrendered
+    assert any(unrendered in err for err in scanner.errors), scanner.errors
+    assert not _status_for(scanner)[1].scan_succeeded, (
+        "the counters read a partial failure fail-closed; the executor's refusal "
+        "over unevaluated_targets still names the template the counters cannot"
     )
 
 
@@ -798,6 +846,37 @@ def test_a_template_the_model_rejects_is_counted_as_a_failed_target(
     assert (scanner.targets_attempted, scanner.targets_failed) == (1, 1)
     assert any("unmodelable.yaml" in err for err in scanner.errors), scanner.errors
     assert _status_for(scanner)[0] == ScannerStatus.ERROR
+
+
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_a_hard_linked_template_is_scanned(
+    scanner, deps_available, subprocess_double, tmp_path
+):
+    """A template whose other name is outside the tree is still the tree's bytes.
+
+    The scanned-tree rule refused a file with a second hard link, and this scanner
+    took the refusal as the not-CloudFormation skip: no finding, no error, no
+    failed target, so a repository that hard-links its templates was reported
+    clean. The template read now admits a hard-linked regular file (a symlink
+    stays refused), and the template is checked and scanned like any other.
+    """
+    elsewhere = tmp_path / "elsewhere" / "role.yaml"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(CFN_TEMPLATE)
+    try:
+        os.link(elsewhere, scanner.context.work_dir / "role.yaml")
+    except OSError as exc:  # pragma: no cover - filesystem without hard links
+        pytest.skip(f"cannot create a hard link here: {exc}")
+    subprocess_double.side_effect = stdout_sequence(
+        cfn_nag_sarif(rule_id="F38", uri="role.yaml")
+    )
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1, "the hard-linked template was skipped"
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
+    assert not any("Skipped" in err for err in scanner.errors), scanner.errors
 
 
 def test_a_non_zero_exit_with_no_results_is_a_failed_target(
@@ -882,10 +961,13 @@ def test_a_template_that_scanned_is_not_counted_as_failed(
     assert _status_for(scanner)[1].scan_succeeded
 
 
-def test_one_failure_among_two_templates_is_not_a_failed_scan(
+def test_one_failure_among_two_templates_fails_the_run(
     scanner, deps_available, subprocess_double
 ):
-    """A partial failure is counted, but the run as a whole still succeeded."""
+    """A partial failure fails the run: the failed template was never
+    evaluated, so a clean sibling does not make the scan a success. An earlier
+    revision of this cell pinned the opposite as the then-current behavior;
+    the fail-closed rule has since been decided."""
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
     (scanner.context.work_dir / "queue.yaml").write_text(SECOND_CFN_TEMPLATE)
     subprocess_double.side_effect = stdout_sequence(
@@ -895,7 +977,7 @@ def test_one_failure_among_two_templates_is_not_a_failed_scan(
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert (scanner.targets_attempted, scanner.targets_failed) == (2, 1)
-    assert _status_for(scanner)[1].scan_succeeded
+    assert not _status_for(scanner)[1].scan_succeeded
 
 
 def test_non_cloudformation_yaml_is_not_counted_as_a_target(
@@ -909,3 +991,117 @@ def test_non_cloudformation_yaml_is_not_counted_as_a_target(
     subprocess_double.assert_not_called()
     assert (scanner.targets_attempted, scanner.targets_failed) == (0, 0)
     assert _status_for(scanner)[1].scan_succeeded
+
+
+def test_execution_successful_is_false_when_a_template_was_not_evaluated(
+    scanner, deps_available, subprocess_double
+):
+    """SARIF executionSuccessful follows the graded rule, not the exit code:
+    one unrendered template beside a clean one grades ERROR, so the report
+    cannot claim the execution succeeded about the same run."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    (scanner.context.work_dir / "queue.yaml").write_text(SECOND_CFN_TEMPLATE)
+    subprocess_double.side_effect = stdout_sequence(cfn_nag_sarif(), "")
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (2, 1)
+    assert not _status_for(scanner)[1].scan_succeeded
+    assert report.runs[0].invocations[0].executionSuccessful is False
+
+
+def test_execution_successful_is_false_when_no_accepted_run_produced_a_code(
+    scanner, deps_available, subprocess_double
+):
+    """Every template rejected by the model: the tool never ran, the exit
+    code is None, and a codeless run with attempted targets is not a
+    successful execution."""
+    (scanner.context.work_dir / "bad.yaml").write_text(UNMODELABLE_CFN)
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    subprocess_double.assert_not_called()
+    assert scanner.exit_code is None
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 1)
+    assert not _status_for(scanner)[1].scan_succeeded
+    assert report.runs[0].invocations[0].executionSuccessful is False
+
+
+def test_execution_successful_keep_sides_clean_run_and_nothing_attempted(
+    scanner, deps_available, subprocess_double
+):
+    """The keep sides of the rule: two clean templates stay True (whatever
+    aggregate exit code the run recorded), and attempted-nothing stays True
+    (a completed execution with nothing to do). The drop sides directly: a
+    failed target marks the run unsuccessful even beside an accepted exit
+    code, and a miscounted scan (negative attempted) never says success."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    (scanner.context.work_dir / "queue.yaml").write_text(SECOND_CFN_TEMPLATE)
+    subprocess_double.side_effect = stdout_sequence(cfn_nag_sarif(), cfn_nag_sarif())
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (2, 0)
+    assert report.runs[0].invocations[0].executionSuccessful is True
+
+    scanner.targets_attempted = 1
+    scanner.targets_failed = 1
+    scanner.exit_code = 0
+    assert scanner._sarif_execution_successful() is False
+    scanner.targets_attempted = -1
+    scanner.targets_failed = 0
+    assert scanner._sarif_execution_successful() is False
+    scanner.targets_attempted = 0
+    assert scanner._sarif_execution_successful() is True
+
+
+def test_a_clean_run_whose_code_counts_violations_is_successful(scanner):
+    """cfn_nag's exit status is its count of failing violations
+    (_evaluated_no_rule's rule), so a run that evaluated every attempted
+    target and found two is a successful execution -- the count is findings,
+    not failure (the base accepted set {0, 1} graded it False).
+    A recorded spawn failure and a signal death still are not: neither is
+    a count cfn_nag returned. The spawn-failure marker's VALUE alone is a
+    count, though: cfn_nag returns the same number for 127 (mod 256) failing
+    violations, so whether the tool ran is read from the recorded spawn
+    failure, never from the code."""
+    from automated_security_helper.utils.subprocess_utils import (
+        SPAWN_FAILURE_RETURNCODE,
+    )
+
+    scanner.targets_attempted = 2
+    scanner.targets_failed = 0
+    scanner.exit_code = 2
+    assert scanner._sarif_execution_successful() is True
+    scanner.exit_code = SPAWN_FAILURE_RETURNCODE
+    assert scanner._sarif_execution_successful() is True
+    scanner._scan_spawn_failure = "the command never ran"
+    assert scanner._sarif_execution_successful() is False
+    scanner._scan_spawn_failure = None
+    scanner.exit_code = -11
+    assert scanner._sarif_execution_successful() is False
+    # A failed target outranks any accepted count.
+    scanner.exit_code = 2
+    scanner.targets_failed = 1
+    assert scanner._sarif_execution_successful() is False
+
+
+@pytest.mark.parametrize("attempted", [None, 0])
+def test_a_failure_count_is_unsuccessful_whatever_the_attempt_count_holds(
+    scanner, attempted
+):
+    """A recorded failed target grades the row ERROR even beside an attempt
+    count of None or 0, so the SARIF flag must say False for the same run.
+    The control: nothing attempted and nothing failed completed successfully,
+    and the flag stays True."""
+    scanner.exit_code = 0
+    scanner.targets_attempted = attempted
+    scanner.targets_failed = 1
+
+    status, container = _status_for(scanner)
+    assert status == ScannerStatus.ERROR
+    assert not container.scan_succeeded
+    assert scanner._sarif_execution_successful() is False
+
+    scanner.targets_failed = 0
+    assert scanner._sarif_execution_successful() is True

@@ -33,6 +33,9 @@ from automated_security_helper.interactions.run_ash_container import (
     _assemble_run_command,
 )
 
+# Argv assembly only, no container runs: the unit tier.
+pytestmark = pytest.mark.unit
+
 
 class _Stop(Exception):
     """Raised by the recorder: nothing past the call is under test."""

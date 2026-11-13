@@ -26,6 +26,7 @@ phases:
     runtime-versions:
       python: '3.12'
     commands:
+      - 'case "$ASH_VERSION" in ''''|-*|*..*|*.|/*|*/|*//*|.*|*/.*|*.lock|*.lock/*|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-]*) echo "ASH_VERSION must be a plain git ref (a tag, branch name or commit id): letters, digits and . _ / -, not starting with - or ., with no .., no empty path component and no component starting with . or ending in .lock; got: $ASH_VERSION" >&2; exit 1;; esac'
       - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
   build:
     commands:

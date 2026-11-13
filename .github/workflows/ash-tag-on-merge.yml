@@ -42,6 +42,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The release pull request's merge commit, not the branch: with two release
+          # pull requests merged close together, a run that read the version from the
+          # current tip of main would release the newer version at the older merge.
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
@@ -51,12 +54,12 @@ jobs:
       # that a CI run of the pull request's branch saved. zizmor's cache-poisoning
       # audit does not model this trigger, so it does not report it.
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -105,6 +108,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
           TAG="v${VERSION}"
@@ -141,18 +145,32 @@ jobs:
   tag-and-release:
     name: Create tag and GitHub Release
     needs: [resolve, assets]
-    # Runs when the release already exists too, with the publishing steps skipped, so the
-    # floating major tag is still maintained -- the behavior before the assets moved into
-    # their own jobs. `assets` is skipped in that case, which would skip this job without
-    # the explicit condition.
+    # Runs when the release already exists too, with the publishing steps skipped.
+    # `assets` is skipped in that case, which would skip this job without the explicit
+    # condition.
     if: >-
       !cancelled() &&
       needs.resolve.result == 'success' &&
       (needs.resolve.outputs.skip == 'true' || needs.assets.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # `contents: write` creates the tag and the release and moves the floating
-    # major tag. The other two exist only for provenance and are the minimum
+    # Release runs do not overlap. The group is not per pull request or per
+    # version: the release step reads the remote's tags before it creates anything,
+    # so two runs for different versions must not interleave that read with each
+    # other's writes. cancel-in-progress stays false because a release run must
+    # finish once started.
+    #
+    # GitHub keeps at most one running and one pending run per group. When a third
+    # release run arrives while one runs and one waits, the waiting run is cancelled
+    # (cancel-in-progress: false does not change that). A cancelled run creates no
+    # release and starts no docs publish, and the only trace is a "cancelled" run in
+    # the Actions list. Re-run it by hand. That is safe: the step skips a release that
+    # already exists and refuses a release tag that sits at another commit.
+    concurrency:
+      group: ash-release-tag
+      cancel-in-progress: false
+    # `contents: write` creates the tag and the release. The other two exist only for
+    # provenance and are the minimum
     # `actions/attest-build-provenance` accepts:
     #
     #   id-token: write       mints the OIDC token Sigstore binds the attestation
@@ -241,6 +259,7 @@ jobs:
         if: needs.resolve.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
           TAG="v${VERSION}"
@@ -254,6 +273,17 @@ jobs:
           # built from, rather than `main`, which may have moved while they were
           # built. `set -u` stops the step if it is unset.
           #
+          # `gh release create --target` is ignored when the tag already exists, so a
+          # tag left at another commit would publish this release there. Read the tag
+          # on the remote first: absent, or already at the merge commit, is fine. An
+          # annotated tag lists its commit on the `^{}` line, which comes last.
+          TAG_REFS=$(git ls-remote origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}")
+          TAG_SHA=$(printf '%s\n' "$TAG_REFS" | tail -n1 | cut -f1)
+          if [[ -n "$TAG_SHA" && "$TAG_SHA" != "$MERGE_SHA" ]]; then
+            echo "::error::Tag ${TAG} already exists at ${TAG_SHA}, but the release pull request merged at ${MERGE_SHA}. Creating the release would publish it at the existing tag's commit. Move or delete the tag, then rerun this job."
+            exit 1
+          fi
+
           # The release body leads with this version's CHANGELOG.md entry, and
           # GitHub's generated notes follow it. gh prepends --notes to
           # --generate-notes output. The entry is what commitizen rendered from
@@ -263,7 +293,9 @@ jobs:
           # v3.8.0 needs this: it ships breaking changes as a minor, and the
           # release page is where users pinned to <4 look.
           #
-          # Covered by tests/unit/test_release_notes_workflow.py.
+          # Covered by tests/unit/test_release_notes_workflow.py: the release body,
+          # and TestTheCuratedNotesFailureNamesTheRecovery for the curated-notes
+          # failure's advice below.
           NOTES_FILE="${RUNNER_TEMP:-/tmp}/release-notes-${TAG}.md"
           CURATED=".github/release-notes/${TAG}.md"
           awk -v tag="$TAG" '
@@ -272,8 +304,16 @@ jobs:
           ' CHANGELOG.md > "$NOTES_FILE"
 
           if [[ -f "$CURATED" ]]; then
-            # The tag does not exist yet, so failing here costs a rerun after the
-            # changelog is fixed, while publishing would lose the curated notes.
+            # No release exists yet, so failing here publishes nothing, while
+            # publishing would lose the curated notes. A re-run cannot pick up a
+            # fix: the checkout is pinned to this pull request's merge commit, and a
+            # re-run replays the same event payload, so it reads the same
+            # CHANGELOG.md and fails the same way. Two recoveries change the outcome:
+            # a new chore(release): pull request whose regenerated entry includes the
+            # file (commitizen regenerates the entry without bumping the version), or
+            # keeping this merge commit by creating the release by hand at it
+            # (`gh release create <tag> --target <merge sha>` with the notes), after
+            # which a run of this job exits at the release-exists check above.
             if ! python3 - "$CURATED" "$NOTES_FILE" <<'PY'
           import sys
           curated = open(sys.argv[1], encoding="utf-8").read().strip()
@@ -281,7 +321,7 @@ jobs:
           sys.exit(0 if curated and curated in notes else 1)
           PY
             then
-              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen (the template includes the file), then rerun this job."
+              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen without bumping the version (the template includes the file) and merge it as a new chore(release): pull request, or keep this merge commit: create the release by hand with gh release create ${TAG} --target ${MERGE_SHA} and the entry plus the curated notes as its body, after which a run of this job finds the release and exits without publishing. A plain re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
               exit 1
             fi
           fi
@@ -293,6 +333,12 @@ jobs:
             echo "::warning::CHANGELOG.md has no entry for ${TAG}, so the release body is GitHub's generated notes only."
           fi
 
+          # Target the merge commit of the release pull request, not the branch name:
+          # RELEASE_SHA is the commit resolve pinned, which it checked equal to that
+          # merge commit. `main` is resolved when the release is created, so a pull
+          # request merged in between would put the tag on a commit that is not the
+          # release.
+          #
           # ${A[@]+"${A[@]}"} rather than "${A[@]}": bash before 4.4, which is
           # macOS's /bin/bash, treats an empty array as unset under `set -u`.
           # The test runs this step on macOS runners as well as ubuntu.
@@ -328,49 +374,3 @@ jobs:
             exit 1
           fi
           echo "release ${TAG} carries all $(wc -l < "$RUNNER_TEMP/staged.txt") staged asset(s)"
-
-      # The floating tag is named from the version being released. It used to be the
-      # literal `v3`, which meant a 4.x release would have pointed `v3` at a 4.0 commit
-      # -- and README.md tells users `@v3` "always points to the latest stable v3.x
-      # release", so they would have received 4.0 on their next install with no tag name
-      # changing to warn them.
-      #
-      # $VERSION is the same value the release step above turns into $TAG, rather than a
-      # second read of the version: two parsers for one version is how they come to
-      # disagree. The major is derived here in the shell for the same reason -- an `if:`
-      # on this step would have to re-derive it in an Actions expression.
-      #
-      # Covered by tests/unit/test_floating_major_tag_workflow.py, which runs this
-      # script with `gh` stubbed and asserts which ref each version touches.
-      - name: Update floating major tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Validate before touching anything: every ref name below is derived from
-          # $VERSION, so an unparsable value would otherwise name a ref from garbage.
-          # A prerelease such as 4.0.0rc1 is accepted and resolves to v4 -- only the
-          # major is read, and refusing one here would stop maintaining the floating
-          # tag for a shape this repository has released before (v3.0.0-beta-*).
-          if [[ ! "$VERSION" =~ ^([0-9]+)\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]]; then
-            # Fails rather than skips. The GitHub release already exists by now, so a
-            # skip would leave a published release whose floating tag silently never
-            # moved, on a green run.
-            echo "::error::VERSION is '${VERSION}', which is not a release version. Refusing to derive a floating tag name from it. The release itself was created; move the floating tag by hand and fix the 'Read version' step."
-            exit 1
-          fi
-          FLOATING="v${BASH_REMATCH[1]}"
-          MAIN_SHA=$(git rev-parse HEAD)
-
-          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${FLOATING}" >/dev/null 2>&1; then
-            gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${FLOATING}" \
-              -X PATCH \
-              --field sha="$MAIN_SHA" \
-              --field force=true
-            echo "Moved ${FLOATING} tag to $MAIN_SHA (v${VERSION})"
-          else
-            gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -X POST \
-              --field ref="refs/tags/${FLOATING}" \
-              --field sha="$MAIN_SHA"
-            echo "Created ${FLOATING} tag at $MAIN_SHA (v${VERSION})"
-          fi

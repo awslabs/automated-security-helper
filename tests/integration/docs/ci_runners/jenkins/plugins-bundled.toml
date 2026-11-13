@@ -1,0 +1,444 @@
+# Jenkins plugins for the jenkinsfile-runner leg on core 2.375.4, the core that
+# jenkinsfile-runner 1.0-beta-32 is built against (jenkins.version in its root pom.xml).
+#
+# The release zip, jenkinsfile-runner-1.0-beta-32.zip, holds the launcher only: it has no
+# Jenkins WAR and no plugins. So `bundled` is empty, the 2.375.4 WAR is pinned in
+# runners.toml, and this file carries the same plugin set as plugins-lts.toml: the plugins
+# the vanilla package declares at that tag (payload-dependencies/pom.xml and
+# vanilla-package/pom.xml), plus junit, plus every non-optional dependency of those, each at
+# the newest release whose required core is 2.375.4 or older. Versions and sha256 values
+# are from the Jenkins update center's plugin-versions.json, resolved 2026-10-12. The
+# update center publishes no tier for this core (a request for it is redirected to the
+# 2.516.2 tier), so plugin-versions.json is the only source used here. Each url is the
+# plugin's file on get.jenkins.io, where the update center's download urls redirect; each
+# file was downloaded from that url and hashed on 2026-10-13, and every hash equals the
+# sha256 here.
+#
+# This core is past its upstream support period. The leg exists to run the runner release on
+# the core it was built for, and it runs only on a disposable CI runner.
+#
+# The install step downloads each url, checks its sha256, and places the file in the
+# directory passed to jenkinsfile-runner with -p. Nothing resolves plugins at run time.
+# `dependencies` lists only non-optional dependencies, and each one is an entry here.
+
+bundled = []
+
+[[plugin]]
+name = "apache-httpcomponents-client-4-api"
+version = "4.5.14-150.v7a_b_9d17134a_5"
+url = "https://get.jenkins.io/plugins/apache-httpcomponents-client-4-api/4.5.14-150.v7a_b_9d17134a_5/apache-httpcomponents-client-4-api.hpi"
+sha256 = "ec6919c2ae115234535ed79947e5c3a20e97ebc566d4f0990944f88f84864dc4"
+dependencies = []
+
+[[plugin]]
+name = "bootstrap5-api"
+version = "5.2.1-3"
+url = "https://get.jenkins.io/plugins/bootstrap5-api/5.2.1-3/bootstrap5-api.hpi"
+sha256 = "42f150cefd03b878bccb498218de68c526b1ca3def60dcd3901caadbee881f5a"
+dependencies = ["font-awesome-api", "popper2-api"]
+
+[[plugin]]
+name = "bouncycastle-api"
+version = "2.30.1.78.1-248.ve27176eb_46cb_"
+url = "https://get.jenkins.io/plugins/bouncycastle-api/2.30.1.78.1-248.ve27176eb_46cb_/bouncycastle-api.hpi"
+sha256 = "052c437528458806a9464d59a577142dc5c8848e306b19cba865e027d1ad2031"
+dependencies = []
+
+[[plugin]]
+name = "branch-api"
+version = "2.1105.v472604208c55"
+url = "https://get.jenkins.io/plugins/branch-api/2.1105.v472604208c55/branch-api.hpi"
+sha256 = "9fcb4a0ba62b543744781be6aa81d394402bb8f3c1213282e109a07e9541205f"
+dependencies = ["caffeine-api", "cloudbees-folder", "scm-api"]
+
+[[plugin]]
+name = "caffeine-api"
+version = "3.1.8-133.v17b_1ff2e0599"
+url = "https://get.jenkins.io/plugins/caffeine-api/3.1.8-133.v17b_1ff2e0599/caffeine-api.hpi"
+sha256 = "a6c614655bc507345bf16b5c4615bb09b1a20f934c9bf0b15c02ccea4a5c0400"
+dependencies = []
+
+[[plugin]]
+name = "checks-api"
+version = "1.8.1"
+url = "https://get.jenkins.io/plugins/checks-api/1.8.1/checks-api.hpi"
+sha256 = "b58839833b335561321e625f758eefe4cad0e55d29f51afbd799e12d5373f0a9"
+dependencies = ["commons-lang3-api", "commons-text-api", "display-url-api", "plugin-util-api", "workflow-step-api", "workflow-support"]
+
+[[plugin]]
+name = "cloudbees-folder"
+version = "6.815.v0dd5a_cb_40e0e"
+url = "https://get.jenkins.io/plugins/cloudbees-folder/6.815.v0dd5a_cb_40e0e/cloudbees-folder.hpi"
+sha256 = "cd045bc885fc7b147765fdae56ef3c6ffd98ade2aed7086fd4a691e270b83f04"
+dependencies = ["ionicons-api"]
+
+[[plugin]]
+name = "commons-lang3-api"
+version = "3.17.0-84.vb_b_938040b_078"
+url = "https://get.jenkins.io/plugins/commons-lang3-api/3.17.0-84.vb_b_938040b_078/commons-lang3-api.hpi"
+sha256 = "90b15521b21ad1462b18a6f8894ff1a2c1080c5d398ca8bb928c062c992c3fc4"
+dependencies = []
+
+[[plugin]]
+name = "commons-text-api"
+version = "1.10.0-68.v0d0b_c439292b_"
+url = "https://get.jenkins.io/plugins/commons-text-api/1.10.0-68.v0d0b_c439292b_/commons-text-api.hpi"
+sha256 = "d21389b3d63edd5779315559632186b7b1ea9ae772b16dc37bb51002998b5464"
+dependencies = ["commons-lang3-api"]
+
+[[plugin]]
+name = "configuration-as-code"
+version = "1625.v27444588cc3d"
+url = "https://get.jenkins.io/plugins/configuration-as-code/1625.v27444588cc3d/configuration-as-code.hpi"
+sha256 = "413a8a73982f2e87dc3a55110ab8d8f292f4b6b5508de21f4fbae6c7005f2ecf"
+dependencies = ["caffeine-api", "commons-text-api", "snakeyaml-api"]
+
+[[plugin]]
+name = "credentials"
+version = "1224.vc23ca_a_9a_2cb_0"
+url = "https://get.jenkins.io/plugins/credentials/1224.vc23ca_a_9a_2cb_0/credentials.hpi"
+sha256 = "23674ca9c570e36597166d9b5a629383546548594ad9f7f7ffe13594231d16bb"
+dependencies = ["structs"]
+
+[[plugin]]
+name = "credentials-binding"
+version = "626.v8d9034b_8ea_cc"
+url = "https://get.jenkins.io/plugins/credentials-binding/626.v8d9034b_8ea_cc/credentials-binding.hpi"
+sha256 = "6e9b4a4d840df54fd6e17dbc2b480f97e9b09f2706be3320501dc37b93ba560e"
+dependencies = ["credentials", "plain-credentials", "ssh-credentials", "structs", "workflow-step-api"]
+
+[[plugin]]
+name = "display-url-api"
+version = "2.204.vf6fddd8a_8b_e9"
+url = "https://get.jenkins.io/plugins/display-url-api/2.204.vf6fddd8a_8b_e9/display-url-api.hpi"
+sha256 = "ca5c4e2d227b04e95c169a721cab7ea2a36f219820184f534d5dfedc6b034b27"
+dependencies = []
+
+[[plugin]]
+name = "durable-task"
+version = "568.v8fb_5c57e8417"
+url = "https://get.jenkins.io/plugins/durable-task/568.v8fb_5c57e8417/durable-task.hpi"
+sha256 = "ab8a1f088fb7236e369891bb840d9d87688a48df1c6a2bca099fc7baef4e8c97"
+dependencies = []
+
+[[plugin]]
+name = "echarts-api"
+version = "5.4.0-1"
+url = "https://get.jenkins.io/plugins/echarts-api/5.4.0-1/echarts-api.hpi"
+sha256 = "9cebfa70d840c69871ff524b232331cdec4f658fb748dbc7a61fdbc06d93b286"
+dependencies = ["bootstrap5-api", "font-awesome-api", "jackson2-api", "jquery3-api", "plugin-util-api"]
+
+[[plugin]]
+name = "font-awesome-api"
+version = "6.2.1-1"
+url = "https://get.jenkins.io/plugins/font-awesome-api/6.2.1-1/font-awesome-api.hpi"
+sha256 = "f2aee4ee373da672d898ed557a5648e1dc05575263428a567e0dfea4e6bd468d"
+dependencies = ["commons-lang3-api", "commons-text-api", "plugin-util-api"]
+
+[[plugin]]
+name = "git"
+version = "5.0.2"
+url = "https://get.jenkins.io/plugins/git/5.0.2/git.hpi"
+sha256 = "bf59710fa864256813dd44749aaaf5cceaa771873a8fb4d774832a642ad8c306"
+dependencies = ["credentials", "credentials-binding", "git-client", "mailer", "scm-api", "script-security", "ssh-credentials", "structs", "workflow-scm-step", "workflow-step-api"]
+
+[[plugin]]
+name = "git-client"
+version = "4.3.0"
+url = "https://get.jenkins.io/plugins/git-client/4.3.0/git-client.hpi"
+sha256 = "5e0b36d6decd94cc3dba471a6f29e1da6c580948ea8bc3ad4bafb347f916fcba"
+dependencies = ["apache-httpcomponents-client-4-api", "credentials", "mina-sshd-api-common", "mina-sshd-api-core", "script-security", "ssh-credentials", "structs", "trilead-api"]
+
+[[plugin]]
+name = "http_request"
+version = "1.18"
+url = "https://get.jenkins.io/plugins/http_request/1.18/http_request.hpi"
+sha256 = "727ad5822b51be8bdedbe5eaee23116ba4d091fd2caabc4206b6538480992a6b"
+dependencies = ["apache-httpcomponents-client-4-api", "credentials", "script-security", "workflow-basic-steps", "workflow-durable-task-step"]
+
+[[plugin]]
+name = "instance-identity"
+version = "201.vd2a_b_5a_468a_a_6"
+url = "https://get.jenkins.io/plugins/instance-identity/201.vd2a_b_5a_468a_a_6/instance-identity.hpi"
+sha256 = "c43dc01e201fd37a38a6307dacc84ace60e1608f96623691e1dbe1fdc6d8a911"
+dependencies = ["bouncycastle-api"]
+
+[[plugin]]
+name = "ionicons-api"
+version = "74.v93d5eb_813d5f"
+url = "https://get.jenkins.io/plugins/ionicons-api/74.v93d5eb_813d5f/ionicons-api.hpi"
+sha256 = "681a9cc3083a089d52ef398206bfc521daabf3c682ef0a57be73e0feddc62e8f"
+dependencies = []
+
+[[plugin]]
+name = "jackson2-api"
+version = "2.15.3-363.v82c51b_de9f60"
+url = "https://get.jenkins.io/plugins/jackson2-api/2.15.3-363.v82c51b_de9f60/jackson2-api.hpi"
+sha256 = "1dcf47173c13e26d828addf701bf06c356f79b1a30b5688aa85673efa5beef45"
+dependencies = ["javax-activation-api", "jaxb", "snakeyaml-api"]
+
+[[plugin]]
+name = "jakarta-activation-api"
+version = "2.1.3-1"
+url = "https://get.jenkins.io/plugins/jakarta-activation-api/2.1.3-1/jakarta-activation-api.hpi"
+sha256 = "ddc3df5d8c39a2a208661d69277120b1113373b04d06e2250615be2a65404b83"
+dependencies = []
+
+[[plugin]]
+name = "jakarta-mail-api"
+version = "2.1.3-1"
+url = "https://get.jenkins.io/plugins/jakarta-mail-api/2.1.3-1/jakarta-mail-api.hpi"
+sha256 = "851ab22ff0647f4d82baab4e526c6d0ddb3e64ad4969c516116b374ef778e539"
+dependencies = ["jakarta-activation-api"]
+
+[[plugin]]
+name = "javax-activation-api"
+version = "1.2.0-7"
+url = "https://get.jenkins.io/plugins/javax-activation-api/1.2.0-7/javax-activation-api.hpi"
+sha256 = "c60ab7240dded219e2cd3002b30579dd993832c5d4683dca710f0f426776b063"
+dependencies = []
+
+[[plugin]]
+name = "jaxb"
+version = "2.3.8-1"
+url = "https://get.jenkins.io/plugins/jaxb/2.3.8-1/jaxb.hpi"
+sha256 = "607213a0b4d959f9982ef53e908c8cfc37f2334e38bb49487f7f8eed6b6c4956"
+dependencies = ["javax-activation-api"]
+
+[[plugin]]
+name = "job-dsl"
+version = "1.82"
+url = "https://get.jenkins.io/plugins/job-dsl/1.82/job-dsl.hpi"
+sha256 = "aa96e7410ccabb1f75be8582478424ba4ecbd64cb3fa2828e84ab3a3688595c7"
+dependencies = ["branch-api", "cloudbees-folder", "script-security", "structs"]
+
+[[plugin]]
+name = "jquery3-api"
+version = "3.6.1-2"
+url = "https://get.jenkins.io/plugins/jquery3-api/3.6.1-2/jquery3-api.hpi"
+sha256 = "13f97355ec4c3bab3da770276f827fba295a1f8bc00f38d2b0a9ccb79a61ad57"
+dependencies = []
+
+[[plugin]]
+name = "junit"
+version = "1202.v79a_986785076"
+url = "https://get.jenkins.io/plugins/junit/1202.v79a_986785076/junit.hpi"
+sha256 = "11e74656976a916b3a8fd6948c688cd958f008cf83487fa4f7e1cbad2c4b0de8"
+dependencies = ["bootstrap5-api", "checks-api", "display-url-api", "echarts-api", "ionicons-api", "jackson2-api", "plugin-util-api", "script-security", "workflow-api", "workflow-step-api"]
+
+[[plugin]]
+name = "mailer"
+version = "457.v3f72cb_e015e5"
+url = "https://get.jenkins.io/plugins/mailer/457.v3f72cb_e015e5/mailer.hpi"
+sha256 = "3a4ed44e4c1460e2b54a08747866f7ec0f4119b2221313f6b5302806eeac77f4"
+dependencies = ["display-url-api", "instance-identity", "jakarta-mail-api"]
+
+[[plugin]]
+name = "mina-sshd-api-common"
+version = "2.12.0-90.v9f7fb_9fa_3d3b_"
+url = "https://get.jenkins.io/plugins/mina-sshd-api-common/2.12.0-90.v9f7fb_9fa_3d3b_/mina-sshd-api-common.hpi"
+sha256 = "f29776326bf03b736e9da1a4385a2e9a5338b22ce9b9a4cbce0a4d547663806e"
+dependencies = []
+
+[[plugin]]
+name = "mina-sshd-api-core"
+version = "2.12.0-90.v9f7fb_9fa_3d3b_"
+url = "https://get.jenkins.io/plugins/mina-sshd-api-core/2.12.0-90.v9f7fb_9fa_3d3b_/mina-sshd-api-core.hpi"
+sha256 = "53506787ee5381ce1e303f9ad7a03b3a1a43cd545c9bb08e7b404fc786fb8663"
+dependencies = ["mina-sshd-api-common"]
+
+[[plugin]]
+name = "pipeline-groovy-lib"
+version = "689.veec561a_dee13"
+url = "https://get.jenkins.io/plugins/pipeline-groovy-lib/689.veec561a_dee13/pipeline-groovy-lib.hpi"
+sha256 = "75ce8286ac7584e7cf8ad4a62f079380dd7f7305e1bbe13acdac73d174df4494"
+dependencies = ["cloudbees-folder", "scm-api", "script-security", "structs", "variant", "workflow-api", "workflow-cps", "workflow-scm-step", "workflow-step-api"]
+
+[[plugin]]
+name = "pipeline-input-step"
+version = "477.v339683a_8d55e"
+url = "https://get.jenkins.io/plugins/pipeline-input-step/477.v339683a_8d55e/pipeline-input-step.hpi"
+sha256 = "b25598cf76c788563ba667c2ab82348842b95db133d378395536f777ee2be00f"
+dependencies = ["credentials", "structs", "workflow-api", "workflow-step-api", "workflow-support"]
+
+[[plugin]]
+name = "pipeline-model-api"
+version = "2.2133.ve46a_6113dfc3"
+url = "https://get.jenkins.io/plugins/pipeline-model-api/2.2133.ve46a_6113dfc3/pipeline-model-api.hpi"
+sha256 = "65fc761badbc933ec8ebde591ee5fa76a6d18d96c1b076fdf90fc96fd41c9480"
+dependencies = ["jackson2-api", "structs", "workflow-step-api"]
+
+[[plugin]]
+name = "pipeline-model-definition"
+version = "2.2133.ve46a_6113dfc3"
+url = "https://get.jenkins.io/plugins/pipeline-model-definition/2.2133.ve46a_6113dfc3/pipeline-model-definition.hpi"
+sha256 = "55d5d678cb451fcd03ee25ad0c4b07ea6125510e5be3c94946563419e2d3a659"
+dependencies = ["credentials", "credentials-binding", "git-client", "mailer", "pipeline-groovy-lib", "pipeline-input-step", "pipeline-model-api", "pipeline-model-extensions", "pipeline-stage-step", "pipeline-stage-tags-metadata", "scm-api", "structs", "workflow-api", "workflow-basic-steps", "workflow-cps", "workflow-durable-task-step", "workflow-multibranch", "workflow-scm-step", "workflow-support"]
+
+[[plugin]]
+name = "pipeline-model-extensions"
+version = "2.2133.ve46a_6113dfc3"
+url = "https://get.jenkins.io/plugins/pipeline-model-extensions/2.2133.ve46a_6113dfc3/pipeline-model-extensions.hpi"
+sha256 = "4b7233bf06f21cb1ca4a7d37c7315b1412f22757d27c7009e975db9b9d4fca99"
+dependencies = ["credentials", "credentials-binding", "pipeline-model-api", "pipeline-stage-step", "workflow-cps", "workflow-job"]
+
+[[plugin]]
+name = "pipeline-stage-step"
+version = "312.v8cd10304c27a_"
+url = "https://get.jenkins.io/plugins/pipeline-stage-step/312.v8cd10304c27a_/pipeline-stage-step.hpi"
+sha256 = "f254c8981de34c1a63f550c5ed374b885c25daf5df4d99555119a41b7a9f936c"
+dependencies = ["workflow-api", "workflow-step-api"]
+
+[[plugin]]
+name = "pipeline-stage-tags-metadata"
+version = "2.2133.ve46a_6113dfc3"
+url = "https://get.jenkins.io/plugins/pipeline-stage-tags-metadata/2.2133.ve46a_6113dfc3/pipeline-stage-tags-metadata.hpi"
+sha256 = "00ab74c4e6f54256a0b536687b473a57299ed7786df055c65c5a5726ed359682"
+dependencies = ["workflow-api"]
+
+[[plugin]]
+name = "pipeline-utility-steps"
+version = "2.16.0"
+url = "https://get.jenkins.io/plugins/pipeline-utility-steps/2.16.0/pipeline-utility-steps.hpi"
+sha256 = "dfe39235dffbe5bfd10c39fb652e313dd9c0b3b7e44dbf275326eb64da94c754"
+dependencies = ["commons-lang3-api", "commons-text-api", "script-security", "snakeyaml-api", "structs", "workflow-step-api"]
+
+[[plugin]]
+name = "plain-credentials"
+version = "182.v468b_97b_9dcb_8"
+url = "https://get.jenkins.io/plugins/plain-credentials/182.v468b_97b_9dcb_8/plain-credentials.hpi"
+sha256 = "a1916cadab03c2aa023d9b21c18c2fb14f837a5cdbb2337d6b98805ffe987c0a"
+dependencies = ["credentials"]
+
+[[plugin]]
+name = "plugin-util-api"
+version = "2.20.0"
+url = "https://get.jenkins.io/plugins/plugin-util-api/2.20.0/plugin-util-api.hpi"
+sha256 = "b86db69c95dde89d1dbbe17057a1a801cc2291981ccc5d009d21968b997afbda"
+dependencies = ["commons-lang3-api", "commons-text-api"]
+
+[[plugin]]
+name = "popper2-api"
+version = "2.11.6-2"
+url = "https://get.jenkins.io/plugins/popper2-api/2.11.6-2/popper2-api.hpi"
+sha256 = "0fce90d92a3faa7098b87c7c62c778d23fa31fc04b9ca0f175c55e81d94ce0db"
+dependencies = []
+
+[[plugin]]
+name = "scm-api"
+version = "676.v886669a_199a_a_"
+url = "https://get.jenkins.io/plugins/scm-api/676.v886669a_199a_a_/scm-api.hpi"
+sha256 = "c8cc7b2120d25977cefc2fa6cc3830be034971e63f5009aee516d984025a837a"
+dependencies = ["structs"]
+
+[[plugin]]
+name = "script-security"
+version = "1269.v639888f5e366"
+url = "https://get.jenkins.io/plugins/script-security/1269.v639888f5e366/script-security.hpi"
+sha256 = "62eeb79b83267daf67815a287fcabe72d223bc389ac6fded7dda81355fb0e601"
+dependencies = ["caffeine-api"]
+
+[[plugin]]
+name = "snakeyaml-api"
+version = "2.3-123.v13484c65210a_"
+url = "https://get.jenkins.io/plugins/snakeyaml-api/2.3-123.v13484c65210a_/snakeyaml-api.hpi"
+sha256 = "d5b81a0d0cfd411de76daefd91b1dcdc0a573bc5be9ff6ed1f47411fadae13fe"
+dependencies = []
+
+[[plugin]]
+name = "ssh-credentials"
+version = "305.v8f4381501156"
+url = "https://get.jenkins.io/plugins/ssh-credentials/305.v8f4381501156/ssh-credentials.hpi"
+sha256 = "008ffb999ce9c7949c1299e1305007178bd0bedfd4c8401d6a4e92eeba635ff4"
+dependencies = ["credentials", "trilead-api"]
+
+[[plugin]]
+name = "structs"
+version = "325.vcb_307d2a_2782"
+url = "https://get.jenkins.io/plugins/structs/325.vcb_307d2a_2782/structs.hpi"
+sha256 = "2300dd3ce12775760e7898c8626567732366e1da652a4121f98aa3effdd1e3e1"
+dependencies = []
+
+[[plugin]]
+name = "templating-engine"
+version = "2.5.3"
+url = "https://get.jenkins.io/plugins/templating-engine/2.5.3/templating-engine.hpi"
+sha256 = "4f78967ea4940859e0df91c8e2804341a9c998efbf1803b5ac07b56ea962bdd5"
+dependencies = ["branch-api", "junit", "pipeline-model-definition", "scm-api", "script-security", "workflow-api", "workflow-multibranch"]
+
+[[plugin]]
+name = "trilead-api"
+version = "2.84.86.vf9c960e9b_458"
+url = "https://get.jenkins.io/plugins/trilead-api/2.84.86.vf9c960e9b_458/trilead-api.hpi"
+sha256 = "6e45b8eb6ba1ca88f9880517f5f0dacd7a1ab2c33a962db9788713703d40598d"
+dependencies = []
+
+[[plugin]]
+name = "variant"
+version = "60.v7290fc0eb_b_cd"
+url = "https://get.jenkins.io/plugins/variant/60.v7290fc0eb_b_cd/variant.hpi"
+sha256 = "acbf1aebb9607efe0518b33c9dde9bd50c03d6a1a0fa62255865f3cf941fa458"
+dependencies = []
+
+[[plugin]]
+name = "workflow-api"
+version = "1291.v51fd2a_625da_7"
+url = "https://get.jenkins.io/plugins/workflow-api/1291.v51fd2a_625da_7/workflow-api.hpi"
+sha256 = "836d3ab116acb58fb75f295fb7f109674cfe9ad8d736f23fac94e6fc42f2f707"
+dependencies = ["scm-api", "workflow-step-api"]
+
+[[plugin]]
+name = "workflow-basic-steps"
+version = "1058.vcb_fc1e3a_21a_9"
+url = "https://get.jenkins.io/plugins/workflow-basic-steps/1058.vcb_fc1e3a_21a_9/workflow-basic-steps.hpi"
+sha256 = "1d17becd03748cc6cce009cbba0ed35a28d17041f72c056b2eaa03615541374f"
+dependencies = ["apache-httpcomponents-client-4-api", "jakarta-mail-api", "mailer", "structs", "workflow-api", "workflow-durable-task-step", "workflow-step-api"]
+
+[[plugin]]
+name = "workflow-cps"
+version = "3673.v5b_dd74276262"
+url = "https://get.jenkins.io/plugins/workflow-cps/3673.v5b_dd74276262/workflow-cps.hpi"
+sha256 = "8d49f1e4284b11dd1d0c94ac98b3c0dcd70b95953875abd5ce0fb806ba76fe01"
+dependencies = ["ionicons-api", "scm-api", "script-security", "structs", "workflow-api", "workflow-scm-step", "workflow-step-api", "workflow-support"]
+
+[[plugin]]
+name = "workflow-durable-task-step"
+version = "1289.v4d3e7b_01546b_"
+url = "https://get.jenkins.io/plugins/workflow-durable-task-step/1289.v4d3e7b_01546b_/workflow-durable-task-step.hpi"
+sha256 = "6565675b1e8eba8121dd7ca90bb18e74e76f2dab1b0e40d851b60dc9e9b05d42"
+dependencies = ["durable-task", "scm-api", "script-security", "structs", "workflow-api", "workflow-step-api", "workflow-support"]
+
+[[plugin]]
+name = "workflow-job"
+version = "1326.ve643e00e9220"
+url = "https://get.jenkins.io/plugins/workflow-job/1326.ve643e00e9220/workflow-job.hpi"
+sha256 = "5d21c8126b379cbbab1542d1984eb5eca0221bf97e0c309b0b6b3ab20f562893"
+dependencies = ["ionicons-api", "workflow-api", "workflow-step-api", "workflow-support"]
+
+[[plugin]]
+name = "workflow-multibranch"
+version = "746.v05814d19c001"
+url = "https://get.jenkins.io/plugins/workflow-multibranch/746.v05814d19c001/workflow-multibranch.hpi"
+sha256 = "184d33f17a91474bed3de59b45fe2add849c662aa260ce45faf619afb6c11ec9"
+dependencies = ["branch-api", "cloudbees-folder", "scm-api", "script-security", "workflow-api", "workflow-cps", "workflow-job", "workflow-scm-step", "workflow-step-api", "workflow-support"]
+
+[[plugin]]
+name = "workflow-scm-step"
+version = "408.v7d5b_135a_b_d49"
+url = "https://get.jenkins.io/plugins/workflow-scm-step/408.v7d5b_135a_b_d49/workflow-scm-step.hpi"
+sha256 = "f6f8892c954ca3e3a8eafcc86812b1ca3d226dd30793b19fc91f75e6557518b7"
+dependencies = ["workflow-step-api"]
+
+[[plugin]]
+name = "workflow-step-api"
+version = "639.v6eca_cd8c04a_a_"
+url = "https://get.jenkins.io/plugins/workflow-step-api/639.v6eca_cd8c04a_a_/workflow-step-api.hpi"
+sha256 = "e297994ef4892b292fed850431cafe5a687fe64fbb9ddf9b7938d2b74db81763"
+dependencies = ["structs"]
+
+[[plugin]]
+name = "workflow-support"
+version = "839.v35e2736cfd5c"
+url = "https://get.jenkins.io/plugins/workflow-support/839.v35e2736cfd5c/workflow-support.hpi"
+sha256 = "3fe54cab155ad9bac49d3a98df1377f5795f8acf556f829ac48b32f5567c02bd"
+dependencies = ["caffeine-api", "scm-api", "script-security", "workflow-api", "workflow-step-api"]

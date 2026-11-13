@@ -35,9 +35,13 @@ and leaves the tool as transport.
 import json
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.core.resource_management.scan_tracking import (
     summarize_scanner_statuses,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _write_results(output_dir: Path, scanner_results: dict) -> None:
@@ -131,6 +135,53 @@ class TestSkippedScannersAreDistinguishable:
         summary = summarize_scanner_statuses(tmp_path)
 
         assert set(summary["scanner_statuses"]) == {"bandit", "semgrep"}
+
+
+class TestTheReasonIsShownAsAnErrorMessageIs:
+    """``detail`` is the reason the writer recorded for a scanner that did not
+    run, and it can hold an exception's text. It reached a client as written:
+    the registry redacts its error messages with the run's environment values
+    and the MCP tools escape control characters, and this field got neither."""
+
+    @staticmethod
+    def _skipped_with(reason):
+        return {
+            "bandit": {
+                "status": "MISSING",
+                "dependencies_satisfied": True,
+                "missing_reason": reason,
+            }
+        }
+
+    def test_control_characters_are_written_as_escapes(self, tmp_path):
+        _write_results(tmp_path, self._skipped_with("filter failed\x1b[31m\nnext"))
+
+        detail = summarize_scanner_statuses(tmp_path)["skipped_scanners"][0]["detail"]
+
+        assert "filter failed" in detail
+        assert "\x1b" not in detail
+        assert "\n" not in detail
+
+    def test_an_environment_value_is_redacted(self, tmp_path):
+        secret = "s3cr3t-Value-zqxj-ptlm-rwvn"  # pragma: allowlist secret
+        _write_results(
+            tmp_path, self._skipped_with(f"could not build: {secret} was refused")
+        )
+
+        detail = summarize_scanner_statuses(tmp_path, environment_values=(secret,))[
+            "skipped_scanners"
+        ][0]["detail"]
+
+        assert secret not in detail
+        assert "was refused" in detail
+
+    def test_plain_text_is_unchanged_without_values(self, tmp_path):
+        """The control: the same reason with nothing to redact is as recorded."""
+        _write_results(tmp_path, self._skipped_with("left filtering with no status"))
+
+        skipped = summarize_scanner_statuses(tmp_path)["skipped_scanners"]
+
+        assert skipped[0]["detail"] == "left filtering with no status"
 
 
 class TestDegradesQuietly:

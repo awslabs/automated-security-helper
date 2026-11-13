@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
@@ -19,6 +21,8 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 from automated_security_helper.utils.offline_mode_validator import (
     validate_trivy_offline_mode,
 )
+
+pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 
@@ -47,7 +51,6 @@ def _make_scanner(offline: bool, tmp_path: Path) -> TrivyRepoScanner:
 OFFLINE_FLAGS = [
     "--skip-db-update",
     "--skip-java-db-update",
-    "--offline-scan",
     "--skip-check-update",
 ]
 
@@ -71,6 +74,13 @@ class TestTrivyOfflineFlagInjection:
         arg_keys = [a.key for a in scanner.args.extra_args]
         for flag in OFFLINE_FLAGS:
             assert flag not in arg_keys, f"Unexpected {flag} in args when offline=False"
+
+    @pytest.mark.parametrize("offline", [False, True])
+    def test_every_scan_stays_off_package_registries(self, tmp_path, offline):
+        scanner = _make_scanner(offline=offline, tmp_path=tmp_path)
+        scanner._process_config_options()
+        arg_keys = [a.key for a in scanner.args.extra_args]
+        assert "--offline-scan" in arg_keys
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +116,10 @@ class TestTrivySubprocessEnvPassthrough:
                 with patch.object(scanner, "_post_scan"):
                     scanner.scan(target=source_dir, target_type="source")
 
-        assert "TRIVY_OFFLINE_TEST" in captured_env
-        assert len(captured_env) > 1  # merged with os.environ
+        # By names: a failure would print the whole environment.
+        names = set(captured_env)
+        assert "TRIVY_OFFLINE_TEST" in names
+        assert len(names) > 1  # merged with os.environ
 
 
 # ---------------------------------------------------------------------------
@@ -123,18 +135,28 @@ class TestValidateTrivyOfflineMode:
         assert any("TRIVY_CACHE_DIR" in m for m in messages)
 
     def test_old_db_returns_true_with_warning(self, tmp_path, monkeypatch):
+        from automated_security_helper.utils.content_databases import (
+            get as get_content_database,
+        )
+
         cache_dir = tmp_path / "trivy-cache"
-        cache_dir.mkdir()
-        db_file = cache_dir / "db.db"
+        # The check counts only files named trivy.db under the cache (the
+        # vulnerability database itself, TRIVY_DATABASE_FILE), where trivy
+        # keeps it: db/trivy.db.
+        db_file = cache_dir / "db" / "trivy.db"
+        db_file.parent.mkdir(parents=True)
         db_file.write_bytes(b"fake")
-        # Make the file appear 8 days old
-        old_mtime = time.time() - (8 * 24 * 3600)
+        # One day past the registry's own bound for trivy-db, which is what
+        # the validator warns against (the old 7-day literal is gone).
+        bound = get_content_database("trivy-db").max_age
+        old_mtime = time.time() - (bound.total_seconds() + 24 * 3600)
         os.utime(db_file, (old_mtime, old_mtime))
 
         monkeypatch.setenv("TRIVY_CACHE_DIR", str(cache_dir))
         valid, messages = validate_trivy_offline_mode()
         assert valid is True
         assert any("days old" in m for m in messages)
+        assert any("consider updating" in m for m in messages)
 
     def test_fresh_db_returns_true_no_staleness_warning(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "trivy-cache"

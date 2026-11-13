@@ -7,6 +7,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.config.config_validator import ConfigValidator
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def cli_runner():

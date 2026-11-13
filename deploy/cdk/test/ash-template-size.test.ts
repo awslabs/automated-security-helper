@@ -132,6 +132,10 @@
  *   of those, entries no rule consults        99 -> 17
  *   reasons cdk-nag base64-encoded            53 -> 0
  *
+ * Five of those 17 went later with the grants they sat on: the shard and merge roles no
+ * longer receive `GetSecretValue` on an auth secret nothing in that stack reads, so their
+ * `SecretsmanagerAccess` policies are gone, leaving 85 entries and 12 unconsulted.
+ *
  * lib/ash-nag-suppressions.ts has the mechanism and the per-helper reasoning. Higher
  * entry counts appear in this branch's intermediate states; 129 is the number a
  * reviewer sees.
@@ -357,7 +361,7 @@ const MAX_BYTES_PER_LINE = 512;
  *
  * Pinned per stack rather than only in total, so a regression names the template it
  * landed in. See the header: against `main` this is 129 -> 89, and 99 -> 17 of them
- * unconsulted.
+ * unconsulted; 85 and 12 since the shard and merge roles lost their unused secret grant.
  *
  * WHAT BREAKS THIS, and it is the point of pinning it at all: reintroducing
  * `applyToChildren: true` on any helper in lib/ash-nag-suppressions.ts. That walks the
@@ -368,7 +372,7 @@ const MAX_BYTES_PER_LINE = 512;
  *
  * Adding a resource that genuinely needs a suppression is expected to change a number
  * here. Re-run `npm run synth`, put the new count in, and the diff makes the review
- * question visible: does the new entry get consulted, or is it an 18th inert one?
+ * question visible: does the new entry get consulted, or is it a 13th inert one?
  */
 const SUPPRESSION_ENTRIES: Record<string, number> = {
   AshAgentCore: 10,
@@ -901,7 +905,7 @@ describe('every shipped reason is true of the policy it lands on', () => {
     // the 12 entries no rule consults, kept deliberately, and what makes keeping them
     // honest is that they describe themselves rather than describing wildcards they lack.
     //
-    // WHAT BREAKS THIS: granting a wildcard inside `SsmAccess`, `SecretsmanagerAccess`,
+    // WHAT BREAKS THIS: granting a wildcard inside `SsmAccess`,
     // `PipelineRole/StsAccess` or a CodePipeline action role; or writing a new per-policy
     // reason for a clean policy without the claim in it.
     const wrong: string[] = [];
@@ -922,7 +926,8 @@ describe('every shipped reason is true of the policy it lands on', () => {
       }
     }
     expect(wrong).toEqual([]);
-    // 77 until the five `SecretsmanagerAccess` policies left AshDistributedPipeline.
+    // 73 measured: five fewer than before the shard and merge roles lost their unused
+    // `SecretsmanagerAccess` policies, which were five of the clean ones checked here.
     expect(checked).toBeGreaterThanOrEqual(73);
   });
 
@@ -953,8 +958,11 @@ describe('every shipped reason is true of the policy it lands on', () => {
     expect(wrong).toEqual([]);
     // Lower than the 205 the union reasons produced, because a per-policy reason names
     // fewer actions. It is the count of claims made, so a reason that named no action at
-    // all would be caught only by the assertion above.
-    expect(checked).toBeGreaterThanOrEqual(100);
+    // all would be caught only by the assertion above. 98 measured: the five
+    // `SecretsmanagerAccess` reasons named two actions each and went with their grants, and
+    // the four shard `S3Access` reasons name no s3:DeleteObject*, which a shard is not
+    // granted.
+    expect(checked).toBeGreaterThanOrEqual(98);
   });
 
   test('no reason claims a resource-wildcard shape its policy lacks', () => {

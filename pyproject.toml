@@ -1,7 +1,7 @@
 [project]
 name = "automated-security-helper"
 version = "4.0.0"
-description = "Automated Security Helper for GitHub Actions"
+description = "Automated Security Helper, the agentic security harness: open-source orchestration for code, infrastructure, secret, and dependency scanners"
 requires-python = ">=3.10,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ license = "Apache-2.0"
 license-files = [ "LICENSE", "NOTICE",]
 classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
- "uv>=0.12.22,<0.13",
+ "uv>=0.13.4,<0.14",
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
@@ -41,7 +41,12 @@ dependencies = [
  "boto3>=1.43.107,<1.44",
  "cfn-flip>=1.3,<2",
  "mcp>=2.2.0,<3",
- "toml>=0.10,<1.0.0",
+ # tomllib before Python 3.11 (utils/version_management.py, config/config_sources.py):
+ # the parser tomllib was taken from. Held below 2.4, which added TOML 1.1, so that
+ # 3.10 reads TOML 1.0 as tomllib does on 3.11 to 3.14 and in the image: a file that
+ # only TOML 1.1 reads is refused everywhere. Already in every 3.10 environment that
+ # runs pytest; declared because ASH imports it.
+ "tomli>=2.0,<2.4; python_full_version < '3.11'",
  "python-multipart>=0.0.32,<0.1",  # 0.0.x -- the patch is the only version component, so >=0.0 is meaningless
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5.
  # >=50.0 keeps that floor: the advisory affects >= 44.0.0, < 50.0.0, so 50.0.0 is the fix.
@@ -56,6 +61,11 @@ dependencies = [
  # pip (utils/pre_installed_tool.py validate_version_constraint). Already in every
  # install as a transitive dependency; declared because ASH now imports it.
  "packaging>=24.0,<27",
+ # Tells a Bedrock answer's code from its text, so the report writes HTML outside code
+ # as text (plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py). Already in
+ # every install through rich, whose floor this matches; declared because ASH now
+ # imports it.
+ "markdown-it-py>=2.2,<5",
 ]
 [project.optional-dependencies]
 cdk = [
@@ -120,7 +130,7 @@ dev = [
  "pytest-cov>=7.1,<8.0.0",
  "pytest-mock>=3.16.0,<4.0.0",
  "mypy>=2.4.0,<3.0.0",
- "types-pyyaml>=6.0.12.20260906",
+ "types-pyyaml>=6.0.12.20261103",
  "lazydocs>=0.4,<1.0.0",
  "mkdocs>=1.6,<2.0.0",
  "mkdocs-material>=9.7.7,<10.0.0",  # floor is advisory-driven: GHSA-xvg9-69gf-fjrf affects >= 7.2.0, < 9.7.7
@@ -165,7 +175,13 @@ dev = [
  "types-boto3-sqs>=1.43,<2.0.0",
  "types-boto3-sts>=1.43.94,<2.0.0",
  "mkdocs-awesome-nav>=3.3,<4.0.0",
- "mkdocs-mermaid2-plugin>=1.2,<2.0.0",
+ # Versioned docs: the docs workflow publishes each release, and main, with mike, which
+ # builds a version into its own directory of the gh-pages branch and records it in
+ # versions.json. Material's version selector (extra.version.provider in mkdocs.yml)
+ # reads that file, and scripts/docs_versions.py check builds the two together on every
+ # pull request. The floor is the version that check and the deploy were verified
+ # against; the cap is this group's next-major convention.
+ "mike>=2.2,<3.0.0",
  "pytest-xdist>=3.8,<4.0.0",
  "toml>=0.10",
  "hatchling>=1.32.4",
@@ -191,7 +207,7 @@ dev = [
  # decorator patches botocore in the current interpreter only and cannot reach a
  # child, so those tests need a real HTTP endpoint. The extra is what pulls in
  # flask/flask-cors for moto.server.ThreadedMotoServer.
- "moto[server]>=5.2.3,<6",
+ "moto[server]>=5.2.5,<6",
  # Snapshot tests for everything ASH prints or writes (tests/snapshot). syrupy rather
  # than a hand-rolled golden helper because it already does the three things the
  # policy depends on: a missing or changed snapshot fails, only --snapshot-update
@@ -241,6 +257,7 @@ ashv3 = "automated_security_helper.cli.entrypoint:main_ashv3"
 # where a short name resolves to something else -- MSYS2 ships the Almquist shell
 # as `ash` and has already shadowed ASH's v3 entry point.
 automated-security-helper = "automated_security_helper.cli.entrypoint:main"
+agentic-security-harness = "automated_security_helper.cli.entrypoint:main"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
@@ -268,17 +285,76 @@ version = "4.0.0"
 # resolves the ref, so a wrong tag is a wrong ASH and a deleted tag is a hard
 # failure.
 #
-# The three docs/ entries are the same failure again, and they are the reason
-# this list is not the only guard. Each holds a paste-in install command that
-# nothing rewrote: cli-reference.md and mcp-performance-scalability.md sat three
-# minor releases behind, and trivy-plugin.md six. They were missed because the
-# repository had three separate hand-maintained lists of files that pin the
-# version -- this one, scripts/version_template_manager.py's target_files, and
-# the test's own list -- and a file absent from all three is invisible to every
-# one of them. tests/unit/test_agent_plugin_ash_version.py now walks the whole
-# tree for install refs instead of consulting a list, so the next omission fails
-# a test rather than shipping. Adding a pin here without adding it there is
-# safe; the reverse is what this comment exists to prevent.
+# There used to be three docs/ entries here: cli-reference.md,
+# mcp-performance-scalability.md and trivy-plugin.md each held a paste-in install
+# command that nothing rewrote, and they sat three to six minor releases behind. The
+# docs rewrite removed the first two pages and the pin from the third; every page
+# that still pins a tag is a .md.template rendered by
+# scripts/version_template_manager.py. They were missed because the repository had
+# three separate hand-maintained lists of files that pin the version -- this one,
+# scripts/version_template_manager.py's target_files, and the test's own list --
+# and a file absent from all three is invisible to every one of them.
+# tests/unit/test_agent_plugin_ash_version.py now walks the whole tree for install
+# refs instead of consulting a list, so the next omission fails a test rather than
+# shipping. Adding a pin here without adding it there is safe; the reverse is what
+# this comment exists to prevent.
+#
+# building-your-own-image.md joined when its install commands stopped naming
+# ASH's distribution bare, which PyPI resolves to an unrelated project, and
+# started naming the git tag instead; it left with cli-reference.md and
+# mcp-performance-scalability.md when the docs restructure replaced those pages
+# (docs/redirects.yml). Its successor, how-to/run-in-a-container.md, is rendered
+# from a template by scripts/version_template_manager.py instead, and the two
+# other successors carry no install pin.
+# docs/content/index.md is here because it has no template since that
+# restructure: its front matter `ash_version` (read by docs/overrides/home.html)
+# and its install commands would otherwise keep the release they were written at.
+# suppressions.md is not listed: its install commands ask for the `symbols`
+# extra, which no tag up to v3.7.1 defines, so they name `main` until a release
+# has it.
+#
+# The deploy/ and examples/ entries pin the ASH ref each deployment target
+# builds or installs when the adopter names none. Nothing else moves them at a
+# release, so without this list a release would ship these targets defaulted to
+# an older ASH, one that may lack options the targets pass. Listed here, a bump
+# moves every one to the release being cut, and
+# tests/unit/deploy/test_deploy_ash_cli_contract.py checks both halves: that each
+# pin names the packaged version and is rewritten by this list, and that every
+# option the targets pass exists in this tree's CLI, which at the release commit
+# is the release they default to. The pins, by file: under deploy/cdk,
+# lib/ash-config.ts (DEFAULT_ASH_VERSION), the five synthesized templates
+# AshAgentCore.template.json, AshCodeCommitGate.template.json,
+# AshDistributedPipeline.template.json, AshFargate.template.json and
+# AshImagePipeline.template.json (each one's AshVersion default), and the
+# AshVersion row of README.md; under deploy/cdk-constructs,
+# src/private/commands.ts (DEFAULT_ASH_REF), the generated buildspec.yml,
+# buildspec-merge.yml and buildspec-shard.yml, README.md and
+# test/ash-scan-step.test.ts; under deploy/terraform, the ash_version line of
+# each module's examples/basic/main.tf (agentcore, ash-image-pipeline,
+# codecommit-gate, codepipeline-executor and fargate); and under
+# examples/AWSCodeBuild, the RELEASE_TAG of buildspec.yml and README.md. The
+# synthesized CDK templates and the generated cdk-constructs buildspecs are
+# listed with their sources because a bump commit is checked by the IaC drift
+# gates: rewriting only the TypeScript would leave the committed output one
+# release behind a fresh synth. Each file is named rather than globbed, because
+# tests/unit/test_repo_walkers_skip_scratch.py keeps this list free of wildcards;
+# the contract test discovers the pins itself, so a new template or example that
+# is missing from this list fails it.
+#
+# The three tests/unit/ entries are fixtures, not install instructions:
+# test_docs_checks_can_fail.py (a docs page the docs checks are given),
+# test_reusable_workflow_defaults.py (the reusable workflow's expected install
+# source) and test_no_bare_name_install_hints.py (the install forms the bare-name
+# hint checker must recognize) each spell an install command with the real
+# repository URL, so the install-ref walk in
+# tests/unit/test_agent_plugin_ash_version.py reads them as pins and compares
+# them with `version` above. The 3.7.1 bump left them at 3.7.0, and the walk was
+# red at the release commit; listed here, a bump moves them with everything
+# else. The regex entries keep the bump off the lines that name a version on
+# purpose: a docstring's historical release, and the docs-site versions a link
+# check is handed. The patterns end at `@`, never at the `v` after it: the walk's
+# loose pin reader takes a repository name, `@`, `v` and no version after them as
+# a malformed pin, in this list's own entries as in any other line of the tree.
 #
 # On pattern choice: commitizen matches each regex per line, then replaces the
 # bare current version within the matching lines. `ash_version` is used rather
@@ -301,9 +377,26 @@ version_files = [
     "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/commands/scan.md:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/references/troubleshooting.md:automated-security-helper@",
-    "docs/content/docs/cli-reference.md:automated-security-helper@",
-    "docs/content/docs/mcp-performance-scalability.md:automated-security-helper@",
     "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
+    # Entries from the v3 mainline whose targets still exist on this branch. The
+    # cdk/cdk-constructs targets are NOT repeated from mainline's spellings: the
+    # anchored variants below supersede them.
+    "docs/content/index.md:ash_version:",
+    "docs/content/index.md:automated-security-helper.git@",
+    "docs/content/index.md:--branch v",
+    "docs/content/index.md:rev: v",
+    "deploy/terraform/modules/agentcore/examples/basic/main.tf:^\\s+ash_version\\s+=",
+    "deploy/terraform/modules/ash-image-pipeline/examples/basic/main.tf:^\\s+ash_version\\s+=",
+    "deploy/terraform/modules/codecommit-gate/examples/basic/main.tf:^\\s+ash_version\\s+=",
+    "deploy/terraform/modules/codepipeline-executor/examples/basic/main.tf:^\\s+ash_version\\s+=",
+    "deploy/terraform/modules/fargate/examples/basic/main.tf:^\\s+ash_version\\s+=",
+    "examples/AWSCodeBuild/buildspec.yml:RELEASE_TAG:",
+    "examples/AWSCodeBuild/README.md:^\\| `RELEASE_TAG`",
+    "tests/unit/test_docs_checks_can_fail.py:automated-security-helper.git@",
+    "tests/unit/test_docs_checks_can_fail.py:rev: v",
+    "tests/unit/test_no_bare_name_install_hints.py",
+    "tests/unit/test_reusable_workflow_defaults.py:CHECKED_ASH_VERSION",
+    "tests/unit/test_reusable_workflow_defaults.py:automated-security-helper@",
     # The native Windows manifests. Each of these carries the package version as
     # structured data a package manager reads, so a stale one installs an old ASH
     # rather than failing -- the same shape as Formula/ash.rb above.
@@ -1668,10 +1761,37 @@ disable_error_code = [
     "union-attr",
 ]
 
+[tool.uv]
+exclude-newer = "7 days"
+# Dependency cooldown: uv resolves nothing published inside the window, so a newly
+# published (possibly malicious or unstable) release waits a week before it can
+# enter uv.lock. Under the uv CI installs (0.11.4) this setting changes no existing
+# lock and `uv sync` reads uv.lock as written; a future `uv lock` that re-resolves
+# records the cutoff in the lock's [options] table. Keep this key first in the table:
+# a dependency-cooldown scanner rule reads the table only up to its first array.
+# filelock 4.1.1 and later require Python 3.11, and every release from 3.20.4
+# through 4.2.0 is affected by GHSA-v4x8-3wr5-3wq8. Python 3.10 therefore has no
+# patched filelock. 4.1.0 is affected by three more advisories that 4.0.x is not,
+# so the 3.10 resolution stays on 4.0.x; 3.11 and later take the patched 4.2.x line.
+constraint-dependencies = [ "filelock<4.1; python_full_version < '3.11'",]
+
 [tool.uv.workspace]
 members = [ ".",]
 
 [tool.uv.sources]
+
+[tool.hatch.build]
+# hatchling walks every directory under the project root to find the files it
+# packages, and an `exclude` pattern on its own only drops the files it matches:
+# the walk still descends into the directory. `skip-excluded-dirs` makes it prune
+# the directory instead. That matters for a uv cache placed under the project root
+# (the Homebrew formula once set UV_CACHE_DIR there): uv writes and renames
+# temporary entries in its cache while hatchling builds ASH from the same tree, and
+# the walk failed in hatchling's safe_walk with FileNotFoundError on a directory
+# that had vanished between listing and stat. .venv needs no entry here: hatchling
+# never descends into it. tests/unit/test_homebrew_formula_install.py holds this.
+exclude = [ ".uv-cache/",]
+skip-excluded-dirs = true
 
 [tool.hatch.build.targets.sdist]
 # Hatch reads these as gitignore patterns, so a bare "Dockerfile" matches a file of

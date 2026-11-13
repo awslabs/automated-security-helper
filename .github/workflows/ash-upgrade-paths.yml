@@ -43,9 +43,13 @@ concurrency:
   # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and push/tag runs feed docs and releases.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets. A merge_group entry has its own
+  # per-entry ref, so a second run in its group only means the entry was rebuilt and the
+  # earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   upgrade-path:
@@ -66,10 +70,10 @@ jobs:
           # Full history and tags: the old versions are resolved locally, not fetched.
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -88,9 +92,10 @@ jobs:
               # Highest semver release tag that is an ancestor of HEAD.
               #
               # Deliberately not `git describe --tags`: that picks the nearest tag
-              # by commit distance, which here returns the floating major-version
-              # tag `v3`. `v3` gets reattached over time, so upgrading "from v3"
-              # would mean upgrading from an unpredictable commit. Sorting by
+              # by commit distance, which here returns the bare major-version
+              # tag `v3`. `v3` is not a release tag -- it is the retired floating
+              # tag, moved across 3.x releases before it was frozen -- so "from v3"
+              # names no particular release. Sorting by
               # version and filtering to vX.Y.Z pins the arm to a real release.
               ref=$(git tag --sort=-v:refname \
                     | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \

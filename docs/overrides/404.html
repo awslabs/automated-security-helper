@@ -1,0 +1,16 @@
+{% extends "main.html" %}
+{% from "partials/ash-icons.html" import action %}
+
+{% block site_nav %}{% endblock %}
+
+{% block content %}
+  <div id="main-content" class="ash-not-found" tabindex="-1">
+    <div class="ash-eyebrow">404</div>
+    <h1>Page not found</h1>
+    <p>Search the documentation or return to the overview.</p>
+    <div class="ash-hero__buttons">
+      {{ action("Documentation", 'docs/quick-start-guide/' | url) }}
+      {{ action("Back to overview", nav.homepage.url | url, false, "arrow-left") }}
+    </div>
+  </div>
+{% endblock %}

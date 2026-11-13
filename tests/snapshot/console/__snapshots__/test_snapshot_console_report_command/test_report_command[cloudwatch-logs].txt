@@ -1,0 +1,21 @@
+$ ash report --format cloudwatch-logs --log-level ERROR
+[exit 5]
+
+[stderr]
+Error: Reporter plugin 'cloudwatch-logs' not found.
+Available reporter formats:
+  - csv
+  - cyclonedx
+  - github-ghas
+  - gitlab-cyclonedx
+  - gitlab-sast
+  - html
+  - flat-json
+  - junitxml
+  - markdown
+  - ocsf
+  - sarif
+  - spdx
+  - text
+  - unused-suppressions
+  - yaml

@@ -30,6 +30,8 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_every_registered_reporter_is_snapshotted():
     """The registry and the snapshotted set are the same set of names.

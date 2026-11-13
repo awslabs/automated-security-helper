@@ -56,6 +56,8 @@ import pytest
 # quietly, and "0 tests, green" is indistinguishable from "coverage deleted".
 from moto.server import ThreadedMotoServer
 
+from tests.utils.env_assertions import NamesOnlyEnvironment
+
 REGION = "us-east-1"
 
 
@@ -105,8 +107,14 @@ def child_env(moto_endpoint: str) -> dict[str, str]:
     with no `endpoint_url`, so this variable is what decides whether the child
     reaches moto or the internet; `test_endpoint_variable_is_load_bearing` proves
     it is actually doing that work rather than the tests passing by luck.
+
+    It is a copy of the whole environment, so it is never an operand of an
+    assertion, not even as a call's argument: a failure would print it. The tests
+    take the call's returncode into a local first (tests/utils/env_assertions.py).
+    A NamesOnlyEnvironment, so the fixture's value, which pytest prints as the
+    test's argument when it fails, shows names only.
     """
-    env = dict(os.environ)
+    env = NamesOnlyEnvironment(os.environ)
     env["AWS_ENDPOINT_URL"] = moto_endpoint
     # The committed commands invoke `python3` by name, because that is what the
     # ASH image provides. Under `uv run` the venv is already on PATH, but that is

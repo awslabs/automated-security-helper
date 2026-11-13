@@ -34,6 +34,8 @@ from tests.snapshot.console.console_inputs import (
     scan_results_model,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     ("exit_code", "incomplete"),

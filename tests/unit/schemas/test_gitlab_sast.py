@@ -8,6 +8,8 @@ from automated_security_helper.schemas.gitlab.sast import (
     Source,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestLevel:
     """Tests for Level enum."""

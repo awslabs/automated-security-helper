@@ -8,7 +8,6 @@
     "but has NOT yet been observed passing - it is the assertion, not a recording.",
     "Do not silently promote a 'specified' value to 'measured'; re-run and record."
   ],
-
   "_verdict_mapping_and_scan_flags_moved": [
     "Both used to be transcribed here from deploy/cdk/lib/ash-container-scripts.ts.",
     "They are now DERIVED into gate-contract.json by gate_contract.py, which calls",
@@ -25,7 +24,92 @@
     "Nothing that is MEASURED moves. The observations below are recordings and",
     "cannot be derived from anything; only the two values the gate owns did."
   ],
-
+  "cases": [
+    {
+      "branch": "feat/unsafe-subprocess",
+      "description": "Adds src/vulnerable.py with bandit HIGH findings. Must be blocked.",
+      "expected_ash_exit_code": 2,
+      "expected_bandit": {
+        "actionable_finding_count": 3,
+        "dependencies_satisfied": true,
+        "finding_count": 4,
+        "provenance": "measured",
+        "severity_counts": {
+          "critical": 0,
+          "high": 2,
+          "info": 0,
+          "low": 1,
+          "medium": 1,
+          "suppressed": 0
+        },
+        "status": "FAILED"
+      },
+      "expected_sarif_rule_ids": {
+        "B307": "error",
+        "B404": "note",
+        "B602": "error",
+        "B605": "error",
+        "_comment": "Rule id -> SARIF level, as observed. B404 is note/LOW and is below the MEDIUM threshold, so it is reported but not actionable."
+      },
+      "expected_verdict": "failed",
+      "measured_on": {
+        "ash_version": "v3.7.0",
+        "date": "2026-08-28",
+        "image_digest": "sha256:5898cea9c3e298dc8dea5638f86a0ee9c13f37768890807987206776bc8abf07",
+        "note": "In Lambda the SAME image and flags produced exit 0 and verdict 'passed' with 5 of 10 scanners MISSING/ERROR. That is the defect.",
+        "scan_duration_seconds": 78.34,
+        "scanners_run": 10,
+        "where": "locally, in the deployed gate image, all filesystems writable"
+      },
+      "name": "vulnerable",
+      "provenance": "measured",
+      "required_scanners": [
+        "bandit"
+      ]
+    },
+    {
+      "branch": "feat/safe-math",
+      "description": "Adds src/safe_math.py with no findings. Must pass, and must pass for the right reason.",
+      "expected_ash_exit_code": 0,
+      "expected_bandit": {
+        "actionable_finding_count": 0,
+        "dependencies_satisfied": true,
+        "provenance": "specified",
+        "status": "PASSED"
+      },
+      "expected_sarif_rule_ids": {},
+      "expected_verdict": "passed",
+      "name": "clean",
+      "not_measured_because": [
+        "The local run of this case was blocked by the operator's permission",
+        "system during the 2026-08-28 validation, so its local exit code was never",
+        "observed. In Lambda it returned verdict 'passed' - but so did the",
+        "vulnerable case, with an identical all-MISSING/ERROR scanner table, so",
+        "that observation is worthless as confirmation. Run the harness to record",
+        "a real value."
+      ],
+      "provenance": "specified",
+      "required_scanners": [
+        "bandit"
+      ]
+    }
+  ],
+  "cross_case_invariant": {
+    "_comment": [
+      "The single most important assertion. During validation BOTH cases reported",
+      "'passed'. A gate that returns one verdict for all inputs is broken",
+      "regardless of which verdict it picks, and only comparing the two cases",
+      "reveals it. Neither case alone can."
+    ],
+    "observed_broken_state": {
+      "clean_verdict": "passed",
+      "date": "2026-08-28",
+      "diverged": false,
+      "scanner_table": "bandit MISSING, checkov MISSING, detect-secrets ERROR, opengrep ERROR, semgrep MISSING",
+      "vulnerable_verdict": "passed"
+    },
+    "verdicts_must_differ": true
+  },
   "integrity_invariants": {
     "_comment": [
       "These are what turn a passing verdict into trustworthy evidence. The gate",
@@ -40,11 +124,6 @@
       "dependencies were absent; ERROR means it ran and failed. Only those two are",
       "faults."
     ],
-    "summary_stats_missing_must_equal": 0,
-    "required_scanner_status_must_not_be": ["MISSING", "ERROR"],
-    "required_scanner_dependencies_satisfied": true,
-    "skipped_is_tolerated": true,
-
     "_do_not_key_on_has_issues": [
       "validation_summary.*.has_issues LOOKS like the signal for this and is NOT.",
       "MEASURED 2026-08-28, on a run with four scanner tools absent:",
@@ -68,77 +147,16 @@
       "agree on the run in front of you tell you nothing about whether they are",
       "interchangeable."
     ],
-    "validation_summary_has_issues_must_be": false,
-    "validation_summary_has_issues_is_advisory_only": true
+    "required_scanner_dependencies_satisfied": true,
+    "required_scanner_status_must_not_be": [
+      "MISSING",
+      "ERROR"
+    ],
+    "skipped_is_tolerated": true,
+    "summary_stats_missing_must_equal": 0,
+    "validation_summary_has_issues_is_advisory_only": true,
+    "validation_summary_has_issues_must_be": false
   },
-
-  "cases": [
-    {
-      "name": "vulnerable",
-      "description": "Adds src/vulnerable.py with bandit HIGH findings. Must be blocked.",
-      "branch": "feat/unsafe-subprocess",
-      "expected_verdict": "failed",
-      "expected_ash_exit_code": 2,
-      "provenance": "measured",
-      "required_scanners": ["bandit"],
-      "expected_bandit": {
-        "status": "FAILED",
-        "dependencies_satisfied": true,
-        "severity_counts": {
-          "critical": 0,
-          "high": 2,
-          "medium": 1,
-          "low": 1,
-          "info": 0,
-          "suppressed": 0
-        },
-        "finding_count": 4,
-        "actionable_finding_count": 3,
-        "provenance": "measured"
-      },
-      "expected_sarif_rule_ids": {
-        "_comment": "Rule id -> SARIF level, as observed. B404 is note/LOW and is below the MEDIUM threshold, so it is reported but not actionable.",
-        "B602": "error",
-        "B605": "error",
-        "B307": "error",
-        "B404": "note"
-      },
-      "measured_on": {
-        "date": "2026-08-28",
-        "where": "locally, in the deployed gate image, all filesystems writable",
-        "ash_version": "v3.7.0",
-        "image_digest": "sha256:5898cea9c3e298dc8dea5638f86a0ee9c13f37768890807987206776bc8abf07",
-        "scan_duration_seconds": 78.34,
-        "scanners_run": 10,
-        "note": "In Lambda the SAME image and flags produced exit 0 and verdict 'passed' with 5 of 10 scanners MISSING/ERROR. That is the defect."
-      }
-    },
-    {
-      "name": "clean",
-      "description": "Adds src/safe_math.py with no findings. Must pass, and must pass for the right reason.",
-      "branch": "feat/safe-math",
-      "expected_verdict": "passed",
-      "expected_ash_exit_code": 0,
-      "provenance": "specified",
-      "required_scanners": ["bandit"],
-      "expected_bandit": {
-        "status": "PASSED",
-        "dependencies_satisfied": true,
-        "actionable_finding_count": 0,
-        "provenance": "specified"
-      },
-      "expected_sarif_rule_ids": {},
-      "not_measured_because": [
-        "The local run of this case was blocked by the operator's permission",
-        "system during the 2026-08-28 validation, so its local exit code was never",
-        "observed. In Lambda it returned verdict 'passed' - but so did the",
-        "vulnerable case, with an identical all-MISSING/ERROR scanner table, so",
-        "that observation is worthless as confirmation. Run the harness to record",
-        "a real value."
-      ]
-    }
-  ],
-
   "verdict_integrity_invariant": {
     "_comment": [
       "The conjunction that pins the defect: a passing verdict is legitimate ONLY",
@@ -155,10 +173,12 @@
       "non-passing verdict. Only expected_verdict_after_fix below changes; the",
       "invariant, the recorded table and the harness all stay as they are."
     ],
-    "passing_verdicts": ["passed"],
-    "fault_statuses": ["MISSING", "ERROR"],
     "a_passing_verdict_requires_zero_faulted_scanners": true,
     "expected_verdict_after_fix": "errored",
+    "fault_statuses": [
+      "MISSING",
+      "ERROR"
+    ],
     "known_defect": {
       "_comment": [
         "Until the exit-code fix lands this replay is EXPECTED TO FAIL, and the",
@@ -168,9 +188,6 @@
         "Do not delete the case at that point; flipping the flag keeps it guarding",
         "against a re-regression."
       ],
-      "expected_to_fail": true,
-      "tracking": "ASH _compute_exit_code derives the exit code from finding counts only and never reads scanner status; core/unified_metrics.py treats MISSING as passed",
-      "fix_must_key_on": "Iterate per-scanner scanner_results[*].status and treat both ERROR and MISSING as verdict-affecting. NOT validation_summary.*.has_issues, and NOT any summary_stats counter -- see _do_not_key_on_summary_stats_alone and _do_not_key_on_has_issues above",
       "_do_not_key_on_summary_stats_alone": [
         "An earlier revision of this field said to key on metadata.summary_stats.missing.",
         "That is WRONG for ERROR scanners and would pass the case this fixture exists",
@@ -211,24 +228,13 @@
         "you tell you nothing about whether either is sufficient. --selftest has a",
         "dedicated case with a scanner in ERROR while summary_stats.missing is 0, which",
         "a summary_stats-keyed checker cannot pass."
-      ]
-    }
-  },
-
-  "cross_case_invariant": {
-    "_comment": [
-      "The single most important assertion. During validation BOTH cases reported",
-      "'passed'. A gate that returns one verdict for all inputs is broken",
-      "regardless of which verdict it picks, and only comparing the two cases",
-      "reveals it. Neither case alone can."
-    ],
-    "verdicts_must_differ": true,
-    "observed_broken_state": {
-      "date": "2026-08-28",
-      "vulnerable_verdict": "passed",
-      "clean_verdict": "passed",
-      "diverged": false,
-      "scanner_table": "bandit MISSING, checkov MISSING, detect-secrets ERROR, opengrep ERROR, semgrep MISSING"
-    }
+      ],
+      "expected_to_fail": true,
+      "fix_must_key_on": "Iterate per-scanner scanner_results[*].status and treat both ERROR and MISSING as verdict-affecting. NOT validation_summary.*.has_issues, and NOT any summary_stats counter -- see _do_not_key_on_summary_stats_alone and _do_not_key_on_has_issues above",
+      "tracking": "ASH _compute_exit_code derives the exit code from finding counts only and never reads scanner status; core/unified_metrics.py treats MISSING as passed"
+    },
+    "passing_verdicts": [
+      "passed"
+    ]
   }
 }

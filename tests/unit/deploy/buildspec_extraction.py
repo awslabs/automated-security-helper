@@ -149,7 +149,7 @@ def _marker_locations(marker: str) -> dict[str, tuple[int, int]]:
 def _marker_report(marker: str) -> str:
     """Human-readable map of where a marker actually lives right now.
 
-    WHY THIS EXISTS: the first time a lane changed which scripts land in which
+    WHY THIS EXISTS: the first time a change moved which scripts land in which
     template, these tests failed with "no buildspec contains marker X" and no hint
     about where X had gone. Diagnosing that took far longer than it should have.
     Every failure path that cannot find a marker prints this, so the next reader

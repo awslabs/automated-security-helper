@@ -26,6 +26,8 @@ from automated_security_helper.utils.sarif_utils import (
     normalize_sarif_result_severities,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _report(
     score: object,
@@ -183,24 +185,79 @@ def _unlevelled_report() -> SarifReport:
     )
 
 
-def test_result_with_no_level_key_resolves_to_critical_not_info():
+def test_result_with_no_level_key_resolves_to_the_missing_level_not_info():
     """SARIF makes ``level`` optional; omitting it must not erase the severity.
 
-    The field default is ``error``, so the fallback owes this result CRITICAL.
-    Resolving it to "info" instead puts the finding below every threshold above
-    INFO, which turns a real finding into a passing scan.
+    The field default is MISSING_SARIF_LEVEL, SARIF's own ``warning`` (3.27.10),
+    so the fallback owes this result MEDIUM, as the gate and every report read
+    it. Resolving it to "info" instead puts the finding below every threshold
+    above INFO, which turns a real finding into a passing scan. (The default was
+    ``error``, CRITICAL, while the gate read the same result as LOW.)
     """
     result = _unlevelled_report().runs[0].results[0]
 
-    assert _resolve_result_severity(result) == "critical"
+    assert _resolve_result_severity(result) == "medium"
 
 
-def test_metrics_path_counts_an_unlevelled_result_as_critical():
+def test_metrics_path_counts_an_unlevelled_result_as_medium():
     """The per-scanner counter is what ``determine_status`` reads for the gate."""
     counts = get_severity_metrics_from_sarif(_unlevelled_report(), MagicMock())
 
-    assert counts.critical == 1
+    assert counts.medium == 1
+    assert counts.critical == 0
     assert counts.info == 0
+
+
+def test_an_explicit_null_level_is_counted_medium_not_info():
+    """A result whose level is ``null`` (not merely absent) is None on the model;
+    the counter read a falsy level as "info" while every gate grades it MEDIUM."""
+    report = _report(None, issue_severity=None)
+    report.runs[0].results[0].level = None
+
+    counts = get_severity_metrics_from_sarif(report, MagicMock())
+
+    assert counts.medium == 1
+    assert counts.info == 0
+
+
+def test_a_null_level_given_in_the_document_is_counted_medium_not_info():
+    """The same result built the way a scanner's file reaches ASH: through
+    ``model_validate`` with ``"level": null`` in the document, so the field is
+    set to None by validation rather than assigned after construction."""
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "bandit"}},
+                    "results": [
+                        {
+                            "ruleId": "B105",
+                            "level": None,
+                            "message": {"text": "hardcoded password string"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert report.runs[0].results[0].level is None
+
+    counts = get_severity_metrics_from_sarif(report, MagicMock())
+
+    assert counts.medium == 1
+    assert counts.info == 0
+
+
+def test_a_padded_issue_severity_is_written_back_canonical():
+    """result_severity strips and upper-cases on its read, but the gate counters
+    and junitxml compare the stored value as written, so " high " was HIGH in the
+    summary and graded by its SARIF level everywhere else."""
+    report = _report(None, issue_severity=" high ")
+
+    normalize_sarif_result_severities(report)
+
+    assert report.runs[0].results[0].properties.issue_severity == "HIGH"
 
 
 def test_level_held_as_an_enum_member_still_resolves():

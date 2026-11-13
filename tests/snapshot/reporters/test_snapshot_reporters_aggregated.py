@@ -21,6 +21,8 @@ from tests.snapshot.support.fixture_model import (
 )
 from tests.snapshot.support.reporter_catalog import reporter_classes
 
+pytestmark = pytest.mark.unit
+
 WORKSPACE_FIXTURES = {
     "workspace": ("fixture_workspace_model", WORKSPACE_FILE),
     "skipped-workspace": ("fixture_skipped_workspace_model", SKIPPED_WORKSPACE_FILE),
@@ -62,7 +64,7 @@ def test_workspace_report_manifest(variant, request, tmp_path, text_snapshot):
     """``reports/workspace-reports.json``: which reporters merged, which were withheld.
 
     Built-in reporters only. The four AWS reporters read their region, profile and
-    destination from the environment when their module is imported, so whether
+    destination from the environment when their config is built, so whether
     they are "skipped: dependencies" or "per-project" here would depend on the
     machine running the test rather than on ASH.
     """

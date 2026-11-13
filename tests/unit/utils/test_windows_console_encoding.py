@@ -32,6 +32,7 @@ from unittest.mock import patch
 import pytest
 
 from automated_security_helper.utils.log import configure_windows_safe_logging
+from tests.utils.windows_console import windows_logging_kept_in_the_test
 
 # The characters ASH actually emits from non-logging call sites.
 ASH_CONSOLE_SYMBOLS = ["❌", "✅", "⚠", "️", "✓", "\U0001f527"]
@@ -44,6 +45,7 @@ def _cp1252_stream() -> io.TextIOWrapper:
     )
 
 
+@pytest.mark.unit
 class TestSymbolsAreGenuinelyUnencodable:
     """Guard the premise: without the fix these characters really do fail."""
 
@@ -59,6 +61,7 @@ class TestSymbolsAreGenuinelyUnencodable:
             stream.write("❌ Error validating config: boom\n")
 
 
+@pytest.mark.unit
 class TestConfigureWindowsSafeLogging:
     def test_is_a_noop_off_windows(self):
         """Must not touch stdout on Linux or macOS."""
@@ -69,8 +72,9 @@ class TestConfigureWindowsSafeLogging:
         assert sys.stdout is before
         assert getattr(sys.stdout, "encoding", None) == before_encoding
 
-    def test_makes_ash_symbols_writable_on_a_cp1252_console(self):
+    def test_makes_ash_symbols_writable_on_a_cp1252_console(self, monkeypatch):
         """The regression: emoji-bearing console writes must stop raising."""
+        windows_logging_kept_in_the_test(monkeypatch)
         replacement = _cp1252_stream()
         original_out, original_err = sys.stdout, sys.stderr
         try:
@@ -92,8 +96,9 @@ class TestConfigureWindowsSafeLogging:
             f"stdout left at {encoding!r}; console writes will still raise"
         )
 
-    def test_stderr_is_handled_too(self):
+    def test_stderr_is_handled_too(self, monkeypatch):
         """The compounding failure path writes to stderr as well."""
+        windows_logging_kept_in_the_test(monkeypatch)
         replacement = _cp1252_stream()
         original_out, original_err = sys.stdout, sys.stderr
         try:
@@ -111,8 +116,9 @@ class TestConfigureWindowsSafeLogging:
 
         assert "utf-8" in encoding.lower()
 
-    def test_survives_a_stream_without_reconfigure(self):
+    def test_survives_a_stream_without_reconfigure(self, monkeypatch):
         """Must degrade quietly rather than raise on an exotic stream."""
+        windows_logging_kept_in_the_test(monkeypatch)
 
         class Bare:
             encoding = "cp1252"
@@ -135,6 +141,7 @@ class TestConfigureWindowsSafeLogging:
             sys.stdout, sys.stderr = original_out, original_err
 
 
+@pytest.mark.unit
 class TestGetLoggerAppliesIt:
     def test_get_logger_configures_the_console(self):
         """get_logger is the entry point every CLI path goes through."""
@@ -234,6 +241,7 @@ def _exceptions_raised_on_threads():
         threading.excepthook = previous
 
 
+@pytest.mark.unit
 class TestTheCaptureHazardIsReal:
     """Guard the premise, in the same spirit as the encode-side control above.
 
@@ -253,6 +261,7 @@ class TestTheCaptureHazardIsReal:
             rounded.encode("utf-8").decode("cp1252")  # must not raise
 
 
+@pytest.mark.integration
 class TestCapturedChildOutputIsDecodedExplicitly:
     """A captured ASH stream must not be decoded with the host code page."""
 
@@ -378,18 +387,24 @@ class TestCapturedChildOutputIsDecodedExplicitly:
         with subprocess.Popen(
             self._child(self.PAYLOAD), stdout=subprocess.PIPE, encoding="cp1252"
         ) as proc:
-            with _exceptions_raised_on_threads() as on_threads:
+            try:
+                with _exceptions_raised_on_threads() as on_threads:
 
-                def _readerthread(fh, buf):  # Popen._communicate's body, verbatim.
-                    buf.append(fh.read())
-                    fh.close()
+                    def _readerthread(fh, buf):  # Popen._communicate's body, verbatim.
+                        buf.append(fh.read())
+                        fh.close()
 
-                reader = threading.Thread(
-                    target=_readerthread, args=(proc.stdout, buffer)
-                )
-                reader.start()
-                reader.join(timeout=60)
-            assert not reader.is_alive(), "the reader thread never finished"
+                    reader = threading.Thread(
+                        target=_readerthread, args=(proc.stdout, buffer)
+                    )
+                    reader.start()
+                    reader.join(timeout=60)
+                assert not reader.is_alive(), "the reader thread never finished"
+            finally:
+                # Popen.__exit__ waits for the child with no timeout, so a child
+                # still running here would hold the test past the join's bound.
+                if proc.poll() is None:
+                    proc.kill()
 
         assert [type(exc) for exc in on_threads] == [UnicodeDecodeError], (
             f"expected one decode failure on the reader thread, got {on_threads!r}"

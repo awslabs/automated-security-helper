@@ -16,7 +16,10 @@ To investigate...
   4. Review scanner-specific reports and outputs in the '.ash/ash_output/scanners' directory
 
 === ASH Exit Codes ===
-  0: Success - No actionable findings or not configured to fail on findings
-  1: Error during execution
-  2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+  0: success
+  1: scan errors / scanner failures
+  2: actionable findings at or above threshold (fail_on_findings is true; default true)
+  3: invalid config or refused input
+  4: workspace definition or policy error
+  5: usage error
 ERROR (2) Exiting due to 4 actionable findings found in ASH scan

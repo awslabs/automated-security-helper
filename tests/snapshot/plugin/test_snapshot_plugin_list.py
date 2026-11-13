@@ -21,6 +21,8 @@ import pytest
 
 from tests.snapshot.support.cli import CONFIG_HOSTS, run_cli, simulated_host
 
+pytestmark = pytest.mark.unit
+
 #: scanner name -> (detected version, dependencies_satisfied). Scanners not listed
 #: report neither, which renders as "Unknown" / "Unknown".
 FAKE_PROBES = {
@@ -37,6 +39,28 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     project.mkdir()
     monkeypatch.chdir(project)
     return project
+
+
+@pytest.fixture
+def no_ruby_toolchain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the machine's Ruby toolchain read as absent, as the goldens record it.
+
+    Building the cfn-nag scanner logs a WARNING naming whichever install
+    prerequisites are missing (RubyGems, a C compiler or the Windows devkit), and
+    `ash plugin list` builds every scanner, so the listing's first lines depend on
+    what the machine running the test has installed. The goldens record a machine
+    with none of it. A runner with `gem` and a compiler (the hosted Linux and macOS
+    images) logged no warning, and a Windows runner with `gem` but no devkit logged
+    one without the RubyGems clause. Answering "not found" for every executable
+    lookup the scanner makes, and leaving RI_DEVKIT unset, measures the same fact
+    on every machine.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cfn_nag_scanner,
+    )
+
+    monkeypatch.setattr(cfn_nag_scanner, "find_executable", lambda *_a, **_k: None)
+    monkeypatch.delenv("RI_DEVKIT", raising=False)
 
 
 @pytest.fixture
@@ -70,7 +94,7 @@ def fake_inventory(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 @pytest.mark.parametrize("host", CONFIG_HOSTS, ids=lambda h: h.id)
-def test_plugin_list(host, project_dir, monkeypatch, text_snapshot):
+def test_plugin_list(host, project_dir, monkeypatch, no_ruby_toolchain, text_snapshot):
     with simulated_host(monkeypatch, host):
         run = run_cli(["plugin", "list"])
 
@@ -82,7 +106,7 @@ def test_plugin_list(host, project_dir, monkeypatch, text_snapshot):
 
 @pytest.mark.parametrize("host", CONFIG_HOSTS, ids=lambda h: h.id)
 def test_plugin_list_show_versions(
-    host, project_dir, monkeypatch, fake_inventory, text_snapshot
+    host, project_dir, monkeypatch, no_ruby_toolchain, fake_inventory, text_snapshot
 ):
     with simulated_host(monkeypatch, host):
         run = run_cli(["plugin", "list", "--show-versions"])
@@ -92,7 +116,9 @@ def test_plugin_list_show_versions(
     assert text_snapshot("txt") == run.document
 
 
-def test_plugin_list_with_plugin_config(project_dir, monkeypatch, text_snapshot):
+def test_plugin_list_with_plugin_config(
+    project_dir, monkeypatch, no_ruby_toolchain, text_snapshot
+):
     (project_dir / "custom.yaml").write_text(
         "project_name: snapshot-demo\n"
         "scanners:\n"
@@ -121,5 +147,6 @@ def test_plugin_list_bad_config(project_dir, text_snapshot):
 
     run = run_cli(["plugin", "list", "-c", "bad.yaml"])
 
-    assert run.exit_code == 1, run.output
+    # 3, the code for an invalid configuration, as `ash scan` exits on this file.
+    assert run.exit_code == 3, run.output
     assert text_snapshot("txt") == run.document

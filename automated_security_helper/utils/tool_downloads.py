@@ -51,8 +51,8 @@ Known limitations
 * Bumping a version means replacing every digest for that tool, in both tables:
   the archive digests and the executable digests (see ``_EXECUTABLE_DIGESTS``).
   A version bumped without its digests will fail every install with an integrity
-  error, which is the intended direction to fail in. opengrep and uv name their assets without a
-  version, so for those two a bump would not even change a filename; see
+  error, which is the intended direction to fail in. cfn-guard, opengrep and uv name their assets
+  without a version, so for those a bump would not even change a filename; see
   ``_DIGESTS_TAKEN_AT`` for what catches it instead.
   Nothing bumps these pins on its own, and Dependabot cannot see a Python dict.
   ``scripts/check_pinned_tool_versions.py`` compares every pin here with its
@@ -143,12 +143,15 @@ class ToolAsset:
 # pins -- NOT the v1.1.5 default in get_opengrep_url's signature, which no caller
 # reaches because the scanner always passes its configured version.
 TOOL_VERSIONS: dict[str, str] = {
-    "grype": "v0.120.1",
-    "opengrep": "v1.30.2",
-    "syft": "v1.54.1",
-    "trivy": "v0.75.0",
+    "actionlint": "v1.7.12",
+    "cfn-guard": "3.2.1",
+    "gitleaks": "v8.30.1",
+    "grype": "v0.121.3",
+    "opengrep": "v1.33.1",
+    "syft": "v1.57.1",
+    "trivy": "v0.76.2",
     # Tagged without a leading "v" upstream, so the release URL has none either.
-    "uv": "0.12.24",
+    "uv": "0.13.7",
 }
 
 # The gem version cfn-nag installs at, kept beside the binary pins so there is one
@@ -156,27 +159,69 @@ TOOL_VERSIONS: dict[str, str] = {
 # whole gem closure is assets/Gemfile.lock; this must agree with assets/Gemfile.
 CFN_NAG_GEM_VERSION = "0.8.10"
 
+# The Bundler the container image installs cfn-nag's gems with: the Dockerfile's
+# `ARG BUNDLER_VERSION`, and the `BUNDLED WITH` line of assets/Gemfile.lock. All three
+# must agree; tests/unit/test_pinned_tool_version_check.py checks that they do.
+BUNDLER_VERSION = "2.6.9"
+
 
 # ---------------------------------------------------------------------------
 # Asset filenames, per tool, exactly as published upstream.
 # ---------------------------------------------------------------------------
 
+_ACTIONLINT_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "actionlint_1.7.12_linux_amd64.tar.gz",
+    ("linux", "arm64"): "actionlint_1.7.12_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "actionlint_1.7.12_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "actionlint_1.7.12_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "actionlint_1.7.12_windows_amd64.zip",
+    ("windows", "arm64"): "actionlint_1.7.12_windows_arm64.zip",
+}
+
+# cfn-guard's release assets carry no version in their names: every release
+# publishes ``cfn-guard-v3-<arch>-<os>-latest.tar.gz``, and the version lives only
+# in the release tag, which is the path segment of the URL. So for cfn-guard the
+# digest is the whole pin, and a version bump that forgets the digests fails every
+# install with an integrity error rather than being caught by the filename check
+# the other tools get (see _DIGESTS_TAKEN_AT).
+#
+# The linux assets are the statically linked builds (``ldd`` reports "statically
+# linked" for x86_64-linux at 3.2.1), so they run on glibc and musl hosts alike.
+# The ``ubuntu-latest`` assets the same release also publishes are not used.
+_CFN_GUARD_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "cfn-guard-v3-x86_64-linux-latest.tar.gz",
+    ("linux", "arm64"): "cfn-guard-v3-aarch64-linux-latest.tar.gz",
+    ("darwin", "amd64"): "cfn-guard-v3-x86_64-macos-latest.tar.gz",
+    ("darwin", "arm64"): "cfn-guard-v3-aarch64-macos-latest.tar.gz",
+    ("windows", "amd64"): "cfn-guard-v3-x86_64-windows-latest.tar.gz",
+    ("windows", "arm64"): "cfn-guard-v3-aarch64-windows-latest.tar.gz",
+}
+
+_GITLEAKS_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "gitleaks_8.30.1_linux_x64.tar.gz",
+    ("linux", "arm64"): "gitleaks_8.30.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "gitleaks_8.30.1_darwin_x64.tar.gz",
+    ("darwin", "arm64"): "gitleaks_8.30.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "gitleaks_8.30.1_windows_x64.zip",
+    ("windows", "arm64"): "gitleaks_8.30.1_windows_arm64.zip",
+}
+
 _GRYPE_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "grype_0.120.1_linux_amd64.tar.gz",
-    ("linux", "arm64"): "grype_0.120.1_linux_arm64.tar.gz",
-    ("darwin", "amd64"): "grype_0.120.1_darwin_amd64.tar.gz",
-    ("darwin", "arm64"): "grype_0.120.1_darwin_arm64.tar.gz",
-    ("windows", "amd64"): "grype_0.120.1_windows_amd64.zip",
+    ("linux", "amd64"): "grype_0.121.3_linux_amd64.tar.gz",
+    ("linux", "arm64"): "grype_0.121.3_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "grype_0.121.3_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "grype_0.121.3_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "grype_0.121.3_windows_amd64.zip",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
 _SYFT_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "syft_1.54.1_linux_amd64.tar.gz",
-    ("linux", "arm64"): "syft_1.54.1_linux_arm64.tar.gz",
-    ("darwin", "amd64"): "syft_1.54.1_darwin_amd64.tar.gz",
-    ("darwin", "arm64"): "syft_1.54.1_darwin_arm64.tar.gz",
-    ("windows", "amd64"): "syft_1.54.1_windows_amd64.zip",
-    ("windows", "arm64"): "syft_1.54.1_windows_arm64.zip",
+    ("linux", "amd64"): "syft_1.57.1_linux_amd64.tar.gz",
+    ("linux", "arm64"): "syft_1.57.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "syft_1.57.1_darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "syft_1.57.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "syft_1.57.1_windows_amd64.zip",
+    ("windows", "arm64"): "syft_1.57.1_windows_arm64.zip",
 }
 
 # Bare executables, not archives. The names carry no version; see _DIGESTS_TAKEN_AT.
@@ -196,11 +241,11 @@ _UV_ASSETS: dict[PlatformArch, str] = {
 }
 
 _TRIVY_ASSETS: dict[PlatformArch, str] = {
-    ("linux", "amd64"): "trivy_0.75.0_Linux-64bit.tar.gz",
-    ("linux", "arm64"): "trivy_0.75.0_Linux-ARM64.tar.gz",
-    ("darwin", "amd64"): "trivy_0.75.0_macOS-64bit.tar.gz",
-    ("darwin", "arm64"): "trivy_0.75.0_macOS-ARM64.tar.gz",
-    ("windows", "amd64"): "trivy_0.75.0_windows-64bit.zip",
+    ("linux", "amd64"): "trivy_0.76.2_Linux-64bit.tar.gz",
+    ("linux", "arm64"): "trivy_0.76.2_Linux-ARM64.tar.gz",
+    ("darwin", "amd64"): "trivy_0.76.2_macOS-64bit.tar.gz",
+    ("darwin", "arm64"): "trivy_0.76.2_macOS-ARM64.tar.gz",
+    ("windows", "amd64"): "trivy_0.76.2_windows-64bit.zip",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
@@ -210,17 +255,33 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 #
 # Transcribed verbatim from the checksums file published with each release, so a
 # reviewer can diff this block against the upstream file line for line:
-#   https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_checksums.txt
-#   https://github.com/anchore/syft/releases/download/v1.54.1/syft_1.54.1_checksums.txt
-#   https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_checksums.txt
+#   https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
+#   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
+#   https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_checksums.txt
+#   https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_checksums.txt
+#   https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_checksums.txt
+#
+# Two entries have no upstream checksums file to transcribe from, so their digests
+# were obtained differently and are stated here so a reviewer can redo it:
+#
+# * cfn-guard 3.2.1 publishes no checksums file. Its digests are the ``digest``
+#   field GitHub's release API reports for each asset
+#   (``gh release view 3.2.1 --repo aws-cloudformation/cloudformation-guard
+#   --json assets``), and each was confirmed by downloading the asset from
+#   https://github.com/aws-cloudformation/cloudformation-guard/releases/tag/3.2.1
+#   and hashing it with sha256sum.
+# * The AWS Guard Rules Registry 1.0.2 release predates GitHub's asset digests,
+#   so its one digest is sha256sum of
+#   https://github.com/aws-cloudformation/aws-guard-rules-registry/releases/download/1.0.2/ruleset-build-v1.0.2.zip
+#   as downloaded on 2026-10-06.
 #
 # opengrep publishes no checksums file. Its five digests were obtained two ways on
-# 2026-10-07 and both agreed byte for byte: the `digest` field GitHub reports for
-# each asset of the v1.30.2 release (`gh api repos/opengrep/opengrep/releases/tags/
-# v1.30.2`) and sha256sum over each asset downloaded once. Each asset's `.sig` was
-# also checked against the public key in its `.cert`, whose identity is opengrep's
-# rolling-release.yml workflow at release-v1.30.2; that check is not repeated at
-# install time (see the module docstring). tests/unit/utils/test_pinned_tool_downloads.py
+# 2026-11-10 and both agreed byte for byte: the `digest` field GitHub reports for
+# each asset of the v1.33.1 release (`gh api repos/opengrep/opengrep/releases/tags/
+# v1.33.1`) and sha256sum over each asset downloaded once. For v1.30.2 each asset's
+# `.sig` was also checked against the public key in its `.cert`; that check was not
+# repeated for v1.33.1 and is not made at install time (see the module docstring).
+# tests/unit/utils/test_pinned_tool_downloads.py
 # keeps nix/opengrep.nix's SRI copy of the four non-Windows digests equal to this one.
 #
 # uv publishes a `<asset>.sha256` beside each asset. For 0.12.24 both were downloaded
@@ -230,7 +291,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # Every line carries `# pragma: allowlist secret`, which is detect-secrets' own
 # inline marker. It is needed and it is honest: a 64-character hex string is exactly
 # what a high-entropy-string detector is built to find, and ASH scanning itself
-# reported the first 16 as CRITICAL secrets -- correctly, by its own heuristic. A published
+# reported every one as a CRITICAL secret -- correctly, by its own heuristic. A published
 # release checksum is public by construction and is the opposite of a credential:
 # it exists so that everyone can compare against it.
 #
@@ -242,82 +303,144 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # archive digest says nothing about a binary already on disk, because that binary was
 # extracted from the archive and is not the archive. The executable digest is what
 # lets ``ashx dependencies install`` recognize a copy that is already present -- the
-# container image installs these three tools into /usr/local/bin before ASH runs --
+# container image installs every pinned tool into /usr/local/bin before ASH runs --
 # and leave it alone, instead of writing a second copy of every binary into
 # ASH_BIN_PATH. trivy alone is 162 MB uncompressed.
 #
 # Derived, not transcribed: no vendor publishes it. Each archive was downloaded,
 # checked against its digest in _DIGESTS, and the member extracted and hashed, on
-# 2026-10-07 (uv 0.12.24's two on 2026-10-09). Two extractors agreed on each one:
-# Python's tarfile/zipfile with the same exactly-one-basename rule the installer uses,
-# and `tar -xzOf` / `unzip -p` piped to sha256sum. Every install re-checks it: the
-# installer refuses an extracted executable that does not hash to this value, so a
-# wrong entry fails the first real install of that asset in CI instead of sitting here.
+# 2026-10-07. Two extractors agreed on every entry: Python's tarfile/zipfile with the same
+# exactly-one-basename rule the installer uses, and `tar -xzOf` / `unzip -p` piped to
+# sha256sum. Every install re-checks it: the installer refuses an extracted
+# executable that does not hash to this value, so a wrong entry fails the first real
+# install of that asset in CI rather than sitting here unnoticed.
 #
-# The two tables are adjacent so that one line-pinned suppression covers both (see
+# _BUNDLE_CONTENTS_DIGESTS, directly after that, does the same for a rules bundle
+# (RULES_BUNDLES): the archive is not what the scanner reads, the rule files extracted
+# from it are. Its value is ``rules_bundles.contents_digest`` of every file
+# ``rules_bundles.extract_bundle`` writes: the SHA256 of their sorted
+# ``<basename><TAB><sha256>`` lines. Derived the same way, not transcribed. For the
+# Guard Rules Registry 1.0.2 the archive was downloaded and checked against its digest
+# in _DIGESTS on 2026-10-12, then extracted with ``extract_bundle``: 50 files, 4,088,497
+# bytes. ``sha256sum`` over the extracted files, written as those lines in
+# ``LC_ALL=C`` order, gave the same value. Both installers refuse an extraction that
+# does not hash to it, and an installed bundle is checked against it and nothing else.
+#
+#
+# The three tables are adjacent so that one line-pinned suppression covers them (see
 # .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
 
 _DIGESTS: dict[str, str] = {
-    # grype v0.120.1
-    "grype_0.120.1_linux_amd64.tar.gz": "0a9ee97ef5ae2ee953b0a80098105052e846cdbe319a57d808b519c33cd1343d",  # pragma: allowlist secret
-    "grype_0.120.1_linux_arm64.tar.gz": "29f47391dc283aa79fcc38e65224cd61f64dec0ecfd0db7074128ebf8ff23514",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_amd64.tar.gz": "5313004ccbc524c8757521dc3913f1edf4309f56bef06a2fb2d0c0eeade7cc62",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_arm64.tar.gz": "cf97957fa467d25575ec2cc3228289f391ea51cf88b9cffc5f83dc03d4cbc732",  # pragma: allowlist secret
-    "grype_0.120.1_windows_amd64.zip": "32e3c811f31822d17592908bafdc6288aaaca3d52583c479167a8dc8399ed65d",  # pragma: allowlist secret
-    # syft v1.54.1
-    "syft_1.54.1_linux_amd64.tar.gz": "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47",  # pragma: allowlist secret
-    "syft_1.54.1_linux_arm64.tar.gz": "dfdf0537610113edbefe1f1fc6548bc957b2d77439636ec824fcf0e10d46d054",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_amd64.tar.gz": "2956322838b2f64e470eea474495f0cd96be4f222b1ac037258cdc47d965064e",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_arm64.tar.gz": "b4319c3abaa87a0170ab76ee83ea2260ca34b53aecfa3ab0dd5428d2319d744f",  # pragma: allowlist secret
-    "syft_1.54.1_windows_amd64.zip": "8b56e8285e295e0bbed26eeea9b16ed51c493be97ccdf42dae6326c84fe8e19f",  # pragma: allowlist secret
-    "syft_1.54.1_windows_arm64.zip": "440019acac7c5b3b44edb8d224aa226b52aadca66a1c3a0a8d58a9525f675e36",  # pragma: allowlist secret
-    # trivy v0.75.0
-    "trivy_0.75.0_Linux-64bit.tar.gz": "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f",  # pragma: allowlist secret
-    "trivy_0.75.0_Linux-ARM64.tar.gz": "a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-64bit.tar.gz": "291edaa9778acbe4693d067b5ad60ee11570e5ac68296e85595417528ca641e4",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-ARM64.tar.gz": "4a77108cccf8e55c8d6823e1e759939a622277e66cd0daa3c1fc621ed69e4568",  # pragma: allowlist secret
-    "trivy_0.75.0_windows-64bit.zip": "4e43bd71a30f51aee39525f60f2b47043af77eb8df8fe082aae4372b69c6660f",  # pragma: allowlist secret
-    # opengrep v1.30.2
-    "opengrep_manylinux_x86": "a66aa3278457f02b287b985a45b6762aebcaba5000f2689245fd1ed86d1456c7",  # pragma: allowlist secret
-    "opengrep_manylinux_aarch64": "90acea5df4b733083f388d4feeb250ca802f671b33d1f222653d1e571dd2b0d8",  # pragma: allowlist secret
-    "opengrep_osx_x86": "fcf47da30d5c3a11119f2ec4e0d1ee55e3c3822e8f90d909bf9f33dfce99044a",  # pragma: allowlist secret
-    "opengrep_osx_arm64": "f1aaa30b88959cb82522c4e1475816278a1f161f994509a518453c0455f9d24b",  # pragma: allowlist secret
-    "opengrep_windows_x86.exe": "523b1074a81006436fec457e2daccf7cf7cacc04000d4482f1072a1b19bc6372",  # pragma: allowlist secret
-    # uv 0.12.24
-    "uv-x86_64-unknown-linux-gnu.tar.gz": "b4dfaef47d491a7296981f8374a4595f55dbf84e8937c8ecd2983574d8bb3da6",  # pragma: allowlist secret
-    "uv-aarch64-unknown-linux-gnu.tar.gz": "5231be65f496304623895dacdbf1de8504fec90303684bdf05805aa34414dd21",  # pragma: allowlist secret
+    # actionlint v1.7.12
+    "actionlint_1.7.12_linux_amd64.tar.gz": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",  # pragma: allowlist secret
+    "actionlint_1.7.12_linux_arm64.tar.gz": "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6",  # pragma: allowlist secret
+    "actionlint_1.7.12_darwin_amd64.tar.gz": "5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644",  # pragma: allowlist secret
+    "actionlint_1.7.12_darwin_arm64.tar.gz": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",  # pragma: allowlist secret
+    "actionlint_1.7.12_windows_amd64.zip": "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9",  # pragma: allowlist secret
+    "actionlint_1.7.12_windows_arm64.zip": "cadcf7ea4efe3a68728893813643cebe1185e5b1d4be5b96245f65c9a4d5ea41",  # pragma: allowlist secret
+    # cfn-guard 3.2.1
+    "cfn-guard-v3-x86_64-linux-latest.tar.gz": "8c66efb19c63e6c2bf26b9a41bbcf2f85baa8a937b01d350940194faaf64cf1d",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-linux-latest.tar.gz": "cd378026dad0f865926ab1d1c082e2faf825f7fd888a9fe6b5c142cdf175c129",  # pragma: allowlist secret
+    "cfn-guard-v3-x86_64-macos-latest.tar.gz": "5089dfaa05a766cf118a020518e62f77eddbd43acf3a0b69d36b23175c6c6fda",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-macos-latest.tar.gz": "4c1eb10c061731159eaaf0e7dbd465db9fa4b767b82186a4ab489671cc00b7d0",  # pragma: allowlist secret
+    "cfn-guard-v3-x86_64-windows-latest.tar.gz": "52af28c02081f1067c6710c08619d359899734ec59d51f17f68e1b4b396a1203",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-windows-latest.tar.gz": "faa9a14382314cd2c3ce6adc21388e0422280ab33ded3c8b1321877efd761300",  # pragma: allowlist secret
+    # aws-guard-rules-registry 1.0.2 (a rules bundle, not a binary; see RULES_BUNDLES)
+    "ruleset-build-v1.0.2.zip": "dc21aaad601c673843c299191d864cd9b9db32475b1937d930d6069ddde73296",  # pragma: allowlist secret
+    # gitleaks v8.30.1
+    "gitleaks_8.30.1_linux_x64.tar.gz": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",  # pragma: allowlist secret
+    "gitleaks_8.30.1_linux_arm64.tar.gz": "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080",  # pragma: allowlist secret
+    "gitleaks_8.30.1_darwin_x64.tar.gz": "dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709",  # pragma: allowlist secret
+    "gitleaks_8.30.1_darwin_arm64.tar.gz": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",  # pragma: allowlist secret
+    "gitleaks_8.30.1_windows_x64.zip": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",  # pragma: allowlist secret
+    "gitleaks_8.30.1_windows_arm64.zip": "b95f5e4f5c425cedca7ee203d9afd29597e692c4924a12ed42f970537c72cc0f",  # pragma: allowlist secret
+    # grype v0.121.3
+    "grype_0.121.3_linux_amd64.tar.gz": "e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85",  # pragma: allowlist secret
+    "grype_0.121.3_linux_arm64.tar.gz": "b7815598d48da78bfd16f5b98ef28e1bb09c03d34fc8c3e350f99b6ccb3c7cba",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_amd64.tar.gz": "65bfb1b3b30d32e9dab156a60003c7146e619f649992be227bf09c9ccbf44f7e",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_arm64.tar.gz": "54336f2cd8cdee8b3d8ea83462561ff7fa9293498054c7c53a193db44bfea4c8",  # pragma: allowlist secret
+    "grype_0.121.3_windows_amd64.zip": "3007a5afea25c60030a49d6c24d4e5abb6c94c0dbeed7ea303eb26df8e900c18",  # pragma: allowlist secret
+    # syft v1.57.1
+    "syft_1.57.1_linux_amd64.tar.gz": "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c",  # pragma: allowlist secret
+    "syft_1.57.1_linux_arm64.tar.gz": "aa3d3e07344f590bcce8d31043b752daa76c8a56c2aa34ceeee63c6168152582",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_amd64.tar.gz": "2355758c1142982a67b309604c5d75effdbe638a57c771979ea8fd1a16656abc",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_arm64.tar.gz": "e0a74a5d2688d1254b4e17b71f068a83215e3625f846265bf6614c7ba06f3a96",  # pragma: allowlist secret
+    "syft_1.57.1_windows_amd64.zip": "3a01fe865076bb548352195b77e88fa4649277861ea458efe165c3a810b6dcc7",  # pragma: allowlist secret
+    "syft_1.57.1_windows_arm64.zip": "8cdd580b5f7160d12b66c7c5191100a6cf792e130d8a28deeae5ea45e0030e00",  # pragma: allowlist secret
+    # trivy v0.76.2
+    "trivy_0.76.2_Linux-64bit.tar.gz": "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf",  # pragma: allowlist secret
+    "trivy_0.76.2_Linux-ARM64.tar.gz": "ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-64bit.tar.gz": "e08bb9ea449ecf66c6bfb03cbb8697c503ff33d35fc585c9747e3eaeb7ed4c7b",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-ARM64.tar.gz": "ae7ea358326960406b703c77b2ac490190797d80b306b5b50c2a27221da0a5b8",  # pragma: allowlist secret
+    "trivy_0.76.2_windows-64bit.zip": "691f737a7e5566a673c3a74dab9160552ec32101e953b659e5c77443d16dddb6",  # pragma: allowlist secret
+    # opengrep v1.33.1
+    "opengrep_manylinux_x86": "46e8133cc490f9f50518061590ce2f6be5a08afaeda034471c0ceda4b3899808",  # pragma: allowlist secret
+    "opengrep_manylinux_aarch64": "d1433f63a90b8bc0b6ad4b498a13b372b856ce9a754a43484ba4920fe2d76dcf",  # pragma: allowlist secret
+    "opengrep_osx_x86": "c3bd18e0d898d44e28419d95dad57c8928bb46ab32889a0ee1f72a87ad9627af",  # pragma: allowlist secret
+    "opengrep_osx_arm64": "a17c1881bb40e3214266a7a291cf4f2ae3bc56c1715628b5712d2ec816bc3e2d",  # pragma: allowlist secret
+    "opengrep_windows_x86.exe": "132e606e071bdd3928286fddc893198a6106a90820d46e21197e0ace1a23e0c1",  # pragma: allowlist secret
+    # uv 0.13.7
+    "uv-x86_64-unknown-linux-gnu.tar.gz": "c5221ff41b7892bfc223543883600125f6a47fe845093e0f5bdff4f359196d83",  # pragma: allowlist secret
+    "uv-aarch64-unknown-linux-gnu.tar.gz": "71279f8d3c67241e807b9d8db872d1bf541579fb9f08b7d1eb1682196d1e57dc",  # pragma: allowlist secret
 }
 
 # SHA256 of the executable inside each archive above; see the comment before _DIGESTS.
 _EXECUTABLE_DIGESTS: dict[str, str] = {
-    # grype v0.120.1
-    "grype_0.120.1_linux_amd64.tar.gz": "d6e3248b0e788b4da7450a9e03d1e72811771cf97de3640a18e6517bf6507eb7",  # pragma: allowlist secret
-    "grype_0.120.1_linux_arm64.tar.gz": "94afbea0a9b65a3a83b820e622e8ac337e26608c860315208d58dad9a80b25db",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_amd64.tar.gz": "4042c050aa6581f6c852d611c51ec62577dff24059547307063a317b975cb075",  # pragma: allowlist secret
-    "grype_0.120.1_darwin_arm64.tar.gz": "1de9d74fff477a652408406b45786ed5694e3030c89dc75805ffe9424c802d36",  # pragma: allowlist secret
-    "grype_0.120.1_windows_amd64.zip": "96373670a07b8b6cbcfff4331c8b3d8ffb70d570f072450f8548d04bbe2db537",  # pragma: allowlist secret
-    # syft v1.54.1
-    "syft_1.54.1_linux_amd64.tar.gz": "dbf75864e7a7ff9e1fbf00552c31483f693188632a9f68f343cd7653dac513d6",  # pragma: allowlist secret
-    "syft_1.54.1_linux_arm64.tar.gz": "7d3cc523a2652d26568b9b2b94b5419dbf05f34ce896cf29904a0073d84eecf2",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_amd64.tar.gz": "9de0c19c5e6bf06884c4699c11449fcf97cfe68b7d0451730dfc38894c6b3bda",  # pragma: allowlist secret
-    "syft_1.54.1_darwin_arm64.tar.gz": "bc08d98ac3ca9cf475952b8eab22dfda70f3ab475ceb4e0113b9f77b24b75e26",  # pragma: allowlist secret
-    "syft_1.54.1_windows_amd64.zip": "b7e78564e72dc550301ff221c9e034d9ece77d16f8e5cc0f7782caa302addbc6",  # pragma: allowlist secret
-    "syft_1.54.1_windows_arm64.zip": "a6dc42b0802fcad9582b178bc6117e4c3fe7cd94912d14054bb489717f34e223",  # pragma: allowlist secret
-    # trivy v0.75.0
-    "trivy_0.75.0_Linux-64bit.tar.gz": "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e",  # pragma: allowlist secret
-    "trivy_0.75.0_Linux-ARM64.tar.gz": "869e310e208f0f2e3e90e4f842cc6adaa2b2c046fecbaade481e6b23fcc8f2a9",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-64bit.tar.gz": "484287e06ab2e4038c42ba396da8637aaaca0967e3e65840563706a0284169b4",  # pragma: allowlist secret
-    "trivy_0.75.0_macOS-ARM64.tar.gz": "32b84c068e11e5381fc85d3fe2e8ac238659ab22524ce1b2b9dfcbd0b1f7331a",  # pragma: allowlist secret
-    "trivy_0.75.0_windows-64bit.zip": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6",  # pragma: allowlist secret
-    # uv 0.12.24
-    "uv-x86_64-unknown-linux-gnu.tar.gz": "d600a831d3e35128156b89786b0a2d1088cb77c2078d16457f6187e78ba1f085",  # pragma: allowlist secret
-    "uv-aarch64-unknown-linux-gnu.tar.gz": "ce732f99771ba9b634b61dea5f3cb383f7d85292993deb0b5885764bb5308bc4",  # pragma: allowlist secret
+    # actionlint v1.7.12
+    "actionlint_1.7.12_linux_amd64.tar.gz": "c872d6db8c6bf83a8eaa704fc93999f027d55dffbc63b8a6abdccb47df5f4cd4",  # pragma: allowlist secret
+    "actionlint_1.7.12_linux_arm64.tar.gz": "ac0323433c2853ec3fb978c611430c5b3dc5d43c58d1a1ec031b00ab572beb60",  # pragma: allowlist secret
+    "actionlint_1.7.12_darwin_amd64.tar.gz": "d1f7cee75ae2873609bd9567b4600bebc5315a5e733e73202987a44fafdd53b2",  # pragma: allowlist secret
+    "actionlint_1.7.12_darwin_arm64.tar.gz": "8db11704dc296f096216db4db65d86cd7f0ebfdf4c38453a1da276b137b88388",  # pragma: allowlist secret
+    "actionlint_1.7.12_windows_amd64.zip": "54ca21be3de4c7cfa26914aa8b61bd76bf573ef3caac5f80d110558cdf241718",  # pragma: allowlist secret
+    "actionlint_1.7.12_windows_arm64.zip": "dc172c9dd32275b4a563143a318a48c91dff44fabafb23b7d1a05ed9c106a488",  # pragma: allowlist secret
+    # cfn-guard 3.2.1
+    "cfn-guard-v3-x86_64-linux-latest.tar.gz": "75109d136e80060bee5572a23d0c1110949c02a8cebb2a56284866ab906b3978",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-linux-latest.tar.gz": "9f8d9a7bc483b39468595b91e99369e8bdbfb12160182a2e2c64ba758892bb79",  # pragma: allowlist secret
+    "cfn-guard-v3-x86_64-macos-latest.tar.gz": "d4e79468a54262b4bf4e963da661bb0e610db9ffb97f378c3588e8d57c2a5e7d",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-macos-latest.tar.gz": "09601e53649b8ca352800d0578e1c810a322a38d8c75fa7b8cbdbfb0c7e32be3",  # pragma: allowlist secret
+    "cfn-guard-v3-x86_64-windows-latest.tar.gz": "a8d57b739b6ac02dbf9ab20e3e91d6761abff706eb5ea01674ff430c2aa179f9",  # pragma: allowlist secret
+    "cfn-guard-v3-aarch64-windows-latest.tar.gz": "c163f76f71af20c9437daec7af0ef9705bb2adadeef29bdeacf45938331d5722",  # pragma: allowlist secret
+    # gitleaks v8.30.1
+    "gitleaks_8.30.1_linux_x64.tar.gz": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",  # pragma: allowlist secret
+    "gitleaks_8.30.1_linux_arm64.tar.gz": "00e91bbe655bd7c47753e8cfe61cb76ea1a5d7e7702fe161ee40102b46b3823b",  # pragma: allowlist secret
+    "gitleaks_8.30.1_darwin_x64.tar.gz": "cee01fea7173f1b779dff188e1c26ecbcb4027d394acc573b23aaf0be260e291",  # pragma: allowlist secret
+    "gitleaks_8.30.1_darwin_arm64.tar.gz": "ba52fb1bfabbcde42f032afad3d6e0b19dff8ed105229a16e7caa338bbc0e84f",  # pragma: allowlist secret
+    "gitleaks_8.30.1_windows_x64.zip": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c",  # pragma: allowlist secret
+    "gitleaks_8.30.1_windows_arm64.zip": "200df852fdecbedb19a33960657333cba5e231740bc8968972b507b50f93b194",  # pragma: allowlist secret
+    # grype v0.121.3
+    "grype_0.121.3_linux_amd64.tar.gz": "30f8f7de5dda71952a20d4955034d30a081a5d10e6bd00d67ce78b56fd0251dc",  # pragma: allowlist secret
+    "grype_0.121.3_linux_arm64.tar.gz": "9d7014d4d96f5d91a8bf0cbc439fcc34750a06a079e30df7c684dc3f7d89d431",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_amd64.tar.gz": "adf8a820354af9b57531509d6350cade122e7cb4ae944177b24347970a94e188",  # pragma: allowlist secret
+    "grype_0.121.3_darwin_arm64.tar.gz": "13904166719c73277fe6b1ebc2636063627b802302787f5831ad4a545a9b93ab",  # pragma: allowlist secret
+    "grype_0.121.3_windows_amd64.zip": "05e7faff2354b7e125ad4bd481a4a9ac967325c49f5331dfcffac7e98a3e262d",  # pragma: allowlist secret
+    # syft v1.57.1
+    "syft_1.57.1_linux_amd64.tar.gz": "de3982edbbc250c4a40764c7b1f30bbf54b681f9b99391ee6b85bfdfa5d4dffe",  # pragma: allowlist secret
+    "syft_1.57.1_linux_arm64.tar.gz": "b0b37d4e18dbb923c9321a332c2f5b1ef2db13f599e58d6f3aee3a1ba3545365",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_amd64.tar.gz": "3e55452f3929913316a1dc3b7032b901c8a83ef26cdb9b210d93a5883be8b561",  # pragma: allowlist secret
+    "syft_1.57.1_darwin_arm64.tar.gz": "d991548e2410d494c2a0da0bf0ac433111fe842f3475f59aee1904484a3aa549",  # pragma: allowlist secret
+    "syft_1.57.1_windows_amd64.zip": "42deb23bff7852997bf0316a540d3dcb364953273152749205e47881dd270c53",  # pragma: allowlist secret
+    "syft_1.57.1_windows_arm64.zip": "fe858f3fe4d5e55d54a48bb6e93a1ceb4cf78225f54c7afe99edde86d05d6688",  # pragma: allowlist secret
+    # trivy v0.76.2
+    "trivy_0.76.2_Linux-64bit.tar.gz": "6a972c69606c7b3ea4c6bdcc6fc9332ea9ad38381624310c1e85cc77345909f3",  # pragma: allowlist secret
+    "trivy_0.76.2_Linux-ARM64.tar.gz": "7844c3851b28470b6d7f0975fa0b3262c5b2272c9a54a91f522801bb8926f51f",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-64bit.tar.gz": "d92df6dbfad2bc30e05e10508d43cdbc43f1e8553285f9d04473a10545f2e928",  # pragma: allowlist secret
+    "trivy_0.76.2_macOS-ARM64.tar.gz": "7a15c426f963473a485a4f315e21f8e2c881269d500bf0de35da13a4421fa108",  # pragma: allowlist secret
+    "trivy_0.76.2_windows-64bit.zip": "dd07adf881a72b54d1a922191d62fa939938df2155be85a727da93b67b24e617",  # pragma: allowlist secret
+    # uv 0.13.7
+    "uv-x86_64-unknown-linux-gnu.tar.gz": "4b5e59bc557ff2cd70934beb59d0eaa92820702853d49f0066b50aa11a8f0c52",  # pragma: allowlist secret
+    "uv-aarch64-unknown-linux-gnu.tar.gz": "553b3a3a31484ef9e4f220085ca672cc71c851f92a92d984646a9d1c814b02c3",  # pragma: allowlist secret
+}
+
+# What each rules bundle archive extracts to; see the comment before _DIGESTS.
+_BUNDLE_CONTENTS_DIGESTS: dict[str, str] = {
+    # aws-guard-rules-registry 1.0.2: 50 rule files
+    "ruleset-build-v1.0.2.zip": "5b5c48e45051dbd862894d9fd494deee1f52319163ea19ebabd8fb08896cd323",  # pragma: allowlist secret
 }
 
 # The version each unversioned tool's digests above were taken from.
 #
-# grype, syft and trivy put the version in every asset name, so bumping
+# The other tools put the version in every asset name, so bumping
 # TOOL_VERSIONS without the table changes every URL to a filename the digest table
 # has no entry for, and get_tool_asset refuses it by name. opengrep and uv do not:
 # `opengrep_manylinux_x86` is the name of that asset in every release. Bumping the
@@ -326,8 +449,9 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
 # message that means "possible supply-chain substitution", for what is a half-applied
 # edit. Recording the version here turns it into the same refusal by name instead.
 _DIGESTS_TAKEN_AT: dict[str, str] = {
-    "opengrep": "v1.30.2",
-    "uv": "0.12.24",
+    "cfn-guard": "3.2.1",
+    "opengrep": "v1.33.1",
+    "uv": "0.13.7",
 }
 
 # Tools whose release asset is the executable itself rather than an archive.
@@ -335,6 +459,9 @@ _BARE_EXECUTABLE_TOOLS = frozenset({"opengrep"})
 
 
 _RELEASE_BASE_URLS: dict[str, str] = {
+    "actionlint": "https://github.com/rhysd/actionlint/releases/download",
+    "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
+    "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
     "opengrep": "https://github.com/opengrep/opengrep/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
@@ -343,12 +470,92 @@ _RELEASE_BASE_URLS: dict[str, str] = {
 }
 
 _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
+    "actionlint": _ACTIONLINT_ASSETS,
+    "cfn-guard": _CFN_GUARD_ASSETS,
+    "gitleaks": _GITLEAKS_ASSETS,
     "grype": _GRYPE_ASSETS,
     "opengrep": _OPENGREP_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
     "uv": _UV_ASSETS,
 }
+
+
+@dataclass(frozen=True)
+class RulesBundle:
+    """A pinned archive of rule files, installed as a directory rather than a binary.
+
+    ``member_dir`` is the directory inside the archive that holds the rule files
+    and ``member_suffix`` the extension they carry. Only regular files directly in
+    that directory with that suffix are extracted, each to its basename, so the
+    archive's own paths are never used as a destination. That also drops the
+    ``__MACOSX/`` resource-fork entries the registry's zip carries.
+
+    ``sha256`` pins the archive (``_DIGESTS``). ``contents_sha256`` pins what it
+    extracts to (``_BUNDLE_CONTENTS_DIGESTS``): ``rules_bundles.contents_digest`` of
+    every file extracted, the SHA256 of the sorted ``"<basename>\\t<sha256>\\n"``
+    lines. An installed bundle is checked against it alone, never against the
+    manifest the installer writes beside the files. Both values move together when
+    the version does: download the new archive, extract it with
+    ``rules_bundles.extract_bundle`` and pin ``contents_digest`` of the map it
+    returns.
+    """
+
+    name: str
+    version: str
+    url: str
+    sha256: str
+    contents_sha256: str
+    member_dir: str
+    member_suffix: str
+    license: str
+
+
+#: The AWS Guard Rules Registry, the rule source for the cfn-guard scanner.
+#:
+#: Release 1.0.2 (2022-09-02) is the newest release the registry has published;
+#: later commits on its default branch were never released, and a release asset is
+#: what can be pinned by digest. The archive holds 50 rule-set files, one per
+#: compliance framework plus ``guard-rules-registry-all-rules.guard``; all 50 parse
+#: under cfn-guard 3.2.1 (each was run against a template and exited 19, the
+#: rule-failure code, rather than 255). Apache-2.0, like cfn-guard itself.
+# Private, so the pin checker does not count it twice: it reads this release from
+# THIRD_PARTY_LICENSES["aws-guard-rules-registry"], which a unit test keeps equal.
+_CFN_GUARD_RULES_RELEASE = "1.0.2"
+
+RULES_BUNDLES: dict[str, RulesBundle] = {
+    "aws-guard-rules-registry": RulesBundle(
+        name="aws-guard-rules-registry",
+        version=_CFN_GUARD_RULES_RELEASE,
+        url=(
+            "https://github.com/aws-cloudformation/aws-guard-rules-registry/"
+            f"releases/download/{_CFN_GUARD_RULES_RELEASE}/"
+            f"ruleset-build-v{_CFN_GUARD_RULES_RELEASE}.zip"
+        ),
+        sha256=_DIGESTS[f"ruleset-build-v{_CFN_GUARD_RULES_RELEASE}.zip"],
+        contents_sha256=_BUNDLE_CONTENTS_DIGESTS[
+            f"ruleset-build-v{_CFN_GUARD_RULES_RELEASE}.zip"
+        ],
+        member_dir="output",
+        member_suffix=".guard",
+        license="Apache-2.0",
+    ),
+}
+
+
+def get_rules_bundle(name: str) -> RulesBundle:
+    """The pinned rules bundle called ``name``.
+
+    Raises:
+        ToolNotProvisionableError: if no bundle of that name is pinned.
+    """
+    bundle = RULES_BUNDLES.get(name)
+    if bundle is None:
+        raise ToolNotProvisionableError(
+            f"{name} is not a pinned rules bundle. "
+            f"Pinned bundles: {', '.join(sorted(RULES_BUNDLES))}"
+        )
+    return bundle
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +652,10 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
 # scanner's name, because it is also the key ``--uv-tool-pins`` overrides.
 #
 # ``scripts/check_pinned_tool_versions.py`` reads new entries from these tables and
-# needs no edit to start reporting the tool's upstream releases.
+# needs no edit to start reporting the tool's upstream releases and what a bump of it
+# changes, as long as ``TOOL_VERSIONS`` or ``RULES_BUNDLES`` pins its download or it
+# has a ``distribution``. An entry none of those name is refused until the script is
+# taught what kind of pin it is.
 #
 # Known limitations
 # -----------------
@@ -486,8 +696,24 @@ COPYLEFT_SPDX = frozenset(
 # fails the unit tests, so a new one is classified on purpose rather than by
 # omission.
 PERMISSIVE_SPDX = frozenset(
-    {"0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "Unlicense"}
+    {
+        "0BSD",
+        "Apache-2.0",
+        "BSD-2-Clause",
+        "BSD-3-Clause",
+        "ISC",
+        "MIT",
+        "MIT-0",
+        "OpenSSL",
+        "Unlicense",
+    }
 )
+
+# License exceptions an expression may name after WITH. An exception only adds
+# permissions to the license it modifies, so it is not classified on its own: the
+# license before WITH decides whether the entry is copyleft. Listed so an unknown
+# token after WITH still fails the tests instead of passing as an exception.
+SPDX_EXCEPTIONS = frozenset({"GCC-exception-2.0"})
 
 _SPDX_OPERATORS = frozenset({"AND", "OR", "WITH"})
 
@@ -523,6 +749,12 @@ class ThirdPartyLicense:
     ASH dependency from PyPI, at whatever version pyproject's range resolves to,
     and that copy carries its own license metadata in its dist-info.
 
+    ``version_probe`` is for a component that is not an executable on PATH: a
+    rules bundle another tool reads, or a native library inside a uv tool's
+    environment. When set, the PATH and ``--version`` checks are replaced by
+    running this argv, whose output must report ``version``. ``{uv_tool_dir}`` in
+    an argument is replaced with what ``uv tool dir`` prints.
+
     ``distribution`` is set for a tool ``ashx dependencies install`` installs with
     ``uv tool install``: the PyPI name of the distribution, whose installed
     dist-info the license files are read from. ``version`` is still the upstream
@@ -536,16 +768,40 @@ class ThirdPartyLicense:
     commit: str
     files: "tuple[LicenseFile, ...]"
     executables: "tuple[str, ...]" = ()
+    version_probe: "tuple[str, ...]" = ()
     distribution: "str | None" = None
+    # Appended to the "Corresponding source" section of a copyleft entry whose
+    # binary also carries code from outside its own repository (a statically
+    # linked binary's library dependencies), saying where that source is.
+    source_note: "str | None" = None
+    # The upstream tag when it is not spelled like ``version`` (OpenSSL's
+    # "OpenSSL_1_1_1w"), or "" when the release has no tag (PCRE1).
+    tag: "str | None" = None
+    # Set for a library another wheel bundles: what bundles it, for SOURCE. Its version
+    # is that wheel's choice, so the pin checker lists it without looking it up.
+    bundled_in: "str | None" = None
 
     @property
     def executable_names(self) -> tuple[str, ...]:
         return self.executables or (self.tool,)
 
     @property
-    def spdx_identifiers(self) -> list[str]:
+    def spdx_tokens(self) -> list[str]:
+        """Every identifier in ``license``: licenses and exceptions alike."""
         tokens = self.license.replace("(", " ").replace(")", " ").split()
         return [t for t in tokens if t not in _SPDX_OPERATORS]
+
+    @property
+    def spdx_exceptions(self) -> list[str]:
+        """The identifiers that follow WITH: exceptions, not licenses."""
+        tokens = self.license.replace("(", " ").replace(")", " ").split()
+        return [b for a, b in zip(tokens, tokens[1:]) if a == "WITH"]
+
+    @property
+    def spdx_identifiers(self) -> list[str]:
+        """The license identifiers in ``license``, without operators or exceptions."""
+        exceptions = self.spdx_exceptions
+        return [t for t in self.spdx_tokens if t not in exceptions]
 
     @property
     def copyleft(self) -> bool:
@@ -561,6 +817,12 @@ class ThirdPartyLicense:
             f"git -C {directory} submodule update --init --recursive",
         ]
 
+    @property
+    def _release_tag(self) -> str:
+        if self.tag is None:
+            return self.version
+        return self.tag or "none (the repository has no tag for it; see Commit)"
+
     def source_notice(self, installed_from: "str | None" = None) -> str:
         """The text of the ``SOURCE`` file written beside the license files."""
         lines = [
@@ -571,18 +833,23 @@ class ThirdPartyLicense:
             ),
             "",
             f"Upstream repository: {self.repository}",
-            f"Release tag:         {self.version}",
+            f"Release tag:         {self._release_tag}",
             f"Commit:              {self.commit}",
         ]
         if installed_from:
             lines.append(f"Installed from:      {installed_from}")
-        lines += [
-            "",
-            (
+        if self.bundled_in:
+            statement = (
+                f"ASH ships this library as {self.bundled_in} bundles it, unmodified. "
+                "The binary was built for that wheel, not published by the project "
+                "above; the commit above is the upstream source of this release."
+            )
+        else:
+            statement = (
                 "ASH bundles this program unmodified, as published by its upstream "
                 "project."
-            ),
-        ]
+            )
+        lines += ["", statement]
         if self.copyleft:
             lines += [
                 "",
@@ -602,6 +869,8 @@ class ThirdPartyLicense:
                 "",
                 *(f"  {command}" for command in self.source_checkout),
             ]
+            if self.source_note:
+                lines += ["", self.source_note]
         return "\n".join(lines) + "\n"
 
     def index_record(self) -> "dict[str, object]":
@@ -613,7 +882,7 @@ class ThirdPartyLicense:
             "copyleft": self.copyleft,
             "repository": self.repository,
             "commit": self.commit,
-            "executables": list(self.executable_names),
+            "executables": [] if self.version_probe else list(self.executable_names),
             "files": [f.name for f in self.files] + ["SOURCE"],
         }
 
@@ -635,18 +904,28 @@ def _source_file(repository: str, commit: str, path: str) -> str:
 # and trivy the archive's LICENSE was also checked byte-identical to the
 # repository's at the same commit.
 _THIRD_PARTY_HASHES: dict[str, str] = {
+    "actionlint commit": "914e7df21a07ef503a81201c76d2b11c789d3fca",  # pragma: allowlist secret
+    "aws-guard-rules-registry commit": "72352d1e5414e496ab75fae216119e65d8e61d53",  # pragma: allowlist secret
+    "aws-guard-rules-registry/LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",  # pragma: allowlist secret
+    "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
-    "checkov commit": "e5f995a6e2dd033e99354b6c477d056eb5eaf2d0",  # pragma: allowlist secret
-    "grype commit": "6f8d854af29d3a3086b11a84afa51554a2a245fe",  # pragma: allowlist secret
-    "opengrep commit": "062fc871dbe9951887d0b985ea30977d3c36d315",  # pragma: allowlist secret
+    "cfn-lint commit": "1d19193ad79ed20c83bf3fbafb6cd506e6d15b62",  # pragma: allowlist secret
+    "checkov commit": "5038a50e21a2253cb5aed2e739d2c22ee28d2e17",  # pragma: allowlist secret
+    "cfn-guard commit": "e531ef56092abb662e08fc6062c92db6d53f99c9",  # pragma: allowlist secret
+    "cfn-guard/LICENSE": "28878a48de57252ed2c9119db71b2fc9766833a0c159d9f5df54cba4dea52dba",  # pragma: allowlist secret
+    "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
+    "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
+    "grype commit": "cd1f23eb50dfb52647090158f453c7359172591f",  # pragma: allowlist secret
+    "opengrep commit": "092c80faa0817840228349f93eff12a50fb9cf6b",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
-    "syft commit": "b254e6d92f28c3868a755f62fb3ca8f26e9fee76",  # pragma: allowlist secret
-    "trivy commit": "591e9799316a602e703f0b484f6c6d7b234ec8f3",  # pragma: allowlist secret
+    "syft commit": "a0c0d3890a9d79421c403e8fcadec50a2e55bf21",  # pragma: allowlist secret
+    "trivy commit": "3f6334d223b52188324af3b9923b4249cd206652",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
-    "uv commit": "5411378eb76dc1ea1ad90aeb10e84e997e5bbd96",  # pragma: allowlist secret
+    "uv commit": "316c827e058c16b71d5c507a20729c2995a7bcce",  # pragma: allowlist secret
     "uv/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",  # pragma: allowlist secret
     "uv/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",  # pragma: allowlist secret
+    "zizmor commit": "21bd300700d43d9ba04b0c1fce72a89391ac80b4",  # pragma: allowlist secret
 }
 
 
@@ -661,6 +940,53 @@ def _from_source(tool: str, repository: str, name: str) -> LicenseFile:
 
 # Alphabetical, one entry per tool.
 THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
+    "actionlint": ThirdPartyLicense(
+        tool="actionlint",
+        version="v1.7.12",
+        license="MIT",
+        repository="https://github.com/rhysd/actionlint",
+        commit=_THIRD_PARTY_HASHES["actionlint commit"],
+        files=(LicenseFile("LICENSE.txt"),),
+    ),
+    # The rule files cfn-guard evaluates, installed by
+    # `install-pinned-tool aws-guard-rules-registry --rules-bundle` (RULES_BUNDLES).
+    # Not an executable, so the build reads the version from the manifest that
+    # install wrote. The release zip holds no license file.
+    "aws-guard-rules-registry": ThirdPartyLicense(
+        tool="aws-guard-rules-registry",
+        version="1.0.2",
+        license="Apache-2.0",
+        repository="https://github.com/aws-cloudformation/aws-guard-rules-registry",
+        commit=_THIRD_PARTY_HASHES["aws-guard-rules-registry commit"],
+        files=(
+            _from_source(
+                "aws-guard-rules-registry",
+                "https://github.com/aws-cloudformation/aws-guard-rules-registry",
+                "LICENSE",
+            ),
+            _from_source(
+                "aws-guard-rules-registry",
+                "https://github.com/aws-cloudformation/aws-guard-rules-registry",
+                "NOTICE",
+            ),
+        ),
+        # The probe reads the manifest of the PINNED bundle directory only: a glob
+        # over every aws-guard-rules-registry-* directory printed each installed
+        # version, so the check passed as long as any of them was the pinned one,
+        # and an unset ASH_CFN_GUARD_RULES_DIR raised KeyError, which read as a
+        # version mismatch; now it prints nothing and says why on stderr.
+        version_probe=(
+            "python3",
+            "-c",
+            (
+                "import glob, json, os, sys; "
+                "d = os.environ.get('ASH_CFN_GUARD_RULES_DIR'); "
+                "d or print('ASH_CFN_GUARD_RULES_DIR is not set', file=sys.stderr); "
+                "[print(json.load(open(m))['version']) for m in glob.glob(os.path.join("
+                "d or '', 'aws-guard-rules-registry-1.0.2', '.ash-rules-manifest.json'))]"
+            ),
+        ),
+    ),
     # The wheel's dist-info carries licenses/LICENSE. The repository has no NOTICE.
     "bandit": ThirdPartyLicense(
         tool="bandit",
@@ -671,19 +997,62 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         files=(LicenseFile("LICENSE"),),
         distribution="bandit",
     ),
+    # The release archive holds the executable and a README, no license file, so
+    # both files come from the repository.
+    "cfn-guard": ThirdPartyLicense(
+        tool="cfn-guard",
+        version="3.2.1",
+        license="Apache-2.0",
+        repository="https://github.com/aws-cloudformation/cloudformation-guard",
+        commit=_THIRD_PARTY_HASHES["cfn-guard commit"],
+        files=(
+            _from_source(
+                "cfn-guard",
+                "https://github.com/aws-cloudformation/cloudformation-guard",
+                "LICENSE",
+            ),
+            _from_source(
+                "cfn-guard",
+                "https://github.com/aws-cloudformation/cloudformation-guard",
+                "NOTICE",
+            ),
+        ),
+    ),
+    # The cfn-lint scanner's uv tool. The wheel's dist-info carries
+    # licenses/LICENSE and licenses/NOTICE.
+    "cfn-lint": ThirdPartyLicense(
+        tool="cfn-lint",
+        version="v1.60.0",
+        license="MIT-0",
+        repository="https://github.com/aws-cloudformation/cfn-lint",
+        commit=_THIRD_PARTY_HASHES["cfn-lint commit"],
+        files=(
+            LicenseFile("LICENSE"),
+            LicenseFile("NOTICE"),
+        ),
+        distribution="cfn-lint",
+    ),
     # The wheel's dist-info carries licenses/LICENSE. The repository has no NOTICE.
     "checkov": ThirdPartyLicense(
         tool="checkov",
-        version="3.3.26",
+        version="3.4.3",
         license="Apache-2.0",
         repository="https://github.com/bridgecrewio/checkov",
         commit=_THIRD_PARTY_HASHES["checkov commit"],
         files=(LicenseFile("LICENSE"),),
         distribution="checkov",
     ),
+    "gitleaks": ThirdPartyLicense(
+        tool="gitleaks",
+        version="v8.30.1",
+        license="MIT",
+        repository="https://github.com/gitleaks/gitleaks",
+        commit=_THIRD_PARTY_HASHES["gitleaks commit"],
+        files=(LicenseFile("LICENSE"),),
+    ),
     "grype": ThirdPartyLicense(
         tool="grype",
-        version="v0.120.1",
+        version="v0.121.3",
         license="Apache-2.0",
         repository="https://github.com/anchore/grype",
         commit=_THIRD_PARTY_HASHES["grype commit"],
@@ -693,7 +1062,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
         tool="opengrep",
-        version="v1.30.2",
+        version="v1.33.1",
         # COPYRIGHT: "GNU Lesser General Public License (LGPL) version 2.1", with
         # no "or later".
         license="LGPL-2.1-only",
@@ -708,7 +1077,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "syft": ThirdPartyLicense(
         tool="syft",
-        version="v1.54.1",
+        version="v1.57.1",
         license="Apache-2.0",
         repository="https://github.com/anchore/syft",
         commit=_THIRD_PARTY_HASHES["syft commit"],
@@ -716,7 +1085,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     ),
     "trivy": ThirdPartyLicense(
         tool="trivy",
-        version="v0.75.0",
+        version="v0.76.2",
         license="Apache-2.0",
         repository="https://github.com/aquasecurity/trivy",
         commit=_THIRD_PARTY_HASHES["trivy commit"],
@@ -730,7 +1099,7 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
     # The release archive holds uv and uvx and nothing else.
     "uv": ThirdPartyLicense(
         tool="uv",
-        version="0.12.24",
+        version="0.13.7",
         license="MIT OR Apache-2.0",
         repository="https://github.com/astral-sh/uv",
         commit=_THIRD_PARTY_HASHES["uv commit"],
@@ -739,6 +1108,17 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             _from_source("uv", "https://github.com/astral-sh/uv", "LICENSE-MIT"),
         ),
         executables=("uv", "uvx"),
+    ),
+    # The zizmor scanner's uv tool, a compiled Rust binary in a wheel. The
+    # wheel's dist-info carries licenses/LICENSE.
+    "zizmor": ThirdPartyLicense(
+        tool="zizmor",
+        version="v1.32.0",
+        license="MIT",
+        repository="https://github.com/zizmorcore/zizmor",
+        commit=_THIRD_PARTY_HASHES["zizmor commit"],
+        files=(LicenseFile("LICENSE"),),
+        distribution="zizmor",
     ),
 }
 
@@ -796,13 +1176,34 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
             f"{tool} has no release-asset download table. "
             f"Tools provisionable by download: {', '.join(downloadable_tools())}"
         )
+    # A tool in the asset table but not in the version or URL table is a
+    # half-added entry; refused by name here, where a bare KeyError used to
+    # escape the graceful handling every other refusal gets.
+    missing = [
+        name
+        for name, entries in (
+            ("TOOL_VERSIONS", TOOL_VERSIONS),
+            ("_RELEASE_BASE_URLS", _RELEASE_BASE_URLS),
+        )
+        if tool not in entries
+    ]
+    if missing:
+        raise ToolNotProvisionableError(
+            f"{tool} has a release-asset download table but no entry in "
+            f"{' or '.join(missing)} in tool_downloads.py; a tool added in one "
+            "table and not the others cannot be downloaded."
+        )
 
     filename = table.get((target_platform, arch))
     if filename is None:
         available = ", ".join(f"{p}/{a}" for p, a in sorted(table))
+        # The table lists the platforms ASH installs the tool on, which can be
+        # fewer than the release publishes (uv's is linux-only by choice), so
+        # the refusal names the table, not the vendor.
         raise ToolNotProvisionableError(
-            f"{tool} {TOOL_VERSIONS[tool]} publishes no release asset for "
-            f"{target_platform}/{arch}. Available: {available}"
+            f"ASH's download table for {tool} {TOOL_VERSIONS[tool]} has no asset for "
+            f"{target_platform}/{arch}; it lists the platforms ASH installs the tool "
+            f"on, not everything the release publishes. Available: {available}"
         )
 
     taken_at = _DIGESTS_TAKEN_AT.get(tool)

@@ -27,6 +27,7 @@ import pytest
 
 pytestmark = [
     pytest.mark.nix_runtime,
+    pytest.mark.e2e,
     # The host prints "ASH Scan Completed in <duration>" from its own wall clock.
     pytest.mark.snapshot_masking(mask_durations=True),
 ]

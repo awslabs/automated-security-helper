@@ -18,6 +18,7 @@ the wrap points and make the snapshot depend on where the test ran.
 
 from __future__ import annotations
 
+import signal
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,31 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+
+
+@pytest.fixture(autouse=True)
+def _process_signal_handlers_unchanged():
+    """Every test here leaves the process signal handlers as it found them.
+
+    ``main()`` installs ASH's SIGINT and SIGTERM handlers, and the entrypoint
+    snapshots run it for real under a restorer. This guard is what notices if
+    that restorer is ever dropped: it reads the installed handlers before each
+    test and asserts the same objects are installed after it, so a failure
+    names the test that leaked. It only reads -- nothing is installed, raised
+    or sent.
+    """
+    before = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    yield
+    after = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    assert after == before, (
+        "this test replaced the process signal handlers",
+        before,
+        after,
+    )
 
 
 @pytest.fixture(autouse=True)

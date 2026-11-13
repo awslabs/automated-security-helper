@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.field_mapping import (
     are_values_equivalent,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_are_values_equivalent_simple_types():

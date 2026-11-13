@@ -40,6 +40,8 @@ from automated_security_helper.core.resource_management.scan_tracking import (
 )
 from automated_security_helper.utils.log import ASHLogger
 
+pytestmark = pytest.mark.unit
+
 _MODULE = "automated_security_helper.core.resource_management.scan_tracking"
 _RESULTS_FILE = "ash_aggregated_results.json"
 
@@ -108,26 +110,28 @@ class TestFindScannerResultFiles:
 
 
 class TestGetScannerProgress:
-    def test_an_unparseable_result_file_is_warned_about_and_skipped(self, tmp_path):
+    def test_an_unparseable_result_file_reads_as_nothing_found_yet(self, tmp_path):
+        """A file that is not a JSON object is a scanner that has not finished
+        writing (_read_scanner_result_document): nothing is counted from it,
+        its target is not a completed one (create_scan_progress_from_files
+        reports the same file as running, and the two views used to disagree),
+        and nothing is warned about, as the per-file reader both progress paths
+        share decides. It used to be read through parse_scanner_result_file
+        and warned about; patching that name no longer reaches the read."""
         out = tmp_path / "ash_output"
-        _write_scanner_result(out, "bandit", "source", {"scanner_name": "bandit"})
+        path = _write_scanner_result(
+            out, "bandit", "source", {"scanner_name": "bandit"}
+        )
+        path.write_text('{"scanner_name": "bandit", "finding_count": 3, "sta')
 
-        with (
-            patch(
-                f"{_MODULE}.parse_scanner_result_file",
-                side_effect=ValueError("truncated file"),
-            ),
-            patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger,
-        ):
+        with patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger:
             progress = get_scanner_progress(out)
 
         assert progress["bandit"]["findings"] == []
-        assert progress["bandit"]["targets_completed"] == ["source"]
-        warning = logger.warning.call_args[0][0]
-        assert (
-            "Failed to parse result file for scanner bandit, target source" in warning
-        )
-        assert "truncated file" in warning
+        assert progress["bandit"]["finding_count"] == 0
+        assert progress["bandit"]["targets_completed"] == []
+        assert progress["bandit"]["targets_count"] == 0
+        logger.warning.assert_not_called()
 
     def test_findings_from_each_target_are_accumulated(self, tmp_path):
         out = tmp_path / "ash_output"
@@ -311,15 +315,11 @@ class TestCreateScanProgressFromFiles:
         source = progress.scanners["bandit"]["source"]
         assert source.finding_count == 2
         assert progress.total_findings == 2
-        # SARIF "level" values (error/warning/note) are carried through as the
-        # finding severity, and they are not ASH severities. This used to assert
-        # `sum(...) == 0` over exactly the six named buckets, with the note
-        # "Pinned as current behavior, not endorsed as correct" -- so the drop was
-        # already identified as wrong here and recorded rather than fixed.
-        #
-        # That pin is deliberately retired. Such findings now land in the
-        # "unknown" bucket, which is what makes the breakdown account for every
-        # finding instead of disagreeing with finding_count.
+        # Each finding's severity is its ASH severity (utils.severity_ladder.
+        # result_severity), error CRITICAL and warning MEDIUM, as every report
+        # and the gate grade it, not the SARIF level upper-cased ("ERROR",
+        # "WARNING"), which is no ASH severity and would put both findings in
+        # the "unknown" bucket.
         assert set(source.severity_counts) == {
             "critical",
             "high",
@@ -329,7 +329,9 @@ class TestCreateScanProgressFromFiles:
             "suppressed",
             "unknown",
         }
-        assert source.severity_counts["unknown"] == 2
+        assert source.severity_counts["critical"] == 1
+        assert source.severity_counts["medium"] == 1
+        assert source.severity_counts["unknown"] == 0
         assert sum(source.severity_counts.values()) == source.finding_count
 
     def test_severity_counts_on_the_scanner_take_precedence_over_findings(
@@ -376,24 +378,27 @@ class TestCreateScanProgressFromFiles:
         assert progress.scanners["bandit"]["source"].finding_count == 1
         assert progress.severity_counts["high"] == 1
 
-    def test_a_per_scanner_file_that_cannot_be_parsed_is_warned_about_and_skipped(
+    def test_a_per_scanner_file_that_cannot_be_parsed_is_a_scanner_still_running(
         self, tmp_path
     ):
+        """A file that is not a JSON object yet (empty, truncated, mid-write) is a
+        scanner that has not finished writing, reported as running until a later
+        poll reads a document; not one that PASSED with 0 findings, and not a
+        warning. (The per-shape cases are in test_scan_tracking_progress_views.)
+        It used to be read through parse_scanner_result_file and skipped with a
+        warning; patching that name no longer reaches the read."""
         out = tmp_path / "ash_output"
-        _write_scanner_result(out, "bandit", "source", {"findings": []})
+        path = _write_scanner_result(out, "bandit", "source", {"findings": []})
+        path.write_text('{"findings": [')
 
-        with (
-            patch(
-                f"{_MODULE}.parse_scanner_result_file",
-                side_effect=ValueError("truncated file"),
-            ),
-            patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger,
-        ):
+        with patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)) as logger:
             progress = create_scan_progress_from_files("scan-1", out)
 
-        assert progress.total_scanners == 0
-        warning = logger.warning.call_args[0][0]
-        assert "Error parsing result file for scanner bandit, target source" in warning
+        assert progress.total_scanners == 1
+        assert progress.completed_scanners == 0
+        assert progress.scanner_status_counts["running"] == 1
+        assert progress.scanners["bandit"]["source"].finding_count == 0
+        logger.warning.assert_not_called()
 
 
 class TestGetScanProgressInfo:
@@ -415,8 +420,8 @@ class TestGetScanProgressInfo:
             {
                 "sarif": {
                     "runs": [
-                        {"results": [{"ruleId": "B105", "severity": "HIGH"}]},
-                        {"results": [{"ruleId": "B303", "severity": "LOW"}]},
+                        {"results": [{"ruleId": "B105", "level": "error"}]},
+                        {"results": [{"ruleId": "B303", "level": "note"}]},
                     ]
                 },
                 "scanner_results": {"bandit": {"status": "PASSED"}},
@@ -428,11 +433,16 @@ class TestGetScanProgressInfo:
         assert info["status"] == "completed"
         assert info["findings_count"] == 2
         assert info["scanners_completed"] == ["bandit"]
-        # No metadata.summary_stats, so the summary is derived from the findings.
-        assert info["findings_summary"]["high"] == 1
+        # No metadata.summary_stats, so the summary is derived from the findings,
+        # each graded by its SARIF level (utils.severity_ladder.result_severity):
+        # a SARIF result has no "severity" key to read.
+        assert info["findings_summary"]["critical"] == 1
         assert info["findings_summary"]["low"] == 1
+        assert info["findings_summary"]["unknown"] == 0
 
-    def test_summary_stats_in_metadata_are_used_verbatim(self, tmp_path):
+    def test_summary_stats_in_metadata_are_the_counts_and_are_returned_whole(
+        self, tmp_path
+    ):
         out = tmp_path / "ash_output"
         _write_results(
             out,
@@ -447,8 +457,47 @@ class TestGetScanProgressInfo:
 
         info = get_scan_progress_info(out)
 
-        assert info["findings_summary"] == {"critical": 7}
+        # The same bucket shape the running view has, from the stats' counts; the
+        # stats themselves come back as they were recorded.
+        assert info["findings_summary"]["critical"] == 7
+        assert sum(info["findings_summary"].values()) == 7
+        # No total beside the buckets: the count is what they add up to, where
+        # it read 0 (the SARIF has no results) beside 7 critical.
+        assert info["findings_count"] == 7
+        assert info["summary_stats"] == {"critical": 7}
         assert info["completion_time"] == "2024-05-05T00:00:00"
+
+    def test_summary_stats_that_name_no_bucket_leave_the_grading_to_the_sarif(
+        self, tmp_path
+    ):
+        """Stats with a total_findings and an actionable and no severity bucket
+        gave all-zero buckets while the SARIF results sat ungraded."""
+        out = tmp_path / "ash_output"
+        _write_results(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            "results": [
+                                {"ruleId": "B105", "level": "error"},
+                                {"ruleId": "B303", "level": "note"},
+                            ]
+                        }
+                    ]
+                },
+                "metadata": {
+                    "summary_stats": {"total_findings": 3, "actionable": 2},
+                },
+                "scanner_results": {"bandit": {"status": "PASSED"}},
+            },
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["findings_summary"]["critical"] == 1
+        assert info["findings_summary"]["low"] == 1
+        assert info["findings_count"] == 2
 
     def test_a_malformed_aggregated_file_is_reported_as_an_error_status(self, tmp_path):
         out = tmp_path / "ash_output"
@@ -562,11 +611,14 @@ class TestGetScanResults:
         e.context` branch is only observable with a bare error.
         """
         _write_results(tmp_path, _aggregated_doc())
+        # Built by its constructor or by model_validate, the model is refused the
+        # same way.
+        rejecting = MagicMock(
+            side_effect=MCPResourceError("model rejected the document", context={})
+        )
+        rejecting.model_validate.side_effect = rejecting.side_effect
 
-        with patch(
-            f"{_MODULE}.AshAggregatedResults",
-            side_effect=MCPResourceError("model rejected the document", context={}),
-        ):
+        with patch(f"{_MODULE}.AshAggregatedResults", rejecting):
             with pytest.raises(MCPResourceError) as excinfo:
                 get_scan_results(tmp_path)
 

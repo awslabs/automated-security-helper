@@ -33,6 +33,8 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 
+pytestmark = pytest.mark.unit
+
 
 # sorted(...) is [bandit, checkov, grype, semgrep]; dealt round-robin at count=2
 # that is positions 0,2 -> shard 0 and positions 1,3 -> shard 1.

@@ -18,6 +18,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestBedrockSeverityKeyFix:
     """finding.get('level') must be used, not finding.get('severity')."""
 

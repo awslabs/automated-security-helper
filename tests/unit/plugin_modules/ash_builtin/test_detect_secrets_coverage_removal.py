@@ -52,6 +52,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanSettings,
 )
 
+# The scanner's dependency check asked uv for detect-secrets' version (``uv tool run
+# detect-secrets --version``), so every scan here started the tool wherever uv could
+# reach it. The scan itself runs in ASH's worker, so the probes answer without a
+# process (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
+
 # A fake value. Written to a file it trips detect-secrets' keyword plugin, which
 # is all these tests need from it.
 _KEYWORD_LINE = 'secret = "base64_encoded_secret=="'  # pragma: allowlist secret
@@ -107,6 +113,7 @@ def _keys(scanner: DetectSecretsScanner) -> set:
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_version_alone_still_resolves_the_default_plugin_set(tmp_path, monkeypatch):
     """Naming a version must not be a way to switch every detector off.
 
@@ -133,6 +140,7 @@ def test_version_alone_still_resolves_the_default_plugin_set(tmp_path, monkeypat
     )
 
 
+@pytest.mark.unit
 def test_installing_the_default_plugins_preserves_the_operator_settings(
     tmp_path, monkeypatch
 ):
@@ -168,6 +176,7 @@ def test_installing_the_default_plugins_preserves_the_operator_settings(
     )
 
 
+@pytest.mark.integration
 def test_transient_settings_receives_a_nonempty_plugin_list(tmp_path, monkeypatch):
     """The end of the chain, which is what actually governs the scan.
 
@@ -215,6 +224,7 @@ def test_transient_settings_receives_a_nonempty_plugin_list(tmp_path, monkeypatc
     assert _keys(scanner) == _EXPECTED_KEYS
 
 
+@pytest.mark.integration
 def test_an_empty_plugin_set_raises_rather_than_reporting_clean(tmp_path, monkeypatch):
     """Fail closed on the general case, not just on the one route into it.
 
@@ -244,6 +254,7 @@ def test_an_empty_plugin_set_raises_rather_than_reporting_clean(tmp_path, monkey
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_converted_target_under_the_default_layout_is_scanned(tmp_path):
     """The documented default layout, which is where the substring bit.
 
@@ -267,6 +278,7 @@ def test_converted_target_under_the_default_layout_is_scanned(tmp_path):
     assert _keys(scanner) == _EXPECTED_KEYS
 
 
+@pytest.mark.integration
 def test_source_scan_still_excludes_ashs_own_output_directory(tmp_path):
     """The exclusion's real job, which the fix has to keep doing.
 

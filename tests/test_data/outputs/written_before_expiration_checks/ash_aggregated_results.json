@@ -1,0 +1,507 @@
+{
+  "additional_reports": {},
+  "ash_config": {
+    "ash_plugin_modules": [],
+    "build": null,
+    "content_db_staleness": "fail",
+    "content_db_staleness_overrides": [],
+    "converters": {
+      "archive": {
+        "enabled": true,
+        "name": "archive",
+        "options": {}
+      },
+      "jupyter": {
+        "enabled": true,
+        "name": "jupyter",
+        "options": {
+          "install_timeout": 300,
+          "tool_version": ">=7.16.0,<8.0.0"
+        }
+      }
+    },
+    "external_reports_to_include": [],
+    "fail_on_findings": true,
+    "fail_on_incomplete_scanners": true,
+    "global_settings": {
+      "ignore_paths": [
+        {
+          "expiration": "TBD",
+          "path": "vendor/**",
+          "reason": "vendored"
+        }
+      ],
+      "mcp": {
+        "runtime_overrides": {
+          "allowed_paths": [],
+          "denied_paths": [
+            "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
+            "/content_db_staleness_overrides",
+            "/sandbox",
+            "/sandbox/**",
+            "/ash_plugin_modules",
+            "/ash_plugin_modules/**",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**"
+          ],
+          "denied_value_patterns": {},
+          "enabled": false
+        }
+      },
+      "severity_threshold": "MEDIUM",
+      "suppressions": []
+    },
+    "mcp-resource-management": {
+      "enable_health_checks": true,
+      "enable_resource_logging": true,
+      "health_check_interval_seconds": 60,
+      "log_resource_operations": false,
+      "max_concurrent_scans": 3,
+      "max_concurrent_tasks": 20,
+      "max_directory_size_mb": 1000,
+      "max_message_size_bytes": 10485760,
+      "max_path_length": 4096,
+      "memory_critical_threshold_mb": 2048,
+      "memory_warning_threshold_mb": 1024,
+      "operation_timeout_seconds": 180,
+      "scan_timeout_seconds": 1800,
+      "shutdown_timeout_seconds": 30,
+      "task_count_warning_threshold": 15,
+      "thread_pool_max_workers": 4
+    },
+    "project_name": "results-written-before-expiration-checks",
+    "reporters": {
+      "csv": {
+        "enabled": true,
+        "extension": "csv",
+        "name": "csv",
+        "options": {}
+      },
+      "cyclonedx": {
+        "enabled": true,
+        "extension": "cdx.json",
+        "name": "cyclonedx",
+        "options": {}
+      },
+      "flat-json": {
+        "enabled": true,
+        "extension": "flat.json",
+        "name": "flat-json",
+        "options": {
+          "include_metadata": true,
+          "include_scanner_metrics": true,
+          "include_summary_metrics": true
+        }
+      },
+      "github-ghas": {
+        "enabled": true,
+        "extension": "ghas.sarif",
+        "name": "github-ghas",
+        "options": {
+          "exclude_suppressed": true
+        }
+      },
+      "gitlab-cyclonedx": {
+        "enabled": true,
+        "extension": "gl-dependency-scanning-report.cdx.json",
+        "name": "gitlab-cyclonedx",
+        "options": {
+          "category": "production",
+          "input_file_path_override": null,
+          "language_override": null,
+          "package_manager_override": null
+        }
+      },
+      "gitlab-sast": {
+        "enabled": true,
+        "extension": "gl-sast-report.json",
+        "name": "gitlab-sast",
+        "options": {
+          "exclude_suppressed": false
+        }
+      },
+      "html": {
+        "enabled": true,
+        "extension": "html",
+        "name": "html",
+        "options": {}
+      },
+      "junitxml": {
+        "enabled": true,
+        "extension": "junit.xml",
+        "name": "junitxml",
+        "options": {
+          "respect_severity_threshold": true
+        }
+      },
+      "markdown": {
+        "enabled": true,
+        "extension": "summary.md",
+        "name": "markdown",
+        "options": {
+          "compact": false,
+          "include_detailed_findings": true,
+          "include_findings_table": false,
+          "include_summary": true,
+          "max_detailed_findings": 20,
+          "top_hotspots_limit": 10,
+          "use_collapsible_details": true
+        }
+      },
+      "ocsf": {
+        "enabled": true,
+        "extension": "ocsf.json",
+        "name": "ocsf",
+        "options": {}
+      },
+      "sarif": {
+        "enabled": true,
+        "extension": "sarif",
+        "name": "sarif",
+        "options": {}
+      },
+      "spdx": {
+        "enabled": false,
+        "extension": "spdx.json",
+        "name": "spdx",
+        "options": {}
+      },
+      "text": {
+        "enabled": true,
+        "extension": "summary.txt",
+        "name": "text",
+        "options": {
+          "include_detailed_findings": false,
+          "include_findings_table": false,
+          "include_summary": true,
+          "max_detailed_findings": 20,
+          "top_hotspots_limit": 20
+        }
+      },
+      "unused-suppressions": {
+        "enabled": true,
+        "extension": "unused-suppressions.json",
+        "name": "unused-suppressions",
+        "options": {
+          "output_format": "both"
+        }
+      },
+      "yaml": {
+        "enabled": false,
+        "extension": "yaml",
+        "name": "yaml",
+        "options": {}
+      }
+    },
+    "sandbox": {
+      "extra_read_paths": [],
+      "mode": "off",
+      "network_scanners": null
+    },
+    "scanners": {
+      "bandit": {
+        "enabled": true,
+        "name": "bandit",
+        "options": {
+          "additional_formats": [],
+          "confidence_level": "all",
+          "config_file": null,
+          "excluded_paths": [
+            {
+              "expiration": "next quarter",
+              "path": "build",
+              "reason": "generated"
+            }
+          ],
+          "ignore_nosec": false,
+          "install_timeout": 300,
+          "scan_timeout": 1800,
+          "severity_threshold": null,
+          "tool_version": ">=1.7.0,<2.0.0"
+        }
+      },
+      "cdk-nag": {
+        "enabled": true,
+        "name": "cdk-nag",
+        "options": {
+          "include_compliant_checks": false,
+          "nag_packs": {
+            "AwsSolutionsChecks": true,
+            "HIPAASecurityChecks": false,
+            "NIST80053R4Checks": false,
+            "NIST80053R5Checks": false,
+            "PCIDSS321Checks": false
+          },
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "cfn-nag": {
+        "enabled": true,
+        "name": "cfn-nag",
+        "options": {
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "checkov": {
+        "enabled": true,
+        "name": "checkov",
+        "options": {
+          "additional_formats": [
+            "cyclonedx_json"
+          ],
+          "config_file": null,
+          "frameworks": [
+            "all"
+          ],
+          "install_timeout": 300,
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null,
+          "skip_ash_output_dir": true,
+          "skip_frameworks": [],
+          "skip_path": [],
+          "tool_version": null
+        }
+      },
+      "detect-secrets": {
+        "enabled": true,
+        "name": "detect-secrets",
+        "options": {
+          "baseline_file": null,
+          "scan_settings": {
+            "filters_used": [],
+            "generated_at": null,
+            "plugins_used": [],
+            "results": {},
+            "version": null
+          },
+          "scan_timeout": 1800,
+          "severity_threshold": null,
+          "skip_generated_lockfiles": true
+        }
+      },
+      "grype": {
+        "enabled": true,
+        "name": "grype",
+        "options": {
+          "config_file": null,
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "npm-audit": {
+        "enabled": true,
+        "name": "npm-audit",
+        "options": {
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      },
+      "opengrep": {
+        "enabled": true,
+        "name": "opengrep",
+        "options": {
+          "config": "p/ci",
+          "exclude": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "exclude_rule": [],
+          "metrics": "auto",
+          "offline": false,
+          "patterns": [],
+          "scan_timeout": 1800,
+          "severity": [],
+          "severity_threshold": null,
+          "sha256": {},
+          "version": "v1.30.2"
+        }
+      },
+      "semgrep": {
+        "enabled": true,
+        "name": "semgrep",
+        "options": {
+          "config": "p/ci",
+          "exclude": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "exclude_rule": [],
+          "install_timeout": 300,
+          "metrics": "auto",
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity": [],
+          "severity_threshold": null,
+          "tool_version": null
+        }
+      },
+      "syft": {
+        "enabled": true,
+        "name": "syft",
+        "options": {
+          "additional_outputs": [
+            "syft-table"
+          ],
+          "config_file": null,
+          "exclude": [],
+          "offline": false,
+          "scan_timeout": 1800,
+          "severity_threshold": null
+        }
+      }
+    },
+    "workspace": {
+      "max_parallel_projects": null,
+      "project_timeout": null
+    }
+  },
+  "converter_results": {},
+  "cyclonedx": {
+    "$schema": null,
+    "annotations": null,
+    "bomFormat": "CycloneDX",
+    "components": null,
+    "compositions": null,
+    "declarations": null,
+    "definitions": null,
+    "dependencies": null,
+    "externalReferences": null,
+    "formulation": null,
+    "metadata": null,
+    "properties": null,
+    "serialNumber": null,
+    "services": null,
+    "signature": null,
+    "specVersion": "1.6",
+    "version": 1,
+    "vulnerabilities": null
+  },
+  "description": "Automated Security Helper - Aggregated Report",
+  "metadata": {
+    "description": "Automated Security Helper Aggregated Report Post-processor",
+    "execution_discrepancy_report": {},
+    "expected_scanners": [],
+    "generated_at": "2026-10-11T04:25:17+00:00",
+    "plugin_load_errors": {},
+    "project_name": "ASH",
+    "report_id": "ASH-20261011",
+    "shard": null,
+    "summary_stats": {
+      "actionable": 0,
+      "duration": 0.0,
+      "end": null,
+      "error": 0,
+      "failed": 0,
+      "missing": 0,
+      "passed": 0,
+      "severity_counts": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "medium": 0,
+        "suppressed": 0
+      },
+      "skipped": 0,
+      "start": null,
+      "total": 0
+    },
+    "tool_version": "3.7.0",
+    "validation_summary": {}
+  },
+  "name": "ASH Scan Report",
+  "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "inlineExternalProperties": [],
+    "properties": {
+      "tags": []
+    },
+    "runs": [
+      {
+        "addresses": [],
+        "artifacts": null,
+        "automationDetails": null,
+        "baselineGuid": null,
+        "columnKind": null,
+        "conversion": null,
+        "defaultEncoding": null,
+        "defaultSourceLanguage": null,
+        "externalPropertyFileReferences": null,
+        "graphs": [],
+        "invocations": [],
+        "language": "en-US",
+        "logicalLocations": [],
+        "newlineSequences": [
+          "\r\n",
+          "\n"
+        ],
+        "originalUriBaseIds": null,
+        "policies": [],
+        "properties": {
+          "tags": []
+        },
+        "redactionTokens": [],
+        "results": [],
+        "runAggregates": [],
+        "specialLocations": null,
+        "taxonomies": [],
+        "threadFlowLocations": [],
+        "tool": {
+          "driver": {
+            "associatedComponent": null,
+            "contents": [
+              "localizedData",
+              "nonLocalizedData"
+            ],
+            "dottedQuadFileVersion": null,
+            "downloadUri": "https://github.com/awslabs/automated-security-helper",
+            "fullDescription": null,
+            "fullName": "awslabs/automated-security-helper",
+            "globalMessageStrings": null,
+            "guid": null,
+            "informationUri": "https://awslabs.github.io/automated-security-helper",
+            "isComprehensive": false,
+            "language": "en-US",
+            "localizedDataSemanticVersion": null,
+            "locations": [],
+            "minimumRequiredLocalizedDataSemanticVersion": null,
+            "name": "AWS Labs - Automated Security Helper",
+            "notifications": [],
+            "organization": "Amazon Web Services",
+            "product": null,
+            "productSuite": null,
+            "properties": null,
+            "releaseDateUtc": null,
+            "rules": [],
+            "semanticVersion": null,
+            "shortDescription": null,
+            "supportedTaxonomies": [],
+            "taxa": [],
+            "translationMetadata": null,
+            "version": "3.7.0"
+          },
+          "extensions": [],
+          "properties": null
+        },
+        "translations": [],
+        "versionControlProvenance": [],
+        "webRequests": [],
+        "webResponses": []
+      }
+    ],
+    "version": "2.1.0"
+  },
+  "scanner_results": {},
+  "used_suppressions": [],
+  "validation_checkpoints": [],
+  "workspace": null
+}

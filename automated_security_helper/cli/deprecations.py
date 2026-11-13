@@ -18,6 +18,8 @@ apart.
 import sys
 from typing import Iterable, Optional, TextIO
 
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
 # Deprecated spelling -> the canonical spelling that replaces it.
 DEPRECATED_OPTION_SPELLINGS = {
     "--ash-revision": "--ash-revision-to-install",
@@ -53,8 +55,10 @@ def warn_deprecated_option_spellings(
         if replacement is not None and spelling not in warned:
             warned.add(spelling)
             print(
-                f"warning: '{spelling}' is deprecated and is scheduled for "
-                f"removal; use '{replacement}' instead.",
+                shown_not_obeyed(
+                    f"warning: '{spelling}' is deprecated and is scheduled for "
+                    f"removal; use '{replacement}' instead."
+                ),
                 file=out,
             )
 
@@ -95,4 +99,6 @@ def warn_deprecated_command_alias(alias: str, stream: Optional[TextIO] = None) -
     callback: a callback would also fire for the canonical name, and group
     callbacks can run more than once for a single command line.
     """
-    print(deprecated_command_message(alias), file=stream or sys.stderr)
+    print(
+        shown_not_obeyed(deprecated_command_message(alias)), file=stream or sys.stderr
+    )

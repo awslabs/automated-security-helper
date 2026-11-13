@@ -212,7 +212,7 @@ describe('the app itself registers cdk-nag over every stack', () => {
   // CDK_CONTEXT_JSON IS PASSED, AND WITHOUT IT THIS MEASURED A DIFFERENT ARTIFACT.
   // `cdk.json`'s `context` block reaches the app only through the CDK CLI, which hands
   // it over in that environment variable (`cxapi.CONTEXT_ENV`). Running bin/ash.ts as a
-  // bare node process bypasses the CLI, so the assembly came out with
+  // bare node process skips the CLI, so the assembly came out with
   // `@aws-cdk/aws-iam:minimizePolicies` OFF: measured against the committed templates,
   // the same policies had unsorted, unmerged `Action` arrays and a differently shaped
   // resource list, and all five templates differed. None of the assertions in this

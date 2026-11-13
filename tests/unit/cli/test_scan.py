@@ -8,6 +8,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.enums import RunMode, ExecutionPhase
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def cli_runner():
