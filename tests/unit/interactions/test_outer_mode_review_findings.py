@@ -109,3 +109,26 @@ def test_nix_mode_refuses_a_looping_results_link(tmp_path, inner_exit):
         ras._run_nix_mode(opts, MagicMock())
 
     assert exited.value.code == 3
+
+
+def test_an_unvalidated_min_severity_is_lowercased_where_it_is_forwarded(
+    tmp_path, monkeypatch
+):
+    """``model_copy(update=...)`` skips the field validator."""
+    opts = _opts(tmp_path).model_copy(update={"min_severity": "HIGH"})
+    assert opts.min_severity == "HIGH", "premise: the validator was skipped"
+
+    nix_argv = ras._nix_inner_argv(opts)
+    assert nix_argv[nix_argv.index("--min-severity") + 1] == "high"
+
+    seen = {}
+
+    def fake_run_ash_container(**kwargs):
+        seen.update(kwargs)
+        raise SystemExit(99)
+
+    monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
+    monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_a, **_k: [])
+    with pytest.raises(SystemExit):
+        ras._run_container_mode(opts, MagicMock())
+    assert seen.get("min_severity") == "high", seen.get("min_severity")
