@@ -135,6 +135,37 @@ which is the default. With it off, the exit code comes from the findings alone, 
 scan whose only problem is the failed scanner exits 0; see
 [Incomplete scans](set-the-gate.md#incomplete).
 
+### No private directory for the config files ASH writes {#no-private-directory-for-the-config-files-ash-writes}
+
+Symptom: a scanner fails before its tool runs, with:
+
+```text
+No private directory for the config files ASH writes for the scanner's tool
+(...). Set TMPDIR to a directory only this account can write.
+```
+
+Cause: ASH writes each scanner's config files in a directory no other local account
+can change, and it checks every directory from the candidate (the temporary
+directory, then the output directory) up to `/`: one owned by another account, or
+writable by its group or everyone without the sticky bit, rejects the candidate.
+The parenthesis names each candidate it passed over and why, with the failing
+directory's owning uid and mode bits.
+
+When the reason is a mode (`can be written by other accounts and does not have the
+sticky bit`), or an ancestor genuinely owned by another account, set `TMPDIR` to a
+directory only your account can write, as the message says.
+
+In a rootless container or an agent sandbox — any process in a Linux user
+namespace — `/` and `/tmp` stat as owned by `nobody` (the overflow uid, 65534 by
+default), because their real owners are outside the namespace. ASH detects that
+(`/proc/self/uid_map` differs from the initial namespace's identity map) and treats
+an overflow-uid-owned ancestor like a root-owned one, so scans in such sandboxes
+work without any setting; a directory whose mode other accounts can write without
+the sticky bit is still rejected there. If you see an `owner is uid 65534`
+rejection anyway, the process is not in a user namespace (or `/proc` is not
+mounted), and the directory really is another account's: pick a `TMPDIR` under a
+path your account owns.
+
 ### semgrep and opengrep show SKIPPED on Windows
 
 Cause: both are off by default on Windows, and semgrep publishes no Windows build, so
