@@ -63,6 +63,7 @@ IAC_DRIFT = WORKFLOWS / "ash-iac-drift.yml"
 INSTALL_METHODS = WORKFLOWS / "ash-install-methods.yml"
 
 RUN_UNIT_TESTS_USES = "./.github/actions/run-unit-tests"
+SETUP_ASH_USES = "./.github/actions/setup-ash"
 
 
 def _jobs(path: Path) -> dict[str, Any]:
@@ -355,6 +356,25 @@ class TestThePullRequestCover:
         }
         assert tier_images - images == {"macos-15"}, tier_images
 
+    def test_ensure_cache_covers_the_image_the_finch_legs_run_on(self):
+        """setup-uv's key carries the runner image, so a leg on an image no ensure-cache
+        leg saves for never hits the cache. The finch legs of scan-validation run on
+        ubuntu-24.04 (Finch ships apt packages for the noble suite only) and call
+        setup-ash, so ensure-cache needs a leg there; a pull request leaves it out, as
+        it does ubuntu-latest, and reads main's entry."""
+        scan = JOBS["scan-validation"]
+        assert "'ubuntu-24.04'" in scan["runs-on"], scan["runs-on"]
+        assert any(step.get("uses") == SETUP_ASH_USES for step in scan["steps"]), (
+            "scan-validation no longer calls setup-ash"
+        )
+        axis = JOBS["ensure-cache"]["strategy"]["matrix"]["os"]
+        assert "ubuntu-24.04" in axis, axis
+        assert JOBS["ensure-cache"]["strategy"]["max-parallel"] == len(axis)
+        assert "ubuntu-24.04" not in {
+            c["os"] for c in _cells(JOBS["ensure-cache"], "pull_request")
+        }
+        assert "ubuntu-24.04" in {c["os"] for c in _cells(JOBS["ensure-cache"], "push")}
+
     def test_unit_coverage_gates_the_pull_request_images_its_axis_names(self):
         """The gate runs where it has shards to combine; macos-15 is the one image it lacks.
 
@@ -543,6 +563,15 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 211 check",
             "211 is this",
             "~592 runner jobs",
+            # Before ensure-cache gained the ubuntu-24.04 image (push 455 -> 456,
+            # merge-queue 453 -> 454, the merge-queue check figure 818 -> 819).
+            "expands to 455 jobs",
+            "455-job",
+            "~920 runner jobs",
+            "is 818:",
+            "the 818 above",
+            "(818 to a merge-queue run",
+            "Most of the 455 is the",
         ):
             assert stale not in COMMENTS
 
