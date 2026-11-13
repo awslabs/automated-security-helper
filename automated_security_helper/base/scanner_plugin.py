@@ -1003,7 +1003,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
         try:
-            allowed = {Path(entry).resolve() for entry in scan_set_of(self.context)}
+            entries = scan_set_of(self.context)
         except Exception as exc:  # noqa: BLE001 - the filter must not fail the scan
             ASH_LOGGER.warning(
                 f"Could not read the run's scan set to filter the staged file "
@@ -1012,11 +1012,31 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 "still dropped after the scan."
             )
             return candidates
-        kept = [
-            candidate
-            for candidate in candidates
-            if Path(candidate).resolve() in allowed
-        ]
+        # ONE resolve of the source root, then a lexical rebase of each entry
+        # onto it: the entries are the context's source directory as it spells
+        # it with each file's path below (utils/scan_output_dirs.scan_set_of),
+        # so os.path.relpath needs no filesystem. Resolving every entry instead
+        # walked the filesystem once per scan-set file, per file-target scanner,
+        # inside the hook that exists to make a one-file commit fast. Only the
+        # few candidates are resolved for real, which is what absorbs a
+        # symlinked spelling of the checkout path on either side.
+        source_text = os.fspath(self.context.source_dir)
+        resolved_source = Path(source_text).resolve()
+        allowed = {
+            (resolved_source / os.path.relpath(entry, source_text)).as_posix()
+            for entry in entries
+        }
+        kept = []
+        for candidate in candidates:
+            try:
+                resolved = Path(candidate).resolve()
+            except (OSError, RuntimeError):
+                # A symlink loop on the path: RuntimeError from Path.resolve()
+                # on Python 3.12 and earlier, OSError on 3.13. Nothing
+                # scannable sits at that name.
+                continue
+            if resolved.as_posix() in allowed:
+                kept.append(candidate)
         left_out = len(candidates) - len(kept)
         if left_out:
             ASH_LOGGER.info(
@@ -1052,8 +1072,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _staged_target_arguments(self, staged_targets: List[Path]) -> List[str]:
         """The argv segment that stands where the directory target went.
 
-        Overridable: checkov mixes ``--directory`` for the Terraform parent
-        directories with ``--file`` for everything else.
+        An overridable hook for a scanner whose tool spells file targets some
+        other way; every shipped scanner uses one of the two styles here
+        (checkov's Terraform handling widens the TARGET LIST to same-directory
+        sibling files in its ``_staged_scope_paths`` and keeps the plain
+        per-file ``--file`` form).
         """
         if self.staged_target_style == "per-file-flag":
             arguments: List[str] = []

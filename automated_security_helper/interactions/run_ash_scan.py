@@ -6222,7 +6222,9 @@ def _staged_findings_filter_set(source_dir: Path, staged_files: List[str]) -> Se
         candidate = Path(source_dir).joinpath(*PurePosixPath(relative).parts)
         try:
             resolved.add(candidate.resolve())
-        except OSError:
+        except (OSError, RuntimeError):
+            # RuntimeError is what Path.resolve() raises for a symlink loop on
+            # Python 3.12 and earlier; 3.13 raises OSError for the same loop.
             continue
     return resolved
 
@@ -6419,11 +6421,15 @@ def _run_local_mode(
         orchestrator.add_metadata(
             # Recorded on every result set, so a reporter that reads "not
             # reported" as "fixed" (aws-security-hub can archive such findings)
-            # knows whether the changed-files filter removed findings that are not
-            # fixed. True when a changed-file set was computed; False otherwise,
-            # also when the flag fell back to a full scan. Always explicit, so
-            # results that predate the marker are told apart from a full scan.
-            changed_files_only=_changed_file_set is not None,
+            # knows whether a file filter removed findings that are not fixed.
+            # From the COMBINED filter, not the flag alone: --staged filters the
+            # results too, and a staged run marked False would let such a
+            # reporter archive real findings as fixed. True when any file set
+            # restricted the results (the --changed-files-only set, the staged
+            # set, or both); False otherwise, also when the flag fell back to a
+            # full scan. Always explicit, so results that predate the marker are
+            # told apart from a full scan.
+            changed_files_only=_filter_file_set is not None,
             # Beside the marker, for the same reporter: the directory the scan
             # looked at, recorded at scan time while it exists
             # (utils/scan_source.py; a report made on another host cannot work it

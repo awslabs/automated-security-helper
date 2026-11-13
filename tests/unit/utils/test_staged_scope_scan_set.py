@@ -74,6 +74,102 @@ def test_a_restriction_no_walked_file_matches_empties_the_scan_set(tree):
     assert nothing == []
 
 
+def test_the_results_filter_under_a_staged_set_keeps_what_it_cannot_place(tmp_path):
+    """The staged set rides the same engine filter as --changed-files-only
+    (utils/changed_files.filter_results_to_changed_files), whose documented
+    shape holds under --staged too: a finding in a staged file is kept, one in
+    an unstaged file is dropped, one with NO location is kept (it cannot be
+    placed outside the staged files), and one in a CONVERTED file is placed by
+    the source the converter read, so a staged notebook keeps its findings."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        _staged_findings_filter_set,
+    )
+    from automated_security_helper.utils.changed_files import (
+        filter_results_to_changed_files,
+    )
+    from automated_security_helper.utils.finding_identity import (
+        CONVERTED_PATH_PROPERTY,
+    )
+    from automated_security_helper.schemas.sarif_schema_model import (
+        ArtifactLocation,
+        Location,
+        Message1,
+        PhysicalLocation,
+        PhysicalLocation2,
+        PropertyBag,
+        Region,
+        Result,
+        Run,
+        SarifReport,
+        Tool,
+        ToolComponent,
+    )
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    def located(uri):
+        return Result(
+            message=Message1(text="finding"),
+            locations=[
+                Location(
+                    physicalLocation=PhysicalLocation(
+                        root=PhysicalLocation2(
+                            artifactLocation=ArtifactLocation(uri=uri),
+                            region=Region(startLine=1),
+                        )
+                    )
+                )
+            ],
+        )
+
+    source = tmp_path / "repo"
+    source.mkdir()
+    staged_set = _staged_findings_filter_set(source, ["app.py", "nb/analysis.ipynb"])
+
+    converted = located("jupyter/analysis-converted.py")
+    converted.properties = PropertyBag()
+    setattr(
+        converted.properties, CONVERTED_PATH_PROPERTY, "jupyter/analysis-converted.py"
+    )
+    unlocated = Result(message=Message1(text="no location"))
+
+    results = AshAggregatedResults()
+    results.sarif = SarifReport(
+        version="2.1.0",
+        runs=[
+            Run(
+                tool=Tool(driver=ToolComponent(name="test-tool")),
+                results=[
+                    located("app.py"),
+                    located("other.py"),
+                    unlocated,
+                    converted,
+                ],
+            )
+        ],
+    )
+
+    filtered = filter_results_to_changed_files(
+        results,
+        staged_set,
+        source,
+        converted_sources={"jupyter/analysis-converted.py": "nb/analysis.ipynb"},
+    )
+
+    survivors = filtered.sarif.runs[0].results
+    uris = [
+        r.locations[0].physicalLocation.root.artifactLocation.uri
+        if r.locations
+        else None
+        for r in survivors
+    ]
+    assert "app.py" in uris, "the staged file's finding survives"
+    assert "other.py" not in uris, "an unstaged file's finding is out of scope"
+    assert None in uris, "a finding with no location is kept"
+    assert "jupyter/analysis-converted.py" in uris, (
+        "a converted finding is placed by its staged source and kept"
+    )
+
+
 def test_a_converter_with_no_staged_candidate_counts_zero(tree):
     """The converter-skip case of --staged, measured end to end: the run's
     recorded scan set holds only a staged .py, so the Jupyter converter's

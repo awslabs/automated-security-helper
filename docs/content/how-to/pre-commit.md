@@ -66,8 +66,9 @@ scanned and is not listed) and makes it the scan's target set:
 - bandit and checkov are handed the staged files instead of the tree; the scanners that
   pick their own files (detect-secrets, cdk-nag, npm-audit) read the same staged list.
   For Terraform, checkov also reads a staged file's same-directory `.tf`/`.tfvars`
-  siblings, so `variables.tf` defaults, `locals` and module sources still resolve;
-  nothing recurses into subdirectories.
+  siblings, so same-directory `variables.tf` defaults and `locals` still resolve;
+  nothing recurses into subdirectories, so a local module that lives in one is read
+  only when its own files are staged.
 - a scanner none of whose files are staged is skipped, with a log line saying so.
 - converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
   when nothing staged matches them.

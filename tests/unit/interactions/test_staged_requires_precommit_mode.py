@@ -50,7 +50,7 @@ def test_staged_files_without_staged_is_refused_even_in_precommit(tmp_path):
 
 @pytest.mark.parametrize(
     "entry",
-    ["/abs/x.py", "../x.py", "a/../../x.py", "", "C:\\x.py", "a\\b.py"],
+    ["/abs/x.py", "../x.py", "a/../../x.py", ""],
 )
 def test_a_staged_files_entry_that_leaves_the_source_dir_is_refused(tmp_path, entry):
     source = tmp_path / "src"
@@ -80,6 +80,26 @@ def test_the_staged_findings_filter_set_resolves_under_the_source_dir(tmp_path):
     # A name with no file still resolves to its would-be path: the filter
     # matching nothing for it is the honest answer.
     assert (source / "missing.py").resolve() in filter_set
+
+
+def test_a_symlink_loop_in_the_staged_list_is_skipped_not_a_crash(tmp_path):
+    """Path.resolve() raises RuntimeError for a loop on Python 3.12 and earlier
+    (OSError on 3.13): one looping staged link must cost that one entry, never
+    the whole hook run."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        _staged_findings_filter_set,
+    )
+
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "loop").symlink_to(source / "loop")
+    (source / "app.py").write_text("x = 1\n")
+
+    filter_set = _staged_findings_filter_set(
+        source, ["loop/deeper/x.py", "loop", "app.py"]
+    )
+
+    assert (source / "app.py").resolve() in filter_set
 
 
 def test_cli_refusal_is_a_usage_error_outside_precommit():

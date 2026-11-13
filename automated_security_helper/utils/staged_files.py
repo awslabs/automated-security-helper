@@ -20,6 +20,7 @@ the scope: scanners keep the same scan root, so every path they report resolves
 exactly as it does in a whole-repository run.
 """
 
+import os
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import List, Optional, Sequence
@@ -84,25 +85,30 @@ def validate_staged_entries(entries: Sequence[str]) -> None:
     """Refuse a ``staged_files`` list whose entries are not source-relative.
 
     The contract is POSIX paths relative to the source directory, which is what
-    :func:`staged_files_for_source` produces. A caller-supplied entry that is
-    absolute (POSIX or a Windows drive), empty, climbs with ``..`` or carries a
-    backslash would name something outside the staged scope -- an absolute path
-    or a ``..`` reaches files the scope must never scan -- so it is refused
-    with the entry named, before any scan starts.
+    :func:`staged_files_for_source` produces. An entry that is absolute, empty
+    or climbs with ``..`` would name something outside the staged scope -- an
+    absolute path or a ``..`` reaches files the scope must never scan -- so it
+    is refused with the entry named, before any scan starts.
+
+    A backslash or a drive-letter spelling (``a\\b.py``, ``C:``) is refused on
+    Windows only, where it is path syntax a POSIX reading mis-parses. On POSIX
+    hosts both are legal file-name characters: git stages ``a\\b.py`` as one
+    file, the CLI's own reader hands it through here, and refusing it failed
+    the hook over a name, not a scope escape.
     """
+    windows_host = os.sep != "/"
     for entry in entries:
         posix = PurePosixPath(entry)
-        if (
-            not entry
-            or posix.is_absolute()
-            or ".." in posix.parts
-            or "\\" in entry
-            or (len(entry) > 1 and entry[1] == ":" and entry[0].isalpha())
-        ):
+        suspicious = not entry or posix.is_absolute() or ".." in posix.parts
+        if windows_host and not suspicious:
+            suspicious = "\\" in entry or (
+                len(entry) > 1 and entry[1] == ":" and entry[0].isalpha()
+            )
+        if suspicious:
             raise ValueError(
                 "staged_files entries are POSIX paths relative to the source "
                 f"directory; {entry!r} is absolute, empty, climbs with '..', "
-                "or is not POSIX-spelled."
+                "or is Windows path syntax on a Windows host."
             )
 
 

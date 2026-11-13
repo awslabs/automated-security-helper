@@ -540,10 +540,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     #: --mode precommit --staged: checkov is handed each staged file as
-    #: ``--file <path>`` -- and, for Terraform, the staged file's parent
-    #: directory as ``--directory`` (_staged_scope_paths below) -- in place of
-    #: ``--directory <target>``, so it parses what the commit stages instead of
-    #: walking the tree. The patterns name what checkov's frameworks read, so a
+    #: ``--file <path>`` -- and, for Terraform, the staged file's SAME-DIRECTORY
+    #: ``.tf``/``.tfvars`` siblings as extra ``--file`` entries
+    #: (_staged_scope_paths below; never a ``--directory``, which recurses) --
+    #: in place of ``--directory <target>``, so it parses what the commit
+    #: stages instead of walking the tree. The patterns name what checkov's
+    #: frameworks read, so a
     #: commit staging none of them (a README, a .py refactor) skips checkov's
     #: startup entirely. The cost of a missing pattern is a skipped checkov run
     #: on a commit it could have read, never a wrong finding: extend the list

@@ -193,7 +193,7 @@ class TestEntryValidation:
 
     @pytest.mark.parametrize(
         "entry",
-        ["/abs.py", "../up.py", "pkg/../../up.py", "", "C:/x.py", "a\\b.py"],
+        ["/abs.py", "../up.py", "pkg/../../up.py", ""],
     )
     def test_an_entry_that_could_leave_the_source_dir_is_refused(self, entry):
         from automated_security_helper.utils.staged_files import (
@@ -202,6 +202,18 @@ class TestEntryValidation:
 
         with pytest.raises(ValueError, match="relative to the source directory"):
             validate_staged_entries([entry])
+
+    @pytest.mark.skipif(os.sep != "/", reason="POSIX file-name semantics")
+    def test_posix_legal_names_with_backslash_or_colon_pass(self):
+        """On POSIX a backslash and a colon are legal file-name characters: git
+        stages ``a\\b.py`` as one file and the CLI's own reader hands it
+        through, so refusing it failed the hook over a name, not a scope
+        escape. The Windows-syntax checks apply on Windows hosts only."""
+        from automated_security_helper.utils.staged_files import (
+            validate_staged_entries,
+        )
+
+        validate_staged_entries(["a\\b.py", "x:y.tf", "C:/notes.md"])
 
 
 @pytest.mark.unit
