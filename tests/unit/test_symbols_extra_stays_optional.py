@@ -14,8 +14,8 @@ Chocolatey, MCPB and the operator's e2e scanner image all install the bare wheel
 or source tree, so they resolve the wheel's Requires-Dist with no extra. This file
 pins both halves: the extra is not a core requirement, and each channel's install
 line asks for no extra. Homebrew is pinned separately by
-tests/unit/test_homebrew_formula_lock_sync.py, because its closure is computed from
-uv.lock rather than written as an install line.
+tests/unit/test_homebrew_formula_install.py, because it installs from uv.lock rather
+than from an install line.
 
 The ASH container image is the one channel that requests the extra on purpose
 (Dockerfile: `[cdk,symbols]`). It is a Debian glibc image, so the wheels exist for

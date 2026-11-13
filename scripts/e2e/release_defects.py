@@ -33,7 +33,8 @@ from typing import Any, Dict, List, Optional
 # v3.7.1's Formula/ash.rb declares no resource blocks, and Homebrew installs a formula's
 # package with `pip --no-deps`, so the keg holds ASH without its dependencies: `brew
 # install` exits 0, `ash --version` cannot import typer, and `brew test` fails. v4's
-# formula carries every resource (tests/unit/test_homebrew_formula_resources.py).
+# formula installs the locked dependencies with `uv sync`
+# (tests/unit/test_homebrew_formula_install.py).
 # Measured with Homebrew on Linux on 2026-10-08.
 HOMEBREW_VERSION_DEFECTS: Dict[str, Dict[str, Any]] = {
     "v3.7.1": {

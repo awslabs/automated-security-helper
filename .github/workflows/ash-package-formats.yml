@@ -119,8 +119,6 @@ jobs:
           uv run pytest -o addopts= -p no:cacheprovider
           tests/unit/test_package_contents_gate.py
           tests/unit/test_package_formats_workflow.py
-          tests/unit/test_homebrew_formula_lock_sync.py
-          tests/unit/test_homebrew_formula_resources.py
           tests/unit/test_homebrew_formula_version.py
           tests/unit/test_msix_e2e_script.py
           tests/unit/test_e2e_prev_tree.py
