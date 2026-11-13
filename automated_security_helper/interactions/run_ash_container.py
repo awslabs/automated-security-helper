@@ -400,7 +400,7 @@ def get_ash_revision(quiet: bool = False) -> str | None:
     # package build recorded: the commit it was built from, or a placeholder when it
     # could not tell. A record of the wrong shape leaves nothing at all.
     if return_val is None or not _names_a_ref(return_val):
-        return _release_revision()
+        return _release_revision(quiet=quiet)
     if return_val == ASH_REPO_LATEST_REVISION and not _COMMIT_ID_PATTERN.fullmatch(
         return_val
     ):
@@ -468,7 +468,7 @@ def _names_a_ref(revision: str) -> bool:
     return revision not in _UNRECORDED_REVISIONS and not revision.startswith("ERROR")
 
 
-def _release_revision() -> str | None:
+def _release_revision(quiet: bool = False) -> str | None:
     """A guess at the revision: the release tag of the installed version, or None.
 
     The last fallback, when neither direct_url.json nor the package build names a
@@ -494,12 +494,13 @@ def _release_revision() -> str | None:
     if parsed.is_prerelease or parsed.is_postrelease or parsed.local is not None:
         return None
     tag = f"v{parsed}"
-    ASH_LOGGER.warning(
-        f"This installation of ASH recorded no source revision, so the image installs "
-        f"{tag}, the release tag of its version {version}. That is a guess: a build "
-        f"of an unreleased commit carries the version of the release before it. Pass "
-        f"--ash-revision-to-install to choose the revision."
-    )
+    if not quiet:
+        ASH_LOGGER.warning(
+            f"This installation of ASH recorded no source revision, so the image installs "
+            f"{tag}, the release tag of its version {version}. That is a guess: a build "
+            f"of an unreleased commit carries the version of the release before it. Pass "
+            f"--ash-revision-to-install to choose the revision."
+        )
     return tag
 
 
