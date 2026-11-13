@@ -353,7 +353,7 @@
         
         🔍 **What ASH Scans For:**
         • Python security issues (Bandit)
-        • Multi-language security patterns (Semgrep)
+        • Multi-language security patterns (Opengrep)
         • Hardcoded secrets and credentials (detect-secrets)
         • Infrastructure as Code issues (Checkov)
         • CDK security problems (cdk-nag)
@@ -394,7 +394,7 @@
         ASH is installed and ready to perform security scans in local mode.
         Local mode includes these scanners:
         • Bandit (Python security issues)
-        • Semgrep (Multi-language security patterns)
+        • Opengrep (Multi-language security patterns; serves the retired semgrep scanner name)
         • detect-secrets (Hardcoded secrets detection)
         • Checkov (Infrastructure as Code security)
         • cdk-nag (CDK security issues)

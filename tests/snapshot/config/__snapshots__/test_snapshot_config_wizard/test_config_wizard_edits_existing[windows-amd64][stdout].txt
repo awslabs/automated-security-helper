@@ -17,7 +17,6 @@ Scanner configuration
 │ grype          │        yes        │
 │ npm-audit      │        yes        │
 │ opengrep       │        no         │
-│ semgrep        │        no         │
 │ syft           │        yes        │
 └────────────────┴───────────────────┘
   Enable bandit? [y/N]:
@@ -28,7 +27,6 @@ Scanner configuration
   Enable grype? [Y/n]: n
   Enable npm-audit? [Y/n]:
   Enable opengrep? [y/N]:
-  Enable semgrep? [y/N]:
   Enable syft? [Y/n]:
 
 Output format configuration

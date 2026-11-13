@@ -143,22 +143,6 @@ scanners:
       patterns: []
       version: v1.30.2
       sha256: {}
-  semgrep:
-    name: semgrep
-    enabled: false
-    options:
-      severity_threshold: null
-      scan_timeout: 1800
-      config: p/ci
-      exclude:
-      - '*-converted.py'
-      - '*_report_result.txt'
-      exclude_rule: []
-      severity: []
-      metrics: auto
-      offline: false
-      tool_version: null
-      install_timeout: 300
   syft:
     name: syft
     enabled: true

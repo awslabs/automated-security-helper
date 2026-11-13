@@ -1,6 +1,6 @@
 $ ash plugin list -c custom.yaml --include-plugin-config
 [<LOG_TIME>] INFO     Using config file specified at: custom.yaml
-             INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+             INFO     Loaded 2 converters, 9 scanners, and 15 reporters
 ASH Scanners
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Enabled ┃ Class                ┃ Module                ┃ Plugin Config          ┃
@@ -170,31 +170,6 @@ ASH Scanners
 │                │         │                      │                       │     "version":         │
 │                │         │                      │                       │ "v1.30.2",             │
 │                │         │                      │                       │     "sha256": {}       │
-│                │         │                      │                       │   }                    │
-│                │         │                      │                       │ }                      │
-├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤
-│ semgrep        │ True    │ SemgrepScanner       │ automated_security_h… │ {                      │
-│                │         │                      │                       │   "name": "semgrep",   │
-│                │         │                      │                       │   "enabled": true,     │
-│                │         │                      │                       │   "options": {         │
-│                │         │                      │                       │     "severity_thresho… │
-│                │         │                      │                       │ null,                  │
-│                │         │                      │                       │     "scan_timeout":    │
-│                │         │                      │                       │ 1800,                  │
-│                │         │                      │                       │     "config": "p/ci",  │
-│                │         │                      │                       │     "exclude": [       │
-│                │         │                      │                       │       "*-converted.py… │
-│                │         │                      │                       │       "*_report_resul… │
-│                │         │                      │                       │     ],                 │
-│                │         │                      │                       │     "exclude_rule":    │
-│                │         │                      │                       │ [],                    │
-│                │         │                      │                       │     "severity": [],    │
-│                │         │                      │                       │     "metrics": "auto", │
-│                │         │                      │                       │     "offline": false,  │
-│                │         │                      │                       │     "tool_version":    │
-│                │         │                      │                       │ null,                  │
-│                │         │                      │                       │     "install_timeout": │
-│                │         │                      │                       │ 300                    │
 │                │         │                      │                       │   }                    │
 │                │         │                      │                       │ }                      │
 ├────────────────┼─────────┼──────────────────────┼───────────────────────┼────────────────────────┤

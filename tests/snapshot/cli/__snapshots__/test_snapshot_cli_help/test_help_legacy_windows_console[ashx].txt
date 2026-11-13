@@ -96,9 +96,15 @@
 │                                                                           off. Ignored in       │
 │                                                                           container mode. See   │
 │                                                                           docs/content/docs/sc… │
-│ --offline-semgrep-r…                                 <str>                Specify Semgrep       │
-│                                                                           rulesets for use in   │
-│                                                                           ASH offline mode      │
+│ --offline-semgrep-r…                                 <str>                Specify rulesets to   │
+│                                                                           bake into the         │
+│                                                                           opengrep offline      │
+│                                                                           cache for ASH offline │
+│                                                                           mode (the flag keeps  │
+│                                                                           its historical name;  │
+│                                                                           the semgrep scanner   │
+│                                                                           is served by the      │
+│                                                                           opengrep plugin)      │
 │                                                                           [default: p/ci]       │
 │ --strategy                                           <sequential|paralle  Whether to run        │
 │                                                      l>                   scanners in parallel  │
@@ -299,11 +305,10 @@
 │                                                                           (grype's or trivy's   │
 │                                                                           vulnerability         │
 │                                                                           database, the offline │
-│                                                                           semgrep/opengrep      │
-│                                                                           rulesets) is older    │
-│                                                                           than its declared     │
-│                                                                           bound -- for grype,   │
-│                                                                           120h after the        │
+│                                                                           opengrep rulesets) is │
+│                                                                           older than its        │
+│                                                                           declared bound -- for │
+│                                                                           grype, 120h after the │
 │                                                                           database was built.   │
 │                                                                           Without it such a     │
 │                                                                           scan exits 1. With it │

@@ -1,5 +1,5 @@
 $ ash plugin list --show-versions
-[<LOG_TIME>] INFO     Loaded 2 converters, 10 scanners, and 15 reporters
+[<LOG_TIME>] INFO     Loaded 2 converters, 9 scanners, and 15 reporters
 ASH Scanners
 ┏━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
 ┃ Name           ┃ Enabled ┃ Class          ┃ Module         ┃ Version ┃ Reachable ┃ Plugin Config ┃
@@ -19,8 +19,6 @@ ASH Scanners
 │ npm-audit      │ True    │ NpmAuditScann… │ automated_sec… │ Unknown │ Unknown   │               │
 ├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
 │ opengrep       │ True    │ OpengrepScann… │ automated_sec… │ Unknown │ Unknown   │               │
-├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
-│ semgrep        │ True    │ SemgrepScanner │ automated_sec… │ 1.139.0 │ Unknown   │               │
 ├────────────────┼─────────┼────────────────┼────────────────┼─────────┼───────────┼───────────────┤
 │ syft           │ True    │ SyftScanner    │ automated_sec… │ 1.33.0  │ No        │               │
 └────────────────┴─────────┴────────────────┴────────────────┴─────────┴───────────┴───────────────┘
