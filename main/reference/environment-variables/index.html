@@ -3790,6 +3790,13 @@ SOFTWARE.
 <td>Directory of release assets kept between runs, set by CI (ASH_TOOL_DOWNLOAD_CACHE). It holds the downloaded release ASSETS, never extracted binaries and never install receipts. (<code>automated_security_helper/utils/download_utils.py</code>)</td>
 </tr>
 <tr>
+<td><code>ASH_TOOL_VERDICT_STORE_DIR</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/pre_installed_tool.py</code> (<code>_verdict_store_dir</code>)</td>
+<td>Overrides where the records live; "0", "off" or "none" turns persistence off. Unset or blank, the default under the user's own state directory (the container_leftovers pattern) is used. (<code>automated_security_helper/utils/pre_installed_tool.py</code>)</td>
+</tr>
+<tr>
 <td><code>ASH_VERBOSE</code></td>
 <td>off</td>
 <td></td>
@@ -4395,7 +4402,7 @@ SOFTWARE.
 <td><code>UV_TOOL_DIR</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_data_directories</code>)</td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_data_directories</code>)<br><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_uv_tools_dir_stamp</code>)</td>
 <td>UV_TOOL_DIR and UV_PYTHON_INSTALL_DIR where set, each screened (_screened_uv_directory), else <code>uv/tools</code> and <code>uv/python</code> under the XDG data home. (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_data_directories</code>)</td>
 </tr>
 <tr>
@@ -4465,7 +4472,7 @@ SOFTWARE.
 <td><code>XDG_DATA_HOME</code></td>
 <td><code>""</code></td>
 <td></td>
-<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_xdg_directory</code>)</td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_xdg_directory</code>)<br><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_uv_tools_dir_stamp</code>)</td>
 <td>Read as given, a relative XDG_DATA_HOME or XDG_CACHE_HOME named uv's directories under ASH's working directory, usually the scanned repository, which <code>_existing</code> then made absolute and the policy mounted, as executable where uv's tools would be. (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_xdg_directory</code>)</td>
 </tr>
 <tr>
