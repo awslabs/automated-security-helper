@@ -782,6 +782,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
+    #: --mode precommit --staged: bandit reads Python, so a staged set with no
+    #: .py file skips it, and when there is one bandit is given the staged files
+    #: as positional targets (bandit scans a file target as it scans a walked
+    #: file; -r matters only for directories) instead of walking the tree. The
+    #: --exclude machinery is anchored at the directory target as before and
+    #: still applies to the file targets.
+    staged_scope_patterns: ClassVar[Optional[Tuple[str, ...]]] = ("*.py",)
+    staged_target_style: ClassVar[Optional[str]] = "positional"
+
     # The operator's .bandit file, when config_file names one; see
     # _process_config_options.
     _ini_file: Optional[Path] = PrivateAttr(default=None)

@@ -44,6 +44,22 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## Unreleased
+
+### Features
+
+- **`ash --mode precommit --staged` scans the staged files instead of the whole repository.**
+  The list comes from `git diff --cached` (no deletions; a rename is scanned at its new
+  path): bandit and checkov are handed the staged files as targets, the scanners that pick
+  their own files (detect-secrets, cdk-nag, npm-audit) and the converters read the same
+  staged list, a scanner with nothing staged to scan is skipped with a log line, and a
+  commit with nothing staged exits 0 without starting a scanner. Suppressions and ignore
+  paths resolve exactly as in a whole-repository scan. The `ash` and `ash-simple-scan`
+  pre-commit hooks now pass `--staged`; on the plain CLI the flag is opt-in and any mode
+  but `precommit` refuses it. It is planned to become the precommit default in ASH v4.
+  Unlike `--changed-files-only`, which scans everything and filters only the reports,
+  `--staged` saves the scan time.
+
 ## v3.8.0 (2026-11-12)
 
 ### Breaking behavior changes in a minor release

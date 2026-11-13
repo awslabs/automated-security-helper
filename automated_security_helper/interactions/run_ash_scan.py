@@ -307,6 +307,9 @@ class ScanOptions(BaseModel):
     min_severity: str = "low"
     changed_files_only: bool = False
     base_ref: str = "origin/main"
+    # --mode precommit only: scan the staged files (git diff --cached) instead
+    # of the whole tree. Validated in run_ash_scan before any mode runs.
+    staged: bool = False
     # One shard of a split scan, or both None for an ordinary whole scan. Left
     # unvalidated here on purpose: ScanPhase._execute_phase is the single place
     # that refuses an unusable pair, so a second rule in this model could drift
@@ -6253,12 +6256,41 @@ def _run_local_mode(
         if opts.mode == RunMode.precommit:
             final_scanners = list(set(final_scanners + list(PRECOMMIT_MODE_SCANNERS)))
 
+        # --mode precommit --staged: the staged files are the scan's target set.
+        # Read here, once, and handed to the orchestrator, which limits the
+        # run's recorded scan set to them and puts them on the plugin context
+        # for the scanners that take file targets. An unreadable list is a
+        # refusal, never a silent whole-tree scan of what the caller asked to
+        # scope; an empty list runs the machinery with nothing to scan, which
+        # reports zero findings and exits clean (the CLI already exits earlier
+        # and faster for that case).
+        staged_files: Optional[List[str]] = None
+        if opts.staged:
+            from automated_security_helper.utils.staged_files import (
+                staged_files_for_source,
+            )
+
+            staged_files = staged_files_for_source(opts.source_dir)
+            if staged_files is None:
+                raise RuntimeError(
+                    "--staged could not read the staged file list for "
+                    f"{opts.source_dir.as_posix()}: it needs git and a git "
+                    "repository (the cause was logged). Run without --staged "
+                    "to scan the whole tree."
+                )
+            if not staged_files:
+                logger.info(
+                    "--staged: no staged file is inside the scanned directory, "
+                    "so there is nothing to scan."
+                )
+
         final_show_progress = _live_progress_enabled(opts)
 
         orchestrator = ASHScanOrchestrator.create(
             source_dir=opts.source_dir,
             output_dir=opts.output_dir,
             work_dir=opts.output_dir / ASH_WORK_DIR_NAME,
+            staged_files=staged_files,
             enabled_scanners=final_scanners,
             excluded_scanners=list(opts.excluded_scanners or []),
             config_path=config,
@@ -7770,6 +7802,7 @@ def run_ash_scan(
     min_severity: str = "low",
     changed_files_only: bool = False,
     base_ref: str = "origin/main",
+    staged: bool = False,
     shard_index: int | None = None,
     shard_count: int | None = None,
     mode: RunMode = RunMode.local,
@@ -7858,6 +7891,7 @@ def run_ash_scan(
         min_severity=min_severity,
         changed_files_only=changed_files_only,
         base_ref=base_ref,
+        staged=staged,
         shard_index=shard_index,
         shard_count=shard_count,
         mode=mode,
@@ -7900,6 +7934,22 @@ def run_ash_scan(
             "config_base_gate is applied only to a scan in local mode, not to "
             f"mode={opts.mode.value!r}: the ASH that mode runs reads the config "
             "without it"
+        )
+    # Before any mode runs: --staged is the precommit scope and nothing else
+    # applies it, so any other mode is refused rather than silently scanning
+    # the whole tree (the CLI refuses it earlier with a usage error; this is
+    # the same contract for a library caller).
+    if opts.staged and opts.mode != RunMode.precommit:
+        raise ValueError(
+            "staged=True is supported only with mode=precommit: it scopes the "
+            f"scan to the files git has staged, and mode={opts.mode.value!r} "
+            "does not read that scope. Run with mode=RunMode.precommit, or "
+            "drop staged."
+        )
+    if opts.staged and opts.workspace_plan is not None:
+        raise ValueError(
+            "staged=True is not supported in workspace mode: the staged scope "
+            "is read for one source directory. Scan the project directly."
         )
     for name, value, workspace_ok in (
         ("untrusted_config", opts.untrusted_config, False),

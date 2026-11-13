@@ -14,7 +14,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
-from typing import Annotated, Any, Dict, Optional, Set, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -194,6 +194,18 @@ class PluginContext(BaseModel):
                 "In a workspace scan, the workspace's output directory, which holds "
                 "this project's output directory and every other project's: ASH's "
                 "own output, left out of the scan like the output directory"
+            )
+        ),
+    ] = None
+    staged_files: Annotated[
+        Optional[List[str]],
+        Field(
+            description=(
+                "Under --mode precommit --staged, the staged files as POSIX paths "
+                "relative to source_dir: the scanner target set. None (the "
+                "default) means no staged scope; the whole tree is scanned. An "
+                "empty list means something was staged and none of it is inside "
+                "source_dir, so every scanner has nothing to scan."
             )
         ),
     ] = None

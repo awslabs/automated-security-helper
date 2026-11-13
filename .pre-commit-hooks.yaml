@@ -12,9 +12,15 @@
 # repository. A bare `.` installs ASH without extras, so the hook environment
 # has only what [project] dependencies name.
 #
-# `ash` and `ash-simple-scan` run `--mode precommit`, which always adds bandit,
-# detect-secrets, checkov, cdk-nag and npm-audit to the scanner selection
-# (interactions/run_ash_scan.py). cdk-nag needs the `cdk` extra; without it the
+# `ash` and `ash-simple-scan` run `--mode precommit --staged`, which always adds
+# bandit, detect-secrets, checkov, cdk-nag and npm-audit to the scanner selection
+# (interactions/run_ash_scan.py) and scopes the scan to the staged files
+# (`git diff --cached`), so a commit pays for what it stages rather than for the
+# whole repository. `--staged` is opt-in on the CLI today and planned to become
+# the precommit default in v4; this template is the opt-in surface. `pass_filenames`
+# stays false: ASH reads the staged list from git itself (NUL-safe, rename-aware),
+# so pre-commit's own filename batching never splits one scan into several.
+# cdk-nag needs the `cdk` extra; without it the
 # scanner is MISSING and the completeness gate exits 1 on every run, whatever the
 # repository contains. `.[cdk]` installs the extra from the same clone, so its
 # version ranges come from pyproject.toml rather than being restated here.
@@ -28,8 +34,8 @@
 # the installed console scripts and the CLI's own options.
 - id: ash
   name: Use ASH for SAST/IaC/Secrets scanning
-  description: Runs ASH's pre-commit scanner set (bandit, detect-secrets, checkov, cdk-nag, npm-audit) locally
-  entry: ashv3 --mode=precommit
+  description: Runs ASH's pre-commit scanner set (bandit, detect-secrets, checkov, cdk-nag, npm-audit) locally on the staged files
+  entry: ashv3 --mode=precommit --staged
   language: python
   additional_dependencies: [".[cdk]"]
   pass_filenames: false
@@ -39,7 +45,7 @@
 - id: ash-simple-scan
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Same hook as `ash`; kept for configurations that use this id
-  entry: ashv3 --mode=precommit
+  entry: ashv3 --mode=precommit --staged
   language: python
   additional_dependencies: [".[cdk]"]
   pass_filenames: false

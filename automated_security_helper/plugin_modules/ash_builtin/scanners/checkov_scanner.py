@@ -537,6 +537,19 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    #: --mode precommit --staged: checkov is handed each staged file as
+    #: ``--file <path>`` in place of ``--directory <target>``, so it parses N
+    #: files instead of walking the tree. No pattern list (None means any staged
+    #: file matches): checkov's ``--framework all`` reads too many file kinds for
+    #: a glob list to name without silently dropping coverage, and checkov
+    #: itself reports nothing for a file no framework reads. The --skip-path
+    #: values stay anchored at the directory target as before; the path
+    #: rewriting already matches file paths (rewrite_checkov_paths's
+    #: ``scanned_files``).
+    staged_target_style: ClassVar[Optional[str]] = "per-file-flag"
+    staged_target_flag: ClassVar[str] = "--file"
+
     check_conf: str = "NOT_PROVIDED"
 
     # The absolute target of the scan in progress, set by _execute_scan and read

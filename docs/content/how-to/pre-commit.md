@@ -48,13 +48,41 @@ Do not ignore all of `.ash/`: an ASH config file can live there, as `.ash/.ash.y
 
 ## What the hook runs {#behavior}
 
-The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
+The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommit mode:
 
 - runs five scanners: bandit, detect-secrets, checkov, cdk-nag, and npm-audit. `--scanners`
   can add others but cannot remove these; `--exclude-scanners` removes them.
-- scans the whole repository on every run, not only the staged files. A commit that touches
-  one file is still blocked by a finding in a file committed earlier.
+- with `--staged` (which the hook passes), scans the staged files instead of the whole
+  repository, so a one-file commit pays for one file. See
+  [Staged-file scope](#staged-scope).
 - prints simplified output and writes the usual reports to `.ash/ash_output/`.
+
+## Staged-file scope (`--staged`) {#staged-scope}
+
+`--staged` reads the staged file list from `git diff --cached` (added, copied, modified
+and renamed entries; a rename is scanned at its new path; a deleted file cannot be
+scanned and is not listed) and makes it the scan's target set:
+
+- bandit and checkov are handed the staged files instead of the tree; the scanners that
+  pick their own files (detect-secrets, cdk-nag, npm-audit) read the same staged list.
+- a scanner none of whose files are staged is skipped, with a log line saying so.
+- converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
+  when nothing staged matches them.
+- suppressions and `ignore_paths` resolve against the same scan root as a whole-repository
+  run, so a suppression that matches a finding in a full scan matches it here too.
+- findings in files that are not staged are out of scope by definition: the hook judges
+  the commit, not the repository. Keep a whole-repository scan in CI for the rest.
+- with nothing staged, the scan logs that and exits 0 without starting any scanner.
+
+`--staged` works only with `--mode precommit`; any other mode refuses it (exit 5).
+Without the flag, a precommit scan still covers the whole repository: on every ASH v3
+release the flag is opt-in, the hooks in this repository pass it for you, and it is
+planned to become the precommit default in ASH v4.
+
+This is not what `--changed-files-only` does. `--changed-files-only` scans everything
+and only filters the reports against a `<base_ref>...HEAD` diff afterwards, so it saves
+no scan time and cannot see staged-but-uncommitted content; `--staged` is the scan-time
+scope built for the hook.
 
 The hook's environment includes the `cdk` extra that cdk-nag needs. cdk-nag and npm-audit
 also need Node.js and npm on `PATH`, but only when the repository has files they scan:

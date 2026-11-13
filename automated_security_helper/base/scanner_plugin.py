@@ -83,7 +83,7 @@ if TYPE_CHECKING:
 # Anchored with \Z: "$" also matches just before a trailing newline, which
 # would let a key ending in one through to the tool's command line.
 _VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?\Z")
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from automated_security_helper.utils.output_excerpt import head_and_tail
 
 # How much of a tool's stderr goes into the failure message. The full text stays
@@ -482,6 +482,29 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: class's: cfn-nag and cdk-nag set it when they passed over a candidate they could
     #: not parse, and reset it at the top of each scan(). Read before the class value.
     _nothing_scanned_reason: Optional[str] = PrivateAttr(default=None)
+    #: What this scanner scans, as fnmatch globs over source-relative POSIX paths
+    #: and base names, read only under ``--mode precommit --staged`` and only by
+    #: scanners that run through the template ``scan()``. With a staged scope in
+    #: the context, a source scan whose staged files match none of these is
+    #: skipped with a log line instead of running the tool. None, the default,
+    #: means "this scanner reads any file": it is never pattern-skipped. Scanners
+    #: that enumerate their own files from the run's scan set (detect-secrets,
+    #: cdk-nag, cfn-nag, npm-audit) need none of this: the recorded scan set is
+    #: already the staged files, and their own nothing-to-scan channels fire.
+    staged_scope_patterns: ClassVar[Optional[Tuple[str, ...]]] = None
+    #: How the staged files are handed to the tool in place of the directory
+    #: target, for a tool that takes file targets. ``"positional"`` appends each
+    #: file where the directory went (bandit); ``"per-file-flag"`` appends
+    #: ``staged_target_flag`` before each file (checkov's ``--file``). None, the
+    #: default, keeps the directory target: the tool scans the whole tree even
+    #: under --staged, and only the pattern skip above applies.
+    staged_target_style: ClassVar[Optional[str]] = None
+    #: The flag ``"per-file-flag"`` repeats before each staged file.
+    staged_target_flag: ClassVar[str] = "--file"
+    #: This source scan's staged file targets, absolute, set by ``scan()`` when a
+    #: staged scope is active and ``staged_target_style`` is declared; consumed by
+    #: ``_resolve_arguments`` in place of the directory target. Reset per scan().
+    _staged_scan_files: Optional[List[Path]] = PrivateAttr(default=None)
     #: Files this scanner asked ASH to own (``_neutral_tool_file``), by path, with
     #: the text each holds. Written when the arguments are resolved.
     _neutral_files: Dict[str, str] = PrivateAttr(default_factory=dict)
@@ -892,6 +915,43 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             with open_for_write(written) as handle:
                 handle.write(content)
 
+    def _staged_scope_paths(
+        self, target: str | Path, target_type: str
+    ) -> Optional[List[Path]]:
+        """The staged files this scanner would scan under ``target``, or None.
+
+        None means no staged scope applies here: the context carries none
+        (every run but ``--mode precommit --staged``), or the target is the
+        converted tree, whose files were produced from staged inputs already
+        (the converters read the run's restricted scan set), or this scanner
+        declares neither ``staged_scope_patterns`` nor ``staged_target_style``,
+        so the scope has nothing to decide for it.
+
+        A staged name whose working-tree file is gone (staged, then deleted on
+        disk) is left out: there is nothing to hand the tool. The paths are
+        absolute, under ``target``, so the tool reports them as it reports a
+        directory scan's and every suppression and ignore path resolves as in a
+        whole-repository run.
+        """
+        if target_type != "source":
+            return None
+        if self.staged_scope_patterns is None and self.staged_target_style is None:
+            return None
+        staged = getattr(self.context, "staged_files", None)
+        if staged is None:
+            return None
+        from automated_security_helper.utils.staged_files import (
+            matching_staged_files,
+        )
+
+        root = Path(target)
+        paths: List[Path] = []
+        for relative in matching_staged_files(staged, self.staged_scope_patterns):
+            candidate = root.joinpath(*PurePosixPath(relative).parts)
+            if candidate.is_file():
+                paths.append(candidate)
+        return paths
+
     def _resolve_arguments(
         self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
@@ -940,10 +1000,29 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 value = str(value)
             args.append(value)
 
+        staged_targets = self._staged_scan_files
+        if staged_targets:
+            # --mode precommit --staged, for a tool that takes file targets:
+            # the staged files stand where the directory went, so the tool reads
+            # N files instead of walking the tree. The paths are absolute under
+            # the same scan root, so suppressions and the SARIF path handling
+            # see the shapes a directory scan produces.
+            if self.staged_target_style == "per-file-flag":
+                for staged_file in staged_targets:
+                    args.extend([self.staged_target_flag, Path(staged_file).as_posix()])
+            else:
+                args.extend(
+                    Path(staged_file).as_posix() for staged_file in staged_targets
+                )
+        else:
+            args.extend(
+                [
+                    self.args.scan_path_arg,
+                    Path(target).as_posix(),
+                ]
+            )
         args.extend(
             [
-                self.args.scan_path_arg,
-                Path(target).as_posix(),
                 self.args.output_arg,
                 (
                     Path(results_file).as_posix()
@@ -1774,6 +1853,32 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
             self._post_scan(target=target, target_type=target_type)
             return True
+
+        # Per target, like exit_code above: a converted scan must not run on the
+        # source target's staged file list or carry its skip reason.
+        self._staged_scan_files = None
+        self._nothing_scanned_reason = None
+        staged_targets = self._staged_scope_paths(target, target_type)
+        if staged_targets is not None:
+            if not staged_targets:
+                # The same clean-skip shape as the empty target above: the tool
+                # is not started, and the row reads as "nothing to scan" with
+                # this reason rather than as a clean scan of the whole tree.
+                reason = (
+                    f"{self.__class__.__name__} was skipped under --staged: no "
+                    "staged file matches what it scans"
+                )
+                self._nothing_scanned_reason = reason
+                self._plugin_log(
+                    f"{reason}. Not running the tool on {target_type}.",
+                    target_type=target_type,
+                    level=logging.INFO,
+                    append_to_stream="stderr",
+                )
+                self._post_scan(target=target, target_type=target_type)
+                return True
+            if self.staged_target_style is not None:
+                self._staged_scan_files = staged_targets
 
         try:
             validated = self._pre_scan(
