@@ -104,14 +104,18 @@ def _run(env, *argv, cwd=None, timeout=600):
 def _write_tree(root) -> None:
     """A tiny tree with one deterministic detect-secrets finding.
 
-    The credential is assembled at run time so no secret-shaped literal sits in
-    this repository for other scanners to report.
+    The access key id is assembled at run time so exact-match detectors see no
+    key-shaped literal in this repository. The secret is AWS's documented
+    example value and stays WHOLE: secret scanners allowlist it by the EXAMPLE
+    marker in the matched text, so splitting it moves that marker out of the
+    captured chunk and turns this repository's own scan red. The pragma covers
+    the detectors that match the keyword-and-quoted-value line shape instead.
     """
     root.mkdir(parents=True, exist_ok=True)
     marker = "AKIA" + "IOSFODNN7EXAMPLE"
     (root / "app.py").write_text(
         f'ACCESS_KEY = "{marker}"\n'
-        'SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY"\n',
+        'SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n',  # pragma: allowlist secret
         encoding="utf-8",
     )
     (root / "README.md").write_text("a tree for the express parity scan\n")

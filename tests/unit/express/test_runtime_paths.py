@@ -51,7 +51,7 @@ class TestRuntimeDir:
     def test_a_loose_mode_on_an_owned_directory_is_corrected(self, tmp_path):
         target = tmp_path / "ash-express"
         target.mkdir(mode=0o755)
-        os.chmod(target, 0o755)
+        os.chmod(target, 0o755)  # nosec B103 - the loose mode is the fixture under test
         runtime.runtime_dir({"XDG_RUNTIME_DIR": str(tmp_path)})
         assert stat.S_IMODE(os.lstat(target).st_mode) == 0o700
 
