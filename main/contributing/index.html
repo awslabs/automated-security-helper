@@ -3423,13 +3423,18 @@ does not merge.</p>
 <td>through <code>required-checks</code></td>
 </tr>
 <tr>
-<td><code>unit-test (&lt;os&gt;, py&lt;version&gt;, shard &lt;i&gt;of4)</code></td>
-<td>the unit and snapshot suite with both extras, on five runners and Python 3.10 to 3.14, plus the cdk-nag integration tests. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of <code>automated_security_helper/</code> is under 80%</td>
+<td><code>unit-test (&lt;os&gt;, py&lt;version&gt;, shard &lt;i&gt;of&lt;n&gt;)</code></td>
+<td>the unit and snapshot suite with both extras, on five runners and Python 3.10 to 3.14, plus the cdk-nag integration tests, in six shards per Linux combination and eight per macOS and Windows one. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of <code>automated_security_helper/</code> is under 80%</td>
 <td>through <code>required-checks</code></td>
 </tr>
 <tr>
-<td><code>integration-test (ubuntu-latest)</code></td>
-<td>the integration suite with <code>pytest --run-integration --run-slow</code>, and the examples in the docs</td>
+<td><code>integration-test (ubuntu-latest, shard &lt;i&gt;of4)</code></td>
+<td>the integration suite with <code>pytest --run-integration --run-slow</code>, in four shards</td>
+<td>through <code>required-checks</code></td>
+</tr>
+<tr>
+<td><code>docs-examples</code></td>
+<td>every runnable shell and Python block in the docs, one test per page</td>
 <td>through <code>required-checks</code></td>
 </tr>
 <tr>

@@ -3888,7 +3888,7 @@ the usual way, how to run the checks yourself, and what each failure means.</p>
   and compare it with the code: the CLI, the config models, the environment variables
   ASH reads, the navigation, and the link targets. They also check the docs URLs and
   paths that ASH's own source names. They run in about ten seconds.</li>
-<li>The docs-example runner, in the <code>integration-test</code> job. It runs every runnable
+<li>The docs-example runner, in the <code>docs-examples</code> job. It runs every runnable
   shell and Python block, page by page, and fails when a block exits with the wrong
   code.</li>
 <li>The site build, in the <code>build-docs</code> job. It runs <code>mkdocs build --strict</code> with link
