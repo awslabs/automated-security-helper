@@ -33,6 +33,8 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 WINGET = REPO / "packaging" / "winget"
 LOWER = REPO / "scripts" / "e2e" / "lower_version.py"

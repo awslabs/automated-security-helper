@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 DOCKERFILE_NAME = re.compile(r"^(Dockerfile.*|.*\.Dockerfile|Containerfile.*)$")

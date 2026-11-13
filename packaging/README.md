@@ -134,12 +134,11 @@ namespaces, because `flatpak-builder` drives `bwrap`. That is why its CI job has
 carries the measurement.
 
 `homebrew/` is the odd one out and the rest of this file does not describe it. It builds
-no package and bundles no wheel: it holds the generator that keeps the formula's
-`resource` block in step with `pyproject.toml`, and Homebrew builds ASH from the git tag
-on the user's machine. The one-wheel rule above therefore has nothing to count there --
-what keeps the formula on the permitted side of the boundary is that a `resource` stanza
-is a URL and a sha256, so no dependency source enters the tree. Read
-`homebrew/README.md`.
+no package and bundles no wheel: Homebrew builds ASH from the git tag on the user's
+machine, and `Formula/ash.rb` installs the locked dependencies with `uv sync` from the
+`uv.lock` committed at that tag. The one-wheel rule above therefore has nothing to count
+there, and the formula declares no `resource` stanzas
+(`tests/unit/test_homebrew_formula_install.py` holds that).
 
 ## Install shape, common to the deb and the rpm
 

@@ -24,6 +24,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "verify_sandbox_scanner_parity.py"
 

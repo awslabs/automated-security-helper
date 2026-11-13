@@ -55,7 +55,10 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"

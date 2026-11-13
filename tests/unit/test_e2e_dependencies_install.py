@@ -31,6 +31,8 @@ from automated_security_helper.cli.dependencies import (
 from automated_security_helper.utils.download_utils import receipt_path
 from automated_security_helper.utils.tool_downloads import get_tool_asset
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "e2e" / "assert_dependencies_install.py"
 MSIX_LEG = REPO_ROOT / "packaging" / "msix" / "verify-on-windows.ps1"

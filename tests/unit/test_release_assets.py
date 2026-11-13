@@ -29,6 +29,8 @@ from pathlib import Path, PureWindowsPath
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "packaging" / "release-assets.py"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"

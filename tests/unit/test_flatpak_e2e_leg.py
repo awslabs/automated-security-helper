@@ -30,6 +30,8 @@ import yaml
 
 from tests.utils.posix_bash import bash_path, run_bash, write_lf
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "packaging" / "flatpak" / "verify-in-container.sh"
 RUN_CASE = REPO_ROOT / "scripts" / "e2e" / "run_case.py"

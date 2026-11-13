@@ -17,7 +17,10 @@ from __future__ import annotations
 import fnmatch
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CALLER = REPO_ROOT / ".github" / "workflows" / "ash-package-formats.yml"

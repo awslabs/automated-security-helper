@@ -29,6 +29,8 @@ import yaml
 
 from tests.utils.helpers import github_yaml_files
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 
 # `ash` (or ash.exe) where a shell would run it: the start of a command line, or

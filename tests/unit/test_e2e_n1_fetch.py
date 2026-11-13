@@ -61,6 +61,8 @@ import yaml
 
 from tests.utils.posix_bash import bash_path
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 PREV_TREE = REPO_ROOT / "scripts" / "e2e" / "prev_tree.py"

@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 FORMULA = REPO / "Formula" / "ash.rb"
 SCRIPT = REPO / "scripts" / "e2e" / "brew_formula.py"
@@ -65,23 +67,34 @@ class TestRenderAgainstTheRealFormula:
             f'  sha256 "{SHA}"',
         ]
 
-    def test_the_copy_keeps_every_resource_and_the_test_block(self) -> None:
+    def test_the_copy_keeps_the_test_block_and_adds_no_resource(self) -> None:
+        # The formula installs from the committed lock with `uv sync`, so it has no
+        # resource stanzas, and the copy must not gain any.
         formula = FORMULA.read_text(encoding="utf-8")
         rendered = brew_formula.render(formula, TARBALL, "3.7.0", SHA)
-        assert _resources(rendered) == _resources(formula)
-        assert len(_resources(formula)) > 0
+        assert _resources(formula) == []
+        assert _resources(rendered) == []
         assert rendered.count("test do") == formula.count("test do") == 1
         assert "tag:" not in rendered
 
     def test_drop_resource_removes_exactly_that_stanza(self) -> None:
+        # The formula has no resource stanzas, so the stanza under test is one
+        # added to the real formula here.
+        stanza = (
+            '  resource "detect-secrets" do\n'
+            '    url "https://example.invalid/detect_secrets-1.0.tar.gz"\n'
+            '    sha256 "' + SHA + '"\n'
+            "  end\n\n"
+        )
         formula = FORMULA.read_text(encoding="utf-8")
+        marker = "  def install\n"
+        assert marker in formula
+        formula = formula.replace(marker, stanza + marker, 1)
         rendered = brew_formula.render(
             formula, TARBALL, "3.7.0", SHA, drop=["detect-secrets"]
         )
-        before = _resources(formula)
-        assert "detect-secrets" in before
-        after = _resources(rendered)
-        assert after == [name for name in before if name != "detect-secrets"]
+        assert _resources(formula) == ["detect-secrets"]
+        assert _resources(rendered) == []
         assert "detect_secrets-" not in rendered
         # Nothing but the url line and the one stanza (plus its trailing blank line).
         removed, _ = _changed_lines(formula, rendered)

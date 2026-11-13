@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = REPO_ROOT / "automated_security_helper"
 AWS_PLUGINS_DIR = Path("automated_security_helper/plugin_modules/ash_aws_plugins")

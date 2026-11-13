@@ -758,14 +758,10 @@ global_settings:
     #   unreachable /tmp control instead of writing the key out in a heredoc.
     # - Formula/ash.rb holds the key in one Ruby string marked
     #   `# pragma: allowlist secret`, and interpolates it into the fixture the test
-    #   writes, so the written file has no marker and `brew test` still sees it. Its
-    #   78 generated `sha256` lines are published PyPI sdist digests, which
-    #   detect-secrets reads as hex high-entropy strings; packaging/homebrew/
-    #   refresh-resources.py writes the same marker on each of those lines, so a
-    #   regenerated block carries it without anyone editing this file. Only those
-    #   lines are marked, so a refresh that adds a dependency whose url happens to
-    #   trip a secrets rule shows up as a finding: read it, and mark that one line if
-    #   it is a false positive, rather than bringing back a whole-file entry.
+    #   writes, so the written file has no marker and `brew test` still sees it. Only
+    #   that line is marked, so a new line that trips a secrets rule shows up as a
+    #   finding: read it, and mark that one line if it is a false positive, rather
+    #   than bringing back a whole-file entry.
     #
     # The MSIX script once assembled the key from two halves at run time so
     # detect-secrets would not match it. That was removed: a scanner reporting a file

@@ -39,6 +39,8 @@ import pytest
 
 from tests.utils.helpers import iter_repo_files
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS = REPO_ROOT / "tests"
 STDLIB = frozenset(sys.stdlib_module_names)

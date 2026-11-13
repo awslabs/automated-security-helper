@@ -23,7 +23,10 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
+import pytest
 from hatchling.builders import sdist as hatchling_sdist
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = REPO_ROOT / "pyproject.toml"

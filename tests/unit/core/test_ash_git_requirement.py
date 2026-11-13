@@ -34,6 +34,8 @@ from automated_security_helper.core.constants import (
     ash_reinstall_command,
 )
 
+pytestmark = pytest.mark.unit
+
 _COMMANDS = [
     lambda: ash_git_requirement(),
     lambda: ash_git_requirement("symbols"),

@@ -37,6 +37,8 @@ import pytest
 
 from automated_security_helper.interactions import run_ash_container as rac
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def recorded_runner(monkeypatch):

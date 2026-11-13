@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = REPO_ROOT / "deploy" / "cdk" / "templates"
 BOOTSTRAP_TYPE = "Custom::AshImageBootstrap"

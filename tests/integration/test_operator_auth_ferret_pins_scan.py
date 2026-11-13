@@ -30,6 +30,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
 RULE = "API_KEY_OR_SECRET"

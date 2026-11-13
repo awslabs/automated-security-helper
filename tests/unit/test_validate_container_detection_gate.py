@@ -30,6 +30,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = (
     REPO_ROOT / ".github" / "actions" / "validate-container" / "assert_detection.py"

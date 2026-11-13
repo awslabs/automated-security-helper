@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASSERT = REPO_ROOT / "scripts" / "e2e" / "assert_quick_create.py"
 RENDERER = REPO_ROOT / "scripts" / "render_quick_create_links.py"

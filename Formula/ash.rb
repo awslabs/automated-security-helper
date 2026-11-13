@@ -153,9 +153,9 @@ class Ash < Formula
       AWS_SECRET_ACCESS_KEY = "#{planted_key}"
     PYTHON
 
-    system ashx, "scan",
-           "--source-dir", testpath,
-           "--output-dir", testpath/"ash_output",
+    system ashx.to_s, "scan",
+           "--source-dir", testpath.to_s,
+           "--output-dir", (testpath/"ash_output").to_s,
            "--scanners", "detect-secrets",
            "--no-progress",
            "--no-fail-on-findings"
