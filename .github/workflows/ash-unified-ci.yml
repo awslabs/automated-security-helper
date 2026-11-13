@@ -2359,18 +2359,20 @@ jobs:
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           export ASH_CFN_GUARD_RULES_DIR="$HOME/.ash/share/cfn-guard-rules"
-          # --snapshot-warn-unused, as run-unit-tests passes it to every sharded leg
-          # (the note on its pytest step): this run has no -m expression, so a shard
-          # selects every test it collects, and syrupy would then fail the leg over
-          # the other shards' snapshot files, unused by construction. Today no
-          # __snapshots__ directory sits under tests/integration, so the flag changes
-          # nothing; it is here so the first snapshot a test adds does not turn the
-          # shards red with no failing test.
+          # No snapshot flag here, on purpose. This run has no -m expression, so a
+          # shard selects every test it collects -- the case where syrupy fails a leg
+          # over the other shards' snapshot files, unused by construction, which is
+          # why run-unit-tests passes --snapshot-warn-unused to its sharded legs. The
+          # snapshot policy admits that flag in exactly one audited place (the "Run
+          # PyTest" step of that action; tests/snapshot/test_snapshot_policy.py), so
+          # this job stays safe the other way: no syrupy snapshot lives under
+          # tests/integration, and test_the_sharded_integration_suite_holds_no_snapshot
+          # in that policy file pins it, so the first snapshot a test adds here fails
+          # there with the decision written out instead of turning these shards red.
           uv run pytest \
             tests/integration \
             --ignore=tests/integration/docs \
             --run-integration --run-slow \
-            --snapshot-warn-unused \
             --no-cov -p no:randomly -n 0 \
             --junit-xml=test-results/integration.junit.xml
       # A red run leaves per-test evidence rather than only the summary line. The shard
