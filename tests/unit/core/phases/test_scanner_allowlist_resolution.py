@@ -50,10 +50,13 @@ import pytest
 # one raises PydanticUserError. Spelled out rather than left to whichever sibling
 # test module happens to be collected first, so this file passes on its own.
 from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
+
+pytestmark = pytest.mark.unit
 
 #: Named with a hyphen because the real registered names use hyphens and the typo
 #: this file exists for is an underscore. A fixture whose names had no punctuation
@@ -269,7 +272,9 @@ class TestTheRefusalReachesTheOperator:
     scan phase itself would still pass.
     """
 
-    def test_local_mode_exits_one_and_prints_the_message(self, tmp_path, capsys):
+    def test_local_mode_exits_the_usage_code_and_prints_the_message(
+        self, tmp_path, capsys
+    ):
         from automated_security_helper.interactions import run_ash_scan as mod
 
         source = tmp_path / "src"
@@ -290,9 +295,9 @@ class TestTheRefusalReachesTheOperator:
         ):
             mod._run_local_mode(opts, MagicMock())
 
-        assert excinfo.value.code == 1, (
-            "1 rather than 3: exit 3 means the config file is invalid, and an operator "
-            "who mistyped a flag has a perfectly good config"
+        assert excinfo.value.code == ASH_EXIT_USAGE_ERROR, (
+            "the usage-error code rather than 3: exit 3 means the config file is "
+            "invalid, and an operator who mistyped a flag has a perfectly good config"
         )
         out = capsys.readouterr().out
         assert "detect_secrets" in out, (
@@ -302,10 +307,10 @@ class TestTheRefusalReachesTheOperator:
     def test_the_handler_precedes_the_generic_one(self):
         """Ordered before ``except Exception``, or it would never be reached.
 
-        Checked on the source rather than by behaviour: both handlers exit 1, so a
-        run cannot tell which one it went through, and the only observable difference
-        -- whether a traceback was logged -- is the thing this ordering exists to
-        avoid.
+        Checked on the source as well as by behaviour. The two handlers exit with
+        different codes, so the test above would catch the generic one taking
+        over, but the traceback this ordering exists to keep out of the log is only
+        visible here.
         """
         import inspect
 

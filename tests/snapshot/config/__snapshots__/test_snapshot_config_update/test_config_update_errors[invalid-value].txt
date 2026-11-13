@@ -1,7 +1,3 @@
 $ ash config update ash.yaml --set fail_on_findings=maybe
-[<LOG_TIME>] INFO     Applied modification: fail_on_findings=maybe
-Failed to validate config after applying modifications: 1 validation error for AshConfig
-fail_on_findings
-  Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value='maybe', input_type=str]
-    For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_parsing
-[exit code: 1]
+Not updating ash.yaml: Configuration is invalid after applying the requested overrides for 'fail_on_findings': Invalid value at 'fail_on_findings': Input should be a valid boolean, unable to interpret input
+[exit code: 3]

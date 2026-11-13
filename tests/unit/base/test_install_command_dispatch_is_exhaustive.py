@@ -40,6 +40,8 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.enums import PackageManager
 from automated_security_helper.core.exceptions import ToolNotProvisionableError
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 

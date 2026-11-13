@@ -10,8 +10,12 @@ validating input parameters, and creating meaningful error messages for
 various failure scenarios.
 """
 
+import errno
 import json
 import os
+import stat
+import sys
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Union
@@ -19,12 +23,71 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
-from automated_security_helper.utils.atomic_write import read_text_of_replaced_file
+from automated_security_helper.utils.directory_refusals import (
+    REFUSED_CANNOT_BE_CREATED,
+    REFUSED_NOT_A_DIRECTORY,
+    REFUSED_NOT_A_VALID_PATH,
+    _WINDOWS_INVALID_NAME_ERRORS,
+    output_dir_refusal,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
 # Configure module logger
 _logger = ASH_LOGGER
+
+#: How a result file is opened for reading: by descriptor, never following a
+#: link at its name (O_NOFOLLOW, where the platform has it; Windows has not),
+#: never blocking on a FIFO left at the name (O_NONBLOCK), closed on exec.
+_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+#: On Windows an open that lands inside ``os.replace`` of the file gets a sharing
+#: violation (``PermissionError``) for a moment; retried for the bounded time
+#: the writer allows itself (utils/atomic_write.py's _REPLACE_ATTEMPTS and
+#: _REPLACE_BACKOFF_SECONDS, 40 x 0.05 s). POSIX never retries.
+_REPLACED_FILE_ATTEMPTS = 40
+_REPLACED_FILE_BACKOFF_SECONDS = 0.05
+
+
+class _NotARegularFile(Exception):
+    """The descriptor opened at the path is not a regular file's."""
+
+
+def _read_regular_file_text(path_obj: Path) -> str:
+    """Read ``path_obj`` through a descriptor that is checked before it is read.
+
+    The name is opened with :data:`_READ_FLAGS` and the descriptor is
+    ``fstat``-ed: what is read is what was checked, so a link or a FIFO swapped
+    in at the name between a caller's look and this open is refused (the open
+    fails with ELOOP for a link under O_NOFOLLOW; a FIFO or a directory opens
+    and is refused as :class:`_NotARegularFile`) instead of followed or waited
+    on. Raises what ``os.open`` raises otherwise, with the Windows replace
+    retry of ``atomic_write.read_text_of_replaced_file``.
+    """
+    for attempt in range(_REPLACED_FILE_ATTEMPTS):
+        try:
+            fd = os.open(path_obj, _READ_FLAGS)
+        except PermissionError:
+            if sys.platform != "win32" or attempt == _REPLACED_FILE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACED_FILE_BACKOFF_SECONDS)
+            continue
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise _NotARegularFile(str(path_obj))
+        except BaseException:
+            os.close(fd)
+            raise
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            return handle.read()
+    raise AssertionError("unreachable: the last attempt returns or raises")
 
 
 class ErrorCategory(Enum):
@@ -39,7 +102,38 @@ class ErrorCategory(Enum):
     OPERATION_TIMEOUT = "operation_timeout"
     SCAN_NOT_FOUND = "scan_not_found"
     SCAN_INCOMPLETE = "scan_incomplete"
+    #: A configuration that loaded and parsed, whose plugin-module list a
+    #: scan refuses. Not a format problem: a format category sent clients
+    #: to re-format a healthy file.
+    PLUGIN_MODULE_REFUSED = "plugin_module_refused"
     UNEXPECTED_ERROR = "unexpected_error"
+
+
+def lookup_error_category(error: BaseException) -> Optional[ErrorCategory]:
+    """The category every route gives an error from looking a path up, or None.
+
+    One answer for one bad input, whichever function met it (``stat`` in
+    ``source_directory_error`` and ``validate_directory_path``, ``lstat`` in
+    ``safe_read_json_file``): a name nothing is at (not found, not a directory,
+    or a link loop on the way, which leads nowhere) is ``file_not_found``; a
+    string the system refuses as a path at all (an embedded NUL, a name past
+    ``NAME_MAX`` or ``PATH_MAX``) is ``invalid_path``; a refusal of permission
+    is ``permission_denied``. None for any other error, which each caller treats
+    as its own default. A NUL read ``invalid_path`` in one route and
+    ``unexpected_error`` in the other two before this.
+    """
+    if isinstance(error, ValueError):
+        return ErrorCategory.INVALID_PATH
+    if isinstance(error, (FileNotFoundError, NotADirectoryError)):
+        return ErrorCategory.FILE_NOT_FOUND
+    if isinstance(error, PermissionError):
+        return ErrorCategory.PERMISSION_DENIED
+    if isinstance(error, OSError):
+        if error.errno == errno.ELOOP:
+            return ErrorCategory.FILE_NOT_FOUND
+        if error.errno == errno.ENAMETOOLONG:
+            return ErrorCategory.INVALID_PATH
+    return None
 
 
 def safe_read_json_file(
@@ -56,17 +150,38 @@ def safe_read_json_file(
         Tuple of (parsed_json, error)
         If successful, error will be None
         If failed, parsed_json will be None and error will contain the error information
+
+    The file is looked at without following a link at its name, and a link there
+    is refused as an invalid path: every caller reads a result file under a scan's
+    output directory, where a sandboxed scanner may have left a link to a file
+    outside the tree (utils/sandbox/fs_guard.py), and through a plain open that
+    file would have been read as the scan's own. The look is not the check: the
+    file is then opened by descriptor without following a link and without
+    blocking (``_read_regular_file_text``), and the descriptor is checked to be
+    a regular file's before it is read, so a link or a FIFO that the scanner
+    swaps in between the look and the open is refused too, where a reopen by
+    name followed the link or waited on the FIFO. Each way the read can fail
+    has its own category, so a caller branching on ``error_category`` is not
+    told "unexpected" for a file that vanished (``file_not_found``), could not
+    be read (``permission_denied``), or is not UTF-8 or is nested past what the
+    decoder can follow (``invalid_format``).
+
+    The error contexts name the file and nothing about the process: the server's
+    working directory used to be in every one, read with ``Path.cwd()`` inside
+    the handlers, so a removed working directory made the "safe" read raise
+    FileNotFoundError, and create_error_response handed that directory to the
+    MCP client with the rest of the context.
     """
     try:
         path_obj = Path(file_path)
 
-        # Check if file exists
-        if not path_obj.exists():
+        try:
+            info = os.lstat(path_obj)
+        except (FileNotFoundError, NotADirectoryError):
             if required:
                 error = MCPResourceError(
                     f"File not found: {path_obj}",
                     context={
-                        "cwd": str(Path.cwd()),
                         "file_path": str(path_obj),
                         "error_category": ErrorCategory.FILE_NOT_FOUND.value,
                     },
@@ -74,13 +189,51 @@ def safe_read_json_file(
                 return None, error
             else:
                 return None, None
+        except PermissionError as e:
+            return None, _read_permission_error(path_obj, e)
+        except (ValueError, OSError) as e:
+            # The other ways a path can fail to be looked up, in the category
+            # every route gives them (``lookup_error_category``): a link loop on
+            # the way names nothing, and a NUL or a name past the limit is not
+            # a path. Anything else is still the generic handler's.
+            category = lookup_error_category(e)
+            if category is ErrorCategory.FILE_NOT_FOUND:
+                if not required:
+                    return None, None
+                return None, MCPResourceError(
+                    f"File not found: {path_obj}",
+                    context={
+                        "file_path": str(path_obj),
+                        "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                    },
+                )
+            if category is ErrorCategory.INVALID_PATH:
+                return None, MCPResourceError(
+                    f"Invalid file path {path_obj}: {str(e)}",
+                    context={
+                        "file_path": str(path_obj),
+                        "error_category": ErrorCategory.INVALID_PATH.value,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    },
+                )
+            raise
+
+        if stat.S_ISLNK(info.st_mode):
+            error = MCPResourceError(
+                f"Path is a symbolic link: {path_obj}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                },
+            )
+            return None, error
 
         # Check if it's a file
-        if not path_obj.is_file():
+        if not stat.S_ISREG(info.st_mode):
             error = MCPResourceError(
                 f"Path is not a file: {path_obj}",
                 context={
-                    "cwd": str(Path.cwd()),
                     "file_path": str(path_obj),
                     "error_category": ErrorCategory.INVALID_PATH.value,
                 },
@@ -92,27 +245,65 @@ def safe_read_json_file(
             error = MCPResourceError(
                 f"Permission denied: Cannot read file {path_obj}",
                 context={
-                    "cwd": str(Path.cwd()),
                     "file_path": str(path_obj),
                     "error_category": ErrorCategory.PERMISSION_DENIED.value,
                 },
             )
             return None, error
 
-        # Read and parse the file. Result files are replaced atomically while scans
-        # run, and on Windows an open that lands inside the replace fails with a
-        # transient PermissionError; the helper retries that instead of reporting it.
-        # One that outlasts the retry is a read error, reported as such and not as
-        # a file that failed to parse.
+        # Read and parse the file, by a descriptor checked before it is read (see
+        # the docstring). Result files are replaced atomically while scans run,
+        # and on Windows an open that lands inside the replace fails with a
+        # transient PermissionError; the reader retries that instead of
+        # reporting it. One that outlasts the retry is a read error, reported as
+        # such and not as a file that failed to parse.
         try:
-            text = read_text_of_replaced_file(path_obj, encoding="utf-8")
-        except PermissionError as e:
+            text = _read_regular_file_text(path_obj)
+        except _NotARegularFile:
+            # A FIFO, a directory or a device swapped in at the name since the
+            # look above.
             error = MCPResourceError(
-                f"Permission denied: Cannot read file {path_obj}: {str(e)}",
+                f"Path is not a file: {path_obj}",
                 context={
-                    "cwd": str(Path.cwd()),
                     "file_path": str(path_obj),
-                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                },
+            )
+            return None, error
+        except (FileNotFoundError, NotADirectoryError):
+            # Removed between the look above and the open.
+            if not required:
+                return None, None
+            error = MCPResourceError(
+                f"File not found: {path_obj}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                },
+            )
+            return None, error
+        except PermissionError as e:
+            return None, _read_permission_error(path_obj, e)
+        except OSError as e:
+            if e.errno != errno.ELOOP:
+                raise
+            # A link swapped in at the name since the look above: O_NOFOLLOW
+            # refuses to open through it.
+            error = MCPResourceError(
+                f"Path is a symbolic link: {path_obj}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                },
+            )
+            return None, error
+        except UnicodeDecodeError as e:
+            error = MCPResourceError(
+                f"Invalid JSON format in file {path_obj}: the file is not valid "
+                f"UTF-8 ({str(e)})",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_FORMAT.value,
                     "error_type": type(e).__name__,
                     "error_message": str(e),
                 },
@@ -120,12 +311,10 @@ def safe_read_json_file(
             return None, error
         try:
             data = json.loads(text)
-            return data, None
         except json.JSONDecodeError as e:
             error = MCPResourceError(
                 f"Invalid JSON format in file {path_obj}: {str(e)}",
                 context={
-                    "cwd": str(Path.cwd()),
                     "file_path": str(path_obj),
                     "error_category": ErrorCategory.INVALID_FORMAT.value,
                     "json_error": str(e),
@@ -134,12 +323,42 @@ def safe_read_json_file(
                 },
             )
             return None, error
+        except RecursionError as e:
+            # Nested deeper than the decoder follows: a document that cannot
+            # be read as JSON here, which is a format problem of the file.
+            error = MCPResourceError(
+                f"Invalid JSON format in file {path_obj}: the document is nested "
+                f"too deeply to decode ({str(e)})",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_FORMAT.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            return None, error
+
+        # The callers read the result as a mapping (``data.get``, ``data.keys``),
+        # which is what the return type says. A file that parses to a list, a
+        # string or a number is valid JSON and not a JSON object, so it is a
+        # format error here rather than an AttributeError in the caller.
+        if not isinstance(data, dict):
+            error = MCPResourceError(
+                f"Expected a JSON object in file {path_obj}, found "
+                f"{type(data).__name__}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_FORMAT.value,
+                    "found_type": type(data).__name__,
+                },
+            )
+            return None, error
+        return data, None
 
     except Exception as e:
         error = MCPResourceError(
             f"Unexpected error reading file {file_path}: {str(e)}",
             context={
-                "cwd": str(Path.cwd()),
                 "file_path": str(file_path),
                 "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
                 "error_type": type(e).__name__,
@@ -147,6 +366,19 @@ def safe_read_json_file(
             },
         )
         return None, error
+
+
+def _read_permission_error(path_obj: Path, e: PermissionError) -> MCPResourceError:
+    """The ``permission_denied`` error for a file that could not be read."""
+    return MCPResourceError(
+        f"Permission denied: Cannot read file {path_obj}: {str(e)}",
+        context={
+            "file_path": str(path_obj),
+            "error_category": ErrorCategory.PERMISSION_DENIED.value,
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+        },
+    )
 
 
 def safe_write_json_file(
@@ -161,68 +393,79 @@ def safe_write_json_file(
 
     Returns:
         None if successful, MCPResourceError if failed
+
+    Missing parent directories are made by the guarded open itself
+    (``open_for_write(make_parents=True)``), never by a ``mkdir(parents=True)``
+    of its own first: below a registered writable root the guard makes each
+    component without following a link, where mkdir followed one, so the
+    directories were created wherever the link pointed and the open that came
+    after refused the link, leaving them behind. A link met on the way is
+    reported as an invalid path, with the guard's own words.
     """
     try:
         path_obj = Path(file_path)
 
-        # Ensure parent directory exists
-        parent_dir = path_obj.parent
-        if not parent_dir.exists():
-            try:
-                parent_dir.mkdir(parents=True, exist_ok=True)
-            except PermissionError:
-                return MCPResourceError(
-                    f"Permission denied: Cannot create directory {parent_dir}",
-                    context={
-                        "cwd": str(Path.cwd()),
-                        "directory_path": str(parent_dir),
-                        "error_category": ErrorCategory.PERMISSION_DENIED.value,
-                    },
-                )
-            except Exception as e:
-                return MCPResourceError(
-                    f"Failed to create directory {parent_dir}: {str(e)}",
-                    context={
-                        "cwd": str(Path.cwd()),
-                        "directory_path": str(parent_dir),
-                        "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                    },
-                )
+        # Write the file. Below an output directory, as ASH's other writes there:
+        # never through a link (fs_guard).
+        from automated_security_helper.utils.output_dir_links import (
+            OutputDirLinkRefused,
+        )
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
-        # Check if parent directory is writable
-        if not os.access(parent_dir, os.W_OK):
-            return MCPResourceError(
-                f"Permission denied: Cannot write to directory {parent_dir}",
-                context={
-                    "cwd": str(Path.cwd()),
-                    "directory_path": str(parent_dir),
-                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
-                },
-            )
-
-        # Write the file
+        # Serialized in full before the file is opened: ``json.dump`` streams
+        # into an already truncated file, so a value that cannot be serialized
+        # partway through left the previous content gone and a partial document
+        # in its place. A serialization error leaves the file as it was. Its
+        # own try: the open raises ValueError too, for a path the system
+        # refuses (an embedded NUL), and caught together that path error was
+        # reported as "Invalid data format for JSON serialization".
         try:
-            with open(path_obj, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            return None
-        except PermissionError:
-            return MCPResourceError(
-                f"Permission denied: Cannot write to file {path_obj}",
-                context={
-                    "cwd": str(Path.cwd()),
-                    "file_path": str(path_obj),
-                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
-                },
-            )
-        except TypeError as e:
+            text = json.dumps(data, indent=2)
+        except (TypeError, ValueError) as e:
+            # TypeError for a value json cannot encode; ValueError for a
+            # structure that refers to itself.
             return MCPResourceError(
                 f"Invalid data format for JSON serialization: {str(e)}",
                 context={
-                    "cwd": str(Path.cwd()),
                     "file_path": str(path_obj),
                     "error_category": ErrorCategory.INVALID_FORMAT.value,
+                    "error_message": str(e),
+                },
+            )
+
+        try:
+            with open_for_write(path_obj, make_parents=True) as f:
+                f.write(text)
+            return None
+        except OutputDirLinkRefused as e:
+            return MCPResourceError(
+                f"Cannot write file {path_obj}: {str(e)}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+        except PermissionError as e:
+            return MCPResourceError(
+                f"Permission denied: Cannot write to file {path_obj}",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+        except ValueError as e:
+            # The path itself, not the data: a string the system refuses as a
+            # path (an embedded NUL) is raised by the open as ValueError.
+            return MCPResourceError(
+                f"Cannot write file {path_obj}: the path is not valid ({str(e)})",
+                context={
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                    "error_type": type(e).__name__,
                     "error_message": str(e),
                 },
             )
@@ -231,7 +474,6 @@ def safe_write_json_file(
         return MCPResourceError(
             f"Unexpected error writing file {file_path}: {str(e)}",
             context={
-                "cwd": str(Path.cwd()),
                 "file_path": str(file_path),
                 "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
                 "error_type": type(e).__name__,
@@ -260,58 +502,233 @@ def validate_directory_path(
     This is also used to validate output directories, which is why no root
     policy belongs here.
 
+    Each answer has its own category, read from ``os.stat`` of the resolved path
+    rather than from ``Path.exists()``: a path that exists and is not a directory
+    is ``invalid_path`` (it used to be reported as not found, so the default
+    suggestions told the client to check that it exists); one below a directory
+    that cannot be searched is ``permission_denied`` (``exists()`` raised
+    PermissionError on some Python versions and answered False on others, so
+    the same path was "unexpected" on one and "not found" on another).
+
     Args:
         directory_path: Path to validate
 
     Returns:
         None if valid, MCPResourceError if invalid
     """
-    # Canonicalize: resolve symlinks and '..' components
     path_obj = Path(directory_path)
     try:
+        # Canonicalize: resolve symlinks and '..' components. A relative path
+        # resolves against the working directory, as the caller means it.
         resolved = path_obj.resolve()
-        # Check if the resolved path exists and is a directory
-        if resolved.exists() and resolved.is_dir():
-            return None  # Path is valid
-    except Exception as e:
-        return MCPResourceError(
-            f"Unexpected error validating directory path {directory_path}: {str(e)}",
-            context={
-                "cwd": str(Path.cwd()),
-                "directory_path": str(directory_path),
-                "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-            },
-        )
-
-    # If the path doesn't exist as provided, try relative to current directory
-    if not path_obj.is_absolute():
-        rel_path_obj = (Path.cwd() / directory_path).resolve()
-        try:
-            if rel_path_obj.exists() and rel_path_obj.is_dir():
-                return None  # Relative path is valid
-        except Exception as e:
+        mode: Optional[int] = os.stat(resolved).st_mode
+    except RuntimeError:
+        # Path.resolve's answer for a symlink loop before Python 3.13: a name
+        # that leads nowhere.
+        mode = None
+    except (ValueError, OSError) as e:
+        category = lookup_error_category(e)
+        if category is ErrorCategory.FILE_NOT_FOUND:
+            mode = None
+        elif category is ErrorCategory.PERMISSION_DENIED:
             return MCPResourceError(
-                f"Unexpected error validating directory path {directory_path}: {str(e)}",
+                f"Permission denied: Cannot read directory path {directory_path}: "
+                f"{str(e)}",
                 context={
-                    "cwd": str(Path.cwd()),
                     "directory_path": str(directory_path),
-                    "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
+                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
                     "error_type": type(e).__name__,
                     "error_message": str(e),
                 },
             )
+        elif category is ErrorCategory.INVALID_PATH:
+            return MCPResourceError(
+                f"Invalid directory path {directory_path}: {str(e)}",
+                context={
+                    "directory_path": str(directory_path),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+        else:
+            return _unexpected_directory_error(directory_path, e)
+    except Exception as e:
+        return _unexpected_directory_error(directory_path, e)
 
-    # If we get here, the path is not valid
+    if mode is not None:
+        if stat.S_ISDIR(mode):
+            return None  # Path is valid
+        return MCPResourceError(
+            f"Path is not a directory: {directory_path}",
+            context={
+                "directory_path": str(directory_path),
+                "error_category": ErrorCategory.INVALID_PATH.value,
+            },
+        )
+
+    # If we get here, nothing is at the path
     return MCPResourceError(
         f"Directory not found or not a directory: {directory_path}",
         context={
-            "cwd": str(Path.cwd()),
             "directory_path": str(directory_path),
             "error_category": ErrorCategory.FILE_NOT_FOUND.value,
         },
     )
+
+
+def _unexpected_directory_error(
+    directory_path: Union[str, Path], e: Exception
+) -> MCPResourceError:
+    """The ``unexpected_error`` for a directory path that could not be examined."""
+    return MCPResourceError(
+        f"Unexpected error validating directory path {directory_path}: {str(e)}",
+        context={
+            "directory_path": str(directory_path),
+            "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+        },
+    )
+
+
+def source_directory_error(
+    directory_path: Union[str, Path],
+) -> Optional[MCPResourceError]:
+    """Why ``directory_path`` cannot be scanned as a source directory, or None.
+
+    In the words the CLI uses for ``--source-dir``, quoting the path as given:
+    "Source directory does not exist" (a link to nothing included), "Source
+    directory is not a directory", "Source directory cannot be entered" for
+    one whose entries cannot be listed and read, or that sits below a directory
+    that cannot be, and "Source directory is not a valid path" for one the OS
+    cannot take at all. For source directories only: validate_directory_path,
+    which output-directory lookups also use, keeps its own words.
+
+    A string the operating system refuses as a path at all is worded as the
+    CLI words it (utils/directory_refusals.py): one with an embedded NUL
+    (``ValueError`` from stat) "is not a valid path", as exit-codes.md says,
+    and one longer than the system allows (``ENAMETOOLONG``) "cannot be
+    entered". Both carry the ``invalid_path`` category, since neither names a
+    directory that is absent or closed to this process; the text is the
+    surfaces' shared one, the category is this surface's.
+    """
+    try:
+        status = os.stat(directory_path)
+    except (ValueError, OSError) as error:
+        category = lookup_error_category(error) or ErrorCategory.PERMISSION_DENIED
+        if isinstance(error, ValueError):
+            # An embedded NUL is worded as the CLI words it: a path no stat
+            # can take is not a valid path (utils/directory_refusals.py).
+            problem = "is not a valid path"
+        elif category is ErrorCategory.FILE_NOT_FOUND or (
+            # Windows answers a name it cannot hold (a newline, characters a
+            # name may not carry) with a WinError, where POSIX answers ENOENT;
+            # the CLI words both "does not exist" (utils/directory_refusals.py).
+            getattr(error, "winerror", None) in _WINDOWS_INVALID_NAME_ERRORS
+        ):
+            problem = "does not exist"
+            category = ErrorCategory.FILE_NOT_FOUND
+        else:
+            # A name past the limit (invalid_path), or any other refusal.
+            problem = "cannot be entered"
+    else:
+        if not stat.S_ISDIR(status.st_mode):
+            problem, category = "is not a directory", ErrorCategory.INVALID_PATH
+        elif not os.access(directory_path, os.R_OK | os.X_OK):
+            problem, category = "cannot be entered", ErrorCategory.PERMISSION_DENIED
+        else:
+            return None
+    return MCPResourceError(
+        f"Source directory {problem}: {directory_path}",
+        context={
+            "directory_path": str(directory_path),
+            "error_category": category.value,
+        },
+    )
+
+
+def validate_output_directory_path(
+    directory_path: Union[str, Path],
+) -> Optional[MCPResourceError]:
+    """Validate a scan's output directory, which need not exist yet.
+
+    A scan creates its output directory only once the registry has given it the
+    scan, so that a scan refused at max_concurrent_scans leaves nothing on disk.
+    Registration therefore accepts a directory that does not exist. It still
+    refuses a path that exists and is not a directory, which no scan can write
+    into, in the words the CLI uses for an ``--output-dir`` that is a file
+    (``utils/directory_refusals.py``). Where the directory may be is the
+    caller's to check, as for :func:`validate_directory_path`.
+
+    The category follows what a stat of the path says, not the refusal's words:
+    a path that is there and is not a directory is ``invalid_path``; a directory
+    that is there and is refused (it cannot be entered, or nothing can be made in
+    it) is ``permission_denied``, as is a path stat itself refuses; a path that
+    cannot be made because of what is on the way to it is ``invalid_path``, and
+    so is one the OS cannot take at all (an embedded NUL). Every
+    refusal used to be ``invalid_parameter``, so a client was told to check its
+    parameter for a directory it had no permission to write.
+    """
+    refusal = output_dir_refusal(directory_path)
+    if refusal is None:
+        return None
+    return MCPResourceError(
+        refusal,
+        context={
+            "directory_path": str(directory_path),
+            "error_category": _output_directory_refusal_category(
+                directory_path, refusal
+            ).value,
+        },
+    )
+
+
+#: The errors that say a disk or a quota is full: no permission is missing.
+_OUT_OF_SPACE_ERRNOS = frozenset(
+    code for code in (errno.ENOSPC, getattr(errno, "EDQUOT", None)) if code is not None
+)
+
+
+def _output_directory_refusal_category(
+    directory_path: Union[str, Path],
+    refusal: Optional[str] = None,
+) -> ErrorCategory:
+    """The category of a refused output directory.
+
+    From what the refusal says went wrong and the error behind it when it carries
+    that (``DirectoryRefusal``), so a full disk or quota (``ENOSPC``, ``EDQUOT``)
+    on a directory that exists is ``resource_exhausted``, not the
+    ``permission_denied`` a second look at the path gave. A refusal that is only
+    text is judged by a stat of the path, as before.
+    """
+    kind = getattr(refusal, "kind", None)
+    if kind is not None:
+        number = getattr(refusal, "error_number", None)
+        if number in _OUT_OF_SPACE_ERRNOS:
+            return ErrorCategory.RESOURCE_EXHAUSTED
+        if kind in (REFUSED_NOT_A_DIRECTORY, REFUSED_NOT_A_VALID_PATH):
+            return ErrorCategory.INVALID_PATH
+        if kind == REFUSED_CANNOT_BE_CREATED:
+            # Refused for what is on the way to it, unless stat itself was
+            # refused permission.
+            if number in (errno.EACCES, errno.EPERM):
+                return ErrorCategory.PERMISSION_DENIED
+            return ErrorCategory.INVALID_PATH
+        return ErrorCategory.PERMISSION_DENIED
+    try:
+        mode = os.stat(directory_path).st_mode
+    except PermissionError:
+        return ErrorCategory.PERMISSION_DENIED
+    except OSError:
+        # Not there, or something on the way to it (a file, a link to
+        # nothing) keeps it from being made.
+        return ErrorCategory.INVALID_PATH
+    except ValueError:
+        return ErrorCategory.INVALID_PATH
+    if not stat.S_ISDIR(mode):
+        return ErrorCategory.INVALID_PATH
+    return ErrorCategory.PERMISSION_DENIED
 
 
 def validate_scan_id(scan_id: str) -> Optional[MCPResourceError]:
@@ -345,6 +762,11 @@ def validate_scan_id(scan_id: str) -> Optional[MCPResourceError]:
     return None
 
 
+#: The severity thresholds a scan accepts, in any case: the values
+#: ``AshConfig.global_settings.severity_threshold`` allows, loosest first.
+VALID_SEVERITY_THRESHOLDS = ("ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
+
+
 def validate_severity_threshold(severity_threshold: str) -> Optional[MCPResourceError]:
     """
     Validate a severity threshold with comprehensive error handling.
@@ -368,7 +790,7 @@ def validate_severity_threshold(severity_threshold: str) -> Optional[MCPResource
     Returns:
         None if valid, MCPResourceError if invalid
     """
-    valid_severities = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    valid_severities = list(VALID_SEVERITY_THRESHOLDS)
 
     if not severity_threshold:
         return MCPResourceError(
@@ -408,9 +830,21 @@ def validate_config_path(
 
     Returns:
         None if valid or None, MCPResourceError if invalid
+
+    ``None`` means no configuration file. An empty string is not that: it is a
+    path that names nothing, and the scan tool refuses it, so it is refused here
+    too rather than read as "no config" (``Path("")`` is the working directory).
     """
     if config_path is None:
         return None
+    if isinstance(config_path, str) and not config_path.strip():
+        return MCPResourceError(
+            "Configuration path cannot be empty",
+            context={
+                "config_path": config_path,
+                "error_category": ErrorCategory.INVALID_PARAMETER.value,
+            },
+        )
 
     try:
         path_obj = (
@@ -449,8 +883,12 @@ def validate_config_path(
                 },
             )
 
-        # Validate file extension
-        valid_extensions = [".yaml", ".yml", ".json"]
+        # Validate file extension. The set is what the config loader reads:
+        # YAML, JSON, and TOML (an ``.ashrc.toml`` or a ``pyproject.toml`` whose
+        # ``[tool.ash]`` table configures ASH). Discovery hands a workspace
+        # project's TOML source to register_scan as its config_path, so a set
+        # without ``.toml`` refused every project configured that way.
+        valid_extensions = [".yaml", ".yml", ".json", ".toml"]
         if not any(str(path_obj).lower().endswith(ext) for ext in valid_extensions):
             return MCPResourceError(
                 f"Invalid configuration file extension: {path_obj}. Supported extensions: {', '.join(valid_extensions)}",
@@ -493,8 +931,8 @@ def validate_scan_parameters(
     """
     errors = []
 
-    # Validate directory path
-    dir_error = validate_directory_path(directory_path)
+    # Validate the source directory
+    dir_error = source_directory_error(directory_path)
     if dir_error:
         errors.append(dir_error)
 
@@ -503,8 +941,10 @@ def validate_scan_parameters(
     if severity_error:
         errors.append(severity_error)
 
-    # Validate configuration path if provided
-    if config_path:
+    # Validate configuration path if provided. ``is not None`` and not a
+    # truthiness test: an empty string is a config path the scan refuses, and
+    # skipping it here passed the parameters as valid.
+    if config_path is not None:
         config_error = validate_config_path(config_path)
         if config_error:
             errors.append(config_error)
@@ -562,6 +1002,7 @@ def create_error_response(
     error: Union[MCPResourceError, Exception],
     operation: str,
     suggestions: Optional[List[str]] = None,
+    category: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a standardized error response for API operations.
@@ -570,6 +1011,8 @@ def create_error_response(
         error: The error that occurred
         operation: The operation that was being performed
         suggestions: Optional list of suggestions for resolving the error
+        category: The error category, for an error that is not an
+            MCPResourceError and so names none in its context
 
     Returns:
         Standardized error response dictionary
@@ -581,21 +1024,103 @@ def create_error_response(
     if isinstance(error, MCPResourceError) and hasattr(error, "context"):
         context = error.context
         error_category = context.get("error_category", "unexpected_error")
+    if category is not None:
+        error_category = category
 
     # Generate default suggestions based on error category
     if suggestions is None:
         suggestions = _get_default_suggestions(error_category)
 
+    from automated_security_helper.utils.error_text import error_text
+    from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+
     return {
         "success": False,
         "operation": operation,
-        "error": str(error),
+        # The MCP response of every tool's failure: a pydantic error's own text
+        # quotes the refused input, which can be a secret (utils/error_text.py).
+        # A client reads and may display it, so it holds no control character:
+        # each is written as its escape, on one line.
+        "error": raw_controls_on_one_line(error_text(error)),
         "error_type": type(error).__name__,
         "error_category": error_category,
-        "context": context,
+        # Its strings name paths and values the error quotes: shown the same way,
+        # in a copy, so the error's own context keeps them as raised.
+        "context": _strings_shown(context),
         "suggestions": suggestions,
         "timestamp": None,  # Will be set by caller if needed
     }
+
+
+def _strings_shown(value: Any, _on_path: Optional[set[int]] = None) -> Any:
+    """*value* with each string in it, in nested dicts, lists, tuples, sets and
+    frozensets too, written for a client that may display it: on one line, each
+    control as its escape (utils/terminal_text.py's raw_controls_on_one_line).
+    Anything else is returned as it is.
+
+    A dict's string keys are shown the same way as its values: a context keyed
+    by a name the repository chose (a scanner's, a path's) reached the client
+    with its control characters raw while the values beside it were escaped.
+
+    This runs inside the error handler, so it must not raise on what a context
+    can hold. A namedtuple is rebuilt through ``_make`` (its constructor takes
+    fields, not an iterable), any other tuple subclass that refuses the rebuilt
+    items comes back as a plain tuple, a set whose shown members are not all
+    hashable comes back as a list, and a container that refers to itself is cut
+    at the second visit with a marker instead of recursing until the interpreter
+    stops it.
+    """
+    from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+
+    if isinstance(value, str):
+        return raw_controls_on_one_line(value)
+    if not isinstance(value, (dict, list, tuple, set, frozenset)):
+        return value
+
+    on_path = set() if _on_path is None else _on_path
+    if id(value) in on_path:
+        return "<recursive>"
+    on_path.add(id(value))
+    try:
+        if isinstance(value, dict):
+            return {
+                (raw_controls_on_one_line(key) if isinstance(key, str) else key): (
+                    _strings_shown(item, on_path)
+                )
+                for key, item in value.items()
+            }
+        items = [_strings_shown(item, on_path) for item in value]
+        if isinstance(value, (set, frozenset)):
+            try:
+                return type(value)(items)
+            except TypeError:
+                return items
+        if hasattr(type(value), "_make"):
+            # The class is only the receiver of the call, never an argument.
+            return type(value)._make(items)  # type: ignore[union-attr]
+        try:
+            return type(value)(items)
+        except TypeError:
+            return list(items) if isinstance(value, list) else tuple(items)
+    finally:
+        on_path.discard(id(value))
+
+
+#: The one wording for the plugin-module refusal's suggestions: the MCP
+#: get_config/scan refusal (cli/mcp_tools._plugin_module_refusal) and this
+#: module's category defaults answer with the same list, naming only what an
+#: MCP client can change. Two wordings for one category sent a reader of the
+#: defaults to a "configuration" the MCP client may never have as a file.
+#: A tuple, so every response is built as its own ``list(...)`` copy: handed
+#: out by identity, one caller's append rewrote the suggestions of every
+#: later refusal in the process.
+PLUGIN_MODULE_REFUSED_SUGGESTIONS: Tuple[str, ...] = (
+    (
+        "Review the ash_plugin_modules entries in the config file or the "
+        "config content sent"
+    ),
+    "Remove the entries a scan refuses",
+)
 
 
 def _get_default_suggestions(error_category: str) -> List[str]:
@@ -654,6 +1179,9 @@ def _get_default_suggestions(error_category: str) -> List[str]:
             "Check for errors in the scan process",
             "Verify the scan is still running",
         ],
+        ErrorCategory.PLUGIN_MODULE_REFUSED.value: list(
+            PLUGIN_MODULE_REFUSED_SUGGESTIONS
+        ),
         ErrorCategory.UNEXPECTED_ERROR.value: [
             "Check logs for additional information",
             "Verify system stability and resource availability",

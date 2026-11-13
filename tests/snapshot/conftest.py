@@ -105,11 +105,9 @@ def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     for name, value in pinned_terminal_env().items():
         monkeypatch.setenv(name, value)
-    # rich.print() renders through one process-wide Console, created on first use and
-    # keeping the width it saw then. Another test in the same worker can create it
-    # under a different COLUMNS, so it is discarded and rebuilt under the pinned env.
-    monkeypatch.setattr(rich, "_console", None)
-    # The same for the Consoles ASH modules build at import time (cli/dependencies.py
+    # rich.print() renders through one process-wide Console, keeping the width it saw
+    # when it was built. It is replaced last, below, so it is built under every pin.
+    # For the Consoles ASH modules build at import time (cli/dependencies.py
     # has one). A Console that read COLUMNS when it was constructed keeps that width,
     # and the import happened at collection, under the developer's shell. Clearing the
     # stored size makes it read the pinned COLUMNS when it renders.
@@ -144,6 +142,15 @@ def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     # Handlers are built per get_logger() call and _fresh_ash_loggers drops them
     # between tests, so "first line" is a property of the command, not of test order.
     monkeypatch.setattr(LogRender, "__call__", _log_render_without_clock)
+    # Last, so it reads the pinned COLUMNS, terminal size and legacy-Windows answer:
+    # rich.print()'s global Console, built as utils/console.py builds it, with the
+    # stream that checks each line and the class that does not wrap text off a
+    # terminal. Set to None, rich built a plain Console on first use, and every
+    # snapshot that does not go through support/cli.run_cli (which pins the same
+    # console) recorded wraps and lines a real `ash` does not print.
+    from automated_security_helper.utils.console import new_global_console
+
+    monkeypatch.setattr(rich, "_console", new_global_console())
 
 
 @pytest.fixture(autouse=True)
@@ -305,12 +312,90 @@ def builtin_plugin_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         },
     )
     monkeypatch.setattr(ash_plugin_manager, "_resolved_plugins", {})
+    # A plugin module the test's run loads (a config's ash_plugin_modules, the
+    # packages list_scanners loads) registers its plugins when it is first
+    # imported, and Python does not run that again. Imported by an earlier test
+    # in the worker, its plugins are in the real registry, which the copy above
+    # leaves out, so the run did not get them, and a test that relied on them
+    # passed only when it was the first in its worker to import the module. The
+    # loader imports every such module, so its imports put back, from the real
+    # registry, what the module exports, as a fresh process importing it has.
+    from automated_security_helper.plugins import loader as plugin_loader
+
+    monkeypatch.setattr(
+        plugin_loader,
+        "importlib",
+        _ImportlibRegisteringExports(
+            lambda module: _register_exports(library, real, real_handlers, module)
+        ),
+    )
     try:
         yield
     finally:
         # Runs before monkeypatch puts the real dicts back, so the copies are still
         # installed and readable here.
         _merge_new_registrations(library, real, real_handlers, imported_before)
+
+
+class _ImportlibRegisteringExports:
+    """``importlib`` for the plugin loader inside ``builtin_plugin_registry``.
+
+    ``import_module`` imports as ``importlib.import_module`` does, then calls
+    ``on_import`` with the module; anything else is ``importlib``'s own.
+    """
+
+    def __init__(self, on_import: Callable[[Any], None]) -> None:
+        self._on_import = on_import
+
+    def import_module(self, name: str, package: str | None = None) -> Any:
+        module = importlib.import_module(name, package)
+        self._on_import(module)
+        return module
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(importlib, name)
+
+
+def _register_exports(
+    library: Any,
+    real: dict[str, dict[str, Any]],
+    real_handlers: dict[Any, list[Callable[..., Any]]],
+    module: Any,
+) -> None:
+    """Put into the test's registry the real registrations ``module``'s import made.
+
+    A registration records the module it was made from (``plugin_module_path``),
+    and a fresh process importing ``module`` makes each one whose module is
+    ``module`` or below it: a plugin registered under any name, its class's or
+    not, and one a package's submodule registers when the package imports it.
+    Also each one made from the same file under another module name: a file
+    imported under two names registers once, under the first, and a fresh
+    process loading it by the second registers it there. Matching the classes
+    ``module`` exports by name missed all three. Event handlers likewise, by
+    their ``__module__``. A name the test's registry holds already (a built-in,
+    or a plugin the test registered itself) is left as it is.
+    """
+    name = module.__name__
+    source = getattr(module, "__file__", None)
+
+    def made_by(module_path: str) -> bool:
+        if module_path == name or module_path.startswith(name + "."):
+            return True
+        other = sys.modules.get(module_path)
+        return source is not None and getattr(other, "__file__", None) == source
+
+    for kind, registry in real.items():
+        test_registry = getattr(library, kind)
+        for key, registration in registry.items():
+            if key not in test_registry and made_by(registration.plugin_module_path):
+                test_registry[key] = registration
+    for event, callbacks in real_handlers.items():
+        test_callbacks = library.event_handlers.setdefault(event, [])
+        for callback in callbacks:
+            if made_by(getattr(callback, "__module__", "") or "") and not any(
+                callback is present for present in test_callbacks
+            ):
+                test_callbacks.append(callback)
 
 
 def _merge_new_registrations(
@@ -352,6 +437,8 @@ _PINNED_UV_TOOL_VERSIONS = {
     "bandit": "9.0.1",
     "checkov": "9.0.2",
     "semgrep": "9.0.3",
+    "cfn-lint": "9.0.4",
+    "zizmor": "9.0.6",
 }
 _PINNED_UV_TOOL_VERSION_DEFAULT = "9.0.9"
 
@@ -383,7 +470,7 @@ def _pinned_uv_tool_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
-    monkeypatch.setattr(UVToolRunner, "is_uv_available", lambda self: True)
+    monkeypatch.setattr(UVToolRunner, "uv_availability", lambda self: (True, None))
     monkeypatch.setattr(
         UVToolRunner,
         "get_tool_version",

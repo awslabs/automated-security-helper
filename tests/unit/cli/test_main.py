@@ -8,6 +8,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def cli_runner():

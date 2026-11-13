@@ -1,5 +1,7 @@
 """Tests for Semgrep scanner."""
 
+import sys
+
 import pytest
 from pathlib import Path
 from automated_security_helper.core.enums import ScannerToolType
@@ -8,6 +10,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
     SemgrepScannerConfig,
     SemgrepScannerConfigOptions,
 )
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
@@ -62,8 +66,14 @@ def test_semgrep_scanner_init(test_plugin_context):
 
 
 def test_semgrep_scanner_validate(test_semgrep_scanner):
-    """Test SemgrepScanner validation."""
-    assert test_semgrep_scanner.validate_plugin_dependencies() is True
+    """Test SemgrepScanner validation.
+
+    On Windows the scanner is deliberately unsupported (semgrep publishes no
+    Windows build; ``unsupported_platform_reason`` says so), so validation
+    reports False there by design.
+    """
+    expected = sys.platform != "win32"
+    assert test_semgrep_scanner.validate_plugin_dependencies() is expected
 
 
 def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
@@ -78,6 +88,13 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
     # Verify UV tool is enabled
     assert scanner.use_uv_tool is True
     assert scanner.command == "semgrep"
+
+    # Semgrep publishes no Windows build, so ``unsupported_platform_reason`` makes
+    # validation report False there whatever the resolver finds (see
+    # ``test_semgrep_scanner_validate``). The "can run" answers below are the
+    # platform's own; the UV version probe and the "nothing found" answer hold
+    # everywhere.
+    can_run = sys.platform != "win32"
 
     # Test UV tool version detection
     with unittest.mock.patch(
@@ -100,8 +117,18 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         # ``sys.executable``/``sys.prefix``, so probing the wrong one leaves the
         # scan's cache cold. The bare-name assertion this replaces could not tell
         # those two invocations apart.
+        # ``values`` is what the probe redacts from its own log lines: the values
+        # the scanner's config read from the environment, none for this config.
+        # The probe also passes the scanner's own offline mode, package and
+        # python pin, as the run and the install do, so the probe resolves the
+        # same environment the scan will use.
         mock_runner_instance.get_tool_version.assert_called_with(
-            "semgrep", scanner._uv_from_spec()
+            "semgrep",
+            scanner._uv_from_spec(),
+            values=(),
+            offline=scanner._is_offline_mode(),
+            package=scanner._uv_package(),
+            **scanner._uv_python_kwargs(),
         )
 
     # Test validation with UV tool available
@@ -112,7 +139,7 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         mock_runner.return_value = mock_runner_instance
         mock_runner_instance.is_uv_available.return_value = True
 
-        assert scanner.validate_plugin_dependencies() is True
+        assert scanner.validate_plugin_dependencies() is can_run
 
     # Test validation with UV tool unavailable but direct executable available
     with (
@@ -129,8 +156,11 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         mock_runner_instance.is_uv_available.return_value = False
         mock_find.return_value = "/usr/local/bin/semgrep"
 
-        assert scanner.validate_plugin_dependencies() is True
-        assert scanner.use_uv_tool is False  # Should be disabled after fallback
+        assert scanner.validate_plugin_dependencies() is can_run
+        if can_run:
+            # Should be disabled after fallback; on an unsupported platform
+            # validation answers before it consults the resolver at all.
+            assert scanner.use_uv_tool is False
 
     # Restore the flag before the next case. These four blocks share one scanner
     # instance, and the fallback above leaves use_uv_tool False --
@@ -183,21 +213,82 @@ def test_semgrep_scanner_configure(test_plugin_context, semgrep_rule_cache):
     assert scanner.config.options.offline is True
 
 
+#: What semgrep writes for a clean scan: SARIF with one run and no results. The
+#: template refuses a log with no run as nothing to grade, so a mocked clean
+#: run has to carry the run semgrep's writer always adds.
+SEMGREP_CLEAN_RUN_SARIF = (
+    '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "semgrep"}}, '
+    '"results": []}]}'
+)
+
+
+def _run_writing_results(scanner, content: str):
+    """A ``_run_subprocess`` stand-in that writes ``content`` where semgrep would.
+
+    The scan reads the real ``results_sarif.sarif`` path through the base reader
+    (``fs_guard.read_bytes_at_most``), which does not go through
+    ``builtins.open``, so patching ``open`` never reached it. It also grades the
+    response's ``returncode`` before it reads the file, and a response with none
+    is "its tool never ran", so the stand-in returns an exit code of 0.
+    """
+    results_file = scanner.results_dir / "source" / "results_sarif.sarif"
+
+    def write_results(*args, **kwargs):
+        results_file.parent.mkdir(parents=True, exist_ok=True)
+        results_file.write_text(content, encoding="utf-8")
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    return write_results
+
+
 def test_semgrep_scanner_scan(test_semgrep_scanner, test_data_dir):
-    """Test SemgrepScanner scan method."""
+    """Test SemgrepScanner scan method: a mocked clean run returns its report."""
     # Mock the scan to avoid actual execution
     import unittest.mock
 
+    # Semgrep publishes no Windows build, so on Windows the scanner is skipped
+    # before it runs; this test is about reading a run's report, on any platform.
     with (
-        unittest.mock.patch.object(test_semgrep_scanner, "_run_subprocess"),
-        unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
-        unittest.mock.patch("json.load", return_value={}),
+        unittest.mock.patch.object(
+            test_semgrep_scanner, "unsupported_platform_reason", return_value=None
+        ),
+        unittest.mock.patch.object(
+            test_semgrep_scanner,
+            "_run_subprocess",
+            side_effect=_run_writing_results(
+                test_semgrep_scanner, SEMGREP_CLEAN_RUN_SARIF
+            ),
+        ),
     ):
         # Run the scan
         results = test_semgrep_scanner.scan(test_data_dir, target_type="source")
 
-    # Check that results were returned
+    # Check that the clean run came back as a report with its one run
     assert results is not None
+    assert len(results.runs) == 1
+    assert results.runs[0].results == []
+
+
+def test_semgrep_scanner_scan_refuses_a_result_with_no_run(
+    test_semgrep_scanner, test_data_dir
+):
+    """``{}`` validates as SARIF with no run, and no run is no scan: refused."""
+    import unittest.mock
+
+    from automated_security_helper.core.exceptions import ScannerError
+
+    with (
+        unittest.mock.patch.object(
+            test_semgrep_scanner, "unsupported_platform_reason", return_value=None
+        ),
+        unittest.mock.patch.object(
+            test_semgrep_scanner,
+            "_run_subprocess",
+            side_effect=_run_writing_results(test_semgrep_scanner, "{}"),
+        ),
+        pytest.raises(ScannerError, match="holds no SARIF run"),
+    ):
+        test_semgrep_scanner.scan(test_data_dir, target_type="source")
 
 
 def test_semgrep_scanner_scan_error(test_semgrep_scanner):

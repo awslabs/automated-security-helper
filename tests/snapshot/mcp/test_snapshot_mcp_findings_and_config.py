@@ -29,6 +29,8 @@ from tests.snapshot.mcp.mcp_snapshot_support import (
     write_results,
 )
 
+pytestmark = pytest.mark.unit
+
 
 async def _call(tool: str, *args, **kwargs) -> Dict[str, Any]:
     """Call a tool; a Context, if the tool takes one, is passed positionally.
@@ -141,8 +143,8 @@ async def test_suggest_suppression_defaults(project, snapshot):
         "suggest_suppression", finding_id=ids["B602"], results_path=str(results_file)
     )
     expected = (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
-    assert defaulted["result"]["json"]["expiration"] == expected
-    assert f"expiration: '{expected}'" in defaulted["result"]["yaml"]
+    assert defaulted["result"]["json"]["expires"] == expected
+    assert f"expires: '{expected}'" in defaulted["result"]["yaml"]
     assert defaulted["result"]["json"]["reason"] == snapshot(
         name="default_justification"
     )
@@ -199,11 +201,14 @@ async def test_diff_scan_results(allowed, snapshot):
 
 
 @pytest.mark.asyncio
-async def test_get_config(isolated_mcp_state, snapshot):
+async def test_get_config(isolated_mcp_state, snapshot, monkeypatch):
     cwd = Path.cwd()
     defaults = await _call("get_config")
     config = cwd / ".ash" / ".ash.yaml"
     config.parent.mkdir()
+    # A config path a client names is the operator's only in a directory the
+    # operator set aside; elsewhere it is checked as the client's.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(config.parent))
     config.write_text(
         "project_name: snapshot-project\n"
         "fail_on_findings: false\n"
@@ -218,7 +223,10 @@ async def test_get_config(isolated_mcp_state, snapshot):
     assert defaults == snapshot(name="no_config_found_returns_defaults")
     assert discovered_raw == snapshot(name="discovered_raw")
     assert explicit == snapshot(name="explicit_path_resolved")
-    assert missing == snapshot(name="explicit_path_missing_returns_defaults")
+    # A named file that does not exist is an error response, not the default
+    # config, which would say the file resolves to no settings.
+    assert missing["result"]["success"] is False
+    assert missing == snapshot(name="explicit_path_missing_is_refused")
 
 
 @pytest.mark.asyncio
@@ -228,6 +236,7 @@ async def test_get_config(isolated_mcp_state, snapshot):
         "valid",
         "unknown_field",
         "wrong_type",
+        "denied_field",
         "yaml_syntax_error",
         "file_valid",
         "file_not_found",
@@ -251,11 +260,22 @@ async def test_validate_config(case, allowed, tmp_path, monkeypatch, snapshot):
         tempfile, "_get_candidate_names", lambda: iter(["validate_config"])
     )
     contents = {
-        "valid": "project_name: demo\nfail_on_findings: true\n",
+        "valid": "project_name: demo\nglobal_settings:\n  severity_threshold: HIGH\n",
         "unknown_field": "project_name: demo\nnot_a_setting: 1\n",
-        "wrong_type": "project_name: demo\nfail_on_findings: [1, 2]\n",
+        "wrong_type": "project_name: demo\nglobal_settings:\n  severity_threshold: [1, 2]\n",
+        # fail_on_findings is a default denied_paths entry. Content from a remote
+        # caller is a config a client delivers, so the denial is listed.
+        "denied_field": "project_name: demo\nfail_on_findings: false\n",
         "yaml_syntax_error": "project_name: [unclosed\n",
     }
+    if case == "denied_field":
+        result = await _call(
+            "validate_config",
+            make_ctx({"mcp-session-id": "remote-session"}),
+            config_content=contents[case],
+        )
+        assert result == snapshot(name="result")
+        return
     if case in contents:
         kwargs = {"config_content": contents[case]}
     elif case == "file_valid":
@@ -271,8 +291,40 @@ async def test_validate_config(case, allowed, tmp_path, monkeypatch, snapshot):
 
 
 @pytest.mark.asyncio
-async def test_check_installation(snapshot):
-    assert await _call("check_installation", make_ctx()) == snapshot(name="result")
+async def test_check_installation(monkeypatch, snapshot, snapshot_normalizer):
+    """The installation report, for a host with every built-in scanner's tool but one.
+
+    Pinned as test_list_scanners pins the inventory: every dependency check passes
+    except grype's, no external version probe runs, the bundled scanners' versions
+    are registered as literals, and the `ash` executable is at a fixed path. So the
+    snapshot shows ready false with grype in missing_dependencies.
+    """
+    import shutil
+
+    from automated_security_helper.cli import mcp_tools
+    from automated_security_helper.core import scanner_inventory
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cdk_nag_scanner,
+    )
+
+    for cls in mcp_tools._builtin_scanner_classes():
+        satisfied = cls.__name__ != "GrypeScanner"
+        monkeypatch.setattr(
+            cls, "validate_plugin_dependencies", lambda self, ok=satisfied: ok
+        )
+    monkeypatch.setattr(
+        scanner_inventory, "_probe_tool_version", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(cdk_nag_scanner, "_cdk_nag_version", "0.0.0-snapshot")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/opt/ash/bin/{name}")
+
+    reported = await _call("check_installation", make_ctx())
+    for entry in reported["result"]["scanners"]:
+        if entry.get("version"):
+            snapshot_normalizer.add_literal(
+                entry["version"], f"{entry['name'].upper()}_VERSION"
+            )
+    assert reported == snapshot(name="result")
 
 
 @pytest.mark.asyncio
@@ -293,7 +345,9 @@ async def test_list_scanners(monkeypatch, snapshot, snapshot_normalizer):
 
     for cls in mcp_tools._loaded_scanner_classes():
         monkeypatch.setattr(cls, "validate_plugin_dependencies", lambda self: True)
-    monkeypatch.setattr(scanner_inventory, "_probe_tool_version", lambda _: None)
+    monkeypatch.setattr(
+        scanner_inventory, "_probe_tool_version", lambda *args, **kwargs: None
+    )
     # cdk-nag reads its version from installed metadata at import: present when ASH's
     # `cdk` extra is in the venv (CI), "unavailable" (reported as None) without it.
     # Pinned to a present version, as for every other dependency here.

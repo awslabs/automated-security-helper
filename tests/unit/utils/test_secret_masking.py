@@ -1,10 +1,14 @@
 """Tests for secret masking utilities."""
 
+import pytest
+
 from automated_security_helper.utils.secret_masking import (
     mask_secret_in_text,
     _mask_bandit_b105_secret,
     _mask_secret_value,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestSecretMasking:

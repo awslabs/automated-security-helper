@@ -39,12 +39,15 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
     GITLAB_SAST_SCHEMA_VERSION,
 )
 from tests.utils.helpers import iter_repo_files
+
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAN_TEST_ACTION = REPO_ROOT / ".github/actions/run-scan-test/action.yml"

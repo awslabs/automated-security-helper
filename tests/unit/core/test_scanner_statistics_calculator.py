@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.config.ash_config import AshConfigGlobalSettingsSection
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -23,6 +25,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
     SarifReport,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestScannerStatisticsCalculator:
@@ -637,8 +641,9 @@ class TestScannerStatisticsCalculator:
         assert failed_stats["total"] == 0
         assert failed_stats["actionable"] == 0
 
-        # Duration should be 0.0 for failed scanner (None is coerced to 0.0 to prevent formatting crashes)
-        assert failed_stats["duration"] == 0.0
+        # A scanner that never ran recorded no duration: None, which every
+        # reader formats as "N/A"; coerced to 0.0 it read "<1ms".
+        assert failed_stats["duration"] is None
 
         # Error flag should be True
         assert failed_stats["error"] is True

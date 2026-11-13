@@ -14,11 +14,17 @@ from automated_security_helper.base.converter_plugin import (
 )
 from automated_security_helper.base.options import ConverterOptionsBase
 from automated_security_helper.plugins.decorators import ash_converter_plugin
+from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import TreeInputRefused
+from automated_security_helper.utils.suppression_matcher import file_path_matches
 
 
 class ExampleConverterConfigOptions(ConverterOptionsBase):
-    pass
+    suffixes: List[str] = Field(
+        default=[".py.tmpl"],
+        description="File name endings to convert into .py files",
+    )
 
 
 class ExampleConverterConfig(ConverterPluginConfigBase):
@@ -34,7 +40,12 @@ class ExampleConverterConfig(ConverterPluginConfigBase):
 
 @ash_converter_plugin
 class ExampleConverter(ConverterPluginBase[ExampleConverterConfig]):
-    """Example converter plugin that demonstrates the decorator pattern."""
+    """Copies Python templates (``*.py.tmpl``) to ``.py`` files the scanners read.
+
+    A scanner that selects files by extension skips ``app.py.tmpl``. This converter
+    writes a copy named ``app.py`` under its results directory, and ASH scans the
+    converted files as a second target.
+    """
 
     def model_post_init(self, context):
         # Do not assign to self.context here. The context is one object shared by
@@ -47,32 +58,55 @@ class ExampleConverter(ConverterPluginBase[ExampleConverterConfig]):
         return super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
-        """Validate converter configuration.
-
-        Returns:
-            bool: True if validation passes
-        """
-        ASH_LOGGER.info("ExampleConverter: Validating configuration")
+        """Pure Python, so there is nothing to install."""
         return True
 
-    def convert(self, target: Path | str) -> List[Path]:
-        """Convert a target file/directory.
+    def convert(self) -> List[Path]:
+        """Convert every matching file in the scan set.
 
-        This example converter simply logs the target and returns it unchanged.
-
-        Args:
-            target: Target file or directory to convert
+        ASH calls this once per scan with no arguments. The inputs come from the
+        scan set under ``self.context.source_dir`` and the output goes under
+        ``self.results_dir``.
 
         Returns:
-            List[Path]: List of converted paths
+            List[Path]: The files written, or an empty list when there was nothing
+            to convert.
         """
-        if self.context is None:
-            ASH_LOGGER.warning("ExampleConverter: No context provided!")
-            return []
+        source_dir = Path(self.context.source_dir)
+        suffixes = tuple(self.config.options.suffixes)
+        ignore_paths = self.context.config.global_settings.ignore_paths or []
 
-        target_path = Path(target)
-        ASH_LOGGER.info(f"ExampleConverter: Converting {target_path}")
+        written: List[Path] = []
+        for name in scan_set(source=source_dir, output=self.context.output_dir):
+            # Only the line ending a cached list leaves: "a.py.tmpl " is its own file.
+            candidate = Path(name.rstrip("\n"))
+            if not candidate.name.endswith(suffixes) or not candidate.is_file():
+                continue
+            relative = candidate.relative_to(source_dir)
+            if any(
+                file_path_matches(relative.as_posix(), ignore.path)
+                for ignore in ignore_paths
+            ):
+                continue
 
-        # In a real converter, you would do some conversion here
-        # For this example, we'll just return the target unchanged
-        return [target_path]
+            # Read through open_source_file, never open(): it refuses a symlink, a
+            # file with a second hard link, or a path outside the scanned tree
+            # before anything is read.
+            try:
+                handle = self.open_source_file(candidate)
+            except TreeInputRefused as refused:
+                self.record_refused_input(refused)
+                continue
+            with handle:
+                content = handle.read()
+
+            suffix = next(s for s in suffixes if candidate.name.endswith(s))
+            target = self.results_dir.joinpath(
+                relative.parent, candidate.name[: -len(suffix)] + ".py"
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            ASH_LOGGER.debug(f"ExampleConverter: {relative.as_posix()} -> {target}")
+            written.append(target)
+
+        return written

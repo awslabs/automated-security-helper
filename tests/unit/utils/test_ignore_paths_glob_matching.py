@@ -9,12 +9,16 @@ matcher's _recursive_glob_match.
 from unittest.mock import MagicMock
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Run,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
+
+pytestmark = pytest.mark.unit
 
 
 def _make_sarif_with_finding(uri: str, rule_id: str = "CKV_AWS_56") -> SarifReport:

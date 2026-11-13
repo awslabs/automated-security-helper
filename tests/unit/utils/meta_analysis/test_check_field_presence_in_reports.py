@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.reporting import (
     check_field_presence_in_reports,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_check_field_presence_in_reports():

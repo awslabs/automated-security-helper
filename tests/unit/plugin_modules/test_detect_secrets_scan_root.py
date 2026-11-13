@@ -45,6 +45,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
 )
 
+# The scanner's dependency check asked uv for detect-secrets' version (``uv tool run
+# detect-secrets --version``), so every scan here started the tool wherever uv could
+# reach it. The scan itself runs in ASH's worker, so the probes answer without a
+# process (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
+
 # A fake value. Written to a file it trips detect-secrets' keyword plugin, which
 # is all these tests need from it.
 _KEYWORD_LINE = 'secret = "base64_encoded_secret=="'  # pragma: allowlist secret
@@ -89,6 +95,7 @@ def _keys(scanner: DetectSecretsScanner) -> set:
     return {Path(key).as_posix() for key in scanner._secrets_collection.data}
 
 
+@pytest.mark.integration
 def test_source_scan_anchors_root_to_the_source_dir(tmp_path):
     """A source scan with no baseline file must still anchor root."""
     source_dir = tmp_path / "src"
@@ -104,6 +111,7 @@ def test_source_scan_anchors_root_to_the_source_dir(tmp_path):
     assert _keys(scanner) == _EXPECTED_KEYS
 
 
+@pytest.mark.integration
 def test_converted_scan_anchors_root_to_the_work_dir(tmp_path):
     """A converted scan reads from work_dir, so that is what root must name.
 
@@ -125,6 +133,7 @@ def test_converted_scan_anchors_root_to_the_work_dir(tmp_path):
     assert _keys(scanner) == _EXPECTED_KEYS
 
 
+@pytest.mark.integration
 def test_baseline_scan_anchors_root(tmp_path):
     """The baseline branch replaces the collection object, so it must be anchored
     after the swap, not before it -- ``load_from_baseline`` returns a fresh
@@ -153,6 +162,7 @@ def test_baseline_scan_anchors_root(tmp_path):
     assert scanner._secrets_collection.root == source_dir.absolute()
 
 
+@pytest.mark.integration
 def test_keys_do_not_depend_on_the_working_directory(tmp_path, monkeypatch):
     """Same tree, working directory outside it: the keys must not move.
 
@@ -174,6 +184,7 @@ def test_keys_do_not_depend_on_the_working_directory(tmp_path, monkeypatch):
     assert _keys(scanner) == _EXPECTED_KEYS
 
 
+@pytest.mark.integration
 def test_keys_stay_inside_root_so_relpath_cannot_fail_on_windows(tmp_path, monkeypatch):
     """The property that makes the Windows failure unreachable.
 
@@ -200,6 +211,7 @@ def test_keys_stay_inside_root_so_relpath_cannot_fail_on_windows(tmp_path, monke
         assert os.pardir not in Path(key).parts, f"key escaped root: {key}"
 
 
+@pytest.mark.integration
 def test_relative_source_dir_still_reports_findings(tmp_path, monkeypatch):
     """A relative ``source_dir`` reaches the scanner as given, and the scan set
     inherits it.
@@ -226,6 +238,7 @@ def test_relative_source_dir_still_reports_findings(tmp_path, monkeypatch):
     assert _keys(scanner) == _EXPECTED_KEYS
 
 
+@pytest.mark.unit
 def test_ntpath_relpath_has_no_answer_across_drives():
     """The Windows mechanism itself, pinned so the reason for the fix is legible.
 

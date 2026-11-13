@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  The principal is the plain String "*", which is the shortest way to write a policy that
+  is open to everyone. The rule used to call a Hash method on the principal, so a String
+  made it raise instead of reporting, and under --isolate-custom-rule-exceptions that
+  cost the rule's verdict on the whole template.
+
+  Reported by the rule: StringStar. The action is es:ESHttpGet, so
+  ResourcePolicyStarAccessVerbPolicyRule reports nothing here.
+
+Resources:
+  StringStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-string-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"

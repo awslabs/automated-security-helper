@@ -1,17 +1,23 @@
 import logging
 import sys
 import time
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from automated_security_helper.core.enums import ExecutionPhase
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.console import ash_console
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    ShownHandlerErrors,
+    TextFileFormatter,
+    run_handler,
+)
 from automated_security_helper.utils.rich_log_handler import (
     LiveDisplayLogHandler,
     RichLogPanel,
 )
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 from rich import box
-from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -27,6 +33,25 @@ from rich.progress import (
 
 
 ExecutionPhaseType = Literal["convert", "scan", "report", "inspect"]
+
+
+if TYPE_CHECKING:
+    # The stub declares StreamHandler generic on every Python version, but the
+    # class only accepts a subscript at run time from 3.11 on. A subscripted base
+    # in the class statement below would raise TypeError at import on 3.10, so
+    # the checker sees the generic and the interpreter sees the plain class.
+    _StreamHandlerBase = logging.StreamHandler[Any]
+else:
+    _StreamHandlerBase = logging.StreamHandler
+
+
+class _ConsoleSink(ShownHandlerErrors, _StreamHandlerBase):
+    """The standard-error sink the display falls back to without a panel.
+
+    A record it cannot write is reported shown (:class:`ShownHandlerErrors`),
+    as every other handler ASH puts on its logger reports one: a plain
+    StreamHandler printed the failed record's traceback and arguments as given.
+    """
 
 
 class LiveProgressDisplay:
@@ -52,7 +77,7 @@ class LiveProgressDisplay:
             debug: Whether to show debug logs
         """
         self.show_progress = show_progress
-        self.console = Console(color_system=color_system)
+        self.console = ash_console(color_system=color_system)
         self.verbose = verbose
         self.debug = debug
 
@@ -90,8 +115,17 @@ class LiveProgressDisplay:
         self.log_handler = LiveDisplayLogHandler(self.log_panel, level=log_level)
         self.log_handler.setFormatter(logging.Formatter("%(message)s"))
 
-        # Add the handler to the ASH logger
-        ASH_LOGGER.addHandler(self.log_handler)
+        # Add the handler to the ASH logger, marked as ASH's own, so a later
+        # get_logger replaces it as it replaces its own; inside a run it is the
+        # run's, so it shows that run's lines and comes off with the run. Only
+        # when the display will show: the handler feeds the panel and nothing
+        # else, so with show_progress=False it would hold lines nobody is
+        # shown -- and the MCP server's workspace scans build one display per
+        # project on a pool thread with no run's scope, where it joined the
+        # logger unscoped and took every session's lines as their home,
+        # keeping them from the last resort.
+        if show_progress:
+            ASH_LOGGER.addHandler(run_handler(self.log_handler))
 
         # Update layout with the logs (on top) and progress (below)
         self.layout["logs"].update(
@@ -141,9 +175,38 @@ class LiveProgressDisplay:
         # Live display
         self.live = None
 
+        # The console sink put on the logger when a shown display ends.
+        self._sink_after_stop: logging.Handler | None = None
+
+    def _restore_panel_handler(self) -> None:
+        """Put the panel's handler back on the logger for a display that starts again.
+
+        A display that has ended took the panel handler off and, if it was
+        shown, put a console sink in its place. Started again, it builds a new
+        ``Live`` over the same panel, so the panel's handler goes back on and the
+        sink comes off: the sink wrote to the standard error it captured before
+        the new ``Live`` redirected the streams, and left on, it would mix its
+        lines into the redraws and print every line twice beside the panel.
+        """
+        sink, self._sink_after_stop = self._sink_after_stop, None
+        if sink is not None and sink in ASH_LOGGER.handlers:
+            ASH_LOGGER.removeHandler(sink)
+        handler = self.log_handler
+        if isinstance(handler, LiveDisplayLogHandler) and (
+            handler not in ASH_LOGGER.handlers
+        ):
+            # Added as it is, not through run_handler as __init__ did. The
+            # handler already carries the mark and the run-scope filter that
+            # call put on it; run_handler would add a second filter for the
+            # scope active now, and a handler's filters must all accept, so a
+            # display restarted under another scope would drop every line. The
+            # display keeps the scope it was built under.
+            ASH_LOGGER.addHandler(handler)
+
     def start(self):
         """Start the live display if progress is enabled."""
         if self.show_progress and (self.live is None):
+            self._restore_panel_handler()
             try:
                 # Use auto_refresh=True and vertical_overflow="visible" to allow the panel to adjust its height
                 self.live = Live(
@@ -156,29 +219,120 @@ class LiveProgressDisplay:
                 )
                 self.live.__enter__()
             except Exception as e:
-                print(f"ERROR initializing live display: {str(e)}", file=sys.stderr)
+                print(
+                    shown_not_obeyed(f"ERROR initializing live display: {e}"),
+                    file=sys.stderr,
+                )
                 import traceback
 
-                traceback.print_exc()
-                # Fall back to non-progress mode
+                # The traceback quotes the error's text, which can quote a path.
+                print(shown_not_obeyed(traceback.format_exc()), file=sys.stderr, end="")
+                # Fall back to non-progress mode. The panel handler __init__
+                # attached fed a panel that will never be rendered, and with
+                # show_progress on, get_logger added no console handler, so
+                # every later log line went to the unrendered panel and nowhere
+                # else. The panel handler comes off and a console sink at the
+                # same level takes its place, marked as the run's handler so
+                # stop() and the run's end remove it as they would the panel's.
+                self._discard_failed_live()
                 self.show_progress = False
+                self._replace_panel_handler_with_console()
                 ASH_LOGGER.error(f"Failed to initialize progress display: {str(e)}")
                 ASH_LOGGER.info("Continuing without progress display")
 
         # Log a message to show in the log panel
         ASH_LOGGER.info("ASH Security Scan started")
 
-    def stop(self):
-        """Stop the live display if it's running."""
-        if self.show_progress and self.live:
-            # Log a final message
-            ASH_LOGGER.info("ASH Security Scan completed")
+    def _discard_failed_live(self) -> None:
+        """Exit a Live whose ``__enter__`` raised, and forget it.
 
-            # Remove our log handler before stopping the display
-            if hasattr(self, "log_handler") and self.log_handler in ASH_LOGGER.handlers:
-                ASH_LOGGER.removeHandler(self.log_handler)
-            self.live.__exit__(None, None, None)
+        ``Live.__enter__`` can fail after it has taken the console (it hides
+        the cursor and redirects the standard streams before it returns), so
+        the object start() assigned may be half started. Leaving it in
+        ``self.live`` meant stop(), which acts only on a shown display, never
+        exited it.
+        """
+        failed, self.live = self.live, None
+        if failed is None:
+            return
+        try:
+            failed.stop()
+        except Exception as stop_error:
+            ASH_LOGGER.debug(
+                f"Could not stop the live display that failed to start: {stop_error}"
+            )
+
+    @staticmethod
+    def _console_sink(level: int) -> logging.Handler:
+        """A standard-error log sink at *level*, marked as the run's handler.
+
+        The console's formatter (the one the last-resort handler uses): each
+        message and traceback shown, not obeyed. The lines this sink takes are
+        the ones the panel would have shown, the error that ended the live
+        display among them, and that error quotes the exception's text, which can
+        carry a terminal control or a line that starts a CI command. A plain
+        ``%(message)s`` formatter wrote them to the console as given.
+        """
+        sink = _ConsoleSink(sys.stderr)
+        sink.setLevel(level)
+        sink.setFormatter(TextFileFormatter("%(message)s", unfiltered=False))
+        return run_handler(sink)
+
+    def _replace_panel_handler_with_console(self) -> None:
+        """Swap the panel's log handler for a console sink at the same level.
+
+        For the fallback start() takes when the live display cannot be built:
+        the lines the panel would have shown go to standard error instead, with
+        the panel handler's level and formatter. The new handler becomes
+        ``self.log_handler`` so stop() removes it as it removes the panel's.
+        """
+        panel_handler = self.log_handler
+        if panel_handler is not None and panel_handler in ASH_LOGGER.handlers:
+            ASH_LOGGER.removeHandler(panel_handler)
+        # A display whose handler was already taken off (a run that stopped
+        # and started again) has no level to copy; the panel's default level
+        # from __init__ stands in.
+        self.log_handler = self._console_sink(getattr(panel_handler, "level", 15))
+        ASH_LOGGER.addHandler(self.log_handler)
+
+    def stop(self, interrupted: bool = False):
+        """Stop the live display if it's running.
+
+        *interrupted* for a scan stopped by Ctrl-C, which did not complete.
+
+        The log handler comes off whether or not a display is showing, so the
+        console sink a failed start() put in the panel's place is removed too.
+        When a shown display ends, a console sink at the panel's level takes
+        over: in progress mode the logger has no other console handler, and the
+        lines logged after the display ends (the completion banner, a later
+        warning or error) would otherwise reach no terminal.
+        """
+        shown = bool(self.show_progress and self.live)
+        if shown:
+            # Log a final message
+            ASH_LOGGER.info(
+                "ASH Security Scan interrupted"
+                if interrupted
+                else "ASH Security Scan completed"
+            )
+
+        # Remove our log handler before stopping the display
+        handler = getattr(self, "log_handler", None)
+        if handler is not None and handler in ASH_LOGGER.handlers:
+            ASH_LOGGER.removeHandler(handler)
+
+        if shown:
+            if self.live is not None:
+                self.live.__exit__(None, None, None)
             self.live = None
+            # Kept, so a display that starts again takes it off (start()), and
+            # the end of a second shown display replaces it where it used to add
+            # another.
+            previous, self._sink_after_stop = self._sink_after_stop, None
+            if previous is not None and previous in ASH_LOGGER.handlers:
+                ASH_LOGGER.removeHandler(previous)
+            self._sink_after_stop = self._console_sink(getattr(handler, "level", 15))
+            ASH_LOGGER.addHandler(self._sink_after_stop)
 
     def add_task(
         self, phase: ExecutionPhase, description: str, total: int = 100
@@ -235,8 +389,10 @@ class LiveProgressDisplay:
             update_kwargs["advance"] = advance
         if completed is not None:
             update_kwargs["completed"] = completed
-            # If task is completed at 100%, also mark it as finished to stop the timer
-            if completed == 100:
+            # A task that has reached its own total is finished: stop its timer.
+            # The total is the task's, not a literal 100 (add_task takes one).
+            task = next((t for t in self.progress.tasks if t.id == task_id), None)
+            if task is not None and task.total is not None and completed >= task.total:
                 self.progress.stop_task(task_id)
         if description is not None:
             # Format the description with the phase

@@ -1,5 +1,7 @@
 """Tests for reporter plugins."""
 
+import pytest
+
 from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
     FlatJSONReporter,
 )
@@ -10,6 +12,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter
     CsvReporter,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+pytestmark = pytest.mark.unit
 
 
 class TestJSONFormatter:
@@ -39,10 +43,11 @@ class TestHTMLFormatter:
         result = formatter.report(sample_ash_model)
         assert result is not None
         assert isinstance(result, str)
-        assert result.startswith("\n<!DOCTYPE html>")
-        assert "<html>" in result
+        assert result.lstrip().startswith("<!DOCTYPE html>")
+        assert '<html lang="en"' in result
         assert "</html>" in result
-        assert "<table>" in result
+        assert 'id="scanner-results"' in result
+        assert 'id="findings"' in result
 
 
 class TestCSVFormatter:

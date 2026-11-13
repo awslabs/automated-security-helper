@@ -4,7 +4,6 @@
 """Unit tests for FerretScanScanner plugin."""
 
 import json
-import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
@@ -16,6 +15,9 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
     UNSUPPORTED_FERRET_OPTIONS,
 )
 from automated_security_helper.core.exceptions import ScannerError
+from tests.utils.env_assertions import environ_value
+from tests.utils.helpers import checkout_env
+from tests.utils.fake_tool_paths import fake_tool_path
 
 
 @pytest.mark.unit
@@ -581,15 +583,24 @@ class TestFerretScanScannerDependencies:
     def test_validate_dependencies_success(
         self, mock_find_executable, mock_plugin_context
     ):
-        """Test successful dependency validation when ferret-scan is available."""
+        """Test successful dependency validation when ferret-scan is available.
+
+        The version check is stubbed like the family's other dependency
+        cells: unstubbed, validate_plugin_dependencies spawned
+        ``<mocked path> --version`` for real, so the verdict depended on
+        whatever binary the HOST had at that path -- a hermeticity hole,
+        and a unit test executing a host binary."""
         mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
 
         scanner = FerretScanScanner(context=mock_plugin_context)
-        result = scanner.validate_plugin_dependencies()
+        with patch.object(
+            scanner, "_check_version_compatibility", return_value=(True, "2.5.2", None)
+        ):
+            result = scanner.validate_plugin_dependencies()
 
         assert result is True
         assert scanner.dependencies_satisfied is True
-        # find_executable is called twice: once for validation, once for version check
+        # find_executable still probes availability itself.
         assert mock_find_executable.call_count >= 1
 
     @patch(
@@ -703,7 +714,7 @@ class TestFerretScanScannerScanning:
             ),
             patch("pathlib.Path.exists", return_value=True),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -736,7 +747,7 @@ class TestFerretScanScannerScanning:
         with (
             patch.object(scanner, "_pre_scan", return_value=True) as mock_pre_scan,
             patch.object(scanner, "_post_scan"),
-            patch.object(scanner, "_run_subprocess"),
+            patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}),
             patch.object(scanner, "_plugin_log"),
             patch(
                 "builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))
@@ -880,7 +891,7 @@ class TestFerretScanScannerErrorHandling:
             patch("builtins.open", mock_open(read_data="not valid json")),
             patch("pathlib.Path.exists", return_value=True),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -914,7 +925,7 @@ class TestFerretScanScannerErrorHandling:
             patch.object(scanner, "_run_subprocess") as mock_subprocess,
             patch.object(scanner, "_plugin_log"),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -980,9 +991,10 @@ class TestFerretScanScannerVersionSupport:
             parse_version,
         )
 
-        assert parse_version("1.0.0") == (1, 0, 0)
-        assert parse_version("2.3.4") == (2, 3, 4)
-        assert parse_version("10.20.30") == (10, 20, 30)
+        # A release carries a trailing 0, the place a pre-release's -1 takes.
+        assert parse_version("1.0.0") == (1, 0, 0, 0)
+        assert parse_version("2.3.4") == (2, 3, 4, 0)
+        assert parse_version("10.20.30") == (10, 20, 30, 0)
 
     def test_parse_version_with_prerelease(self):
         """Test parsing version strings with pre-release suffixes."""
@@ -990,10 +1002,13 @@ class TestFerretScanScannerVersionSupport:
             parse_version,
         )
 
-        assert parse_version("1.0.0-beta") == (1, 0, 0)
-        assert parse_version("2.0.0-rc1") == (2, 0, 0)
-        assert parse_version("1.2.3-alpha.1") == (1, 2, 3)
-        assert parse_version("1.0.0+build123") == (1, 0, 0)
+        # A pre-release sorts below its release: a -1 marks it where the release
+        # carries 0, and the numbers in its label follow, so rc1 is older than rc2.
+        assert parse_version("1.0.0-beta") == (1, 0, 0, -1)
+        assert parse_version("2.0.0-rc1") == (2, 0, 0, -1, 1)
+        assert parse_version("1.2.3-alpha.1") == (1, 2, 3, -1, 1)
+        # Build metadata ranks with its release.
+        assert parse_version("1.0.0+build123") == (1, 0, 0, 0)
 
     def test_compare_versions(self):
         """Test version comparison."""
@@ -1299,7 +1314,7 @@ class TestFerretScanScannerVersionSupport:
             assert any("skip_version_check=true" in call for call in log_calls)
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 class TestFerretPluginValidation:
     """Run the pre-push validation script as a test to catch regressions."""
 
@@ -1312,9 +1327,11 @@ class TestFerretPluginValidation:
         --exclude args, ferret in .ash.yaml, and config override conflicts.
         """
         import subprocess  # nosec B404 — test validates subprocess behavior
+        import sys
 
         result = subprocess.run(  # nosec B603 B607 — test invokes ferret-scan binary
-            ["python", "scripts/validate_ferret_plugin.py"],
+            [sys.executable, "scripts/validate_ferret_plugin.py"],
+            env=checkout_env(),
             capture_output=True,
             text=True,
             timeout=30,
@@ -1353,16 +1370,17 @@ class TestFerretVersionWindowBoundaries:
     ]
 
     @pytest.mark.parametrize(("version", "supported"), CASES)
-    @patch(
-        "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.subprocess.run"
-    )
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     @patch(
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"
     )
     def test_runtime_check_on_installed_binary(
         self, mock_find_executable, mock_run, mock_plugin_context, version, supported
     ):
-        mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
+        # The version probe spawns this path, so ASH's lookup has to count it as
+        # anchored; on Windows a bare POSIX path has no drive and is refused before the
+        # mocked runner is reached, and the installed version reads as unknown.
+        mock_find_executable.return_value = fake_tool_path("/usr/local/bin/ferret-scan")
         mock_run.return_value = MagicMock(
             returncode=0, stdout=_ferret_version_output(version) + "\n"
         )
@@ -1488,7 +1506,7 @@ class TestFerretSarifShapeAcrossVersions:
             out = Path(command[command.index("--output") + 1])
             out.write_text(json.dumps(sarif), encoding="utf-8")
             scanner.exit_code = 0
-            return {"stdout": "", "stderr": ""}
+            return {"returncode": 0, "stdout": "", "stderr": ""}
 
         with (
             patch.object(scanner, "_pre_scan", return_value=True),
@@ -1609,4 +1627,6 @@ class TestFerretSarifShapeAcrossVersions:
         assert env["FERRET_PRECOMMIT"] == "0"
         # The opt-out is added on top of the inherited environment, not instead of it.
         assert env["PRE_COMMIT"] == "1"
-        assert env.get("PATH") == os.environ.get("PATH")
+        # The one value, not the mapping: a failure would print the whole environment.
+        passed_path = env.get("PATH")
+        assert passed_path == environ_value("PATH")

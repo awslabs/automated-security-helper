@@ -7,8 +7,10 @@ Background scan-progress monitor for the ASH MCP server.
 
 import asyncio
 import json
+import os
+import stat
 from pathlib import Path
-from typing import Awaitable, Callable, Dict, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from mcp.server.mcpserver import Context
 
@@ -17,6 +19,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_get_scan_results,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 logger = ASH_LOGGER
 
@@ -56,24 +59,50 @@ async def _safe_send(
         return False
 
 
+def _in_session(session_id: Optional[str]) -> Dict[str, Any]:
+    """The keyword that reads the scan in the session that started it.
+
+    The registry shows a scan only to its own session, so the monitor asks as
+    that session. Omitted when there is none, which is the default session.
+    """
+    return {} if session_id is None else {"session_id": session_id}
+
+
 async def _fetch_initial_scan_info(
-    ctx: Context, scan_id: str
+    ctx: Context, scan_id: str, session_id: Optional[str] = None
 ) -> Optional[Tuple[Path, Path, Path]]:
     """Resolve the scan's working directory or report the failure to the client.
 
     Returns ``(directory_path, output_dir, ash_aggregated_results)`` on success,
     or ``None`` when the registry lookup fails or the directory path is missing.
     """
-    registry_info = await mcp_get_scan_progress(scan_id=scan_id)
+    registry_info = await mcp_get_scan_progress(
+        scan_id=scan_id, **_in_session(session_id)
+    )
     if not registry_info.get("success", False):
-        await ctx.error(
-            f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}"
+        # Through _safe_send like every other send of the monitor: a client that
+        # is gone makes the send raise, and a bare send here landed that failure
+        # in monitor_scan_progress's own handler, which sent a second error to
+        # the same dead client and logged the dead send as a monitor failure.
+        await _safe_send(
+            True,
+            lambda: ctx.error(
+                raw_controls_on_one_line(
+                    "Failed to get scan info: "
+                    f"{registry_info.get('error', 'Unknown error')}"
+                )
+            ),
+            "Failed to send scan-info error",
         )
         return None
 
     directory_path = registry_info.get("directory_path", "")
     if not directory_path:
-        await ctx.error("Missing directory path in scan registry")
+        await _safe_send(
+            True,
+            lambda: ctx.error("Missing directory path in scan registry"),
+            "Failed to send scan-info error",
+        )
         return None
 
     directory_path_obj = Path(directory_path)
@@ -91,12 +120,50 @@ def _build_findings_summary(severity_counts: dict) -> str:
     )
 
 
+def _findings_in(final_results: dict) -> Tuple[int, dict]:
+    """The finding count and per-severity counts of a ``mcp_get_scan_results`` reply.
+
+    The reply carries the aggregated results' ``summary_stats``: its
+    ``severity_counts`` mapping and its ``total``, the number of findings that
+    are not suppressed. It has never carried a top-level ``findings_count`` or
+    ``severity_counts``, which is what this monitor used to read, so every
+    completed scan was announced as having no findings whatever it found.
+
+    ``total`` is read when it is a number; otherwise the non-suppressed
+    severities are summed, which is how the model derives it.
+    """
+    stats = final_results.get("summary_stats")
+    if not isinstance(stats, dict):
+        return 0, {}
+    severity_counts = stats.get("severity_counts")
+    if not isinstance(severity_counts, dict):
+        severity_counts = {}
+    total = stats.get("total")
+    if isinstance(total, bool) or not isinstance(total, int):
+        total = sum(
+            count
+            for severity, count in severity_counts.items()
+            if isinstance(count, int)
+            and not isinstance(count, bool)
+            and str(severity).lower() != "suppressed"
+        )
+    return total, severity_counts
+
+
 async def _handle_scan_completed(
-    ctx: Context, output_dir: Path, connection_alive: bool
+    ctx: Context,
+    output_dir: Path,
+    connection_alive: bool,
+    session_id: Optional[str] = None,
 ) -> bool:
-    """Emit completion progress + summary once the aggregated results file exists.
+    """Emit completion progress + summary once the registry reports the scan completed.
 
     Returns the (possibly updated) ``connection_alive`` flag.
+
+    The results are read as the scan's own session. A delivered tree's output
+    sits inside that session's sandbox, which no operator grant names, so a
+    read with no session is refused and the completion summary was never sent
+    for a scan of a delivered tree.
     """
     connection_alive = await _safe_send(
         connection_alive,
@@ -108,12 +175,13 @@ async def _handle_scan_completed(
         "Failed to send completion progress",
     )
 
-    final_results = await mcp_get_scan_results(output_dir=str(output_dir))
+    final_results = await mcp_get_scan_results(
+        output_dir=str(output_dir), **_in_session(session_id)
+    )
     if not final_results.get("success", False):
         return connection_alive
 
-    findings_count = final_results.get("findings_count", 0)
-    severity_counts = final_results.get("severity_counts", {})
+    findings_count, severity_counts = _findings_in(final_results)
 
     if findings_count > 0:
         summary = (
@@ -125,7 +193,7 @@ async def _handle_scan_completed(
 
     return await _safe_send(
         connection_alive,
-        lambda: ctx.info(summary),
+        lambda: ctx.info(raw_controls_on_one_line(summary)),
         "Failed to send completion summary",
     )
 
@@ -140,7 +208,7 @@ async def _handle_terminal_status(
         lambda: ctx.report_progress(
             progress=1.0,
             total=1.0,
-            message=f"Scan {status}",
+            message=raw_controls_on_one_line(f"Scan {status}"),
         ),
         "Failed to send final status progress",
     )
@@ -149,7 +217,9 @@ async def _handle_terminal_status(
         error_message = progress_info.get("error_message", "Unknown error")
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.error(f"Scan failed: {error_message}"),
+            lambda: ctx.error(
+                raw_controls_on_one_line(f"Scan failed: {error_message}")
+            ),
             "Failed to send completion message",
         )
     elif status == "incomplete":
@@ -160,8 +230,10 @@ async def _handle_terminal_status(
         connection_alive = await _safe_send(
             connection_alive,
             lambda: ctx.warning(
-                "Scan finished with incomplete coverage; its results are partial"
-                + (f". Did not complete: {names}" if names else "")
+                raw_controls_on_one_line(
+                    "Scan finished with incomplete coverage; its results are partial"
+                    + (f". Did not complete: {names}" if names else "")
+                )
             ),
             "Failed to send completion message",
         )
@@ -174,6 +246,12 @@ async def _handle_terminal_status(
     return connection_alive
 
 
+#: The most of a scanner's ``ASH.ScanResults.json`` the monitor reads for its
+#: severity counts. The file is a few KiB; a sandboxed scanner writes into this
+#: directory, so the read is bounded rather than trusting the size.
+_MAX_SCANNER_RESULTS_BYTES = 16 * 1024 * 1024
+
+
 def _read_scanner_severity(result_path: Path) -> dict:
     """Load a scanner's ASH.ScanResults.json and return its severity_counts dict.
 
@@ -181,10 +259,39 @@ def _read_scanner_severity(result_path: Path) -> dict:
     file as UTF-8, and without an encoding text-mode open() uses the locale one,
     which on Windows is cp1252 and cannot decode a finding that quotes non-ASCII
     source.
+
+    Opened without following a link at the name and without blocking, and read
+    only when what was opened is a regular file, as the results readers in
+    ``mcp_tools`` refuse a linked results file. The directory is one a sandboxed
+    scanner writes; a plain ``open()`` there followed a link to any file the
+    server can read, and blocked the event loop on a FIFO.
     """
-    with open(result_path, "r", encoding="utf-8") as f:
-        scanner_data = json.load(f)
-    return scanner_data.get("severity_counts", {})
+    # The link check by name first: Windows has no O_NOFOLLOW, so the flag loop
+    # below contributes nothing there and the open followed the link.
+    if stat.S_ISLNK(os.lstat(result_path).st_mode):
+        raise OSError(f"{result_path} is a link")
+    flags = os.O_RDONLY
+    for name in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_BINARY"):
+        flags |= getattr(os, name, 0)
+    fd = os.open(result_path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{result_path} is not a regular file")
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            raw = f.read(_MAX_SCANNER_RESULTS_BYTES + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(raw) > _MAX_SCANNER_RESULTS_BYTES:
+        raise OSError(
+            f"{result_path} is larger than {_MAX_SCANNER_RESULTS_BYTES} bytes"
+        )
+    scanner_data = json.loads(raw.decode("utf-8"))
+    if not isinstance(scanner_data, dict):
+        return {}
+    counts = scanner_data.get("severity_counts", {})
+    return counts if isinstance(counts, dict) else {}
 
 
 def _format_scanner_message(
@@ -212,14 +319,17 @@ async def _emit_scanner_progress(
         lambda: ctx.report_progress(
             progress=progress,
             total=1.0,
-            message=message,
+            message=raw_controls_on_one_line(message),
         ),
         "Failed to send progress update",
     )
     connection_alive = await _safe_send(
         connection_alive,
         lambda: ctx.debug(
-            f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
+            raw_controls_on_one_line(
+                f"Scanner progress: {scanner_name}/{target_type} - "
+                f"{int(progress * 100)}%"
+            )
         ),
         "Failed to send debug message",
     )
@@ -270,7 +380,7 @@ async def _process_scanner_result(
         logger.warning(warning_message)
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(warning_message),
+            lambda: ctx.warning(raw_controls_on_one_line(warning_message)),
             "Failed to send warning message",
         )
 
@@ -293,7 +403,7 @@ async def _emit_heartbeat(
         lambda: ctx.report_progress(
             progress=progress,
             total=1.0,
-            message=(
+            message=raw_controls_on_one_line(
                 f"Scan in progress ({len(completed_scanners)}/"
                 f"{total_scanners_estimate} scanners completed)"
             ),
@@ -332,12 +442,27 @@ async def _send_initial_progress(ctx: Context) -> bool:
     )
 
 
+async def _report_lost_scan(
+    ctx: Context, scan_id: str, progress_info: dict, connection_alive: bool
+) -> bool:
+    """Tell the client the registry stopped answering for ``scan_id``."""
+    message = (
+        f"Scan {scan_id} is no longer tracked by the server: "
+        f"{progress_info.get('error', 'Unknown error')}"
+    )
+    return await _safe_send(
+        connection_alive,
+        lambda: ctx.error(raw_controls_on_one_line(message)),
+        "Failed to send lost-scan error",
+    )
+
+
 async def _run_monitor_loop(
     ctx: Context,
     scan_id: str,
     output_dir: Path,
-    ash_aggregated_results: Path,
     connection_alive: bool,
+    session_id: Optional[str] = None,
 ) -> None:
     """Poll-and-emit loop until the scan finishes, fails, cancels, or times out."""
     completed_scanners: set = set()
@@ -349,27 +474,47 @@ async def _run_monitor_loop(
         current_time = asyncio.get_event_loop().time()
 
         if current_time - start_time > _MAX_WAIT_SECONDS:
-            await ctx.warning(
-                f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+            # Honors connection_alive like the loop's other sends: nothing is
+            # sent into a client the loop already knows is gone, and a send that
+            # fails here is one failed send, not a monitor failure.
+            await _safe_send(
+                connection_alive,
+                lambda: ctx.warning(
+                    raw_controls_on_one_line(
+                        f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                    )
+                ),
+                "Failed to send timeout warning",
             )
             return
 
-        # Blocking stat on the event loop, inside the monitor's polling loop. Deferred
-        # rather than fixed: asyncio.to_thread would move it off the loop but adds a
-        # thread hop per poll iteration, and this loop makes several blocking calls, so
-        # converting one of them buys nothing measurable while changing the loop's
-        # timing. Wants doing as one pass over the whole monitor.
-        if ash_aggregated_results.exists():  # noqa: ASYNC240
-            await _handle_scan_completed(ctx, output_dir, connection_alive)
+        # The registry's status decides when the scan is over, never the presence
+        # of the aggregated results file. That file is there before the scan ends
+        # when the previous scan's results were not set aside (clean_output off),
+        # it is put back when a scan fails or is cancelled without results, and
+        # the SCAN phase writes it before the REPORT phase has run; each of those
+        # was announced as a completed scan with the file's findings.
+        progress_info = await mcp_get_scan_progress(
+            scan_id=scan_id, **_in_session(session_id)
+        )
+        if not progress_info.get("success", False):
+            # The registry no longer answers for the scan: its entry is gone, or
+            # the session that owns it ended. No status will ever arrive, so
+            # this is an ending, reported once; polling on left the monitor
+            # running for the rest of _MAX_WAIT_SECONDS on a scan nobody tracks.
+            await _report_lost_scan(ctx, scan_id, progress_info, connection_alive)
             return
-
-        progress_info = await mcp_get_scan_progress(scan_id=scan_id)
-        if progress_info.get("status") in ["failed", "incomplete", "cancelled"]:
+        status = progress_info.get("status")
+        if status == "completed":
+            await _handle_scan_completed(
+                ctx, output_dir, connection_alive, session_id=session_id
+            )
+            return
+        if status in ["failed", "incomplete", "cancelled"]:
             await _handle_terminal_status(ctx, progress_info, connection_alive)
             return
 
-        # Blocking glob on the event loop. Deferred: see the note on the exists() call
-        # above -- same polling loop, same reason.
+        # Blocking glob on the event loop, once per pass of this polling loop.
         scanner_results = list(output_dir.glob("scanners/**/ASH.ScanResults.json"))  # noqa: ASYNC240
         total_scanners_estimate = _update_scanner_estimate(
             scanner_results, total_scanners_estimate
@@ -401,11 +546,43 @@ async def _run_monitor_loop(
         await asyncio.sleep(_sleep_interval_for(len(completed_scanners)))
 
 
+def _results_file_state(output_dir: Path) -> Optional[Tuple[int, int, int, int]]:
+    """Identity and version of a project's aggregated results file, or None.
+
+    Device, inode, modification time in nanoseconds and size: a file that was
+    rewritten, replaced or newly written differs in at least one of them from
+    the same name read earlier. Read with ``lstat`` so a link at the name is
+    the link, not what it points at.
+    """
+    try:
+        st = os.lstat(output_dir / _AGGREGATED_RESULTS_FILENAME)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+ResultsFileState = Optional[Tuple[int, int, int, int]]
+
+
+def results_files_before(
+    project_outputs: Dict[str, Path],
+) -> Dict[str, ResultsFileState]:
+    """What each project's aggregated results file is now, keyed as ``project_outputs``.
+
+    For :func:`monitor_workspace_progress`'s ``before``: taken by the caller
+    before it touches the output directories, so the monitor compares against
+    the file the previous scan left, not against an absence its own set-aside
+    made.
+    """
+    return {key: _results_file_state(out) for key, out in project_outputs.items()}
+
+
 async def monitor_workspace_progress(
     report_progress: Callable[..., Awaitable[None]],
     project_outputs: Dict[str, Path],
     *,
     poll_interval: float = _WORKSPACE_POLL_INTERVAL_SECONDS,
+    before: Optional[Dict[str, ResultsFileState]] = None,
 ) -> None:
     """Report a workspace scan's progress as completed projects over total projects.
 
@@ -435,6 +612,13 @@ async def monitor_workspace_progress(
         project_outputs: ``{project key: that project's output directory}``. The
             monitor watches for ``ash_aggregated_results.json`` appearing in each.
         poll_interval: Seconds between sweeps.
+        before: What each project's aggregated results file was before the run
+            touched its directory (:func:`results_files_before`); read here when
+            not given. The workspace scan sets previous results aside before this
+            monitor starts, so a snapshot taken here read every file as absent,
+            and a failed project's restore of its previous file, which the run's
+            settle makes while this monitor still polls, counted as its
+            completion.
 
     Failure modes
     -------------
@@ -451,12 +635,24 @@ async def monitor_workspace_progress(
         return
 
     completed: set = set()
+    # What each project's aggregated results file was before the run touched
+    # the directories, or when the monitor started when the caller took no
+    # snapshot. A project is complete when that file is not what it was then: a
+    # file the previous scan left (clean_output off) or that a failed project's
+    # restore put back is the same file, and counted a project that never
+    # finished, or had not started, as complete.
+    if before is None:
+        before = results_files_before(project_outputs)
+    else:
+        before = {key: before.get(key) for key in project_outputs}
     connection_alive = await _safe_send(
         True,
         lambda: report_progress(
             progress=0.0,
             total=float(total),
-            message=f"Workspace scan started: 0/{total} projects complete",
+            message=raw_controls_on_one_line(
+                f"Workspace scan started: 0/{total} projects complete"
+            ),
         ),
         "Failed to send initial workspace progress update",
     )
@@ -465,7 +661,8 @@ async def monitor_workspace_progress(
         for key, output_dir in project_outputs.items():
             if key in completed:
                 continue
-            if not (output_dir / _AGGREGATED_RESULTS_FILENAME).exists():
+            state = _results_file_state(output_dir)
+            if state is None or state == before[key]:
                 continue
             completed.add(key)
             connection_alive = await _safe_send(
@@ -475,7 +672,9 @@ async def monitor_workspace_progress(
                 lambda k=key, done=len(completed): report_progress(
                     progress=float(done),
                     total=float(total),
-                    message=f"{k} complete ({done}/{total} projects)",
+                    message=raw_controls_on_one_line(
+                        f"{k} complete ({done}/{total} projects)"
+                    ),
                 ),
                 "Failed to send workspace progress update",
             )
@@ -486,7 +685,9 @@ async def monitor_workspace_progress(
         await asyncio.sleep(poll_interval)
 
 
-async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
+async def monitor_scan_progress(
+    ctx: Context, scan_id: str, session_id: Optional[str] = None
+) -> None:
     """
     Monitor scan progress and report updates via the MCP context.
 
@@ -496,13 +697,15 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
     Args:
         ctx: MCP context for reporting progress/log messages.
         scan_id: The scan ID returned by run_ash_scan.
+        session_id: The session that started the scan, which is the only one
+            the registry shows it to. None is the default session.
     """
     connection_alive = True
     try:
-        scan_info = await _fetch_initial_scan_info(ctx, scan_id)
+        scan_info = await _fetch_initial_scan_info(ctx, scan_id, session_id)
         if scan_info is None:
             return
-        _, output_dir, ash_aggregated_results = scan_info
+        _, output_dir, _ = scan_info
 
         connection_alive = await _send_initial_progress(ctx)
 
@@ -510,8 +713,8 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
             ctx,
             scan_id,
             output_dir,
-            ash_aggregated_results,
             connection_alive,
+            session_id,
         )
     except asyncio.CancelledError:
         logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")
@@ -528,6 +731,6 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
         logger.exception(error_message)
         await _safe_send(
             connection_alive,
-            lambda: ctx.error(error_message),
+            lambda: ctx.error(raw_controls_on_one_line(error_message)),
             "Failed to send error message to client",
         )

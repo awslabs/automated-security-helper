@@ -48,6 +48,8 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _isolated_session_state(monkeypatch, tmp_path):
@@ -65,10 +67,10 @@ def _isolated_session_state(monkeypatch, tmp_path):
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     yield
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
 
 
 def _register(tmp_path: Path, name: str, body: str) -> Path:
@@ -279,14 +281,35 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
         )
 
         class _WindowsDir(PureWindowsPath):
-            """Windows-flavoured, and tolerates the one directory call made on it.
+            """Windows-flavoured, and tolerates the filesystem calls made on it.
 
             Subclassing keeps the flavour across ``/`` joins, which is what makes
-            the ``config/`` and ``ash.yaml`` segments Windows-shaped too.
+            the ``config/`` and ``ash.yaml`` segments Windows-shaped too. The
+            calls are the directory creation and the session-workspace marker.
             """
 
             def mkdir(self, *args, **kwargs):
                 return None
+
+            def touch(self, *args, **kwargs):
+                return None
+
+            def unlink(self, *args, **kwargs):
+                return None
+
+            def exists(self):
+                # make_private_dir asks each ancestor whether it exists before it
+                # makes the missing ones with os.mkdir; a stand-in that exists
+                # makes nothing, which is what the stubbed mkdir did before the
+                # walk was added. A False would send a Windows-shaped path to
+                # os.stat on this host.
+                return True
+
+            def is_dir(self):
+                # make_private_dir then asks the ancestor it found whether it is
+                # a directory, to refuse a file where a level goes; a pure path
+                # has no such call, and the stand-in is the directory it found.
+                return True
 
         class _Sandbox:
             root = _WindowsDir(r"C:\ash-mcp\session-a")
@@ -300,9 +323,16 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
 
             def __init__(self):
                 self.saved_to = None
+                self.as_written = None
+                # A profile that read a value from the environment: only such a
+                # config is written as written (materialize_session_config).
+                self._environment_references = ("reference",)
 
-            def save(self, target):
+            def save(
+                self, target, exclude_unset=False, as_written=False, env_tags=True
+            ):
                 self.saved_to = target
+                self.as_written = as_written
 
         # Patched on the sandbox module, not on profile_registry:
         # ``materialize_session_config`` imports the name inside its own body, so
@@ -313,9 +343,19 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
             "session_sandbox",
             lambda session_id=None: _Sandbox(),
         )
+        # The file is written beside the target and renamed over it.
+        from automated_security_helper.cli.mcp import profile_registry
+
+        renamed = []
+        monkeypatch.setattr(
+            profile_registry.os, "replace", lambda src, dst: renamed.append(dst)
+        )
 
         config = _Config()
         recorded = materialize_session_config("session-a", config)
+        assert [str(dst) for dst in renamed] == [
+            r"C:\ash-mcp\session-a\config\ash.yaml"
+        ]
 
         assert recorded == "C:/ash-mcp/session-a/config/ash.yaml", (
             "the binding recorded a native-spelled path while the workspace plan "
@@ -323,10 +363,11 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
             "describe two different files on Windows"
         )
         # The file is still written to the Windows-flavoured path, not to the
-        # re-spelled string: only the *recorded* spelling changed.
-        assert config.saved_to == PureWindowsPath(
-            r"C:\ash-mcp\session-a\config\ash.yaml"
-        )
+        # re-spelled string: only the *recorded* spelling changed. It is written
+        # beside the target first, and renamed over it (checked above).
+        assert config.saved_to.parent == PureWindowsPath(r"C:\ash-mcp\session-a\config")
+        # Written as the profile wrote it (test_select_profile_materializes_as_written).
+        assert config.as_written is True
 
 
 class TestTheScanUsesTheBoundConfig:

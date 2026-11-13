@@ -21,6 +21,8 @@ from automated_security_helper.config.default_config import get_default_config
 from tests.snapshot.support.cli import CONFIG_HOSTS, simulated_host
 from tests.snapshot.support.cli import _windows_dependent_defaults
 
+pytestmark = pytest.mark.unit
+
 
 def _every_reading(segment_field: str, config_cls) -> dict[str, bool]:
     return {

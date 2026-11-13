@@ -11,6 +11,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 )
 from automated_security_helper.schemas.sarif_schema_model import Level, Kind
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def detect_secrets_scanner(test_plugin_context):
@@ -176,7 +178,7 @@ def test_detect_secrets_scanner_sarif_output(
 
     # Verify invocation details. ``commandLine`` must be the joined argv
     # (parity with legacy GrepScannerBase.scan format) — the binary alone
-    # is no longer accepted post DA r4 #2.
+    # is no longer accepted after an earlier review round.
     invocation = result.runs[0].invocations[0]
     assert invocation.commandLine.startswith("ash-detect-secrets-scanner")
     assert "--target" in invocation.commandLine

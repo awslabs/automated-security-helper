@@ -175,21 +175,28 @@ ZERO_SHA = "0" * 40
 # * automated_security_helper/schemas/*.json: the published config and results JSON
 #   schemas. Written whole by `python -m automated_security_helper.schemas.generate_schemas`;
 #   the lint job regenerates them and fails on any difference.
-# * docs/content/docs/cli-reference-generated.md: written whole by
-#   scripts/generate_cli_docs.py; tests/unit/test_generated_docs_freshness.py regenerates
-#   and diffs it.
 # * ash-agent-plugins/.../transpiler/_base/references/tool-reference.md: written whole by
 #   scripts/generate_mcp_tool_reference.py (its editorial notes live in that script, not
 #   in the file); the same freshness test runs its --check.
+# * docs/content/reference/<page>.md for each generated reference page: written whole by
+#   the scripts/generate_*.py named in the page's banner; the same freshness test runs
+#   each one's --check. Listed by name rather than as reference/*.md, because a
+#   hand-written page added to that directory later is not golden.
+# * docs/overrides/partials/generated/plugin-data.html: the plugin data the home page
+#   graphics read, written whole by scripts/generate_plugin_data_partial.py; the same
+#   freshness test runs its --check.
 #
 # Out, deliberately:
 # * The per-backend copies of tool-reference.md under ash-agent-plugins/.../plugins/ and
 #   skills/ash-mcp/references/: byte copies of the _base file, held equal by the
 #   transpiler's own byte-compare gate. The _base change is where the reason belongs;
 #   requiring it again on each copy adds annotations and no information.
-# * Pages with regions maintained by scripts/generate_reporter_docs.py (output-formats.md,
-#   plugins/**.md): only the marker-delimited regions are generated, the rest is prose,
-#   so a whole-file rule would demand a trailer for a typo fix.
+# * docs/content/docs/cli-reference-generated.md: the CLI reference's previous location.
+#   Nothing writes it since scripts/generate_cli_docs.py moved to
+#   docs/content/reference/cli.md, and the docs rewrite deletes it.
+# * output-formats.md and the plugins/ pages that once held regions written by
+#   scripts/generate_reporter_docs.py: it writes only docs/content/reference/reporters.md
+#   now, and the docs rewrite replaces those pages.
 # * docs/content/docs/cli-reference.md: hand-written.
 # * ash-agent-plugins/.../transpiler/generated_models/*.py: generated code, not output a
 #   user sees.
@@ -198,10 +205,23 @@ GOLDEN: tuple[tuple[str, str], ...] = (
     ("__snapshots__", "snapshot"),
     (".github/actions/validate-mcp/*.golden.json", "MCP tool-surface golden"),
     ("automated_security_helper/schemas/*.json", "generated JSON schema"),
-    ("docs/content/docs/cli-reference-generated.md", "generated CLI reference"),
     (
         "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md",
         "generated MCP tool reference",
+    ),
+    ("docs/content/reference/cli.md", "generated CLI reference"),
+    ("docs/content/reference/configuration.md", "generated configuration reference"),
+    ("docs/content/reference/converters.md", "generated converter reference"),
+    (
+        "docs/content/reference/environment-variables.md",
+        "generated environment variable reference",
+    ),
+    ("docs/content/reference/mcp-tools.md", "generated MCP tool reference page"),
+    ("docs/content/reference/reporters.md", "generated reporter reference"),
+    ("docs/content/reference/scanners.md", "generated scanner reference"),
+    (
+        "docs/overrides/partials/generated/plugin-data.html",
+        "generated plugin data partial",
     ),
 )
 
@@ -591,6 +611,10 @@ class Violation:
     path: str
     why_golden: str
     commits: list[Commit]
+    # Set by resolve_via_pr_chain for a squash or merge commit it tried and failed to
+    # excuse: a clause for the error, and whether the amend advice is replaced.
+    note: str = ""
+    squash: bool = False
 
 
 def exemption_reason(
@@ -688,14 +712,23 @@ def _annotation_property(text: str) -> str:
 def report(violations: list[Violation], base: str | None, head_sha: str) -> None:
     for v in violations:
         touched_by = ", ".join(f"{c.sha[:10]} ({c.subject})" for c in v.commits)
+        if v.squash:
+            fix = (
+                "main is never force-pushed: land a revert, or re-land the change "
+                "through a pull request whose golden-touching commits carry the trailer."
+            )
+        else:
+            fix = (
+                f"Fix: {fix_instructions(v, base, head_sha)} -- replace <why the output "
+                f"changed> with the reason, review `git log`, then "
+                f"`git push --force-with-lease`."
+            )
         message = (
             f"{v.path} ({v.why_golden}) changed in "
             f"{(base or '')[:10] or '(root)'}..{head_sha[:10]} without a "
             f"'{TRAILER_KEY}: <reason>' trailer on the commit that changed it. Touched "
-            f"by: {touched_by}. A separate commit carrying the trailer does not count. "
-            f"Fix: {fix_instructions(v, base, head_sha)} -- replace <why the output "
-            f"changed> with the reason, review `git log`, then "
-            f"`git push --force-with-lease`."
+            f"by: {touched_by}. A separate commit carrying the trailer does not count."
+            f"{v.note} {fix}"
         )
         print(
             f"::error file={_annotation_property(v.path)}::{_annotation_data(message)}"
@@ -712,6 +745,10 @@ class Range:
     base: str | None
     head: str
     note: str
+    # Whether a violating squash or merge commit may be resolved against the head of the
+    # pull request its subject names. Off for pull_request events, where every commit of
+    # the pull request is already in the range with its own message.
+    pr_chain: bool = True
 
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
@@ -777,7 +814,9 @@ def resolve_range(repo: Path, event_name: str, payload: dict[str, Any]) -> Range
             raise GitError(f"{head} is not in the clone; check out with fetch-depth: 0")
         ensure_commit(repo, pr["base"]["sha"])
         bases = [pr["base"]["sha"], *_base_branch_tip(repo, pr["base"].get("ref"))]
-        return Range(fork_point(repo, bases, head), head, "pull request")
+        return Range(
+            fork_point(repo, bases, head), head, "pull request", pr_chain=False
+        )
     if event_name == "merge_group":
         mg = payload["merge_group"]
         head = mg["head_sha"]
@@ -846,6 +885,163 @@ def _from_default_branch(
     return Range(base, head, f"{why}: branch vs merge base with origin/{default}")
 
 
+# ---------------------------------------------------------------------------
+# Squash and merge commits: verify against the pull request's own head chain
+#
+# GitHub's squash body can be truncated for a large pull request (a 369-commit one kept
+# 184 sections), and a wrapped trailer value is not a trailer to git, so the squash
+# commit that lands on main may not carry the trailers its pull request commits had.
+# The push-to-main run reads only that one message. For a path already marked a violation
+# the squash commit is therefore checked against refs/pull/<n>/head, and the path is
+# excused only when a commit of that chain touched the same path, carries a trailer git
+# parses, and the bytes that landed are the bytes that chain produced. Anything that
+# cannot be verified keeps the failure.
+# ---------------------------------------------------------------------------
+
+_SQUASH_SUBJECT = re.compile(r"\(#([0-9]+)\)\s*$")
+_MERGE_SUBJECT = re.compile(r"^Merge pull request #([0-9]+)")
+PR_FETCH_TIMEOUT_S = 60
+PR_REF_NAMESPACE = "refs/snapshot-trailers/pr"
+
+
+def pr_number(commit: Commit, parents: int) -> int | None:
+    """The pull request a squash (one parent) or merge (more) commit subject names."""
+    pattern = _SQUASH_SUBJECT if parents == 1 else _MERGE_SUBJECT
+    if parents < 1:
+        return None
+    match = pattern.search(commit.subject)
+    return int(match.group(1)) if match else None
+
+
+def fetch_pr_head(repo: Path, number: int) -> str | None:
+    """Fetch ``refs/pull/<number>/head`` into a private ref; None on any failure."""
+    ref = f"{PR_REF_NAMESPACE}/{number}"
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "fetch",
+                "--no-tags",
+                "--quiet",
+                "origin",
+                f"+refs/pull/{number}/head:{ref}",
+            ],
+            capture_output=True,
+            timeout=PR_FETCH_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if proc.returncode != 0:
+        return None
+    out = git(repo, "rev-parse", f"{ref}^{{commit}}", check=False).strip()
+    return out or None
+
+
+def _blob(repo: Path, rev: str, path: str) -> str:
+    # --verify keeps rev-parse from echoing an unresolvable argument to stdout, so a
+    # path absent from the revision reads as the empty string on both sides.
+    return git(
+        repo, "rev-parse", "--verify", "--quiet", f"{rev}:{path}", check=False
+    ).strip()
+
+
+def pr_chain_satisfies(
+    repo: Path,
+    chain: list[Commit],
+    pr_head: str,
+    squash_sha: str,
+    path: str,
+) -> str | None:
+    """The sha of a pull request commit that excuses ``path`` on the squash, or None.
+
+    The same commit must touch the path and carry a verified reason, and the blob on the
+    squash must equal the blob at the pull request head (both absent for a deletion).
+    """
+    if _blob(repo, squash_sha, path) != _blob(repo, pr_head, path):
+        return None
+    for c in chain:
+        if path in c.files and snapshot_reasons(repo, c.message):
+            return c.sha
+    return None
+
+
+def _parent_count(repo: Path, sha: str) -> int:
+    return len(git(repo, "rev-list", "--parents", "-n", "1", sha).split()) - 1
+
+
+def resolve_via_pr_chain(
+    repo: Path, violations: list[Violation]
+) -> tuple[list[Violation], list[str]]:
+    """Drop the violations the named pull request's head chain excuses.
+
+    Returns the remaining violations (with an explanatory clause on those that were
+    tried) and one notice line per excused path.
+    """
+    heads: dict[int, str | None] = {}
+    chains: dict[tuple[int, str], list[Commit]] = {}
+    remaining: list[Violation] = []
+    notices: list[str] = []
+    for v in violations:
+        satisfied: list[tuple[int, str]] = []
+        note = ""
+        for c in v.commits:
+            number = pr_number(c, _parent_count(repo, c.sha))
+            if number is None:
+                satisfied = []
+                note = ""
+                break
+            v.squash = True
+            if number not in heads:
+                heads[number] = fetch_pr_head(repo, number)
+            pr_head = heads[number]
+            if pr_head is None:
+                note = (
+                    f" refs/pull/{number}/head could not be fetched to verify the "
+                    f"pull request chain; the gate fails closed."
+                )
+                satisfied = []
+                break
+            first_parent = git(repo, "rev-parse", f"{c.sha}^1").strip()
+            key = (number, first_parent)
+            if key not in chains:
+                chains[key] = commits_in_range(repo, first_parent, pr_head)
+            found = pr_chain_satisfies(repo, chains[key], pr_head, c.sha, v.path)
+            if found is None:
+                note = (
+                    f" refs/pull/{number}/head was checked: no pull request commit "
+                    f"touching this file carries the trailer (or the landed bytes "
+                    f"differ from the pull request head), so the squash is not excused."
+                )
+                satisfied = []
+                break
+            satisfied.append((number, found))
+        if satisfied and len(satisfied) == len(v.commits):
+            number, found = satisfied[0]
+            notices.append(
+                f"::notice file={_annotation_property(v.path)}::"
+                + _annotation_data(
+                    f"excused by {found[:10]} on refs/pull/{number}/head "
+                    f"({'; '.join(snapshot_reasons(repo, _message_of(chains, found)))})"
+                )
+            )
+            continue
+        v.note = note
+        if not note:
+            v.squash = False
+        remaining.append(v)
+    return remaining, notices
+
+
+def _message_of(chains: dict[tuple[int, str], list[Commit]], sha: str) -> str:
+    for chain in chains.values():
+        for c in chain:
+            if c.sha == sha:
+                return c.message
+    return ""
+
+
 def run_check(repo: Path, rng: Range) -> int:
     for sha in (rng.base, rng.head):
         if sha and not ensure_commit(repo, sha):
@@ -853,6 +1049,15 @@ def run_check(repo: Path, rng: Range) -> int:
             return 1
     commits = commits_in_range(repo, rng.base, rng.head)
     violations = find_violations(repo, commits, head=rng.head)
+    if violations and rng.pr_chain:
+        before = len(violations)
+        violations, notices = resolve_via_pr_chain(repo, violations)
+        for line in notices:
+            print(line)
+        if before != len(violations):
+            print(
+                f"pr-chain: {before - len(violations)} path(s) satisfied via pull ref"
+            )
     head_sha = git(repo, "rev-parse", f"{rng.head}^{{commit}}").strip()
     report(violations, rng.base, head_sha)
     golden = sorted({p for c in commits for p in c.files if golden_reason(p)})
@@ -868,6 +1073,52 @@ def run_check(repo: Path, rng: Range) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _snapshot_dirs(root: Path) -> list[Path]:
+    """Every ``__snapshots__`` directory under ``root/tests`` that git counts as the tree.
+
+    Taken from git, not a walk of the filesystem, because git does not enter an
+    ignored directory. tests/pytest-temp is one, and the unit tests run this on the
+    real checkout while other test workers create and remove directories there; a
+    walk of ``tests`` descended into it, raised FileNotFoundError when a directory
+    went away mid-walk, and reported the workers' own empty ``__snapshots__`` as
+    orphans.
+
+    Tracked files give the directories already committed; an untracked file in one
+    is still checked, because ``find_orphans`` lists each directory it is given. An
+    untracked directory, empty or not, is one entry in ``--directory``'s report, and
+    those entries are walked here with every directory git reports as ignored pruned
+    before the walk can enter it. Empty directories, which this check exists to
+    find, hold no file for git to list, so they arrive only that way.
+    """
+
+    def listing(*args: str) -> list[str]:
+        out = git(root, "ls-files", "-z", *args, "--", "tests")
+        return [entry for entry in out.split("\0") if entry]
+
+    found: set[Path] = set()
+    for entry in listing("--cached"):
+        for parent in PurePosixPath(entry).parents:
+            if parent.name == "__snapshots__":
+                found.add(root / parent)
+
+    ignored = {
+        entry.rstrip("/")
+        for entry in listing(
+            "--others", "--ignored", "--exclude-standard", "--directory"
+        )
+    }
+    for entry in listing("--others", "--exclude-standard", "--directory"):
+        if not entry.endswith("/"):
+            continue
+        for dirpath, dirnames, _files in os.walk(root / entry):
+            here = Path(dirpath)
+            prefix = here.relative_to(root).as_posix()
+            dirnames[:] = [d for d in dirnames if f"{prefix}/{d}" not in ignored]
+            if here.name == "__snapshots__":
+                found.add(here)
+    return sorted(found)
+
+
 def find_orphans(root: Path) -> list[str]:
     """Problems with snapshot files under ``root/tests`` that syrupy cannot report.
 
@@ -875,9 +1126,12 @@ def find_orphans(root: Path) -> list[str]:
     ``<mod>.py`` next to the ``__snapshots__`` directory, and no ``__snapshots__``
     directory (or per-module directory inside one) may be empty: an empty one is what a
     deleted snapshot leaves behind locally.
+
+    ``root`` must be a git work tree; see ``_snapshot_dirs`` for why and for what that
+    leaves out, which is ignored directories and nothing else.
     """
     problems = []
-    for snapdir in sorted((root / "tests").rglob("__snapshots__")):
+    for snapdir in _snapshot_dirs(root):
         if not snapdir.is_dir():
             continue
         rel = snapdir.relative_to(root).as_posix()
@@ -1364,13 +1618,13 @@ def _core_case_squash_message(r: _Repo) -> list[str]:
 
 def _core_case_schema_and_generated_doc(r: _Repo) -> list[str]:
     r.write("automated_security_helper/schemas/AshConfig.json", "{}\n")
-    r.write("docs/content/docs/cli-reference-generated.md", "x\n")
+    r.write("docs/content/reference/cli.md", "x\n")
     r.write("docs/content/docs/cli-reference.md", "hand-written\n")
     r.commit("docs: regenerate")
     return sorted(
         [
             "automated_security_helper/schemas/AshConfig.json",
-            "docs/content/docs/cli-reference-generated.md",
+            "docs/content/reference/cli.md",
         ]
     )
 
@@ -1610,13 +1864,144 @@ def _self_test_stale_base(tmp: Path) -> list[str]:
     return failures
 
 
+def _pr_scenario(
+    tmp: Path,
+    name: str,
+    *,
+    pr_trailer: bool,
+    pr_file: str = CORE_SNAP,
+    landed: str = "pr\n",
+) -> tuple[Path, Range, Path, str]:
+    """A pull request branch, a trailer-less squash of it on main, and a clone of both.
+
+    The upstream repository publishes ``refs/pull/7/head`` at the branch tip; the clone
+    has only branches, as actions/checkout leaves it, so the fetch is the real one.
+    """
+    up = _Repo(tmp / f"{name}-up")
+    before = up.base
+    up._git("checkout", "-q", "-b", "pr")
+    up.write(pr_file, "pr\n")
+    message = f"test: pr work\n\n{GOOD}" if pr_trailer else "test: pr work"
+    pr_tip = up.commit(message)
+    up._git("update-ref", "refs/pull/7/head", pr_tip)
+    up._git("checkout", "-q", "main")
+    up.write(CORE_SNAP, landed)
+    squash = up.commit("test: squashed (#7)")
+    clone = tmp / f"{name}-clone"
+    git(tmp, "clone", "-q", str(up.path), str(clone))
+    return clone, Range(before, squash, "push"), up.path, pr_tip
+
+
+def _run_check_captured(repo: Path, rng: Range) -> tuple[int, str]:
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = run_check(repo, rng)
+    return code, buf.getvalue()
+
+
+def _self_test_pr_chain(tmp: Path) -> list[str]:
+    """A squash with no trailer, excused only by a verified pull request head chain."""
+    failures = []
+
+    clone, rng, _up, pr_tip = _pr_scenario(tmp, "chain-ok", pr_trailer=True)
+    code, out = _run_check_captured(clone, rng)
+    if code != 0 or "refs/pull/7/head" not in out or pr_tip[:10] not in out:
+        failures.append(f"pr chain with trailer: expected pass naming the chain: {out}")
+    if not commit_exists(clone, f"{PR_REF_NAMESPACE}/7"):
+        failures.append("pr chain with trailer: the pull ref was not fetched")
+
+    clone, rng, _up, _tip = _pr_scenario(tmp, "chain-bare", pr_trailer=False)
+    code, out = _run_check_captured(clone, rng)
+    if code != 1 or "was checked" not in out or "force-pushed" not in out:
+        failures.append(f"pr chain without trailer: expected checked failure: {out}")
+
+    clone, rng, up, _tip = _pr_scenario(tmp, "chain-gone", pr_trailer=True)
+    git(up, "update-ref", "-d", "refs/pull/7/head")
+    code, out = _run_check_captured(clone, rng)
+    if code != 1 or "could not be fetched" not in out:
+        failures.append(f"pr ref absent: expected fail-closed: {out}")
+
+    clone, rng, _up, _tip = _pr_scenario(tmp, "chain-badurl", pr_trailer=True)
+    git(clone, "remote", "set-url", "origin", str(tmp / "no-such-remote"))
+    code, out = _run_check_captured(clone, rng)
+    if code != 1 or "could not be fetched" not in out:
+        failures.append(f"unreachable origin: expected fail-closed: {out}")
+
+    other = "tests/other/__snapshots__/test_other.ambr"
+    clone, rng, _up, _tip = _pr_scenario(
+        tmp, "chain-other-file", pr_trailer=True, pr_file=other
+    )
+    code, out = _run_check_captured(clone, rng)
+    if code != 1 or "was checked" not in out:
+        failures.append(f"chain touching another file: expected failure: {out}")
+
+    clone, rng, _up, _tip = _pr_scenario(
+        tmp, "chain-bytes", pr_trailer=True, landed="different\n"
+    )
+    code, out = _run_check_captured(clone, rng)
+    if code != 1 or "was checked" not in out:
+        failures.append(f"landed bytes differ from the chain: expected failure: {out}")
+
+    up = _Repo(tmp / "chain-delete-up")
+    up.write(CORE_SNAP, "old\n")
+    before = up.commit("chore: add snapshot")
+    up._git("checkout", "-q", "-b", "pr")
+    (up.path / CORE_SNAP).unlink()
+    pr_tip = up.commit(f"test: drop the snapshot\n\n{GOOD}")
+    up._git("update-ref", "refs/pull/7/head", pr_tip)
+    up._git("checkout", "-q", "main")
+    (up.path / CORE_SNAP).unlink()
+    squash = up.commit("test: squashed (#7)")
+    clone = tmp / "chain-delete-clone"
+    git(tmp, "clone", "-q", str(up.path), str(clone))
+    code, out = _run_check_captured(clone, Range(before, squash, "push"))
+    if code != 0 or "refs/pull/7/head" not in out:
+        failures.append(f"deleted golden excused by the chain: expected pass: {out}")
+
+    clone, rng, _up, _tip = _pr_scenario(tmp, "chain-pr-event", pr_trailer=True)
+    rng.pr_chain = False
+    code, out = _run_check_captured(clone, rng)
+    if code != 1 or commit_exists(clone, f"{PR_REF_NAMESPACE}/7"):
+        failures.append(f"pr_chain off: expected failure and no fetch: {out}")
+    r = _Repo(tmp / "chain-event-range")
+    r.write("a.txt", "a\n")
+    head = r.commit("chore: second")
+    pr = {"pull_request": {"base": {"sha": r.base}, "head": {"sha": head}}}
+    got = resolve_range(r.path, "pull_request", pr)
+    if not (got and got.pr_chain is False):
+        failures.append(f"pull_request range must not use the pr chain: got {got}")
+    got = resolve_range(r.path, "push", {"before": r.base, "after": head})
+    if not (got and got.pr_chain is True):
+        failures.append(f"push range should allow the pr chain: got {got}")
+
+    if pr_number(Commit("a" * 40, "feat: x (#12)", ""), 1) != 12:
+        failures.append("squash subject (#12) not read")
+    if pr_number(Commit("a" * 40, "feat: x (#12)", ""), 2) is not None:
+        failures.append("squash subject read on a merge commit")
+    if pr_number(Commit("a" * 40, "Merge pull request #34 from a/b", ""), 2) != 34:
+        failures.append("merge subject not read")
+    if pr_number(Commit("a" * 40, "feat: no number", ""), 1) is not None:
+        failures.append("subject without a number matched")
+    return failures
+
+
 def _self_test_core_orphans(tmp: Path) -> list[str]:
     root = tmp / "core-orphans"
     snaps = root / "tests/snapshot/__snapshots__"
     (snaps / "test_alive").mkdir(parents=True)
+    git(root, "init", "-q")
     (snaps / "test_alive/case.md").write_text("x")
     (snaps / "test_alive.ambr").write_text("x")
     (root / "tests/snapshot/test_alive.py").write_text("")
+    # An ignored directory is outside the check, the way tests/pytest-temp is: an
+    # empty __snapshots__ in it, and a snapshot with no module, are not reported.
+    (root / ".gitignore").write_text("tests/scratch/\n")
+    (root / "tests/scratch/worker/__snapshots__").mkdir(parents=True)
+    (root / "tests/scratch/other/__snapshots__").mkdir(parents=True)
+    (root / "tests/scratch/other/__snapshots__/test_none.ambr").write_text("x")
     clean = find_orphans(root)
     (snaps / "test_gone.ambr").write_text("x")
     (snaps / "test_gone_dir").mkdir()
@@ -1790,6 +2175,7 @@ def self_test() -> int:
                 )
         failures += _self_test_ranges(tmp)
         failures += _self_test_exemptions(tmp)
+        failures += _self_test_pr_chain(tmp)
         failures += _self_test_core_orphans(tmp)
         failures += _self_test_orphans(tmp)
         failures += _self_test_policy(tmp)

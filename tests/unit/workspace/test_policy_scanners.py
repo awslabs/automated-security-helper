@@ -61,6 +61,8 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
 
+pytestmark = pytest.mark.unit
+
 AshConfig.model_rebuild()
 
 # The scanner used throughout. Pure Python, ships with ASH, needs no external
@@ -638,6 +640,73 @@ def test_the_policy_origin_count_is_reported_separately(tmp_path):
     )
 
 
+def _level_only(scanner):
+    """A finding judged from its SARIF level alone, with no issue_severity."""
+    finding = _finding(scanner)
+    del finding["properties"]["issue_severity"]
+    return finding
+
+
+def _tightened_project(tmp_path, policy_body):
+    """A project declaring CRITICAL, tightened to MEDIUM by a workspace ceiling.
+
+    The ceiling is set on the plan by hand, as the ceiling tests in
+    test_execution.py do, so what varies between the two tests below is only
+    whether the policy scanner's findings reach the project's exit code.
+    """
+    _project(
+        tmp_path,
+        "api",
+        f"global_settings:\n  severity_threshold: CRITICAL\n"
+        f"scanners:\n  {SCANNER}:\n    enabled: false\n",
+    )
+    _policy(tmp_path, policy_body)
+    plan = resolve_workspace(_workspace(tmp_path, ["api"]))
+    project = plan.projects[0]
+    assert project.severity_threshold == "CRITICAL"
+    assert project.policy_scanners, "the fixture must leave the scanner to the policy"
+    project.effective_severity_threshold = "MEDIUM"
+    project.threshold_tightened_by_policy = True
+    return plan
+
+
+def test_the_ceiling_disclosure_leaves_out_a_scanner_the_gate_ignores(tmp_path):
+    """Findings the exit code never counted are not ones the ceiling missed.
+
+    With policy_scanners_gate off, the policy scanner's level-only finding is
+    judged at no threshold. Counting it under "the ceiling could not reach this"
+    told the operator the ceiling had failed on a finding that never took part.
+    The project's own level-only finding is still disclosed.
+    """
+    plan = _tightened_project(
+        tmp_path, f"workspace:\n  additional_scanners:\n    - {SCANNER}\n"
+    )
+
+    RecordingOrchestrator.sarif_results = [_level_only("bandit"), _level_only(SCANNER)]
+    entry = _results_of(_run(tmp_path, plan))
+
+    # Control: the policy finding is present and tagged, so the absence below is
+    # a decision of the disclosure and not a missing input.
+    assert entry.finding_count == 2
+    assert entry.policy_origin_finding_count == 1
+    assert entry.ceiling_unreachable_findings == {"bandit": 1}
+
+
+def test_the_ceiling_disclosure_keeps_a_scanner_the_gate_counts(tmp_path):
+    """The other direction: with the gate on the policy finding was judged."""
+    plan = _tightened_project(
+        tmp_path,
+        f"workspace:\n  additional_scanners:\n    - {SCANNER}\n"
+        f"  policy_scanners_gate: true\n",
+    )
+    assert plan.projects[0].policy_scanners_gate is True
+
+    RecordingOrchestrator.sarif_results = [_level_only("bandit"), _level_only(SCANNER)]
+    entry = _results_of(_run(tmp_path, plan))
+
+    assert entry.ceiling_unreachable_findings == {"bandit": 1, SCANNER: 1}
+
+
 def test_a_suppressed_policy_finding_is_not_counted_as_one(tmp_path):
     """Suppression is upstream of the origin split, as it is everywhere else."""
     _project(tmp_path, "api", f"scanners:\n  {SCANNER}:\n    enabled: false\n")
@@ -826,7 +895,10 @@ def test_a_policy_scanner_that_never_ran_is_named_in_a_warning(tmp_path):
     exists to avoid, reached by a typo rather than by a bug.
     """
     _project(tmp_path, "api", "global_settings:\n  severity_threshold: HIGH\n")
-    _policy(tmp_path, "workspace:\n  additional_scanners:\n    - detectsecrets\n")
+    # A misspelling no plugin answers to: "detectsecrets" is detect-secrets to the
+    # plugin lookup (it drops the hyphen), and "detect-secrts" is not a substring
+    # of that name, so a warning about the real scanner cannot satisfy the check.
+    _policy(tmp_path, "workspace:\n  additional_scanners:\n    - detect-secrts\n")
     plan = resolve_workspace(_workspace(tmp_path, ["api"]))
 
     import logging
@@ -835,7 +907,7 @@ def test_a_policy_scanner_that_never_ran_is_named_in_a_warning(tmp_path):
         _run(tmp_path, plan)
 
     messages = [r.getMessage() for r in records if r.levelno >= logging.WARNING]
-    assert any("detectsecrets" in m for m in messages), (
+    assert any("detect-secrts" in m for m in messages), (
         f"the policy scanner that never ran was not named in any warning; "
         f"warnings={messages}"
     )
@@ -883,7 +955,33 @@ def test_a_policy_scanner_that_did_run_produces_no_warning(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(tmp_path):
+@pytest.fixture
+def no_tool_starts(tmp_path_factory, monkeypatch):
+    """Recording stand-ins first on PATH for every tool a scanner starts by name.
+
+    The policy scanner is the only one these tests are about, and it runs
+    in-process. Any other default scanner the orchestrator ran would start the
+    host's semgrep (``--config p/ci``, a registry download) or checkov (an update
+    check) and write under the real HOME, so each test asserts nothing started.
+    Building the registered scanners also probes uv and opengrep, and
+    detect-secrets asks ``uv tool run detect-secrets --version`` for a log line;
+    those are answered as on a host without the tools (``stub_tool_probes``).
+    """
+    from tests.utils.tool_guard import (
+        install_tool_guard,
+        reset_tool_lookup_caches,
+        stub_tool_probes,
+    )
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    stub_tool_probes(monkeypatch)
+    yield guard
+    reset_tool_lookup_caches()
+
+
+def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(
+    tmp_path, no_tool_starts
+):
     """The assertion the classifier tests could not make.
 
     Everything above this line goes through a double, so all of it would still
@@ -906,7 +1004,11 @@ def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(tmp_path):
     _policy(tmp_path, f"workspace:\n  additional_scanners:\n    - {SCANNER}\n")
     plan = resolve_workspace(_workspace(tmp_path, ["api"]))
 
-    outcome = _run(tmp_path, plan, factory=None)
+    # Only the policy scanner is allowed into the run. The allowlist does not
+    # enable it: ScanPhase runs a scanner that is allowlisted AND enabled, so it
+    # is the policy that has to turn it back on, and the control below shows the
+    # project's "enabled: false" still holds without the policy.
+    outcome = _run(tmp_path, plan, factory=None, enabled_scanners=(SCANNER,))
     entry = _results_of(outcome)
 
     assert entry.status.value == "completed", entry.error
@@ -927,9 +1029,15 @@ def test_a_real_scan_runs_the_policy_scanner_and_tags_what_it_finds(tmp_path):
         f"a real policy-scanner finding is untagged; origins={origins}"
     )
     assert entry.policy_origin_finding_count == len(findings)
+    assert no_tool_starts.started == [], (
+        f"the real scan started tools besides {SCANNER}'s library: "
+        f"{no_tool_starts.started}"
+    )
 
 
-def test_a_real_scan_without_the_policy_does_not_run_the_scanner(tmp_path):
+def test_a_real_scan_without_the_policy_does_not_run_the_scanner(
+    tmp_path, no_tool_starts
+):
     """The control for the real-scan test, and the one that proves causation.
 
     Same project, same file, no policy. If the scanner reported here too, the
@@ -947,7 +1055,8 @@ def test_a_real_scan_without_the_policy_does_not_run_the_scanner(tmp_path):
     )
     plan = resolve_workspace(_workspace(tmp_path, ["api"]))
 
-    outcome = _run(tmp_path, plan, factory=None)
+    # The same allowlist as the test above, so the policy is the only difference.
+    outcome = _run(tmp_path, plan, factory=None, enabled_scanners=(SCANNER,))
     entry = _results_of(outcome)
 
     assert entry.status.value == "completed", entry.error
@@ -959,4 +1068,7 @@ def test_a_real_scan_without_the_policy_does_not_run_the_scanner(tmp_path):
     assert not findings, (
         "the project disabled this scanner and no policy re-enabled it, but it "
         f"reported {len(findings)} findings"
+    )
+    assert no_tool_starts.started == [], (
+        f"the real scan started tools: {no_tool_starts.started}"
     )

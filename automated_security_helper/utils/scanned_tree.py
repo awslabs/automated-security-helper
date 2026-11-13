@@ -33,7 +33,15 @@ A file is read only when all of these hold:
 
 ``follow_links_inside=True`` relaxes rules 3 and 5 for readers that look up a file a
 scanner already reported: a link is followed when its target is inside the tree, and
-a hard-linked file is read. See :func:`open_in_scanned_tree`.
+a hard-linked file is read. ``allow_hardlinks=True`` relaxes rule 5 alone, for a
+reader that copies files a directory walk of the tree reads under these names, and
+for the CloudFormation template readers (``utils/cfn_template_model.py``), which
+read a file the scan set already lists to decide whether a scanner evaluates it. A
+hard link to a regular file inside the tree is that file's own bytes under a second
+name: reading it follows no link to another path, so rule 5 protects nothing there
+and refusing it only left a hard-linked template unscanned and unreported. Rules 1
+to 4 still hold for every such read: a symlink, a path that resolves outside the
+tree and a non-regular file stay refused. See :func:`open_in_scanned_tree`.
 
 How the check is made, and why that way
 ---------------------------------------
@@ -90,6 +98,10 @@ _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
+#: Open a directory only to name it, which needs the right to search its parent and
+#: none to read it. Linux has it; where it is 0 a directory that may be searched
+#: but not read (mode 0711) is still refused with EACCES.
+_O_PATH = getattr(os, "O_PATH", 0)
 
 #: Whether components can be opened one at a time without following links. Both
 #: ``O_NOFOLLOW`` and ``dir_fd`` support for ``os.open`` and ``os.stat`` are needed.
@@ -111,6 +123,8 @@ REASON_NOT_REGULAR = "it is not a regular file"
 REASON_HARDLINK = "it has more than one hard link"
 REASON_CHANGED = "it changed while it was being checked"
 REASON_RESOLVES_OUTSIDE = "it is a symbolic link that resolves outside the scanned tree"
+#: Why the scan set leaves out a file link: see :func:`resolves_inside`.
+REASON_LINK_LEAVES_TREE = "link leaves the scanned tree"
 
 
 def _parent_symlink_reason(component: str) -> str:
@@ -184,6 +198,78 @@ def relative_display(path: PathLike, root: PathLike) -> str:
     return "/".join(below[1])
 
 
+def is_inside_tree(path: PathLike, root: PathLike) -> bool:
+    """Whether ``path`` is in the tree at ``root``, as written or once resolved.
+
+    For a file ASH found some other way than through the scan set, such as an
+    executable on PATH. Inside if any of these is at or below the root: the path
+    as given; the path with its directory resolved; its real path. Or if the root
+    is one of its parents by device and inode, as named or resolved, which covers
+    spellings that differ only in case on a case-insensitive volume, and macOS's
+    ``/var`` for ``/private/var``. Components are compared through
+    ``os.path.normcase``.
+
+    A spelling that holds ``..`` is not judged as written: ``<root>/../elsewhere/tool``
+    starts with the root's components and leaves the tree in the next one, and
+    its lexical parents include the root itself, so both the as-written prefix
+    check and the as-written ancestor walk said "inside" for a tool outside the
+    tree, which was then refused as an in-tree one. Its directory-resolved
+    spelling is still asked, because the directory's real path has no ``..`` left
+    in it: ``<root>/tools/../bin/git`` is the tree's own ``bin/git`` whatever that
+    file links to. The one spelling whose last component is ``..`` has no such
+    form (``<root>/..`` has the root as its directory, so it read
+    ``<real root>/..``, the root's parent spelled inside the root) and is judged
+    by its resolved path alone.
+    """
+    named = _absolute(path)
+    literal = ".." not in named.parts
+    if literal and _below(path, root) is not None:
+        return True
+    real_root = Path(os.path.realpath(root))
+    resolved = Path(os.path.realpath(named))
+    # As named with its directory resolved, and fully resolved: a link on PATH
+    # whose directory is a link into the tree, and a file in the tree that is
+    # itself a link elsewhere, are both in the tree. The directory-resolved
+    # spelling is skipped only for a path that ends in "..": its directory is
+    # the path's own child and the spelling would name its parent.
+    through_directory = None
+    if named.name not in ("..", ""):
+        through_directory = Path(os.path.realpath(named.parent)) / named.name
+    for spelling in (through_directory, resolved):
+        if spelling is not None and _starts_with(spelling, real_root):
+            return True
+    if literal and _has_ancestor_file(named, root):
+        return True
+    if through_directory is not None and _has_ancestor_file(through_directory, root):
+        return True
+    return _has_ancestor_file(resolved, root)
+
+
+def _has_ancestor_file(path: Path, root: PathLike) -> bool:
+    """Whether ``root`` is ``path`` or one of its parents, by device and inode.
+
+    For spellings the comparisons by name miss: on a case-insensitive volume, which
+    macOS uses by default, ``/Users/me/Repo`` and ``/users/me/repo`` are one
+    directory, and ``normcase`` folds case only on Windows. A filesystem that
+    reports no inode numbers answers False rather than matching everything.
+    """
+    try:
+        root_stat = os.stat(root)
+    except OSError:
+        return False
+    if not root_stat.st_ino:
+        return False
+    identity = (root_stat.st_dev, root_stat.st_ino)
+    for candidate in (path, *path.parents):
+        try:
+            found = os.stat(candidate)
+        except OSError:
+            continue
+        if (found.st_dev, found.st_ino) == identity:
+            return True
+    return False
+
+
 def _split_below_root(path: PathLike, root: PathLike) -> Tuple[Path, Tuple[str, ...]]:
     """The root to anchor at, and the components of ``path`` below it.
 
@@ -225,16 +311,34 @@ def _check_opened(fd: int, display: str, allow_hardlinks: bool = False) -> None:
         raise TreeInputRefused(display, REASON_HARDLINK)
 
 
+def _open_directory(
+    name: Union[str, "os.PathLike[str]"], dir_fd: Optional[int], extra: int = 0
+) -> int:
+    """A descriptor for the directory *name*, opened for reading when it may be.
+
+    The walk only needs a descriptor to open the next component relative to. A
+    directory the user may search but not read (mode 0711) refuses ``O_RDONLY``
+    with EACCES, though a plain open of a file below it succeeds, so there the
+    descriptor is opened with ``O_PATH``, which asks for no read right, when the
+    platform has it.
+    """
+    flags = os.O_RDONLY | _DIRECTORY | _CLOEXEC | extra
+    try:
+        return os.open(name, flags, dir_fd=dir_fd)
+    except PermissionError:
+        if not _O_PATH:
+            raise
+        return os.open(name, flags | _O_PATH, dir_fd=dir_fd)
+
+
 def _open_by_descriptor_walk(
     anchor: Path, parts: Tuple[str, ...], display: str, allow_hardlinks: bool
 ) -> int:
-    dir_fd = os.open(anchor, os.O_RDONLY | _DIRECTORY | _CLOEXEC)
+    dir_fd = _open_directory(anchor, None)
     try:
         for index, part in enumerate(parts[:-1]):
             try:
-                child = os.open(
-                    part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC, dir_fd=dir_fd
-                )
+                child = _open_directory(part, dir_fd, _NOFOLLOW)
             except OSError:
                 if _is_link_at(part, dir_fd):
                     component = "/".join(parts[: index + 1])
@@ -244,6 +348,18 @@ def _open_by_descriptor_walk(
             os.close(previous)
 
         name = parts[-1]
+        # What the name is, asked before it is opened: opening a device node can
+        # act on the device, and a socket cannot be opened for reading at all
+        # (ENXIO, a plain OSError that read as "readable" to refusal_reason). A
+        # link goes on to the open below, which refuses it with its own reason;
+        # anything else that is not a regular file is refused here. The check on
+        # the opened descriptor stays: the name can change between the two.
+        try:
+            kind = os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
+        except OSError:
+            kind = None  # missing or unreadable: the open below reports it
+        if kind is not None and not stat.S_ISLNK(kind) and not stat.S_ISREG(kind):
+            raise TreeInputRefused(display, REASON_NOT_REGULAR)
         try:
             # O_NONBLOCK so a FIFO at the name cannot block the open; it is refused by
             # the regular-file check right after.
@@ -317,6 +433,38 @@ def _open_by_checked_path(
     return fd
 
 
+def resolves_inside(path: PathLike, root: PathLike) -> bool:
+    """Whether *path*, every link in it resolved, is strictly below *root* resolved.
+
+    Both are resolved with ``os.path.realpath``, so a root reached through a link (the
+    operator's choice) and a link inside the tree that points elsewhere inside it both
+    count as inside; a link whose target, after any chain of links, is outside the
+    root does not. A path that does not exist is resolved as far as it goes, so a
+    dangling link is judged by where it points. The scan set uses this to leave out
+    file links that leave the tree (``get_scan_set``); it says nothing about whether
+    the path is a regular file.
+
+    A target whose spelling is not below the root can still count as inside, by
+    identity: when the root is the target's directory or one of its parents, compared
+    by device and inode (:func:`_has_ancestor_file`). That admits what the spelling
+    misses and nothing else: a target spelled in another case on a case-insensitive
+    volume, and a target reached through a second path to the same directory, such as
+    a bind mount of the root. Those are the root's own files, so a link to one is
+    kept in the scan set; the check is a leak boundary, and these are the cases it
+    lets in beyond the plain spelling test. A target that is the root itself is not
+    inside, by either test.
+    """
+    real_root = Path(os.path.realpath(root))
+    resolved = Path(os.path.realpath(_absolute(path)))
+    if len(resolved.parts) > len(real_root.parts) and _starts_with(resolved, real_root):
+        return True
+    # A spelling by name can miss what is inside: on a case-insensitive volume a
+    # link whose target names the root in another case resolves to a path that does
+    # not start with the root's components, though it is the same directory. The
+    # root as a parent of the target's directory, by device and inode, says so.
+    return _has_ancestor_file(resolved.parent, root)
+
+
 def _resolved_inside(
     path: PathLike, root: PathLike, display: str
 ) -> Tuple[Path, Tuple[str, ...]]:
@@ -332,7 +480,11 @@ def _resolved_inside(
 
 
 def open_in_scanned_tree(
-    path: PathLike, root: PathLike, *, follow_links_inside: bool = False
+    path: PathLike,
+    root: PathLike,
+    *,
+    follow_links_inside: bool = False,
+    allow_hardlinks: bool = False,
 ) -> BinaryIO:
     """Open ``path`` for binary reading if it is a regular file inside ``root``.
 
@@ -355,35 +507,55 @@ def open_in_scanned_tree(
             more than one hard link is accepted too, for the same reason: the
             scanner already read it under this name, and installers that hard-link
             files (uv, pnpm, conda) would otherwise draw a warning per file.
+        allow_hardlinks: Accept a file with more than one hard link, and still
+            follow no link. For a reader that stands in for a directory walk of the
+            tree, which reads a hard-linked file under each of its names but
+            follows no symlink: the gitleaks ``.gitleaksignore`` re-scan copies the
+            files it names, and refusing a hard-linked one would leave a file the
+            scan covers unread. The CloudFormation template readers set it for the
+            same reason: a template the scan set lists is read to decide whether
+            cfn-nag and cdk-nag evaluate it, and a refusal there skipped a
+            hard-linked template with no finding and no error, so a repository
+            that hard-links its templates read as clean.
 
     Returns:
         A binary file object positioned at the start of the file.
 
     Raises:
         TreeInputRefused: The file breaks the rule. Nothing has been read from it.
-        OSError: The file could not be opened for some other reason.
+        OSError: The file could not be opened for some other reason. A path holding
+            a NUL character names no file and raises ``FileNotFoundError``, as a
+            missing file does, not the ``ValueError`` ``os.open`` raises for it.
     """
+    if "\0" in os.fspath(path):
+        raise FileNotFoundError(errno.ENOENT, "a path holding a NUL character")
     anchor, parts = _split_below_root(path, root)
     display = "/".join(parts)
     if follow_links_inside:
         anchor, parts = _resolved_inside(path, root, display)
+    hardlinks = follow_links_inside or allow_hardlinks
     if _DESCRIPTOR_WALK:
-        fd = _open_by_descriptor_walk(anchor, parts, display, follow_links_inside)
+        fd = _open_by_descriptor_walk(anchor, parts, display, hardlinks)
     else:
-        fd = _open_by_checked_path(anchor, parts, display, follow_links_inside)
+        fd = _open_by_checked_path(anchor, parts, display, hardlinks)
     return os.fdopen(fd, "rb")
 
 
-def refusal_reason(path: PathLike, root: PathLike) -> Optional[str]:
+def refusal_reason(
+    path: PathLike, root: PathLike, *, allow_hardlinks: bool = False
+) -> Optional[str]:
     """Why ``path`` would be refused, or None if it may be read.
 
     For callers that only need the verdict, such as counting candidate inputs. Makes
     the same check as :func:`open_in_scanned_tree`, by calling it, so the two cannot
     disagree. An ``OSError`` other than a refusal is not a refusal and returns None;
-    the caller that opens the file for real will meet it there.
+    the caller that opens the file for real will meet it there. ``allow_hardlinks``
+    is passed through, so a caller whose real read admits a hard-linked file (the
+    cdk-nag scanner's pre-check, ahead of the template reader) asks under the same
+    rule its read applies.
     """
     try:
-        handle = open_in_scanned_tree(path, root)
+        handle = open_in_scanned_tree(path, root, allow_hardlinks=allow_hardlinks)
     except TreeInputRefused as refused:
         return refused.reason
     except OSError:

@@ -1,0 +1,86 @@
+{
+  "errors": [
+    {
+      "column": 21,
+      "end_column": 27,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "credentials",
+      "line": 17,
+      "message": "\"password\" section in \"db\" service should be specified via secrets. do not put password value directly",
+      "snippet": "          password: hunter2\n                    ^~~~~~~"
+    },
+    {
+      "column": 24,
+      "end_column": 47,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "expression",
+      "line": 20,
+      "message": "\"github.event.issue.title\" is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see https://docs.github.com/en/actions/reference/security/secure-use#good-practices-for-mitigating-script-injection-attacks for more details",
+      "snippet": "        run: echo \"${{ github.event.issue.title }}\"\n                       ^~~~~~~~~~~~~~~~~~~~~~~~"
+    },
+    {
+      "column": 14,
+      "end_column": 17,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "deprecated-commands",
+      "line": 22,
+      "message": "workflow command \"set-output\" was deprecated. use `echo \"{name}={value}\" >> $GITHUB_OUTPUT` instead: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions",
+      "snippet": "        run: echo \"::set-output name=result::done\"\n             ^~~~"
+    },
+    {
+      "column": 14,
+      "end_column": 17,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "deprecated-commands",
+      "line": 24,
+      "message": "workflow command \"set-env\" was deprecated. use `echo \"{name}={value}\" >> $GITHUB_ENV` instead: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions",
+      "snippet": "        run: echo \"::set-env name=MODE::fast\"\n             ^~~~"
+    },
+    {
+      "column": 13,
+      "end_column": 15,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "if-cond",
+      "line": 26,
+      "message": "if: condition \"${{ github.event_name == 'issues' }} && false\" is always evaluated to true because extra characters are around ${{ }}",
+      "snippet": "        if: ${{ github.event_name == 'issues' }} && false\n            ^~~"
+    },
+    {
+      "column": 3,
+      "end_column": 9,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "job-needs",
+      "line": 28,
+      "message": "job \"report\" needs job \"missing-job\" which does not exist in this workflow",
+      "snippet": "  report:\n  ^~~~~~~"
+    },
+    {
+      "column": 9,
+      "end_column": 12,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "shellcheck",
+      "line": 34,
+      "message": "shellcheck reported issue in this script: SC2086:info:1:5: Double quote to prevent globbing and word splitting",
+      "snippet": "        run: cat $REPORT_FILE\n        ^~~~"
+    },
+    {
+      "column": 14,
+      "end_column": 25,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "runner-label",
+      "line": 36,
+      "message": "label \"ubuntu-99.04\" is unknown. available labels are \"windows-latest\", \"windows-latest-8-cores\", \"windows-2025\", \"windows-2025-vs2026\", \"windows-2022\", \"windows-11-arm\", \"ubuntu-slim\", \"ubuntu-latest\", \"ubuntu-latest-4-cores\", \"ubuntu-latest-8-cores\", \"ubuntu-latest-16-cores\", \"ubuntu-24.04\", \"ubuntu-24.04-arm\", \"ubuntu-22.04\", \"ubuntu-22.04-arm\", \"macos-latest\", \"macos-latest-xlarge\", \"macos-latest-large\", \"macos-26-intel\", \"macos-26-xlarge\", \"macos-26-large\", \"macos-26\", \"macos-15-intel\", \"macos-15-xlarge\", \"macos-15-large\", \"macos-15\", \"macos-14-xlarge\", \"macos-14-large\", \"macos-14\", \"self-hosted\", \"x64\", \"arm\", \"arm64\", \"linux\", \"macos\", \"windows\". if it is a custom label for self-hosted runner, set list of labels in actionlint.yaml config file",
+      "snippet": "    runs-on: ubuntu-99.04\n             ^~~~~~~~~~~~"
+    },
+    {
+      "column": 5,
+      "end_column": 19,
+      "filepath": ".github/workflows/vulnerable.yml",
+      "kind": "syntax-check",
+      "line": 37,
+      "message": "unexpected key \"timeout-minute\" for \"job\" section. expected one of \"concurrency\", \"container\", \"continue-on-error\", \"defaults\", \"env\", \"environment\", \"if\", \"name\", \"needs\", \"outputs\", \"permissions\", \"runs-on\", \"secrets\", \"services\", \"snapshot\", \"steps\", \"strategy\", \"timeout-minutes\", \"uses\", \"with\"",
+      "snippet": "    timeout-minute: 5\n    ^~~~~~~~~~~~~~~"
+    }
+  ],
+  "version": "1.7.12"
+}

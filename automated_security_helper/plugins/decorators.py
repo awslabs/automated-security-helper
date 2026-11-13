@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 from typing import Literal
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.plugin_manager import without_masked_modules
 from automated_security_helper.utils.log import ASH_LOGGER
 from importlib.metadata import version, PackageNotFoundError
 
@@ -30,9 +32,14 @@ def ash_plugin(
             # Get the module path of the class
             module_path = cls.__module__
 
-            ASH_LOGGER.debug(
-                f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
-            )
+            # Built and masked only for a logger that writes it: the masking
+            # redacts the text with every masked module in scope.
+            if ASH_LOGGER.isEnabledFor(logging.DEBUG):
+                ASH_LOGGER.debug(
+                    without_masked_modules(
+                        f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
+                    )
+                )
 
             plug_mod_ver = None
             try:

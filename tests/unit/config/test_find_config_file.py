@@ -3,8 +3,12 @@
 
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.config.resolve_config import find_config_file
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+
+pytestmark = pytest.mark.unit
 
 
 def test_finds_config_in_cwd(tmp_path):

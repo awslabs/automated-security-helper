@@ -33,9 +33,12 @@ timed-out scanner is distinguishable from the generic returncode 1 the previous
 error path returned for everything.
 """
 
+import os
 import sys
 import time
 from unittest.mock import patch
+
+import pytest
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.utils.subprocess_utils import (
@@ -51,6 +54,7 @@ def _sleep_command(seconds: int = _SLEEP_SECONDS):
     return [sys.executable, "-c", f"import time; time.sleep({seconds})"]
 
 
+@pytest.mark.integration
 class TestTimeoutIsEnforced:
     def test_a_hanging_command_returns_instead_of_blocking(self, tmp_path):
         """The reported failure mode, reduced to its smallest form."""
@@ -106,6 +110,7 @@ class TestTimeoutIsEnforced:
         assert failed.get("timed_out") is not True
 
 
+@pytest.mark.integration
 class TestNormalExecutionIsUnaffected:
     def test_fast_command_succeeds_within_a_timeout(self, tmp_path):
         response = run_command_with_output_handling(
@@ -135,6 +140,26 @@ class TestNormalExecutionIsUnaffected:
         assert "unbounded" in response.get("stdout", "")
 
 
+@pytest.fixture
+def runner_with_uv(monkeypatch):
+    """The global UV tool runner, with uv available, whatever the host or the order.
+
+    ``is_uv_available`` runs ``uv --version`` once and caches the answer on the global
+    runner, so reading the real one makes a test pass or fail on whether uv is on PATH,
+    and on whatever an earlier test in the same worker left in that cache: with uv
+    off PATH, or the cache primed False, run_tool raises "UV is not available" before
+    it reaches the call under test. Here the answer is the test's, and the runner is a
+    fresh one installed for this test only.
+    """
+    from automated_security_helper.utils import uv_tool_runner
+
+    runner = uv_tool_runner.UVToolRunner()
+    monkeypatch.setattr(runner, "uv_availability", lambda: (True, None))
+    monkeypatch.setattr(uv_tool_runner, "_uv_tool_runner", runner)
+    return runner
+
+
+@pytest.mark.unit
 class TestTheUvToolPathIsAlsoBounded:
     """The path bandit, checkov and semgrep actually take.
 
@@ -150,7 +175,9 @@ class TestTheUvToolPathIsAlsoBounded:
     which is exactly why the gap survived a green build.
     """
 
-    def test_run_tool_forwards_the_timeout_on_the_results_dir_branch(self, tmp_path):
+    def test_run_tool_forwards_the_timeout_on_the_results_dir_branch(
+        self, tmp_path, runner_with_uv
+    ):
         """This is the branch scanners take: they all pass results_dir.
 
         `run_tool` already accepted a `timeout`, but honoured it only on its
@@ -158,7 +185,7 @@ class TestTheUvToolPathIsAlsoBounded:
         i.e. none of the scanners.
         """
         from automated_security_helper.utils import subprocess_utils
-        from automated_security_helper.utils.uv_tool_runner import get_uv_tool_runner
+        from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
         captured = {}
 
@@ -166,10 +193,20 @@ class TestTheUvToolPathIsAlsoBounded:
             captured.update(kwargs)
             return {"returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(
-            subprocess_utils, "run_command_with_output_handling", side_effect=_fake
+        # A runner of the test's own, told that uv is there. This test is about
+        # where the timeout goes, not about whether uv is installed, and the
+        # process-wide runner from get_uv_tool_runner() remembers the first
+        # is_uv_available() answer on the worker. A test that probed it through a
+        # subprocess stand-in left that answer False, and this test then failed
+        # with "UV is not available" on whichever xdist worker ran both.
+        runner = UVToolRunner()
+        with (
+            patch.object(runner, "is_uv_available", return_value=True),
+            patch.object(
+                subprocess_utils, "run_command_with_output_handling", side_effect=_fake
+            ),
         ):
-            get_uv_tool_runner().run_tool(
+            runner.run_tool(
                 tool_name="bandit",
                 args=["--version"],
                 results_dir=tmp_path,
@@ -180,6 +217,24 @@ class TestTheUvToolPathIsAlsoBounded:
             "run_tool dropped the timeout on the results_dir branch, so every "
             "uv-run scanner executes unbounded."
         )
+
+    def test_run_tool_without_uv_refuses_before_running_anything(
+        self, tmp_path, monkeypatch
+    ):
+        """The other answer, also decided here: no uv, no subprocess."""
+        from automated_security_helper.utils import subprocess_utils, uv_tool_runner
+
+        runner = uv_tool_runner.UVToolRunner()
+        monkeypatch.setattr(runner, "is_uv_available", lambda: False)
+        with patch.object(subprocess_utils, "run_command_with_output_handling") as run:
+            with pytest.raises(uv_tool_runner.UVToolRunnerError, match="not available"):
+                runner.run_tool(
+                    tool_name="bandit",
+                    args=["--version"],
+                    results_dir=tmp_path,
+                    timeout=_TIMEOUT_SECONDS,
+                )
+        run.assert_not_called()
 
     def test_try_uv_tool_execution_forwards_the_timeout(self, tmp_path):
         """The seam between the plugin and the runner.
@@ -194,12 +249,24 @@ class TestTheUvToolPathIsAlsoBounded:
         from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 
         class _Probe(UVToolMixin):
-            """Minimal host: the mixin only needs these three from its owner."""
+            """Minimal host: what the dispatch reads from its owner on the run path."""
 
             command = "bandit"
             use_uv_tool = True
+            # The package that provides the command when it is named apart from
+            # it; the dispatch reads this attribute at its run_tool call. A host
+            # without it raised inside the dispatch's try, which answered "could
+            # not start" and never reached run_tool, so no timeout was captured
+            # and the test read as a dropped timeout.
+            uv_tool_package_name = None
 
             def _plugin_log(self, *args, **kwargs):
+                return None
+
+            def _process_command_response(self, response):
+                # The dispatch hands the run's response to its owner; a host
+                # without the hook raised inside the handler and the run read
+                # as a failure after the timeout had already been forwarded.
                 return None
 
             def _get_tool_package_extras(self):
@@ -211,8 +278,8 @@ class TestTheUvToolPathIsAlsoBounded:
         captured = {}
 
         class _Runner:
-            def is_uv_available(self):
-                return True
+            def uv_availability(self):
+                return True, None
 
             def run_tool(self, **kwargs):
                 captured.update(kwargs)
@@ -224,20 +291,113 @@ class TestTheUvToolPathIsAlsoBounded:
 
                 return _Result()
 
+        probe = _Probe()
         with patch.object(runner_module, "get_uv_tool_runner", return_value=_Runner()):
-            _Probe()._try_uv_tool_execution(
+            probe._try_uv_tool_execution(
                 ["bandit", "--version"],
                 tmp_path,
                 results_dir=tmp_path,
                 timeout=_TIMEOUT_SECONDS,
             )
 
+        # The dispatch's own reason rides along: a run it refused before the
+        # launch (a host missing an attribute it reads) leaves no timeout to
+        # capture, and that reads the same as a timeout dropped at the seam.
         assert captured.get("timeout") == _TIMEOUT_SECONDS, (
             "_try_uv_tool_execution accepted a timeout but did not pass it to "
-            f"run_tool: {captured!r}"
+            f"run_tool: {captured!r}; the dispatch's own reason, if it refused "
+            f"the uv route: {probe._uv_run_failure!r}"
         )
 
 
+# A child that writes one latin-1 e-acute byte, flushes, and hangs: what it
+# printed before the kill is the clue to why it hung, and it only reads right
+# decoded with the encoding the caller asked for.
+_LATIN1_THEN_SLEEP = (
+    "import sys, time\n"
+    "sys.stdout.buffer.write(bytes([99, 97, 102, 233]))\n"
+    "sys.stdout.buffer.flush()\n"
+    f"time.sleep({_SLEEP_SECONDS})\n"
+)
+
+
+class TestPartialOutputKeepsTheCallersEncoding:
+    """The function takes ``encoding`` and the run decodes a finished child's
+    streams with it. A timed-out or failed wait hands the partial output over
+    as BYTES (TimeoutExpired carries them undecoded, text mode or not), and
+    the decode on those paths was pinned to UTF-8: a latin-1 tool's partial
+    output came back with replacement characters, in the returned stdout and
+    in the stream log, while the same tool finishing read correctly."""
+
+    @pytest.mark.integration
+    def test_a_timed_out_runs_partial_stdout_decodes_with_the_callers_encoding(
+        self, tmp_path
+    ):
+        response = run_command_with_output_handling(
+            command=[sys.executable, "-c", _LATIN1_THEN_SLEEP],
+            results_dir=tmp_path,
+            stdout_preference="return",
+            encoding="latin-1",
+            timeout=_TIMEOUT_SECONDS,
+        )
+
+        assert response.get("timed_out") is True, response
+        assert response.get("stdout") == "café", response.get("stdout")
+
+    @pytest.mark.skipif(
+        os.name != "posix",
+        reason="only the POSIX communicate attaches partial bytes to "
+        "TimeoutExpired; the thread-reader one raises with no output",
+    )
+    @pytest.mark.integration
+    def test_a_failed_waits_late_read_decodes_as_the_childs_streams_would(self):
+        """The reap path: a wait that fails on a still-running text-mode child
+        reads what sits in the pipes, and the late communicate's TimeoutExpired
+        carries it as bytes. The decode follows the child's own stream
+        wrappers (what communicate itself would have used), not a pinned
+        UTF-8."""
+        import subprocess
+
+        from automated_security_helper.utils.subprocess_utils import (
+            _output_after_failure,
+        )
+
+        process = subprocess.Popen(  # nosec B603 - fixed interpreter argv
+            [sys.executable, "-c", _LATIN1_THEN_SLEEP],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="latin-1",
+        )
+        try:
+            stdout, _stderr = _output_after_failure(process)
+        finally:
+            process.kill()
+            process.wait()
+
+        assert stdout == "café", repr(stdout)
+
+    @pytest.mark.unit
+    def test_partial_bytes_with_no_named_encoding_decode_as_the_locale_would(self):
+        """With no encoding named, a finished run's text-mode streams decode
+        with the locale encoding, so the partial bytes a timed-out wait
+        carried must follow the same read instead of a pinned UTF-8 (under
+        UTF-8 mode the locale read answers utf-8, so the two stay in step)."""
+        from automated_security_helper.utils import subprocess_utils
+
+        with patch.object(
+            subprocess_utils.locale,
+            "getpreferredencoding",
+            lambda do_setlocale=True: "latin-1",
+        ):
+            decoded = subprocess_utils._late_decoded(b"caf\xe9", None)
+
+        assert decoded == "café", repr(decoded)
+        # The controls: a named encoding wins, and non-bytes pass through.
+        assert subprocess_utils._late_decoded(b"caf\xc3\xa9", "utf-8") == "café"
+        assert subprocess_utils._late_decoded("already text", None) == "already text"
+
+
+@pytest.mark.unit
 def test_detect_secrets_inherits_the_shared_scan_timeout():
     """detect-secrets must not carry its own copy of the option.
 
@@ -260,6 +420,7 @@ def test_detect_secrets_inherits_the_shared_scan_timeout():
     )
 
 
+@pytest.mark.unit
 def test_scanners_that_override_scan_still_pass_the_timeout():
     """A field that appears in a schema and does nothing is worse than absent.
 
@@ -302,6 +463,7 @@ def test_scanners_that_override_scan_still_pass_the_timeout():
     )
 
 
+@pytest.mark.unit
 def test_scanner_options_expose_a_scan_timeout_default():
     """Every scanner gets the knob, not just the one that grew its own.
 

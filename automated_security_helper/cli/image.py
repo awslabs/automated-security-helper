@@ -3,15 +3,40 @@
 
 from typing import Annotated, Optional, List
 import typer
-import platform
+
+from automated_security_helper.core.cancellation import (
+    CancelEvent,
+    ScanCancelled,
+    cancel_scope,
+    discard_die_now_message,
+    record_die_now_message,
+    shutdown_cancels,
+    shutdown_requested,
+)
 
 # Import subprocess utilities
 from automated_security_helper.cli.deprecations import (
     warn_deprecated_option_spellings,
 )
-from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_SOURCES_DESCRIPTION,
+    ASH_EXIT_INTERRUPTED,
+    ASH_EXIT_TERMINATED,
+)
+from automated_security_helper.cli.params import from_environment
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
-from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+from automated_security_helper.interactions.run_ash_container import (
+    OciValueRefused,
+    oci_runner_for_this_run,
+    oci_wrapper_refusal,
+)
+from automated_security_helper.interactions.run_ash_scan import (
+    resolved_console_log_level,
+    run_ash_scan,
+)
+from automated_security_helper.utils.console import echo
+from automated_security_helper.utils.log import configure_last_resort_level
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 
 def build_ash_image_cli_command(
@@ -64,13 +89,13 @@ def build_ash_image_cli_command(
         ),
     ] = "bridge",
     build_target: Annotated[
-        BuildTarget,
+        Optional[BuildTarget],
         typer.Option(
             "--build-target",
-            help="Specify the target stage of the ASH image to build",
+            help="The ASH image stage to build: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it.",
             case_sensitive=False,
         ),
-    ] = BuildTarget.NON_ROOT,
+    ] = None,
     offline_semgrep_rulesets: Annotated[
         str,
         typer.Option(
@@ -103,7 +128,7 @@ def build_ash_image_cli_command(
             # least as likely to land here as on `scan`.
             "--ash-revision",
             "-rev",
-            help="ASH branch or tag to install in the container image for usage during containerized scans",
+            help="ASH branch, tag or full commit id to install in the container image for usage during containerized scans",
         ),
     ] = None,
     custom_containerfile: Annotated[
@@ -129,7 +154,7 @@ def build_ash_image_cli_command(
     offline: Annotated[
         bool,
         typer.Option(
-            help="Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
+            help="Run scan in offline/airgapped mode. npm-audit does not run offline, because npm, yarn and pnpm audit by asking the registry: a project with a lockfile reports it MISSING, and one without reports it SKIPPED. IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
         ),
     ] = False,
     quiet: Annotated[
@@ -186,34 +211,141 @@ def build_ash_image_cli_command(
     if config_overrides is None:
         config_overrides = []
 
-    # Call run_ash_scan with all parameters
-    run_ash_scan(
-        # Container-specific params
-        build=not no_build,
-        run=not no_run,
-        force=force,
-        oci_runner=oci_runner,
-        container_network=container_network,
-        # TODO - Windows cannot map write permissions to the bind-mounted output directory, so reports and logs fail to emit successfully.
-        build_target=BuildTarget.CI
-        if platform.system().lower().startswith("win")
-        else build_target,
-        offline_semgrep_rulesets=offline_semgrep_rulesets,
-        container_uid=container_uid,
-        container_gid=container_gid,
-        ash_revision_to_install=ash_revision_to_install,
-        custom_containerfile=custom_containerfile,
-        custom_build_arg=custom_build_arg,
-        # General params
-        show_summary=False,
-        config=config,
-        config_overrides=config_overrides,
-        offline=offline,
-        progress=False,
-        log_level=log_level,
-        quiet=quiet,
-        verbose=verbose,
-        debug=debug,
-        color=color,
-        mode=RunMode.container,
+    # The process-wide last-resort gate, set once at this command's start as
+    # `ash scan` sets it (cli/scan.py): a record logged before run_ash_scan
+    # attaches its handlers is shown at the verbosity the flags ask for, so
+    # --quiet hides it and --debug and --verbose show it. Without this the gate
+    # stayed at its import-time default whatever the flags said.
+    configure_last_resort_level(
+        resolved_console_log_level(
+            log_level=log_level,
+            verbose=verbose,
+            debug=debug,
+            quiet=quiet,
+            simple=False,
+        ).value
     )
+
+    # A relative path is read against the working directory where it was typed, and
+    # refused when it came from OCI_RUNNER (oci_runner_for_this_run): not run, and
+    # not replaced by looking for another runtime. build-image always starts a
+    # runner, so the value is always read.
+    try:
+        oci_runner = oci_runner_for_this_run(
+            oci_runner, from_environment=from_environment(ctx, "oci_runner")
+        )
+    except OciValueRefused as refusal:
+        echo(shown_on_one_line(str(refusal)), err=True)
+        raise typer.Exit(refusal.exit_code) from None
+    wrapper_refusal = oci_wrapper_refusal()
+    if wrapper_refusal is not None:
+        echo(shown_on_one_line(wrapper_refusal[1]), err=True)
+        raise typer.Exit(wrapper_refusal[0])
+
+    # Call run_ash_scan with all parameters, inside a scope the entry point's
+    # SIGTERM handler cancels, as ash scan runs it (cli/scan.py;
+    # core/cancellation.py, "SIGTERM on the CLI"). The container scan this
+    # starts waits on the OCI runner the same way a scan in container mode does,
+    # and the handler cooperates only while a scope is registered: with none, a
+    # SIGTERM took the die-now kill instead of the cooperative stop.
+    cancel_event = CancelEvent()
+    # A second Ctrl-C takes the die-now ending, which never returns to the
+    # interrupt arm below, so the word on how the run ended is registered with
+    # it, built as that arm builds it: exit-codes.md pins that `ash build-image`
+    # prints its interrupted line and, without --no-run, the no-verdict clause,
+    # and that a second Ctrl-C still exits 130.
+    interrupted_message = "ASH build-image interrupted before it finished"
+    if not no_run:
+        interrupted_message += (
+            ": there is no verdict, and the output directory may hold partial results"
+        )
+    record_die_now_message(f"{interrupted_message}.")
+    try:
+        with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
+            run_ash_scan(
+                # Container-specific params
+                build=not no_build,
+                run=not no_run,
+                force=force,
+                oci_runner=oci_runner,
+                container_network=container_network,
+                # None picks the host's default: 'ci' on Windows, where the non-root
+                # user cannot write the bind-mounted output directory, 'non-root'
+                # elsewhere.
+                build_target=build_target,
+                offline_semgrep_rulesets=offline_semgrep_rulesets,
+                container_uid=container_uid,
+                container_gid=container_gid,
+                ash_revision_to_install=ash_revision_to_install,
+                custom_containerfile=custom_containerfile,
+                custom_build_arg=custom_build_arg,
+                # General params. The scan that follows the build is a container
+                # scan, and the container is run with --no-show-summary so that
+                # the host prints the one summary (run_ash_container): with False
+                # here nobody did, and a scan with actionable findings exited 2
+                # with no summary and no exit-code legend. With --no-run nothing
+                # is scanned, so there is no summary to show.
+                show_summary=not no_run,
+                config=config,
+                config_overrides=config_overrides,
+                offline=offline,
+                progress=False,
+                log_level=log_level,
+                quiet=quiet,
+                verbose=verbose,
+                debug=debug,
+                color=color,
+                mode=RunMode.container,
+            )
+            # The handler only sets the event; the phases raise on their next
+            # poll. A SIGTERM that lands where nothing polls (between the image
+            # build and the run, in a build step, after a --no-run build) lets
+            # run_ash_scan return as if nothing happened, and the command then
+            # exited 0 after a termination. The exit says what the handler saw.
+            if shutdown_requested():
+                raise ScanCancelled(
+                    "SIGTERM landed where nothing in the run polled the event"
+                )
+    except ScanCancelled as error:
+        if not shutdown_requested():
+            # Not this frame's stop: nothing on the CLI sets the event but the
+            # SIGTERM handler, so an unexplained cancel is a defect to report as
+            # one, as ash scan reports it.
+            raise
+        # The handler printed nothing (a signal frame must not take the logger's
+        # locks), so this is the only word on how the run ended.
+        message = "ASH build-image stopped by SIGTERM before it finished"
+        if not no_run:
+            message += (
+                ": the scan did not complete, and the output directory may hold "
+                "partial results"
+            )
+        survivors = getattr(error, "could_not_stop", ())
+        if survivors:
+            names = "; ".join(f"{tool} (pid {pid})" for tool, pid in survivors)
+            message += f". A tool the stop could not end may still be running: {names}"
+        echo(f"{message}.", err=True)
+        raise typer.Exit(ASH_EXIT_TERMINATED) from None
+    except KeyboardInterrupt:
+        # As ash scan does: the runtime has had the interrupt and its grace
+        # (run_cmd_direct). The interrupt landed in ONE frame; a cancellable
+        # spawn still running in another thread polls the scope's event, so it
+        # is cancelled before the exit or that thread keeps running a scan the
+        # operator stopped. A normal thread frame, so the real set calls are safe
+        # here where the signal handler's are not. With --no-run there was no
+        # scan, so no outcome was owed.
+        cancel_event.stop_promptly = True
+        cancel_event.set()
+        message = "ASH build-image interrupted before it finished"
+        if not no_run:
+            message += (
+                ": there is no verdict, and the output directory may hold partial "
+                "results"
+            )
+        echo(f"{message}.", err=True)
+        raise typer.Exit(ASH_EXIT_INTERRUPTED) from None
+    finally:
+        # The die-now ending speaks for this run only while this run exists: a
+        # process that goes on living (a test running the command in-process)
+        # must not keep a stale word for a later interrupt.
+        discard_die_now_message()

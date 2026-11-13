@@ -11,11 +11,19 @@ error responses, and helper functions in the mcp_server module.
 
 import copy
 import json
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+if sys.version_info < (3, 11):
+    # What anyio raises there; the built-in group types arrived in 3.11.
+    from exceptiongroup import ExceptionGroup
+
+from tests.utils.scan_task_stubs import closing_scan_task_start
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -128,6 +136,9 @@ def sample_full_results():
                     }
                 ]
             },
+            # What scan_tracking.get_scan_results puts beside the SARIF. ALL, so
+            # that every unsuppressed result here is actionable whatever its level.
+            "severity_thresholds": {"": "ALL"},
         },
     }
 
@@ -148,31 +159,49 @@ class TestServerInitialization:
         assert mcp.name == "ASH Security Scanner"
 
     def test_run_mcp_server_keyboard_interrupt(self):
-        """run_mcp_server handles KeyboardInterrupt gracefully."""
+        """run_mcp_server raises KeyboardInterrupt on, so `ash mcp` exits 130."""
         from automated_security_helper.cli.mcp_server import run_mcp_server
 
         with patch("automated_security_helper.cli.mcp_server.mcp") as mock_mcp:
-            mock_mcp.run.side_effect = KeyboardInterrupt()
-            # Should not raise
-            run_mcp_server()
+            mock_mcp.run_stdio_async = AsyncMock(side_effect=KeyboardInterrupt())
+            with pytest.raises(KeyboardInterrupt):
+                run_mcp_server()
 
     def test_run_mcp_server_closed_resource_error(self):
-        """run_mcp_server logs warning for ClosedResourceError."""
+        """run_mcp_server logs a warning when the transport finds the client gone."""
+        import anyio
+
         from automated_security_helper.cli.mcp_server import run_mcp_server
 
         with patch("automated_security_helper.cli.mcp_server.mcp") as mock_mcp:
-            mock_mcp.run.side_effect = RuntimeError("ClosedResourceError in TaskGroup")
-            # Should not raise
-            run_mcp_server()
+            mock_mcp.run_stdio_async = AsyncMock(
+                side_effect=ExceptionGroup(
+                    "unhandled errors in a TaskGroup", [anyio.ClosedResourceError()]
+                )
+            )
+            # Should not raise. A KeyboardInterrupt is caught so that taking the
+            # disconnect for a Ctrl-C fails this test: let through, it stops the
+            # test run itself, and under xdist it crashes the worker and the
+            # tests queued on it never run.
+            try:
+                run_mcp_server()
+            except KeyboardInterrupt:
+                pytest.fail(
+                    "run_mcp_server raised KeyboardInterrupt for a grouped "
+                    "ClosedResourceError: the client going away was taken for "
+                    "a Ctrl-C, so `ash mcp` would exit 130 instead of 0"
+                )
 
     def test_run_mcp_server_generic_exception(self):
-        """run_mcp_server logs exception for unexpected errors."""
+        """run_mcp_server raises an unexpected error, so `ash mcp` exits 1."""
         from automated_security_helper.cli.mcp_server import run_mcp_server
 
         with patch("automated_security_helper.cli.mcp_server.mcp") as mock_mcp:
-            mock_mcp.run.side_effect = ValueError("Something unexpected")
-            # Should not raise
-            run_mcp_server()
+            mock_mcp.run_stdio_async = AsyncMock(
+                side_effect=ValueError("Something unexpected")
+            )
+            with pytest.raises(ValueError, match="Something unexpected"):
+                run_mcp_server()
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +223,12 @@ class TestRunAshScan:
         }
 
         with (
+            # The directories these tests name do not exist; the source
+            # directory check has its own tests.
+            patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
             patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
@@ -228,6 +263,10 @@ class TestRunAshScan:
 
         with (
             patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
+            patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
                 return_value=mock_result,
@@ -256,6 +295,10 @@ class TestRunAshScan:
 
         with (
             patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
+            patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
                 return_value=mock_result,
@@ -276,24 +319,37 @@ class TestRunAshScan:
 
     @pytest.mark.asyncio
     async def test_scan_start_failure(self, mock_ctx):
-        """When mcp_scan_directory returns failure, error result is returned."""
+        """A refusal from mcp_scan_directory is passed on as it was given."""
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
-        mock_result = {"success": False, "error": "Permission denied"}
+        mock_result = {
+            "success": False,
+            "error": "Permission denied",
+            "error_type": "MCPResourceError",
+            "error_category": "permission_denied",
+            "exit_code": 1,
+            "exit_code_meaning": "scan errors / scanner failures",
+        }
 
         with (
+            # The directory this test names does not exist on every runner
+            # (/tmp is no directory on Windows); the source directory check has
+            # its own tests, and this one is about the refusal mcp_scan_directory
+            # gives, so the check is stood down as the start tests above do.
+            patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
             patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
-                return_value=mock_result,
+                return_value=dict(mock_result),
             ),
             patch("pathlib.Path.cwd", return_value=Path("/tmp")),  # nosec B108
         ):
             result = await run_ash_scan(ctx=mock_ctx, source_dir="/tmp")  # nosec B108
 
-        assert result["success"] is False
-        assert "Permission denied" in result["error"]
-        assert result["error_type"] == "scan_start_failure"
+        assert result == mock_result
         mock_ctx.error.assert_called()
 
     @pytest.mark.asyncio
@@ -302,6 +358,13 @@ class TestRunAshScan:
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
         with (
+            # As in test_scan_start_failure: /tmp is no directory on Windows,
+            # and the exception under test is mcp_scan_directory's, so the
+            # source directory check is stood down.
+            patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
             patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
@@ -317,7 +380,11 @@ class TestRunAshScan:
 
     @pytest.mark.asyncio
     async def test_scan_cleans_existing_results(self, mock_ctx, tmp_path):
-        """When clean_output=True and results file exists, it gets removed."""
+        """When clean_output=True and results file exists, it is moved out of view.
+
+        Through the real mcp_scan_directory, where clean_output acts once the scan
+        has the directory; only the scan task is not started.
+        """
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
         # Create a fake results file
@@ -326,13 +393,10 @@ class TestRunAshScan:
         results_file = output_dir / "ash_aggregated_results.json"
         results_file.write_text("{}")
 
-        mock_result = {"success": True, "scan_id": "scan-clean"}
-
         with (
             patch(
-                "automated_security_helper.cli.mcp_server.mcp_scan_directory",
-                new_callable=AsyncMock,
-                return_value=mock_result,
+                "automated_security_helper.cli.mcp_tools._start_scan_task",
+                side_effect=closing_scan_task_start(),
             ),
             patch(
                 "automated_security_helper.cli.mcp_server.asyncio.create_task"
@@ -501,6 +565,43 @@ class TestGetScanProgress:
         assert "Boom" in result["error"]
         assert result["error_type"] == "RuntimeError"
 
+    @pytest.mark.asyncio
+    async def test_progress_keeps_a_scanner_whose_map_is_not_a_mapping(
+        self, mock_ctx, mock_scan_registry_entry, tmp_path
+    ):
+        """A producer entry whose value is not a mapping is kept under its
+        scanner with an empty map, beside the entries that are. Before, dict()
+        of the odd value raised TypeError and the catch-all answered the whole
+        poll as failed."""
+        from automated_security_helper.cli.mcp_server import get_scan_progress
+
+        mock_progress = {
+            "status": "running",
+            "scanners": {"bandit": None, "semgrep": {"source": {"findings": 1}}},
+        }
+        mock_registry = MagicMock()
+        mock_scan_registry_entry.output_directory = str(tmp_path)
+        mock_registry.get_scan.return_value = mock_scan_registry_entry
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+                new_callable=AsyncMock,
+                return_value=mock_progress,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp_server.get_scan_registry",
+                return_value=mock_registry,
+            ),
+        ):
+            result = await get_scan_progress(ctx=mock_ctx, scan_id="test-scan-123")
+
+        assert "success" not in result, result
+        assert result["scanners"] == {
+            "bandit": {},
+            "semgrep": {"source": {"findings": 1}},
+        }, result
+
 
 # ---------------------------------------------------------------------------
 # get_scan_results tool
@@ -631,11 +732,12 @@ class TestGetScanResults:
         assert result["_content_filters"]["actionable_only"] is True
         # Suppressed count should be zeroed
         assert result["summary_stats"]["suppressed"] == 0
-        # SARIF results with suppressions should be removed
-        sarif_results = result["raw_results"]["sarif"]["runs"][0]["results"]
-        for r in sarif_results:
-            suppressions = r.get("suppressions", [])
-            assert len(suppressions) == 0
+        # The suppressed SARIF result (B102) is left out of the findings list,
+        # and the SARIF the list was built from is not echoed back.
+        assert sorted(f["rule_id"] for f in result["findings"]) == ["B101", "B103"]
+        assert result["findings_count"] == 2
+        assert "sarif" not in result["raw_results"]
+        assert "severity_thresholds" not in result["raw_results"]
 
     @pytest.mark.asyncio
     async def test_results_scanner_filter(self, mock_ctx, sample_full_results):
@@ -658,6 +760,63 @@ class TestGetScanResults:
 
         assert "bandit" in result["raw_results"]["scanner_results"]
         assert "semgrep" not in result["raw_results"]["scanner_results"]
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_scanner_name_is_the_clients_input_error(
+        self, mock_ctx, sample_full_results
+    ):
+        """A filter naming a scanner the results do not hold is the client's
+        input error (ResultFilterInputError, category invalid_parameter). It
+        used to fall through to the unexpected-error handler: logged as a server
+        fault, returned with no category a client could branch on."""
+        from automated_security_helper.cli.mcp_server import get_scan_results
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
+                new_callable=AsyncMock,
+                return_value=sample_full_results,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp_server.log_unexpected_error"
+            ) as unexpected,
+            patch("pathlib.Path.cwd", return_value=Path("/workspace")),
+        ):
+            result = await get_scan_results(
+                ctx=mock_ctx,
+                output_dir="/workspace/.ash/ash_output",
+                scanners="nope",
+            )
+
+        assert result["success"] is False
+        assert result["error_type"] == "ResultFilterInputError"
+        assert result["error_category"] == "invalid_parameter"
+        assert "Unknown scanner" in result["error"]
+        unexpected.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_severity_name_is_the_clients_input_error(
+        self, mock_ctx, sample_full_results
+    ):
+        from automated_security_helper.cli.mcp_server import get_scan_results
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
+                new_callable=AsyncMock,
+                return_value=sample_full_results,
+            ),
+            patch("pathlib.Path.cwd", return_value=Path("/workspace")),
+        ):
+            result = await get_scan_results(
+                ctx=mock_ctx,
+                output_dir="/workspace/.ash/ash_output",
+                severities="urgent",
+            )
+
+        assert result["success"] is False
+        assert result["error_category"] == "invalid_parameter"
+        assert "Unknown severity" in result["error"]
 
     @pytest.mark.asyncio
     async def test_results_error_from_upstream(self, mock_ctx):
@@ -1044,8 +1203,10 @@ class TestResources:
 
         result = get_ash_help()
         assert "ASH" in result
-        assert "Bandit" in result
-        assert "Semgrep" in result
+        # Scanners are named by their config names, the names list_scanners and
+        # a config file use.
+        assert "bandit" in result
+        assert "semgrep" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1065,15 +1226,19 @@ class TestPrompts:
         assert "run_ash_scan" in result
 
     def test_run_ash_security_scan_prompt_default(self):
-        """Prompt uses cwd when no source_dir is given."""
+        """With no source_dir the prompt names the session's source directory and
+        has the agent call run_ash_scan with no source_dir, never a directory of
+        the server's own: a prompt has no request context, so it cannot tell a
+        local client from a network one, and naming the working directory steered
+        a remote agent to pass the server's tree explicitly."""
         from automated_security_helper.cli.mcp_server import run_ash_security_scan
 
         with patch("pathlib.Path.cwd", return_value=Path("/default/dir")):
-            # The function calls Path.cwd().absolute() internally
-            with patch.object(Path, "absolute", return_value=Path("/default/dir")):
-                result = run_ash_security_scan(source_dir=None)
+            result = run_ash_security_scan(source_dir=None)
 
-        assert "/default/dir" in result or str(Path("/default/dir")) in result
+        assert "this session's source directory" in result, result
+        assert "called with no source_dir" in result, result
+        assert "/default/dir" not in result, result
 
     def test_analyze_security_findings_prompt(self):
         """Prompt includes directory and analysis instructions."""

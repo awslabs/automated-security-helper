@@ -19,6 +19,8 @@ start with ``FAILED`` changes the text and leaves the row green. Both are
 asserted here for that reason.
 """
 
+import pytest
+
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
@@ -33,6 +35,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
     text_workspace_section,
     workspace_project_rows,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _project(key: str, **overrides) -> WorkspaceProjectResult:
@@ -68,6 +72,27 @@ def _row(model: AshAggregatedResults, key: str) -> dict:
 
 
 class TestIncompleteScanIsNotPassed:
+    def test_a_stale_database_is_named_in_its_own_note(self):
+        """A scanner listed only for a stale database is not in incomplete_scanners.
+
+        So the row names the database, as a single scan's console does, rather than
+        reading FAILED (incomplete) with nothing to say why.
+        """
+        model = _model(
+            _project(
+                "svc",
+                scan_incomplete=True,
+                incomplete_scanners=[],
+                stale_content_databases=[{"name": "grype-db", "scanner": "grype"}],
+            )
+        )
+
+        row = _row(model, "svc")
+
+        assert row["result"].startswith("FAILED"), row
+        assert "stale content database: grype-db" in row["detail"], row
+        assert "did not complete" not in row["detail"], row
+
     def test_incomplete_project_does_not_render_passed(self):
         """The fixture the cascade had no arm for: incomplete, no error, under threshold."""
         model = _model(
@@ -195,6 +220,28 @@ class TestTheOtherArmsAreUnchanged:
         )
 
         assert _row(model, "svc")["result"] == "FAILED"
+
+    def test_incompleteness_outranks_a_threshold_breach_like_the_exit_code(self):
+        """The row and workspace_exit_code read the project the same way.
+
+        A project both over its threshold and incomplete exits 1, as a
+        single-directory scan of it would, so its row says incomplete; the
+        Actionable column still carries the breach.
+        """
+        project = _project(
+            "svc",
+            finding_count=3,
+            actionable_finding_count=3,
+            exceeds_threshold=True,
+            scan_incomplete=True,
+            incomplete_scanners=["npm-audit"],
+        )
+        row = _row(_model(project), "svc")
+
+        assert int(workspace_exit_code([project])) == 1
+        assert row["result"] == "FAILED (incomplete)"
+        assert row["actionable"] == 3
+        assert "npm-audit" in row["detail"]
 
 
 class TestEveryRendererCarriesTheState:

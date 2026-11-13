@@ -28,10 +28,6 @@
         {
           "project": "web",
           "path": "projects/web/reports/ash.cdx.json"
-        },
-        {
-          "project": "docs",
-          "path": "projects/docs/reports/ash.cdx.json"
         }
       ],
       "missing_per_project_artifacts": [
@@ -61,10 +57,6 @@
         {
           "project": "web",
           "path": "projects/web/reports/ash.ghas.sarif"
-        },
-        {
-          "project": "docs",
-          "path": "projects/docs/reports/ash.ghas.sarif"
         }
       ],
       "missing_per_project_artifacts": [
@@ -86,10 +78,6 @@
         {
           "project": "web",
           "path": "projects/web/reports/ash.gl-dependency-scanning-report.cdx.json"
-        },
-        {
-          "project": "docs",
-          "path": "projects/docs/reports/ash.gl-dependency-scanning-report.cdx.json"
         }
       ],
       "missing_per_project_artifacts": [
@@ -111,10 +99,6 @@
         {
           "project": "web",
           "path": "projects/web/reports/ash.gl-sast-report.json"
-        },
-        {
-          "project": "docs",
-          "path": "projects/docs/reports/ash.gl-sast-report.json"
         }
       ],
       "missing_per_project_artifacts": [

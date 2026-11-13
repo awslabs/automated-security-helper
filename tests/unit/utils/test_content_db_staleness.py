@@ -64,6 +64,39 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import content_db_staleness as staleness
 
+
+@pytest.mark.unit
+def test_a_probes_stderr_excerpt_hides_a_value_straddling_its_cut(monkeypatch):
+    """A status probe's stderr is redacted BEFORE the 300-character cut.
+
+    The 292 filler characters put the cut inside the value: cut first, the
+    error would keep the fragment ``EDGE-SEC``, which the downstream
+    whole-spelling redaction cannot match.
+    """
+    from types import SimpleNamespace
+
+    value = "EDGE-SECRET-3317"
+
+    def _probe(command, **kwargs):
+        return SimpleNamespace(
+            returncode=1, stdout="", stderr="s" * 292 + value + " tail"
+        )
+
+    monkeypatch.setattr(staleness, "spawn_run", _probe)
+
+    with pytest.raises(ValueError) as raised:
+        staleness._run_json(
+            ["grype", "db", "status", "-o", "json"],
+            {},
+            ctx=staleness.ProbeContext(env={}, values=(value,)),
+        )
+
+    message = str(raised.value)
+    assert "printed nothing" in message, message
+    assert value not in message, message
+    assert "EDGE-SEC" not in message, message
+
+
 UTC = timezone.utc
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
@@ -80,17 +113,21 @@ def _executable(bin_dir: Path, name: str, source: str) -> Path:
     would leave on PATH. On POSIX that is an executable file named ``name``. On Windows a
     shebang script cannot be started at all -- ``CreateProcess`` rejects it with
     ``[WinError 193] %1 is not a valid Win32 application`` -- so the launcher is a
-    ``name.cmd`` shim, the same form npm installs. ``find_executable`` tries ``.exe``,
-    ``.bat`` and ``.cmd`` before the bare name on Windows, and ``subprocess.run`` with a
-    list starts a ``.cmd`` directly, so the scanner's own lookup and invocation are the
-    ones under test rather than a patched-out subprocess call.
+    ``name.bat`` shim, the form RubyGems installs. ``find_executable`` tries ``.exe``,
+    ``.bat`` and ``.cmd`` before the bare name on Windows, each across the whole PATH
+    before the next, and ``subprocess.run`` with a list starts a ``.bat`` directly, so
+    the scanner's own lookup and invocation are the ones under test rather than a
+    patched-out subprocess call. It is ``.bat``, not ``.cmd``, because the tool guard
+    (tests/utils/tool_guard.py) puts a ``name.bat`` stand-in on PATH for each guarded
+    tool: a ``.cmd`` shim ranks after it whatever the PATH order, so the lookup
+    answered the stand-in and the test started a guarded tool.
 
     Returns the launcher's path, which is what a scanner's ``find_executable`` would return.
     """
     script = bin_dir / f"_fake_{name}.py"
     script.write_text(source, encoding="utf-8")
     if platform.system().lower() == "windows":
-        launcher = bin_dir / f"{name}.cmd"
+        launcher = bin_dir / f"{name}.bat"
         launcher.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
         return launcher
     launcher = bin_dir / name
@@ -187,7 +224,7 @@ class StubScanner:
     def content_databases_in_use(self):
         if self._entries is not None:
             return self._entries
-        return [e for e in cdb.CONTENT_DATABASES if e.scanner == self.config.name]
+        return [e for e in cdb.CONTENT_DATABASES if self.config.name in e.readers]
 
     def content_database_probe_context(self):
         return self._ctx
@@ -289,6 +326,27 @@ CASES = {
     "semgrep-offline-rules": _ruleset_case("semgrep"),
     "opengrep-offline-rules": _ruleset_case("opengrep"),
 }
+# The one place a case's tier is written. CASES and CASE_TIERS are two dicts
+# because the suite's static tier check follows `marks=CASE_TIERS[name]` only over
+# a dict literal of marks; the assertion below names a case one of them lacks
+# instead of letting a bare KeyError error the module's collection.
+CASE_TIERS = {
+    "grype-db": pytest.mark.integration,
+    "trivy-db": pytest.mark.integration,
+    "semgrep-offline-rules": pytest.mark.unit,
+    "opengrep-offline-rules": pytest.mark.unit,
+}
+assert CASES.keys() == CASE_TIERS.keys(), (
+    "every database case needs a factory in CASES and a tier in CASE_TIERS",
+    sorted(CASES.keys() ^ CASE_TIERS.keys()),
+)
+TIERED_CASES = [pytest.param(name, marks=CASE_TIERS[name]) for name in sorted(CASES)]
+# Every case but trivy-db, whose offline default is the subject of
+# TestTheOfflineImageDefault; the tiers come from CASE_TIERS, not a second list.
+_EVERY_OTHER_DATABASE = sorted(set(CASES) - {"trivy-db"})
+EVERY_OTHER_TIERED_CASE = [
+    pytest.param(name, marks=CASE_TIERS[name]) for name in _EVERY_OTHER_DATABASE
+]
 
 
 def _over(name: str) -> timedelta:
@@ -299,7 +357,7 @@ def _under(name: str) -> timedelta:
     return cdb.get(name).max_age - timedelta(hours=1)
 
 
-@pytest.mark.parametrize("name", sorted(CASES))
+@pytest.mark.parametrize("name", TIERED_CASES)
 class TestEachDatabaseType:
     def test_stale_fails_the_scan_by_default(self, tmp_path, name):
         scanner = CASES[name](tmp_path, _over(name))
@@ -365,6 +423,7 @@ class TestEachDatabaseType:
 
 
 class TestMeasurement:
+    @pytest.mark.integration
     def test_grype_built_is_read_even_when_grype_exits_nonzero(self, tmp_path):
         built = datetime.now(UTC) - timedelta(days=10)
         exe = fake_grype(tmp_path, built)
@@ -377,7 +436,9 @@ class TestMeasurement:
         assert record.built == built.replace(microsecond=0)
         assert "grype db status" in record.measured_by
 
-    def test_trivy_without_a_database_is_unknown_and_counts_as_stale(self, tmp_path):
+    @pytest.mark.integration
+    def test_trivy_without_a_database_is_absent_and_counts_as_stale(self, tmp_path):
+        """No database at all is more than an unread age: the record says absent."""
         exe = fake_trivy(tmp_path, None)
         record = staleness.measure(
             cdb.get("trivy-db"),
@@ -385,8 +446,57 @@ class TestMeasurement:
             cdb.STALENESS_FAIL,
         )
         assert record.built is None and record.stale and record.enforced
-        assert "could not be read" in record.message()
+        assert record.absent
+        assert "does not exist" in record.message()
+        assert staleness.ContentDbAgeRecord.from_dict(record.to_dict()).absent
 
+    @pytest.mark.integration
+    def test_grype_reporting_no_database_is_absent(self, tmp_path):
+        status = {
+            "schemaVersion": "",
+            "path": str(tmp_path / "cache" / "6" / "vulnerability.db"),
+            "valid": False,
+            "error": "database does not exist",
+        }
+        exe = _executable(
+            tmp_path,
+            "grype",
+            f"import sys\nprint({json.dumps(status)!r})\nsys.exit(1)\n",
+        )
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.absent and record.stale
+        assert "does not exist" in record.message()
+
+    @pytest.mark.integration
+    def test_a_database_grype_cannot_date_but_that_exists_is_not_absent(self, tmp_path):
+        """Unreadable is stale, not absent: the file is there and grype says why not."""
+        database = tmp_path / "cache" / "6" / "vulnerability.db"
+        database.parent.mkdir(parents=True)
+        database.write_bytes(b"not sqlite")
+        status = {
+            "schemaVersion": "",
+            "path": str(database),
+            "valid": False,
+            "error": "unable to open database: file is not a database",
+        }
+        exe = _executable(
+            tmp_path,
+            "grype",
+            f"import sys\nprint({json.dumps(status)!r})\nsys.exit(1)\n",
+        )
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.stale and not record.absent
+        assert "absent" not in record.to_dict()
+
+    @pytest.mark.unit
     def test_a_missing_executable_is_unknown_not_fresh(self):
         record = staleness.measure(
             cdb.get("grype-db"),
@@ -395,6 +505,55 @@ class TestMeasurement:
         )
         assert record.stale and "not found" in (record.error or "")
 
+    @pytest.mark.integration
+    def test_grype_reporting_a_database_path_that_does_not_exist_is_absent(
+        self, tmp_path
+    ):
+        """No build time, an error that does not say so, and no file at the path."""
+        status = {
+            "schemaVersion": "",
+            "path": str(tmp_path / "cache" / "6" / "vulnerability.db"),
+            "valid": False,
+            "error": "unable to load the database",
+        }
+        exe = _executable(
+            tmp_path,
+            "grype",
+            f"import sys\nprint({json.dumps(status)!r})\nsys.exit(1)\n",
+        )
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.absent, record.error
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
+    )
+    def test_a_ruleset_with_no_directory_configured_is_absent(self, name):
+        record = staleness.measure(
+            cdb.get(name), staleness.ProbeContext(env={}), cdb.STALENESS_WARN
+        )
+        assert record.absent and "no offline rules cache directory" in record.error
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
+    )
+    def test_a_ruleset_directory_without_rules_files_is_absent(self, tmp_path, name):
+        cache = tmp_path / "rules"
+        cache.mkdir()
+        (cache / "README.txt").write_text("not a rule\n")
+        record = staleness.measure(
+            cdb.get(name),
+            staleness.ProbeContext(env={}, cache_dir=str(cache)),
+            cdb.STALENESS_WARN,
+        )
+        assert record.absent and "no rules files found" in record.error
+
+    @pytest.mark.unit
     def test_ruleset_manifest_wins_over_a_fresh_mtime(self, tmp_path):
         """A copy resets mtime to now; the recorded download time still says 40 days."""
         fetched = datetime.now(UTC) - timedelta(days=40)
@@ -407,6 +566,7 @@ class TestMeasurement:
         assert record.stale
         assert cdb.RULESET_FETCHED_AT_FILE in record.measured_by
 
+    @pytest.mark.unit
     def test_ruleset_without_a_manifest_falls_back_to_mtime_and_says_so(self, tmp_path):
         old = datetime.now(UTC) - timedelta(days=45)
         cache = ruleset_dir(tmp_path / "rules", None, mtime=old)
@@ -418,6 +578,7 @@ class TestMeasurement:
         assert record.stale
         assert "mtime" in record.measured_by and "weaker" in record.measured_by
 
+    @pytest.mark.unit
     def test_a_scanner_that_cannot_describe_its_database_is_recorded_not_skipped(self):
         class Broken(StubScanner):
             def content_database_probe_context(self):
@@ -431,6 +592,7 @@ class TestMeasurement:
         assert "boom" in (records[0].error or "")
         assert staleness.stale_content_databases(_model(sarif), enforced_only=True)
 
+    @pytest.mark.integration
     def test_a_report_with_no_runs_still_carries_the_record(self, tmp_path):
         """merge_sarif_report drops a runless report, so the record must create a run."""
         scanner = _grype_case(tmp_path, timedelta(days=10))
@@ -442,6 +604,7 @@ class TestMeasurement:
 # --------------------------------------------------------------------------- reading it back
 
 
+@pytest.mark.integration
 class TestTheRecordTravelsWithTheResults:
     def test_it_survives_a_merge_behind_another_scanner(self, tmp_path):
         """The aggregate keeps the FIRST run's properties; the record is on the invocation."""
@@ -556,6 +719,7 @@ def _run_through_executor(scanner, context) -> AshAggregatedResults:
     return _aggregate(containers[0].raw_results)
 
 
+@pytest.mark.integration
 class TestOfflineGrypeTenDaysOld:
     """The measured silent case: offline, validate-age off, a database built 10 days ago."""
 
@@ -593,6 +757,7 @@ class TestOfflineGrypeTenDaysOld:
 # --------------------------------------------------------------------------- the flag
 
 
+@pytest.mark.unit
 class TestTheFlag:
     def test_the_config_default_is_fail(self):
         assert AshConfig(project_name="x").content_db_staleness == "fail"
@@ -624,11 +789,19 @@ class TestTheFlag:
             ([], None),
             (
                 ["--allow-stale-content-db"],
-                ["content_db_staleness=warn", "content_db_staleness_overrides=[]"],
+                [
+                    "content_db_staleness=warn",
+                    "content_db_staleness_overrides=[]",
+                    "content_db_staleness_offline_image_default=false",
+                ],
             ),
             (
                 ["--no-allow-stale-content-db"],
-                ["content_db_staleness=fail", "content_db_staleness_overrides=[]"],
+                [
+                    "content_db_staleness=fail",
+                    "content_db_staleness_overrides=[]",
+                    "content_db_staleness_offline_image_default=false",
+                ],
             ),
         ],
     )
@@ -682,6 +855,7 @@ def _relax(database: str, expiration: str = "2999-01-01", policy: str = "warn") 
 
 
 class TestPerDatabaseOverrides:
+    @pytest.mark.integration
     def test_the_default_has_no_overrides_and_still_fails_a_stale_database(
         self, tmp_path
     ):
@@ -702,6 +876,7 @@ class TestPerDatabaseOverrides:
         assert "policy_source" not in records[0].to_dict()
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
+    @pytest.mark.integration
     def test_an_override_relaxes_only_the_database_it_names(self, tmp_path):
         overrides = _overrides(_relax("trivy-db"))
         trivy = _trivy_case(tmp_path, _over("trivy-db"))
@@ -738,6 +913,7 @@ class TestPerDatabaseOverrides:
         ]
         assert _exit_code(tmp_path, both) == 1
 
+    @pytest.mark.integration
     def test_an_expired_override_is_ignored_with_a_warning(self, tmp_path, caplog):
         overrides = _overrides(_relax("trivy-db", expiration="2020-01-01"))
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
@@ -753,6 +929,7 @@ class TestPerDatabaseOverrides:
             for m in caplog.messages
         ), caplog.messages
 
+    @pytest.mark.unit
     def test_expiry_is_midnight_utc_on_the_expiration_date(self):
         (entry,) = _overrides(_relax("trivy-db", expiration="2026-10-11"))
         assert entry.expires_at == datetime(2026, 10, 11, tzinfo=UTC)
@@ -760,6 +937,7 @@ class TestPerDatabaseOverrides:
         assert entry.is_expired(datetime(2026, 10, 11, 0, 0, 0, tzinfo=UTC))
         assert entry.is_expired(datetime(2026, 10, 12, tzinfo=UTC))
 
+    @pytest.mark.integration
     def test_an_override_can_also_tighten(self, tmp_path):
         overrides = _overrides(_relax("trivy-db", policy="fail"))
         scanner = _trivy_case(tmp_path, _over("trivy-db"))
@@ -770,6 +948,7 @@ class TestPerDatabaseOverrides:
         assert record.enforced
         assert _exit_code(tmp_path, _model(sarif)) == 1
 
+    @pytest.mark.unit
     @pytest.mark.parametrize(
         "entry,needle",
         [
@@ -785,6 +964,7 @@ class TestPerDatabaseOverrides:
             _overrides(entry)
         assert needle in str(raised.value)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("missing", ["expiration", "reason", "database", "policy"])
     def test_every_field_is_required(self, missing):
         entry = _relax("trivy-db")
@@ -793,11 +973,13 @@ class TestPerDatabaseOverrides:
             _overrides(entry)
         assert missing in str(raised.value)
 
+    @pytest.mark.unit
     def test_one_entry_per_database(self):
         with pytest.raises(ValueError) as raised:
             _overrides(_relax("trivy-db"), _relax("trivy-db", policy="fail"))
         assert "more than one" in str(raised.value)
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("allow_stale,expected", [(False, "fail"), (True, "warn")])
     def test_either_form_of_the_flag_clears_the_overrides(self, allow_stale, expected):
         from_file = AshConfig(
@@ -810,6 +992,7 @@ class TestPerDatabaseOverrides:
         assert overridden.content_db_staleness_overrides == []
         assert staleness.resolve_policy(overridden) == expected
 
+    @pytest.mark.unit
     def test_a_runtime_patch_cannot_add_an_override(self):
         from automated_security_helper.config.ash_config import RuntimeOverridesConfig
 
@@ -817,6 +1000,7 @@ class TestPerDatabaseOverrides:
             "/content_db_staleness_overrides" in RuntimeOverridesConfig().denied_paths
         )
 
+    @pytest.mark.unit
     def test_the_config_validator_accepts_the_key(self):
         from automated_security_helper.config.config_validator import ConfigValidator
 
@@ -824,6 +1008,7 @@ class TestPerDatabaseOverrides:
             "content_db_staleness_overrides" in ConfigValidator.VALID_TOP_LEVEL_FIELDS
         )
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("relaxed,exit_code", [("trivy-db", 1), ("grype-db", 0)])
     def test_the_executor_applies_the_overrides_from_the_config(
         self, tmp_path, offline_grype, test_plugin_context, relaxed, exit_code
@@ -839,9 +1024,225 @@ class TestPerDatabaseOverrides:
         ]
 
 
+# --------------------------------------------------------------------------- offline image
+
+
+def _offline_image_env(monkeypatch, value: str | None = "YES") -> None:
+    """The variable the image sets from its OFFLINE build argument, as an image has it."""
+    if value is None:
+        monkeypatch.delenv(cdb.OFFLINE_IMAGE_ENV, raising=False)
+    else:
+        monkeypatch.setenv(cdb.OFFLINE_IMAGE_ENV, value)
+
+
+class TestTheOfflineImageDefault:
+    """An image built with OFFLINE=YES holds trivy-db, and only trivy-db, to warn.
+
+    Such an image carries the trivy database it was built with, and trivy's own 24h
+    bound would fail every scan from a day after the build. The rule: the
+    scan stays green and every report records the stale database; grype-db and the
+    offline rulesets keep ``fail``. The scope is fixed in code, the trigger is the
+    image's own environment, and the config can only turn it off.
+    """
+
+    @pytest.mark.unit
+    def test_it_names_exactly_trivy_db(self):
+        assert dict(cdb.OFFLINE_IMAGE_POLICIES) == {"trivy-db": cdb.STALENESS_WARN}
+        assert cdb.OFFLINE_IMAGE_ENV == "ASH_OFFLINE_AT_BUILD_TIME"
+
+    @pytest.mark.integration
+    def test_a_stale_trivy_db_warns_and_every_report_says_why(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+        )
+        assert record.stale and not record.enforced
+        assert record.policy == cdb.STALENESS_WARN
+        assert "OFFLINE=YES" in (record.policy_source or "")
+        assert "OFFLINE=YES" in record.message()
+        assert "ash build-image --offline" in record.message()
+
+        model = _model(sarif)
+        assert _exit_code(tmp_path, model) == 0
+        reports = _reports(model)
+        notes = _notifications(reports["sarif"])
+        assert [n["level"] for n in notes] == ["warning"]
+        assert "OFFLINE=YES" in notes[0]["message"]["text"]
+        assert "### Stale content databases" in reports["markdown"]
+        assert "OFFLINE=YES" in reports["markdown"]
+        assert "OFFLINE=YES" in reports["text"]
+        (flat,) = json.loads(reports["flat"])["content_databases"]
+        assert (flat["name"], flat["policy"], flat["enforced"]) == (
+            "trivy-db",
+            "warn",
+            False,
+        )
+        assert "OFFLINE=YES" in flat["policy_source"]
+
+    @pytest.mark.parametrize("name", EVERY_OTHER_TIERED_CASE)
+    def test_every_other_database_still_fails(self, tmp_path, name):
+        scanner = CASES[name](tmp_path, _over(name))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+        )
+        assert record.enforced and record.policy_source is None
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    @pytest.mark.integration
+    def test_outside_an_offline_image_trivy_db_still_fails(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(scanner, sarif, cdb.STALENESS_FAIL)
+        assert record.enforced and record.policy_source is None
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    @pytest.mark.integration
+    def test_a_fresh_trivy_db_is_not_reported(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _under("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_FAIL, offline_image=True
+        )
+        assert not record.stale
+        assert staleness.stale_content_databases(_model(sarif)) == []
+
+    @pytest.mark.integration
+    def test_an_override_entry_outranks_it(self, tmp_path):
+        overrides = _overrides(_relax("trivy-db", policy="fail"))
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner,
+            sarif,
+            cdb.STALENESS_FAIL,
+            overrides=overrides,
+            offline_image=True,
+        )
+        assert record.enforced
+        assert "content_db_staleness_overrides entry" in (record.policy_source or "")
+
+    @pytest.mark.integration
+    def test_an_expired_override_falls_back_to_it_and_says_so(self, tmp_path, caplog):
+        overrides = _overrides(
+            _relax("trivy-db", policy="fail", expiration="2020-01-01")
+        )
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        with caplog.at_level("WARNING"):
+            (record,) = staleness.assess_scanner(
+                scanner,
+                sarif,
+                cdb.STALENESS_FAIL,
+                overrides=overrides,
+                offline_image=True,
+            )
+        assert not record.enforced and "OFFLINE=YES" in (record.policy_source or "")
+        (expired,) = [m for m in caplog.messages if "expired at" in m]
+        assert "OFFLINE=YES" in expired
+        assert "content_db_staleness (fail)" not in expired
+
+    @pytest.mark.integration
+    def test_under_warn_it_changes_nothing(self, tmp_path):
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.STALENESS_WARN, offline_image=True
+        )
+        assert record.policy == cdb.STALENESS_WARN and record.policy_source is None
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "env,field,expected",
+        [
+            (None, True, False),
+            ("NO", True, False),
+            ("", True, False),
+            ("YES", True, True),
+            ("yes", True, True),
+            ("YES", False, False),
+        ],
+    )
+    def test_only_the_image_turns_it_on_and_the_config_can_only_turn_it_off(
+        self, monkeypatch, env, field, expected
+    ):
+        _offline_image_env(monkeypatch, env)
+        config = AshConfig(
+            project_name="x", content_db_staleness_offline_image_default=field
+        )
+        assert staleness.resolve_offline_image_default(config) is expected
+
+    @pytest.mark.unit
+    def test_the_config_default_leaves_it_on(self, monkeypatch):
+        _offline_image_env(monkeypatch)
+        assert AshConfig(project_name="x").content_db_staleness_offline_image_default
+        assert get_default_config().content_db_staleness_offline_image_default
+        assert staleness.resolve_offline_image_default(AshConfig(project_name="x"))
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("allow_stale", [False, True])
+    def test_either_form_of_the_flag_turns_it_off(self, monkeypatch, allow_stale):
+        _offline_image_env(monkeypatch)
+        overridden = apply_config_overrides(
+            AshConfig(project_name="x"),
+            cdb.content_db_staleness_flag_overrides(allow_stale=allow_stale),
+        )
+        assert overridden.content_db_staleness_offline_image_default is False
+        assert staleness.resolve_offline_image_default(overridden) is False
+
+    @pytest.mark.unit
+    def test_a_runtime_patch_cannot_turn_it_back_on(self):
+        from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+
+        assert (
+            "/content_db_staleness_offline_image_default"
+            in RuntimeOverridesConfig().denied_paths
+        )
+
+    @pytest.mark.unit
+    def test_the_config_validator_accepts_the_key(self):
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        assert (
+            "content_db_staleness_offline_image_default"
+            in ConfigValidator.VALID_TOP_LEVEL_FIELDS
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("env,enforced", [("YES", False), (None, True)])
+    def test_the_executor_applies_it_from_the_environment(
+        self, tmp_path, monkeypatch, test_plugin_context, env, enforced
+    ):
+        from automated_security_helper.core.phases.scanner_executor import (
+            ScannerExecutor,
+        )
+
+        _offline_image_env(monkeypatch, env)
+        test_plugin_context.config = get_default_config()
+        scanner = _trivy_case(tmp_path, _over("trivy-db"))
+        sarif = _sarif(scanner.config.name)
+        executor = ScannerExecutor(
+            plugin_context=test_plugin_context, progress_display=None, scanner_tasks=[]
+        )
+        executor._assess_content_databases(scanner, sarif)
+        (record,) = staleness.content_db_records(_model(sarif))
+        assert record.stale and record.enforced is enforced
+
+    @pytest.mark.unit
+    def test_the_image_sets_it_from_its_offline_build_argument_only(self):
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assignments = re.findall(
+            rf"^\s*ENV\s+{cdb.OFFLINE_IMAGE_ENV}=(\S+)", dockerfile, re.MULTILINE
+        )
+        assert assignments == ['"${OFFLINE}"'], assignments
+        assert re.search(r'^ARG OFFLINE="NO"$', dockerfile, re.MULTILINE)
+
+
 # --------------------------------------------------------------------------- the registry
 
 
+@pytest.mark.unit
 class TestEveryDatabaseIsBoundedAndMeasurable:
     def test_every_entry_declares_a_bound_its_source_and_a_refresh(self):
         for entry in cdb.CONTENT_DATABASES:
@@ -868,6 +1269,7 @@ class TestEveryDatabaseIsBoundedAndMeasurable:
             assert f'"${{{env}}}/{cdb.RULESET_FETCHED_AT_FILE}"' in dockerfile, env
 
 
+@pytest.mark.unit
 class TestNoSecondLiteral:
     """The new bounds are declared once, like grype's (see test_content_databases.py)."""
 
@@ -899,6 +1301,7 @@ class TestNoSecondLiteral:
         assert offenders == [], offenders
 
 
+@pytest.mark.unit
 class TestNoScannerReadsAnUndeclaredDatabase:
     """The drift gate for scanners: a new offline-cache scanner must declare its database."""
 
@@ -923,7 +1326,7 @@ class TestNoScannerReadsAnUndeclaredDatabase:
         return found
 
     def test_every_cache_scanner_is_declared_or_explained(self):
-        declared = {e.scanner for e in cdb.CONTENT_DATABASES}
+        declared = {name for e in cdb.CONTENT_DATABASES for name in e.readers}
         explained = set(cdb.SCANNERS_WITHOUT_CONTENT_DATABASE)
         assert not declared & explained
         undeclared = sorted(set(self._cache_scanners()) - declared - explained)
@@ -935,7 +1338,7 @@ class TestNoScannerReadsAnUndeclaredDatabase:
 
     def test_every_declared_scanner_exists(self):
         scanners = self._cache_scanners()
-        for name in {e.scanner for e in cdb.CONTENT_DATABASES} | set(
+        for name in {n for e in cdb.CONTENT_DATABASES for n in e.readers} | set(
             cdb.SCANNERS_WITHOUT_CONTENT_DATABASE
         ):
             assert name in scanners, name
@@ -943,7 +1346,7 @@ class TestNoScannerReadsAnUndeclaredDatabase:
     def test_the_gate_can_fail(self):
         """A CACHE_FLAGS scanner nobody declared would be reported."""
         scanners = set(self._cache_scanners()) | {"a-new-db-scanner"}
-        declared = {e.scanner for e in cdb.CONTENT_DATABASES}
+        declared = {name for e in cdb.CONTENT_DATABASES for name in e.readers}
         explained = set(cdb.SCANNERS_WITHOUT_CONTENT_DATABASE)
         assert sorted(scanners - declared - explained) == ["a-new-db-scanner"]
 
@@ -969,6 +1372,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         )
         return _model(sarif)
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("gate", [True, False])
     def test_it_is_carried_once_in_its_own_field(self, tmp_path, gate):
         from automated_security_helper.core.unified_metrics import ScannerMetrics
@@ -988,6 +1392,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         assert [d["name"] for d in payload["stale_content_databases"]] == ["grype-db"]
         json.dumps(payload)
 
+    @pytest.mark.integration
     def test_a_stale_scanner_that_also_lost_targets_keeps_its_row(self, tmp_path):
         from automated_security_helper.core.unified_metrics import ScannerMetrics
         from automated_security_helper.interactions.run_ash_scan import (
@@ -1007,11 +1412,13 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         assert "4 of 10 targets unevaluated" in got.scanners[0][1]
         assert [r.name for r in got.stale_content_databases] == ["grype-db"]
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("gate", [True, False])
     def test_it_exits_1_with_the_gate_on_or_off(self, tmp_path, gate):
         model = self._stale_model(tmp_path)
         assert _exit_code(tmp_path, model, fail_on_incomplete_scanners=gate) == 1
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("gate", [True, False])
     def test_the_opt_out_still_passes_with_the_gate_on_or_off(self, tmp_path, gate):
         from automated_security_helper.interactions.run_ash_scan import (
@@ -1023,6 +1430,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=[]):
             assert not scan_incompleteness(model, gate=gate)
 
+    @pytest.mark.integration
     def test_the_message_gives_the_refresh_advice_and_not_the_install_advice(
         self, tmp_path, capsys
     ):
@@ -1040,6 +1448,7 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
         assert "Install the missing" not in out
         assert "exception" not in out
 
+    @pytest.mark.unit
     def test_the_mcp_coverage_check_sees_it(self):
         from automated_security_helper.core.resource_management.scan_tracking import (
             coverage_has_gap,
@@ -1047,3 +1456,379 @@ class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
 
         assert coverage_has_gap({"stale_content_databases": [{"name": "grype-db"}]})
         assert not coverage_has_gap({"stale_content_databases": []})
+
+
+# --------------------------------------------------------------------------- two readers
+
+
+@pytest.mark.integration
+class TestEveryScannerThatReadAStaleDatabaseIsNamed:
+    """trivy and trivy-repo both read trivy-db. Records were kept one per database, so
+    when both read a stale one, only one scanner was named in every report."""
+
+    @staticmethod
+    def _both(tmp_path, trivy_age, repo_age, policy=cdb.STALENESS_FAIL):
+        reports = []
+        for name, age in (("trivy", trivy_age), ("trivy-repo", repo_age)):
+            (tmp_path / name).mkdir()
+            exe = fake_trivy(tmp_path / name, datetime.now(UTC) - age)
+            scanner = StubScanner(
+                name,
+                staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            )
+            sarif = _sarif(name)
+            staleness.assess_scanner(scanner, sarif, policy)
+            reports.append(sarif)
+        return _aggregate(*reports)
+
+    def test_both_scanners_are_named(self, tmp_path):
+        model = self._both(tmp_path, _over("trivy-db"), _over("trivy-db"))
+        pairs = [("trivy-db", "trivy"), ("trivy-db", "trivy-repo")]
+        assert [
+            (r.name, r.scanner)
+            for r in staleness.stale_content_databases(model, enforced_only=True)
+        ] == pairs
+        assert [(r.name, r.scanner) for r in staleness.content_db_records(model)] == (
+            pairs
+        )
+        assert _exit_code(tmp_path, model) == 1
+
+        reports = _reports(model)
+        stale_md = reports["markdown"].split("### Stale content databases", 1)[1]
+        assert "(trivy, failed the scan)" in stale_md
+        assert "(trivy-repo, failed the scan)" in stale_md
+        assert reports["text"].count("[FAILED THE SCAN]") == 2
+        flat = json.loads(reports["flat"])["content_databases"]
+        assert [(d["name"], d["scanner"], d["enforced"]) for d in flat] == [
+            ("trivy-db", "trivy", True),
+            ("trivy-db", "trivy-repo", True),
+        ]
+        assert len(_notifications(reports["sarif"])) == 2
+
+    def test_a_fresh_reader_does_not_hide_a_stale_one(self, tmp_path):
+        model = self._both(tmp_path, _under("trivy-db"), _over("trivy-db"))
+        assert [(r.scanner, r.stale) for r in staleness.content_db_records(model)] == [
+            ("trivy", False),
+            ("trivy-repo", True),
+        ]
+        assert [r.scanner for r in staleness.stale_content_databases(model, True)] == [
+            "trivy-repo"
+        ]
+        flat = json.loads(_reports(model)["flat"])["content_databases"]
+        assert [(d["scanner"], d["stale"], d["enforced"]) for d in flat] == [
+            ("trivy", False, False),
+            ("trivy-repo", True, True),
+        ]
+
+    @pytest.mark.parametrize("stale_first", [True, False])
+    def test_one_scanners_stale_record_is_never_hidden_behind_its_fresh_one(
+        self, tmp_path, stale_first
+    ):
+        """One scanner measured per target type writes the database twice."""
+        reports = []
+        ages = [_over("trivy-db"), _under("trivy-db")]
+        for i, age in enumerate(ages if stale_first else reversed(ages)):
+            (tmp_path / str(i)).mkdir()
+            exe = fake_trivy(tmp_path / str(i), datetime.now(UTC) - age)
+            scanner = StubScanner(
+                "trivy",
+                staleness.ProbeContext(env=dict(os.environ), executable=str(exe)),
+            )
+            sarif = _sarif("trivy")
+            staleness.assess_scanner(scanner, sarif, cdb.STALENESS_FAIL)
+            reports.append(sarif)
+        model = _aggregate(*reports)
+        (record,) = staleness.content_db_records(model)
+        assert record.stale and record.scanner == "trivy"
+        (stale,) = staleness.stale_content_databases(model, enforced_only=True)
+        assert stale.scanner == "trivy"
+        assert _exit_code(tmp_path, model) == 1
+
+
+# --------------------------------------------------------------------------- future-dated
+
+
+class TestABuildTimeInTheFutureIsNotFresh:
+    """``now - built`` is negative for a build time in the future, which every bound
+    admits, so a database claiming to be built tomorrow read as fresh indefinitely."""
+
+    @pytest.mark.unit
+    def test_is_stale_refuses_a_build_time_past_the_clock_skew_allowance(self):
+        entry = cdb.get("trivy-db")
+        now = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
+        allowance = cdb.CLOCK_SKEW_ALLOWANCE
+        assert not cdb.is_stale(entry, now + allowance, now)
+        assert cdb.is_stale(entry, now + allowance + timedelta(seconds=1), now)
+        assert cdb.is_stale(entry, now + timedelta(days=365), now)
+        assert not cdb.is_stale(entry, now - timedelta(hours=1), now)
+
+    @pytest.mark.parametrize("name", TIERED_CASES)
+    def test_it_fails_the_scan_and_says_why(self, tmp_path, name):
+        scanner = CASES[name](tmp_path, -timedelta(days=2))
+        sarif = _sarif(scanner.config.name)
+        (record,) = staleness.assess_scanner(
+            scanner, sarif, cdb.DEFAULT_STALENESS_POLICY
+        )
+        assert record.stale and record.enforced
+        message = record.message()
+        assert "ahead of this host's clock" in message, message
+        assert "cannot be shown to be inside" in message, message
+        assert _exit_code(tmp_path, _model(sarif)) == 1
+
+    @pytest.mark.integration
+    def test_a_small_skew_is_tolerated(self, tmp_path):
+        scanner = _trivy_case(tmp_path, -timedelta(minutes=1))
+        (record,) = staleness.assess_scanner(
+            scanner, _sarif("trivy-repo"), cdb.DEFAULT_STALENESS_POLICY
+        )
+        assert not record.stale
+
+
+# --------------------------------------------------------------------------- spellings
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value, built",
+    [
+        ("YES", True),
+        ("yes", True),
+        ("true", True),
+        ("TRUE", True),
+        ("1", True),
+        ("NO", False),
+        ("false", False),
+        ("0", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_the_offline_image_is_recognized_by_every_spelling_ash_offline_takes(
+    monkeypatch, value, built
+):
+    """``built_offline`` takes the spellings ``ASH_OFFLINE`` does, so an image whose
+    build argument is ``true`` or ``1`` is the offline image too."""
+    from automated_security_helper.core.constants import is_offline_mode
+
+    environ = {} if value is None else {cdb.OFFLINE_IMAGE_ENV: value}
+    assert cdb.built_offline(environ) is built
+    if value is None:
+        monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    else:
+        monkeypatch.setenv("ASH_OFFLINE", value)
+    assert is_offline_mode() is built
+
+
+# --------------------------------------------------------------------------- what the probes read
+
+#: trivy's config and cache resolution around ``trivy version``, as measured at 0.75.0:
+#: ``--config FILE`` loads FILE (an error when it is missing), and without the flag
+#: ``trivy.yaml`` in the working directory, never a parent's. The cache is
+#: ``--cache-dir``, else TRIVY_CACHE_DIR, else the config's ``cache.dir``, else the
+#: default. Config files here are JSON, which is YAML.
+FAKE_TRIVY = """\
+import json, os, sys
+args = sys.argv[1:]
+def flag(name):
+    for i, arg in enumerate(args):
+        if arg == name and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith(name + "="):
+            return arg.split("=", 1)[1]
+    return None
+path = flag("--config")
+explicit = path is not None
+path = path if explicit else "trivy.yaml"
+config = {}
+if os.path.isfile(path):
+    text = open(path, encoding="utf-8").read()
+    config = json.loads(text) if text.strip() else {}
+elif explicit:
+    sys.exit("config file not found: " + path)
+cache = (
+    flag("--cache-dir")
+    or os.environ.get("TRIVY_CACHE_DIR")
+    or (config.get("cache") or {}).get("dir")
+    or os.path.join(os.path.expanduser("~"), ".cache", "trivy")
+)
+with open(os.path.join(cache, "db", "metadata.json"), encoding="utf-8") as f:
+    print(json.dumps({"Version": "0.75.0", "VulnerabilityDB": json.load(f)}))
+"""
+
+#: grype's around ``grype db status``, as measured at 0.120.1: ``-c FILE`` loads only
+#: FILE; without it, ``.grype.yaml`` or ``.grype/config.yaml`` in the working
+#: directory. The cache is GRYPE_DB_CACHE_DIR, else the config's ``db.cache-dir``,
+#: else the default.
+FAKE_GRYPE = """\
+import json, os, sys
+args = sys.argv[1:]
+path = None
+for i, arg in enumerate(args):
+    if arg in ("-c", "--config") and i + 1 < len(args):
+        path = args[i + 1]
+if path is None:
+    for candidate in (".grype.yaml", os.path.join(".grype", "config.yaml")):
+        if os.path.isfile(candidate):
+            path = candidate
+            break
+config = {}
+if path is not None:
+    text = open(path, encoding="utf-8").read()
+    config = json.loads(text) if text.strip() else {}
+cache = (
+    os.environ.get("GRYPE_DB_CACHE_DIR")
+    or (config.get("db") or {}).get("cache-dir")
+    or os.path.join(os.path.expanduser("~"), ".cache", "grype", "db")
+)
+built = open(os.path.join(cache, "6", "built.txt"), encoding="utf-8").read().strip()
+db = os.path.join(cache, "6", "vulnerability.db")
+print(json.dumps({"built": built, "path": db, "valid": True}))
+"""
+
+
+def _plant_trivy(cache: Path, when: datetime) -> None:
+    (cache / "db").mkdir(parents=True, exist_ok=True)
+    stamp = _ts(when)
+    (cache / "db" / "metadata.json").write_text(
+        json.dumps(
+            {
+                "Version": 2,
+                "NextUpdate": stamp,
+                "UpdatedAt": stamp,
+                "DownloadedAt": stamp,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _plant_grype(cache: Path, when: datetime) -> None:
+    (cache / "6").mkdir(parents=True, exist_ok=True)
+    (cache / "6" / "built.txt").write_text(_ts(when), encoding="utf-8")
+
+
+@pytest.mark.integration
+class TestTheProbeReadsNothingTheRepositoryWrote:
+    """``cd repo && ash --offline`` with a planted config cannot age a stale database.
+
+    Measured with trivy 0.75.0 and grype 0.120.1: run from a directory holding a
+    ``trivy.yaml`` with ``cache.dir``, or a ``.grype.yaml`` or ``.grype/config.yaml``
+    with ``db.cache-dir``, naming a planted database built "2099-01-01", the probes
+    ASH ran after the scan reported that date. The fake tools below resolve config
+    and cache the way the real ones were measured to; the same case against the
+    real binaries is tests/integration/scanners/test_content_db_probe_real_tools.py.
+    """
+
+    PLANTED = datetime(2099, 1, 1, tzinfo=UTC)
+
+    @pytest.fixture
+    def repo(self, tmp_path, monkeypatch):
+        from automated_security_helper.utils import subprocess_utils
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        _executable(bin_dir, "trivy", FAKE_TRIVY)
+        _executable(bin_dir, "grype", FAKE_GRYPE)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
+        home = tmp_path / "home"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
+        for name in ("XDG_CACHE_HOME", "TRIVY_CACHE_DIR", "GRYPE_DB_CACHE_DIR"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("ASH_OFFLINE", "YES")
+        source = tmp_path / "repo"
+        source.mkdir()
+        # ASH's own working directory is the scanned repository.
+        monkeypatch.chdir(source)
+        return source
+
+    @staticmethod
+    def _context(source: Path):
+        from automated_security_helper.base.plugin_context import PluginContext
+
+        return PluginContext(
+            source_dir=source,
+            output_dir=source.parent / "out",
+            config=get_default_config(),
+        )
+
+    def _assert_fresh(self, record, fresh: datetime) -> None:
+        assert record.built is not None, record.error
+        assert record.built != self.PLANTED, "the probe read the repository's database"
+        assert abs(record.built - fresh) < timedelta(seconds=2)
+
+    def test_trivy_yaml(self, repo, monkeypatch):
+        from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+            TrivyRepoScanner,
+            TrivyRepoScannerConfig,
+        )
+        from automated_security_helper.utils.content_db_refresh import (
+            default_cache_dir,
+        )
+
+        fresh = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+        _plant_trivy(default_cache_dir("trivy"), fresh)
+        planted = repo.parent / "planted-trivy"
+        _plant_trivy(planted, self.PLANTED)
+        (repo / "trivy.yaml").write_text(json.dumps({"cache": {"dir": str(planted)}}))
+
+        scanner = TrivyRepoScanner(
+            context=self._context(repo), config=TrivyRepoScannerConfig()
+        )
+        scanner._process_config_options()
+        monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+        # A run that ended: the scanner refuses a response with no exit code,
+        # so the stand-in answers as a finished tool does, with nothing to read.
+        monkeypatch.setattr(
+            scanner,
+            "_run_subprocess",
+            lambda command, **kw: {"returncode": 0, "stdout": "", "stderr": ""},
+        )
+        scanner.scan(repo, "source")
+        record = staleness.measure(
+            cdb.get("trivy-db"),
+            scanner.content_database_probe_context(),
+            cdb.STALENESS_FAIL,
+        )
+        self._assert_fresh(record, fresh)
+
+    @pytest.mark.parametrize("name", [".grype.yaml", ".grype/config.yaml"])
+    def test_grype_config(self, repo, name):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+            GrypeScanner,
+            GrypeScannerConfig,
+        )
+        from automated_security_helper.utils.content_db_refresh import (
+            default_cache_dir,
+        )
+
+        fresh = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+        _plant_grype(default_cache_dir("grype"), fresh)
+        planted = repo.parent / "planted-grype"
+        _plant_grype(planted, self.PLANTED)
+        config = repo / name
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps({"db": {"cache-dir": str(planted)}}))
+
+        scanner = GrypeScanner(context=self._context(repo), config=GrypeScannerConfig())
+        scanner._process_config_options()
+        scanner._execute_scan(repo, "source", [])
+        record = staleness.measure(
+            cdb.get("grype-db"),
+            scanner.content_database_probe_context(),
+            cdb.STALENESS_FAIL,
+        )
+        self._assert_fresh(record, fresh)
+
+
+@pytest.mark.unit
+def test_the_probes_pass_the_same_empty_config_the_refresh_does():
+    """One object, from the module both import (utils/content_db_shared.py), so
+    no copy can drift; the file it names ships with ASH."""
+    from automated_security_helper.utils import content_db_refresh, content_db_shared
+
+    assert staleness.EMPTY_TOOL_CONFIG is content_db_shared.EMPTY_TOOL_CONFIG
+    assert content_db_refresh.EMPTY_TOOL_CONFIG is content_db_shared.EMPTY_TOOL_CONFIG
+    assert content_db_shared.EMPTY_TOOL_CONFIG.is_file()

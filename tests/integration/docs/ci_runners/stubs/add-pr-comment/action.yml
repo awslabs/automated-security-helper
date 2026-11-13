@@ -1,0 +1,98 @@
+# Stands in for mshick/add-pr-comment when the docs' workflows run under act in the Docs
+# CI Runners workflow. It posts nothing and calls no API. Like the real action it fails
+# when it is given neither a message nor a message file, or a message file that does not
+# exist, and does nothing without a pull request or issue number; otherwise it records
+# the message files it was given and their sha256 in the directory DOCTEST_STUB_RECORDS
+# names, which only the runner tests set.
+name: add-pr-comment stand-in
+description: Records the comment it is given instead of posting it.
+inputs:
+  message:
+    description: The comment text.
+    required: false
+    default: ""
+  message-path:
+    description: A file, or newline-separated files, holding the comment text.
+    required: false
+    default: ""
+  message-id:
+    description: Accepted and ignored.
+    required: false
+    default: add-pr-comment
+  issue:
+    description: The issue or pull request number, when the event has none.
+    required: false
+    default: ""
+  repo-token:
+    description: Accepted and ignored; the stand-in calls no API.
+    required: false
+    default: ""
+  refresh-message-position:
+    description: Accepted and ignored.
+    required: false
+    default: "false"
+  allow-repeats:
+    description: Accepted and ignored.
+    required: false
+    default: "false"
+outputs:
+  comment-created:
+    description: Always false; nothing is posted.
+    value: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        STUB_MESSAGE: ${{ inputs.message }}
+        STUB_MESSAGE_PATH: ${{ inputs.message-path }}
+        STUB_ISSUE: ${{ inputs.issue }}
+      run: |
+        python3 -I - <<'PYTHON'
+        import glob
+        import hashlib
+        import json
+        import os
+        import sys
+        from pathlib import Path
+
+        records = os.environ.get("DOCTEST_STUB_RECORDS", "")
+        if not records:
+            sys.exit("DOCTEST_STUB_RECORDS is not set: this stand-in runs only under the docs CI-runner tests")
+        message = os.environ.get("STUB_MESSAGE", "")
+        patterns = [p.strip() for p in os.environ.get("STUB_MESSAGE_PATH", "").splitlines() if p.strip()]
+        if not message and not patterns:
+            sys.exit("Either message or message-path input is required")
+        workspace = Path(os.environ.get("GITHUB_WORKSPACE", "."))
+        files = {}
+        for pattern in patterns:
+            matches = sorted(glob.glob(str(workspace / pattern), recursive=True))
+            if not matches:
+                sys.exit(f"no file matches message-path {pattern}")
+            for match in matches:
+                relative = os.path.relpath(match, workspace)
+                files[Path(relative).as_posix()] = hashlib.sha256(Path(match).read_bytes()).hexdigest()
+        issue = os.environ.get("STUB_ISSUE", "")
+        if not issue:
+            try:
+                event = json.loads(Path(os.environ.get("GITHUB_EVENT_PATH", "")).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                event = {}
+            number = (event.get("pull_request") or {}).get("number") or (event.get("issue") or {}).get("number")
+            issue = str(number) if number else ""
+        if not issue:
+            print("no issue number found, use a pull_request event, a pull event, or provide an issue input")
+            sys.exit(0)
+        record = {
+            "action": "mshick/add-pr-comment",
+            "job": os.environ.get("GITHUB_JOB", ""),
+            "issue": int(issue),
+            "message": message,
+            "files": files,
+        }
+        out = Path(records)
+        out.mkdir(parents=True, exist_ok=True)
+        number = len(list(out.glob("add-pr-comment-*.json"))) + 1
+        (out / f"add-pr-comment-{number}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        print(f"recorded the comment for #{issue} as comment {number}")
+        PYTHON

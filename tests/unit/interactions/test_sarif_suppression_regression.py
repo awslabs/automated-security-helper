@@ -41,6 +41,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_sarif_result(scanner_name: str, level: Level, suppressed: bool) -> Result:
     """Build a minimal SARIF Result with optional suppression."""

@@ -1,0 +1,67 @@
+{% from "partials/ash-icons.html" import icon %}
+{% set integration_page = page and 'Integrate ASH' in (page.ancestors | map(attribute='title') | list) %}
+<a class="ash-skip" href="#main-content">Skip to content</a>
+<header class="md-header ash-header" data-md-component="header">
+  <nav class="ash-header__inner md-grid" aria-label="Main navigation">
+    <a class="ash-brand" href="{{ nav.homepage.url | url }}" aria-label="ASH home" data-md-component="logo">
+      <span class="ash-brand__name">ASH<span class="ash-brand__subtitle">Automated Security Helper</span></span>
+    </a>
+    <div class="ash-header__links">
+      <a href="{{ nav.homepage.url | url }}" {% if page.is_homepage %}aria-current="page"{% endif %}>Overview</a>
+      <a href="{{ 'docs/quick-start-guide/' | url }}" {% if page and not page.is_homepage and not integration_page %}aria-current="true"{% endif %}>Documentation</a>
+      <a href="{{ nav.homepage.url | url }}#scanners">Scanners</a>
+      <a href="{{ 'integrations/' | url }}" {% if integration_page %}aria-current="true"{% endif %}>Integrations</a>
+    </div>
+    <div class="ash-sr-only md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">{{ config.site_name }}</div>
+        <div class="md-header__topic" data-md-component="header-topic">{{ page.title if page else config.site_name }}</div>
+      </div>
+    </div>
+    <div class="ash-header__actions">
+      {% if page and not page.is_homepage %}
+        <button class="ash-handbook-toggle" type="button" data-ash-handbook aria-label="Browse all documentation" aria-haspopup="dialog" aria-controls="ash-handbook" aria-expanded="false" disabled>{{ icon("book-open-variant") }}<span>Contents</span></button>
+      {% endif %}
+      <button class="ash-search-trigger" type="button" data-ash-search aria-label="Search documentation" aria-haspopup="dialog" aria-controls="ash-search-dialog" aria-expanded="false" disabled>
+        {{ icon("magnify") }}<span>Search docs</span><kbd data-ash-shortcut>⌘ K</kbd>
+      </button>
+      {% if config.theme.palette and not config.theme.palette is mapping %}
+        {% include "partials/palette.html" %}
+        {% include "partials/javascripts/palette.html" %}
+      {% endif %}
+      <template data-ash-theme-icons>
+        <span data-color-scheme="default">{{ icon("sun") }}</span>
+        <span data-color-scheme="slate">{{ icon("moon") }}</span>
+      </template>
+      <a class="ash-github" href="{{ config.repo_url }}" aria-label="ASH on GitHub">
+        <span>GitHub</span>{{ icon("arrow-top-right") }}
+      </a>
+      <button class="ash-menu-toggle" type="button" aria-label="Open navigation" aria-haspopup="dialog" aria-expanded="false" aria-controls="ash-mobile-menu" data-ash-menu disabled>
+        <span class="ash-menu-glyph" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+    {% if "material/search" in config.plugins %}
+      {% include "partials/search.html" %}
+    {% endif %}
+  </nav>
+  <dialog class="ash-mobile-menu" id="ash-mobile-menu" aria-label="Site navigation" hidden>
+    <div class="ash-mobile-menu__heading"><p class="ash-mobile-menu__eyebrow">Navigation</p><button type="button" data-ash-menu-close aria-label="Close navigation">{{ icon("close") }}</button></div>
+    <a href="{{ nav.homepage.url | url }}">Overview {{ icon("arrow-top-right") }}</a>
+    <a href="{{ 'docs/quick-start-guide/' | url }}">Documentation {{ icon("arrow-top-right") }}</a>
+    <a href="{{ nav.homepage.url | url }}#scanners">Scanners {{ icon("arrow-top-right") }}</a>
+    <a href="{{ 'integrations/' | url }}">Integrations {{ icon("arrow-top-right") }}</a>
+    <a href="{{ config.repo_url }}">GitHub {{ icon("arrow-top-right") }}</a>
+    {% if page and not page.is_homepage %}
+      <button type="button" data-ash-drawer>Browse all documentation {{ icon("book-open-variant") }}</button>
+    {% endif %}
+  </dialog>
+  <noscript>
+    <nav class="ash-static-navigation" aria-label="Site navigation">
+      <a href="{{ nav.homepage.url | url }}">Overview</a>
+      <a href="{{ 'docs/quick-start-guide/' | url }}">Documentation</a>
+      <a href="{{ nav.homepage.url | url }}#scanners">Scanners</a>
+      <a href="{{ 'integrations/' | url }}">Integrations</a>
+      <a href="{{ config.repo_url }}">GitHub</a>
+    </nav>
+  </noscript>
+</header>

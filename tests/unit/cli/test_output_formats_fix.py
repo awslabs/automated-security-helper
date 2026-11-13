@@ -2,8 +2,11 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from automated_security_helper.core.enums import ExportFormat
+
+pytestmark = pytest.mark.unit
 
 
 class TestOutputFormatsThreading:

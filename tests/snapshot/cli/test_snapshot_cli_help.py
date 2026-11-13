@@ -22,9 +22,11 @@ How the help is made identical on every OS
   detection: ``test_help`` is a VT terminal (Linux, macOS, Windows Terminal) and
   ``test_help_legacy_windows_console`` is the legacy console.
 - ``prog_name=CANONICAL_CLI_NAME`` (``ashx``) keeps the usage line from depending on how pytest was started.
-- The one machine-dependent help default, ``dependencies install --bin-path``
-  (``~/.ash/bin``), is masked as ``<HOME>`` by the shared normalizer, which also
-  keeps the panel border where rich drew it.
+- No help text depends on the machine. ``dependencies install --bin-path`` displays
+  ``~/.ash/bin`` itself (tests/unit/cli/test_dependencies_bin_path_default.py).
+  Printing its default resolved from $HOME would need the shared normalizer to mask
+  it as ``<HOME>``, which breaks once a long HOME wraps the line, or when
+  ASH_BIN_PATH points outside HOME.
 """
 
 from __future__ import annotations
@@ -41,6 +43,8 @@ from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.cli.json_input import CliJsonInputCommand
 from automated_security_helper.cli.main import app
 from tests.snapshot.support.normalize import pinned_terminal_env
+
+pytestmark = pytest.mark.unit
 
 _SNAPSHOT_DIR = Path(__file__).parent / "__snapshots__" / Path(__file__).stem
 

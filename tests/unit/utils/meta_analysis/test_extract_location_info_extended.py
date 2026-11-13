@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     extract_location_info,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_extract_location_info_with_full_location():

@@ -4,6 +4,8 @@ import pytest
 
 from automated_security_helper.utils.suppression_matcher import file_path_matches
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "pattern,path,expected",

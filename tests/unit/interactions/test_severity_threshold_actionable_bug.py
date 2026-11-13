@@ -43,6 +43,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestSeverityThresholdActionableCount:
     """Tests that severity_threshold correctly filters actionable findings.

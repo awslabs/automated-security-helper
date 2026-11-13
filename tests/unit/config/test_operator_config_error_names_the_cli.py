@@ -22,6 +22,9 @@ from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
+# In-process: the unit tier.
+pytestmark = pytest.mark.unit
+
 
 def _resolve(tmp_path: Path, operator_text: str, selected_text: str):
     source = tmp_path / "repo"
@@ -46,7 +49,7 @@ def test_an_invalid_operator_config_names_the_canonical_config_lint(tmp_path):
         )
     message = str(raised.value)
     assert "operator.yaml" in message
-    assert f"Run '{CANONICAL_CLI_NAME} config lint'" in message
+    assert f"Run: {CANONICAL_CLI_NAME} config lint" in message
     assert "'ash config lint'" not in message
 
 
@@ -58,4 +61,4 @@ def test_the_selected_config_names_the_same_command(tmp_path):
             operator_text="project_name: operator\n",
             selected_text="project_name: scanned\nfail_on_findings: notabool\n",
         )
-    assert f"Run '{CANONICAL_CLI_NAME} config lint'" in str(raised.value)
+    assert f"Run: {CANONICAL_CLI_NAME} config lint" in str(raised.value)

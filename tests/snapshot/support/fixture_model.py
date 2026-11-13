@@ -56,6 +56,7 @@ from __future__ import annotations
 import importlib
 import itertools
 import json
+import sys
 import uuid
 from datetime import datetime as _RealDatetime
 from datetime import timedelta, timezone
@@ -174,9 +175,35 @@ def pin_clock(
         module = importlib.import_module(name)
         if getattr(module, "datetime", None) is _RealDatetime:
             monkeypatch.setattr(module, "datetime", FrozenDatetime)
+    # An id drawn while a module loads is not the test's: on a fresh process
+    # -- the first test on an xdist worker -- a module imported for the first
+    # time inside this window would otherwise take pinned ids and shift every
+    # one after it. The config loader's first use is one: it imports
+    # cli.mcp.sandbox, whose chain (mcp.server -> opentelemetry) draws five at
+    # module level. Such draws go to the real uuid4, whichever module makes
+    # them, so no list of modules to import first has to be kept.
+    real_uuid4 = uuid.uuid4
     counter = itertools.count(1)
-    monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(counter), version=4))
+
+    def pinned_uuid4() -> uuid.UUID:
+        if _drawn_while_importing():
+            return real_uuid4()
+        return uuid.UUID(int=next(counter), version=4)
+
+    monkeypatch.setattr(uuid, "uuid4", pinned_uuid4)
     return CLOCK
+
+
+def _drawn_while_importing() -> bool:
+    """Whether the calling code runs inside a module's import: a frame of
+    importlib's bootstrap, which runs every module's top-level code, is on the
+    stack (``<frozen importlib._bootstrap>`` and ``_bootstrap_external``)."""
+    frame = sys._getframe(1)
+    while frame is not None:
+        if frame.f_code.co_filename.startswith("<frozen importlib._bootstrap"):
+            return True
+        frame = frame.f_back
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -242,6 +269,13 @@ def _ran_container(entry: dict[str, Any], manifest_dir: Path, context, offset: f
         end_time=end,
         duration=(end - start).total_seconds(),
         metadata={"scanner_version": entry["version"]},
+        # Assigned, as the executor assigns it for a tool that started; the model
+        # itself defaults to None for a tool that never ran. The code comes from
+        # the manifest entry so the recorded data matches the entry's own story
+        # (cfn-nag's error text names its exit 1); entries that say nothing
+        # exited 0. The ERROR grade still comes from the recorded per-target
+        # failure below, through determine_status, never from this code.
+        exit_code=int(entry.get("exit_code", 0)),
     )
 
     if entry["outcome"] == "error":

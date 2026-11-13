@@ -34,15 +34,15 @@ ASH_VENV="$ASH_LIB/venv"
 FIXTURE_DIR=/opt/ash-fixture
 SCAN_OUT=/tmp/ash-scan-out
 SCAN_USER=ashscan
-# Pinned to the floor pyproject.toml declares for uv (uv>=0.12.22,<0.13), so the tool
+# Pinned to the floor pyproject.toml declares for uv (uv>=0.13.4,<0.14), so the tool
 # is one ASH itself supports. Installed from the GitHub release tarball and checked
 # against the SHA-256 digests below before it is unpacked; the digests were measured
 # from the downloaded tarballs and match the .sha256 files published beside them. No
 # environment override: a different version needs different digests, so changing it
 # is an edit to these three lines together.
-UV_VERSION=0.12.22
-UV_SHA256_X86_64=b9980552309f09c15172b8be828555e375097f16deb459795ce7bfd200380f0b
-UV_SHA256_AARCH64=6f66a14e8239871fb477f9746c941fedfa77e8fe28a8bc7c07e1dc7f53a66712
+UV_VERSION=0.13.4
+UV_SHA256_X86_64=2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f
+UV_SHA256_AARCH64=1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab
 # The interpreter the gates run under. uv downloads its own, so nothing installed here
 # satisfies a dependency of the package under test.
 GATE_PYTHON="${GATE_PYTHON:-3.12}"

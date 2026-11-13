@@ -626,7 +626,7 @@ with tab1:
         ash_revision_to_install = st.text_input(
             "ASH Revision to Install",
             value="",
-            help="ASH branch or tag to install in the container image for usage during containerized scans",
+            help="ASH branch, tag or full commit id to install in the container image for usage during containerized scans",
         )
         if not ash_revision_to_install:
             ash_revision_to_install = None

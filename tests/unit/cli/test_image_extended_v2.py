@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget
@@ -13,6 +14,8 @@ from automated_security_helper.interactions.run_ash_container import (
     _get_oci_wrapper_prefix,
     _resolve_oci_runner,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

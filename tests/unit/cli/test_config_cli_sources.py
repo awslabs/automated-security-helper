@@ -18,6 +18,8 @@ from automated_security_helper.config.config_linter import (
 from automated_security_helper.config.config_validator import ConfigValidator
 from automated_security_helper.models.core import AshSuppression
 
+pytestmark = pytest.mark.unit
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,8 +71,17 @@ class TestValidate:
             """,
         )
         ok, errors = ConfigValidator.validate_config_file(pyproject)
+        # Reported once, and invalid: a scan refuses a key bandit's section does
+        # not declare.
         assert not ok
-        assert any("internal-only field 'tool_version'" in e for e in errors)
+        assert [e for e in errors if "tool_version" in e] == [
+            (
+                "Invalid value at 'scanners.bandit': Value error, "
+                "Scanner 'bandit' contains internal-only field 'tool_version' - "
+                "this should not be in user configs; if you meant a version "
+                "constraint, put it under options."
+            )
+        ]
 
     def test_pyproject_without_tool_ash_fails_validation(self, tmp_path):
         pyproject = _write(tmp_path / "pyproject.toml", '[project]\nname = "x"\n')
@@ -119,7 +130,8 @@ class TestValidate:
         result = runner.invoke(
             config_app, ["validate", "--config", str(tmp_path / "a.yaml")]
         )
-        assert result.exit_code == 1
+        # 3, as a scan exits for a chain that does not resolve.
+        assert result.exit_code == 3
         assert "Config extends error" in result.output
         assert "cycle" in result.output
 
@@ -129,7 +141,7 @@ class TestValidate:
         _write(repo / ".ash.yaml", "project_name: p\nextends: ../outside.yaml\n")
         monkeypatch.chdir(repo)
         result = runner.invoke(config_app, ["validate"])
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "outside the directory" in result.output
 
 
@@ -164,12 +176,26 @@ class TestLint:
         ), [str(i) for i in result.issues]
 
     def test_fix_refuses_toml(self, runner, tmp_path):
-        pyproject = _pyproject(tmp_path)
+        # A fix to make (a bare line_start): --fix refuses a TOML file only
+        # when it would rewrite it; one with nothing to fix passes.
+        pyproject = _write(
+            tmp_path / "pyproject.toml",
+            """
+            [tool.ash]
+            project_name = "p"
+
+            [[tool.ash.global_settings.suppressions]]
+            rule_id = "B101"
+            path = "src/app.py"
+            reason = "reviewed"
+            line_start = 3
+            """,
+        )
         before = pyproject.read_text()
         result = runner.invoke(
             config_app, ["lint", "--config", str(pyproject), "--fix", "--yes"]
         )
-        assert result.exit_code == 1
+        assert result.exit_code == 1, result.output
         assert "edit" in result.output and "by hand" in result.output
         assert pyproject.read_text() == before
         with pytest.raises(ValueError, match="YAML and JSON"):
@@ -209,8 +235,22 @@ class TestSuppressionWrites:
             add_suppression_to_config(pyproject, self._suppression())
         assert pyproject.read_text() == before
 
-    def test_refuses_to_shadow_a_base_suppression_list(self, tmp_path):
-        child = _write(tmp_path / ".ash.yaml", "extends: base.yaml\nproject_name: p\n")
+    @pytest.mark.parametrize(
+        "name, text",
+        [
+            pytest.param(
+                ".ash.yaml", "extends: base.yaml\nproject_name: p\n", id="yaml"
+            ),
+            pytest.param(
+                ".ash.json",
+                '{"extends": "base.yaml", "project_name": "p"}\n',
+                id="json",
+            ),
+        ],
+    )
+    def test_refuses_to_shadow_a_base_suppression_list(self, tmp_path, name, text):
+        child = tmp_path / name
+        child.write_text(text)
         before = child.read_text()
         with pytest.raises(ValueError, match="replace the base's suppressions"):
             add_suppression_to_config(child, self._suppression())

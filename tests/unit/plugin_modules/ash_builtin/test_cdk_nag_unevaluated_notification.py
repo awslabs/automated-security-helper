@@ -23,6 +23,8 @@ through ``CdkNagScanner.scan`` against real cdk-nag; these tests pin the helper'
 inputs a live run is awkward to produce on demand, such as one rule raising on several resources.
 """
 
+import pytest
+
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind,
     Level,
@@ -32,6 +34,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+pytestmark = pytest.mark.unit
 
 
 def _result(rule_id: str, compliance: str, resource: str = "ProbeResource") -> Result:

@@ -63,7 +63,12 @@ def build_spec(pins) -> dict:
             {
                 "tool": entry.tool,
                 "commit": entry.commit,
-                "executables": list(entry.executable_names),
+                # A probed entry (the cfn-guard rules bundle, for one) has no
+                # executable on PATH; the image build already ran its version_probe
+                # in --verify-third-party.
+                "executables": (
+                    [] if entry.version_probe else list(entry.executable_names)
+                ),
                 "files": [{"name": f.name, "sha256": f.sha256} for f in entry.files],
             }
             for entry in (

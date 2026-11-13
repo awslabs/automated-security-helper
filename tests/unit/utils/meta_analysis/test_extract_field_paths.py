@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.field_mapping import (
     extract_field_paths,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_extract_field_paths_simple_dict():

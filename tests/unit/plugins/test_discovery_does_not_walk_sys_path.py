@@ -27,6 +27,8 @@ import pytest
 
 from automated_security_helper.plugins.discovery import discover_plugins
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def evicted_zip_on_sys_path(tmp_path, monkeypatch):

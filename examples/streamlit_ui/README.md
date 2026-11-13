@@ -11,7 +11,7 @@ This is a Streamlit-based UI for the Automated Security Helper (ASH). It provide
 
 ## Prerequisites
 
-- Python 3.10 or later
+- Python 3.10 to 3.14
 - ASH v3 installed
 - AWS credentials configured (for Amazon Bedrock integration)
 
@@ -19,6 +19,7 @@ This is a Streamlit-based UI for the Automated Security Helper (ASH). It provide
 
 Install the required dependencies:
 
+<!-- doctest: illustrative reason="installs from the network" -->
 ```bash
 # ASH
 pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
@@ -27,7 +28,7 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 pip install streamlit
 ```
 
-> **Tip**: You can also use the `v4` floating tag (`@v4`) instead of a specific version to always get the latest stable v4.x release.
+> **Note**: Floating major tags such as `v4` are no longer updated; pin a release tag as above.
 
 ## Usage
 
@@ -35,12 +36,14 @@ pip install streamlit
 
 #### ...directly from GitHub...
 
+<!-- doctest: illustrative reason="needs Streamlit and network access" -->
 ```bash
 streamlit run https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/examples/streamlit_ui/ash_ui.py
 ```
 
 #### ...or clone and run from local
 
+<!-- doctest: illustrative reason="clones from the network and needs Streamlit" -->
 ```bash
 git clone https://github.com/awslabs/automated-security-helper.git --branch v4.0.0
 streamlit run ./automated-security-helper/examples/streamlit_ui/ash_ui.py

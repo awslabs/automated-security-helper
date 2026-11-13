@@ -6,6 +6,8 @@ from pydantic import ValidationError
 
 from automated_security_helper.models.core import AshSuppression
 
+pytestmark = pytest.mark.unit
+
 
 class TestSuppression:
     """Tests for the Suppression model."""
@@ -64,7 +66,7 @@ class TestSuppression:
                 path="src/example.py",
                 expiration="invalid-date",
             )
-        assert "Invalid expiration date format" in str(excinfo.value)
+        assert "Invalid expiration date format. Use YYYY-MM-DD" in str(excinfo.value)
 
     def test_suppression_model_expired_date_accepted(self):
         """Past expiration date must be stored; is_expired signals it at runtime."""

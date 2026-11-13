@@ -3,7 +3,11 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from automated_security_helper.utils.get_scan_set import get_ash_ignorespec_lines
+
+pytestmark = pytest.mark.unit
 
 
 def test_nested_gitignore_found_recursively():

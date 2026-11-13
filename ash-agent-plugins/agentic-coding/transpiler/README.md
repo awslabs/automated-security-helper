@@ -6,6 +6,7 @@ architecture.
 
 ## Run
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```sh
 # From the ash-agent-plugins/ directory:
 uv run --project agentic-coding/transpiler agentic-plugins build   # regenerate all outputs
@@ -19,6 +20,7 @@ number; `agentic-plugins formats` lists them with the format each one emits.
 
 ## Develop
 
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```sh
 uv sync --project agentic-coding/transpiler --extra test
 uv run --project agentic-coding/transpiler --extra test pytest agentic-coding/transpiler/tests/

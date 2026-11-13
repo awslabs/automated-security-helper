@@ -1,0 +1,7 @@
+# Fixture config: gitleaks' default rules plus one path allowlist.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fixture docs are examples"
+paths = ['''^docs/''']

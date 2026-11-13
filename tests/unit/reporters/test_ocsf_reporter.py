@@ -30,6 +30,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     State,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestOcsfReporterHelperMethods:
     """Test cases for OCSF reporter helper methods."""
@@ -66,9 +68,9 @@ class TestOcsfReporterHelperMethods:
         assert isinstance(vulnerability, Vulnerability)
         assert vulnerability.title == "TEST001"
         assert vulnerability.desc == "Test error message"
-        assert vulnerability.severity == "ERROR"
-        assert vulnerability.cve.uid == "TEST001"
-        assert vulnerability.cve.desc == "Test error message"
+        assert vulnerability.severity == "CRITICAL"
+        # A scanner rule id is not a CVE identifier, so no cve object is attached.
+        assert vulnerability.cve is None
 
     def test_create_vulnerability_from_result_with_location(self, reporter):
         """Test creating vulnerability from SARIF result with location info."""
@@ -92,7 +94,7 @@ class TestOcsfReporterHelperMethods:
 
         assert vulnerability.title == "TEST002"
         assert vulnerability.desc == "Test warning message"
-        assert vulnerability.severity == "WARNING"
+        assert vulnerability.severity == "MEDIUM"
         assert len(vulnerability.affected_code) == 1
 
         affected_code = vulnerability.affected_code[0]
@@ -159,7 +161,7 @@ class TestOcsfReporterHelperMethods:
 
         assert vulnerability.title == "Unknown Rule"
         assert vulnerability.desc == "Test message without rule ID"
-        assert vulnerability.severity == "ERROR"
+        assert vulnerability.severity == "CRITICAL"
         # Should not have CVE when no rule ID
         assert not hasattr(vulnerability, "cve") or vulnerability.cve is None
 
@@ -175,7 +177,9 @@ class TestOcsfReporterHelperMethods:
 
         assert vulnerability.title == "TEST004"
         assert vulnerability.desc == "Test message without level"
-        assert vulnerability.severity == "MEDIUM"  # Default when level is None
+        assert (
+            vulnerability.severity == "MEDIUM"
+        )  # MEDIUM: a missing or unrecognised level is MISSING_SARIF_LEVEL everywhere
 
     def test_create_vulnerability_from_result_empty_locations(self, reporter):
         """Test creating vulnerability from SARIF result with empty locations."""
@@ -245,7 +249,7 @@ class TestOcsfReporterHelperMethods:
             ),
             Suppression(
                 kind=Kind1.external,
-                state=State.underReview,
+                state=State.accepted,
                 justification="Second suppression",
             ),
         ]
@@ -259,6 +263,32 @@ class TestOcsfReporterHelperMethods:
         assert "First suppression" in status_detail
         assert "Second suppression" in status_detail
         assert " | " in status_detail  # Multiple suppressions separated by |
+
+    def test_a_suppression_under_review_is_left_out_of_the_detail(self, reporter):
+        """An accepted suppression closes the finding; one still under review has
+        not taken effect and does not explain the closed status."""
+        suppressions = [
+            Suppression(
+                kind=Kind1.inSource,
+                state=State.accepted,
+                justification="First suppression",
+            ),
+            Suppression(
+                kind=Kind1.external,
+                state=State.underReview,
+                justification="Second suppression",
+            ),
+        ]
+
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
+            suppressions
+        )
+
+        assert status_id == StatusId.integer_3
+        assert status == "Suppressed"
+        assert "First suppression" in status_detail
+        assert "Second suppression" not in status_detail
+        assert " | " not in status_detail
 
     def test_determine_status_from_suppressions_minimal_suppression(self, reporter):
         """Test status determination with minimal suppression data."""
@@ -289,7 +319,9 @@ class TestOcsfReporterHelperMethods:
         assert "kind: inSource" in status_detail
 
     def test_determine_status_from_suppressions_all_states(self, reporter):
-        """Test status determination with all possible suppression states."""
+        """Only an accepted suppression closes the finding (SARIF 3.35.4): one
+        rejected by the reviewer or still under review has not taken effect, so
+        the finding is reported as it is gated, open."""
         # Test accepted state
         suppressions_accepted = [Suppression(kind=Kind1.inSource, state=State.accepted)]
         status_id, status_detail, status = reporter._determine_status_from_suppressions(
@@ -305,16 +337,18 @@ class TestOcsfReporterHelperMethods:
         status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_review
         )
-        assert status_id == StatusId.integer_3
-        assert "state: underReview" in status_detail
+        assert status_id == StatusId.integer_1
+        assert status_detail is None
+        assert status == "New"
 
         # Test rejected state
         suppressions_rejected = [Suppression(kind=Kind1.inSource, state=State.rejected)]
         status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_rejected
         )
-        assert status_id == StatusId.integer_3
-        assert "state: rejected" in status_detail
+        assert status_id == StatusId.integer_1
+        assert status_detail is None
+        assert status == "New"
 
     def test_determine_status_from_suppressions_all_kinds(self, reporter):
         """Test status determination with all possible suppression kinds."""
@@ -414,8 +448,10 @@ class TestOcsfReporterHelperMethods:
         )
 
         assert isinstance(finding, VulnerabilityFinding)
-        assert finding.activity_name == "Scan"
-        assert finding.severity_id == SeverityId.integer_4  # HIGH for error
+        assert finding.activity_name == "Create"
+        assert (
+            finding.severity_id == SeverityId.integer_5
+        )  # CRITICAL for error, as the gate
         assert finding.status_id == StatusId.integer_1  # Active (no suppressions)
         assert finding.status_detail is None
         assert finding.type_uid == 200201
@@ -469,7 +505,7 @@ class TestOcsfReporterHelperMethods:
         finding_error = reporter._create_vulnerability_finding(
             result_error, sample_metadata, current_time_ms
         )
-        assert finding_error.severity_id == SeverityId.integer_4  # HIGH
+        assert finding_error.severity_id == SeverityId.integer_5  # CRITICAL
 
         # Test warning -> MEDIUM
         result_warning = Result(
@@ -505,7 +541,7 @@ class TestOcsfReporterHelperMethods:
         assert finding_none.severity_id == SeverityId.integer_1  # INFORMATIONAL
 
     def test_create_vulnerability_finding_no_level(self, reporter, sample_metadata):
-        """Test creating vulnerability finding without level (uses SARIF schema default)."""
+        """Test creating vulnerability finding without level (uses the schema default, warning)."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         result = Result(
             ruleId="TEST_NO_LEVEL",
@@ -516,11 +552,13 @@ class TestOcsfReporterHelperMethods:
             result, sample_metadata, current_time_ms
         )
 
-        # SARIF schema defaults to Level.error when no level is provided
-        assert finding.severity_id == SeverityId.integer_4  # HIGH (error default)
+        # The schema default is MISSING_SARIF_LEVEL, warning (SARIF 3.27.10)
+        assert finding.severity_id == SeverityId.integer_3  # MEDIUM (warning default)
 
-    def test_create_vulnerability_finding_unique_ids(self, reporter, sample_metadata):
-        """Test that each vulnerability finding gets a unique ID."""
+    def test_create_vulnerability_finding_deterministic_ids(
+        self, reporter, sample_metadata
+    ):
+        """The same finding gets the same UID every time, so a SIEM can update it."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         result = Result(
             ruleId="TEST_UNIQUE",
@@ -535,8 +573,8 @@ class TestOcsfReporterHelperMethods:
             result, sample_metadata, current_time_ms
         )
 
-        # Each finding should have a unique UID
-        assert finding1.finding_info.uid != finding2.finding_info.uid
+        # One finding, one UID, across runs
+        assert finding1.finding_info.uid == finding2.finding_info.uid
 
         # Verify UIDs are valid UUIDs
         uuid.UUID(finding1.finding_info.uid)  # Should not raise exception
@@ -674,20 +712,20 @@ class TestOcsfReporterHelperMethods:
         # Full message should be in description
         assert finding.finding_info.desc == very_long_message
 
-    def test_create_vulnerability_finding_unique_identifiers_stress_test(
+    def test_create_vulnerability_finding_repeats_one_uid_for_one_finding(
         self, reporter, sample_metadata
     ):
-        """Test that unique identifiers are generated consistently under stress."""
+        """The uid is derived from the finding, so building it twice gives the
+        same uid; two builds show that as well as a hundred would."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         result = Result(
-            ruleId="STRESS_TEST",
+            ruleId="REPEAT_BUILD",
             level=Level.error,
-            message=Message(root=Message1(text="Stress test message")),
+            message=Message(root=Message1(text="Repeat build message")),
         )
 
-        # Generate many findings to test uniqueness
         findings = []
-        for i in range(100):
+        for i in range(2):
             finding = reporter._create_vulnerability_finding(
                 result, sample_metadata, current_time_ms
             )
@@ -696,18 +734,18 @@ class TestOcsfReporterHelperMethods:
         # Extract all UIDs
         uids = [finding.finding_info.uid for finding in findings]
 
-        # All UIDs should be unique
-        assert len(uids) == len(set(uids)), "All UIDs should be unique"
+        # One finding built twice is one UID
+        assert len(set(uids)) == 1, "the same finding keeps one UID"
 
         # All UIDs should be valid UUIDs
         for uid in uids:
             uuid.UUID(uid)  # Should not raise exception
 
-        # All findings should have the same content except UID
+        # All findings should have the same content, UID included
         for i in range(1, len(findings)):
             assert findings[i].finding_info.title == findings[0].finding_info.title
             assert findings[i].finding_info.desc == findings[0].finding_info.desc
-            assert findings[i].finding_info.uid != findings[0].finding_info.uid
+            assert findings[i].finding_info.uid == findings[0].finding_info.uid
 
     def test_create_vulnerability_finding_complete_metadata_validation(
         self, reporter, sample_metadata
@@ -769,10 +807,11 @@ class TestOcsfReporterHelperMethods:
         assert vulnerability.affected_code[0].start_line == 10
         assert vulnerability.affected_code[0].end_line == 20
 
-    def test_create_vulnerability_finding_error_recovery_maintains_uniqueness(
+    def test_create_vulnerability_finding_error_recovery_keeps_one_uid(
         self, reporter, sample_metadata, monkeypatch
     ):
-        """Test that error recovery still maintains unique identifiers."""
+        """Error recovery derives the uid the same way, so the same faulty result
+        keeps one uid across builds."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
         # Create a result that will cause errors in title creation
@@ -803,9 +842,9 @@ class TestOcsfReporterHelperMethods:
             )
             findings.append(finding)
 
-        # All findings should have unique UIDs even with errors
+        # The same faulty result keeps one UID even with errors
         uids = [finding.finding_info.uid for finding in findings]
-        assert len(uids) == len(set(uids)), "All UIDs should be unique even with errors"
+        assert len(set(uids)) == 1, "the same finding keeps one UID even with errors"
 
         # All UIDs should be valid UUIDs
         for uid in uids:
@@ -885,8 +924,8 @@ class TestOcsfReporterSeverityMapping:
             result, sample_metadata, current_time_ms
         )
 
-        assert finding.severity_id == SeverityId.integer_4  # HIGH
-        assert finding.vulnerabilities[0].severity == "ERROR"
+        assert finding.severity_id == SeverityId.integer_5  # CRITICAL
+        assert finding.vulnerabilities[0].severity == "CRITICAL"
 
     def test_severity_mapping_warning_to_medium(self, reporter, sample_metadata):
         """Test that SARIF 'warning' level maps to OCSF MEDIUM severity."""
@@ -902,7 +941,7 @@ class TestOcsfReporterSeverityMapping:
         )
 
         assert finding.severity_id == SeverityId.integer_3  # MEDIUM
-        assert finding.vulnerabilities[0].severity == "WARNING"
+        assert finding.vulnerabilities[0].severity == "MEDIUM"
 
     def test_severity_mapping_note_to_low(self, reporter, sample_metadata):
         """Test that SARIF 'note' level maps to OCSF LOW severity."""
@@ -918,7 +957,7 @@ class TestOcsfReporterSeverityMapping:
         )
 
         assert finding.severity_id == SeverityId.integer_2  # LOW
-        assert finding.vulnerabilities[0].severity == "NOTE"
+        assert finding.vulnerabilities[0].severity == "LOW"
 
     def test_severity_mapping_none_to_informational(self, reporter, sample_metadata):
         """Test that SARIF 'none' level maps to OCSF INFORMATIONAL severity."""
@@ -934,29 +973,29 @@ class TestOcsfReporterSeverityMapping:
         )
 
         assert finding.severity_id == SeverityId.integer_1  # INFORMATIONAL
-        assert finding.vulnerabilities[0].severity == "NONE"
+        assert finding.vulnerabilities[0].severity == "INFO"
 
     def test_severity_mapping_missing_level_defaults_to_schema_default(
         self, reporter, sample_metadata
     ):
-        """Test that missing SARIF level uses SARIF schema default (error -> HIGH)."""
+        """Test that missing SARIF level uses SARIF schema default (warning -> MEDIUM)."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         result = Result(
             ruleId="SEVERITY_MISSING",
             message=Message(root=Message1(text="Missing level severity test")),
-            # level is not set (None), but SARIF schema defaults to Level.error
+            # level is not set, so it is the schema default, warning
         )
 
         finding = reporter._create_vulnerability_finding(
             result, sample_metadata, current_time_ms
         )
 
-        # SARIF schema defaults to Level.error when no level is provided
-        assert finding.severity_id == SeverityId.integer_4  # HIGH (error default)
-        assert finding.vulnerabilities[0].severity == "ERROR"  # Schema default
+        # The schema default is MISSING_SARIF_LEVEL, warning (SARIF 3.27.10)
+        assert finding.severity_id == SeverityId.integer_3  # MEDIUM (warning default)
+        assert finding.vulnerabilities[0].severity == "MEDIUM"  # Schema default
 
     def test_severity_mapping_explicit_none_level(self, reporter, sample_metadata):
-        """Test that explicitly set None level defaults to OCSF LOW severity."""
+        """Test that explicitly set None level is read as the missing level, OCSF MEDIUM."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
         # Create a mock result that truly has None level
@@ -974,7 +1013,9 @@ class TestOcsfReporterSeverityMapping:
             result, sample_metadata, current_time_ms
         )
 
-        assert finding.severity_id == SeverityId.integer_2  # LOW (default)
+        assert (
+            finding.severity_id == SeverityId.integer_3
+        )  # MEDIUM, MISSING_SARIF_LEVEL, as every grader reads it
         assert (
             finding.vulnerabilities[0].severity == "MEDIUM"
         )  # Default in vulnerability creation
@@ -1003,7 +1044,7 @@ class TestOcsfReporterSeverityMapping:
         finding_upper = reporter._create_vulnerability_finding(
             result_upper, sample_metadata, current_time_ms
         )
-        assert finding_upper.severity_id == SeverityId.integer_4  # HIGH
+        assert finding_upper.severity_id == SeverityId.integer_5  # CRITICAL
 
         # Test mixed case "Warning"
         result_mixed = MockResult("Warning")
@@ -1019,10 +1060,10 @@ class TestOcsfReporterSeverityMapping:
         )
         assert finding_lower.severity_id == SeverityId.integer_2  # LOW
 
-    def test_severity_mapping_invalid_level_defaults_to_low(
+    def test_severity_mapping_invalid_level_reads_as_the_missing_level(
         self, reporter, sample_metadata
     ):
-        """Test that invalid SARIF level values default to OCSF LOW severity."""
+        """Test that invalid SARIF level values are read as the missing level, OCSF MEDIUM."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
         # Create a mock result with invalid level
@@ -1045,21 +1086,27 @@ class TestOcsfReporterSeverityMapping:
         finding_invalid_str = reporter._create_vulnerability_finding(
             result_invalid_str, sample_metadata, current_time_ms
         )
-        assert finding_invalid_str.severity_id == SeverityId.integer_2  # LOW (default)
+        assert (
+            finding_invalid_str.severity_id == SeverityId.integer_3
+        )  # MEDIUM, MISSING_SARIF_LEVEL, as every grader reads it
 
         # Test with numeric value
         result_numeric = MockResult(42)
         finding_numeric = reporter._create_vulnerability_finding(
             result_numeric, sample_metadata, current_time_ms
         )
-        assert finding_numeric.severity_id == SeverityId.integer_2  # LOW (default)
+        assert (
+            finding_numeric.severity_id == SeverityId.integer_3
+        )  # MEDIUM, MISSING_SARIF_LEVEL, as every grader reads it
 
         # Test with empty string
         result_empty = MockResult("")
         finding_empty = reporter._create_vulnerability_finding(
             result_empty, sample_metadata, current_time_ms
         )
-        assert finding_empty.severity_id == SeverityId.integer_2  # LOW (default)
+        assert (
+            finding_empty.severity_id == SeverityId.integer_3
+        )  # MEDIUM, MISSING_SARIF_LEVEL, as every grader reads it
 
     def test_severity_mapping_error_handling_during_level_access(
         self, reporter, sample_metadata
@@ -1115,8 +1162,8 @@ class TestOcsfReporterSeverityMapping:
 
         # All findings should have the same severity
         for finding in findings:
-            assert finding.severity_id == SeverityId.integer_4  # HIGH
-            assert finding.vulnerabilities[0].severity == "ERROR"
+            assert finding.severity_id == SeverityId.integer_5  # CRITICAL
+            assert finding.vulnerabilities[0].severity == "CRITICAL"
 
     def test_severity_mapping_all_levels_comprehensive(self, reporter, sample_metadata):
         """Comprehensive test of all SARIF levels to OCSF severity mapping."""
@@ -1124,10 +1171,10 @@ class TestOcsfReporterSeverityMapping:
 
         # Test data: (sarif_level, expected_ocsf_severity_id, expected_vuln_severity)
         test_cases = [
-            (Level.error, SeverityId.integer_4, "ERROR"),  # HIGH
-            (Level.warning, SeverityId.integer_3, "WARNING"),  # MEDIUM
-            (Level.note, SeverityId.integer_2, "NOTE"),  # LOW
-            (Level.none, SeverityId.integer_1, "NONE"),  # INFORMATIONAL
+            (Level.error, SeverityId.integer_5, "CRITICAL"),
+            (Level.warning, SeverityId.integer_3, "MEDIUM"),
+            (Level.note, SeverityId.integer_2, "LOW"),
+            (Level.none, SeverityId.integer_1, "INFO"),
         ]
 
         for sarif_level, expected_severity_id, expected_vuln_severity in test_cases:
@@ -1175,9 +1222,9 @@ class TestOcsfReporterSeverityMapping:
         )
 
         # Severity should still be HIGH even though finding is suppressed
-        assert finding.severity_id == SeverityId.integer_4  # HIGH
+        assert finding.severity_id == SeverityId.integer_5  # CRITICAL
         assert finding.status_id == StatusId.integer_3  # Suppressed
-        assert finding.vulnerabilities[0].severity == "ERROR"
+        assert finding.vulnerabilities[0].severity == "CRITICAL"
 
     def test_severity_mapping_individual_finding_independence(
         self, reporter, sample_metadata
@@ -1213,14 +1260,14 @@ class TestOcsfReporterSeverityMapping:
             findings.append(finding)
 
         # Each finding should have its own severity
-        assert findings[0].severity_id == SeverityId.integer_4  # HIGH (error)
+        assert findings[0].severity_id == SeverityId.integer_5  # CRITICAL (error)
         assert findings[1].severity_id == SeverityId.integer_3  # MEDIUM (warning)
         assert findings[2].severity_id == SeverityId.integer_2  # LOW (note)
 
         # Verify vulnerability severities match
-        assert findings[0].vulnerabilities[0].severity == "ERROR"
-        assert findings[1].vulnerabilities[0].severity == "WARNING"
-        assert findings[2].vulnerabilities[0].severity == "NOTE"
+        assert findings[0].vulnerabilities[0].severity == "CRITICAL"
+        assert findings[1].vulnerabilities[0].severity == "MEDIUM"
+        assert findings[2].vulnerabilities[0].severity == "LOW"
 
     def test_severity_mapping_edge_case_level_attribute_missing(
         self, reporter, sample_metadata
@@ -1242,8 +1289,10 @@ class TestOcsfReporterSeverityMapping:
             result, sample_metadata, current_time_ms
         )
 
-        # Should default to LOW severity when level attribute doesn't exist
-        assert finding.severity_id == SeverityId.integer_2  # LOW (default)
+        # A result with no level attribute is read as MISSING_SARIF_LEVEL
+        assert (
+            finding.severity_id == SeverityId.integer_3
+        )  # MEDIUM, as every grader reads it
 
     def test_severity_mapping_performance_with_many_findings(
         self, reporter, sample_metadata
@@ -1274,7 +1323,7 @@ class TestOcsfReporterSeverityMapping:
 
         # Verify all findings have correct severity mapping
         expected_severities = [
-            SeverityId.integer_4,  # HIGH (error)
+            SeverityId.integer_5,  # CRITICAL (error)
             SeverityId.integer_3,  # MEDIUM (warning)
             SeverityId.integer_2,  # LOW (note)
             SeverityId.integer_1,  # INFORMATIONAL (none)
@@ -1338,7 +1387,7 @@ class TestOcsfReporterSeverityMapping:
         # Each finding should be a VulnerabilityFinding object
         for finding in findings:
             assert "activity_name" in finding
-            assert finding["activity_name"] == "Scan"
+            assert finding["activity_name"] == "Create"
             assert "vulnerabilities" in finding
             assert len(finding["vulnerabilities"]) == 1  # One vulnerability per finding
             assert "finding_info" in finding
@@ -1353,7 +1402,7 @@ class TestOcsfReporterSeverityMapping:
         findings = json.loads(result_json)
 
         # First finding should be HIGH severity (error level)
-        assert findings[0]["severity_id"] == 4  # SeverityId.integer_4 (HIGH)
+        assert findings[0]["severity_id"] == 5  # SeverityId.integer_5 (CRITICAL)
 
         # Second finding should be MEDIUM severity (warning level)
         assert findings[1]["severity_id"] == 3  # SeverityId.integer_3 (MEDIUM)
@@ -1486,10 +1535,21 @@ class TestOcsfReporterSeverityMapping:
 
         findings = json.loads(result_json)
 
-        # Should have one finding (second one succeeded)
+        # One finding converted (the second), and the array says it is short:
+        # a shortfall record with no vulnerabilities entry follows it, so a
+        # reader can tell "one finding" from "one of two". Its uid is derived
+        # from the scanned project's name, and a model built with the default
+        # report metadata is named "ASH" by that default.
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
+            _shortfall_uid,
+        )
+
         assert isinstance(findings, list)
-        assert len(findings) == 1
-        assert findings[0]["vulnerabilities"][0]["title"] == "TEST002"
+        assert len(findings) == 2
+        converted = [f for f in findings if f["vulnerabilities"]]
+        assert [f["vulnerabilities"][0]["title"] for f in converted] == ["TEST002"]
+        (shortfall,) = [f for f in findings if not f["vulnerabilities"]]
+        assert shortfall["finding_info"]["uid"] == _shortfall_uid("ASH")
 
     def test_report_unique_identifiers_across_findings(self, reporter):
         """Test that all findings in a report have unique identifiers."""
@@ -1732,18 +1792,24 @@ class TestOcsfReporterSeverityMapping:
         self, reporter, sample_ash_model, monkeypatch
     ):
         """Test error handling when JSON serialization fails."""
-        # Mock json.dumps to raise an exception only for the main findings array
+        # Mock json.dumps to raise an exception only for the main findings
+        # array: a list whose items are OCSF findings (they carry finding_info).
+        # The error response is a list of one dict without finding_info, and
+        # the finding-identity helpers the reporter now calls first serialize
+        # tags and properties through json.dumps too, so the array is picked by
+        # shape, not by call order.
         import json
 
         original_dumps = json.dumps
 
-        call_count = 0
-
         def mock_dumps(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            # Fail on first call (main findings array), succeed on second call (error response)
-            if call_count == 1 and isinstance(args[0], list) and len(args[0]) > 0:
+            payload = args[0] if args else kwargs.get("obj")
+            if (
+                isinstance(payload, list)
+                and payload
+                and all(isinstance(item, dict) for item in payload)
+                and any("finding_info" in item for item in payload)
+            ):
                 raise Exception("JSON serialization error")
             return original_dumps(*args, **kwargs)
 
@@ -1760,5 +1826,8 @@ class TestOcsfReporterSeverityMapping:
         assert len(findings) == 1
         assert "error" in findings[0]
         assert "processing_statistics" in findings[0]
-        assert findings[0]["processing_statistics"]["processed_results_count"] == 2
-        assert findings[0]["processing_statistics"]["failed_results_count"] == 0
+        # Nothing reached the file, so the report counts every result as a
+        # failure of this report rather than stating a success rate for an
+        # array that was never written.
+        assert findings[0]["processing_statistics"]["processed_results_count"] == 0
+        assert findings[0]["processing_statistics"]["failed_results_count"] == 2

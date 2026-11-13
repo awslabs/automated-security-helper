@@ -79,8 +79,8 @@ _INSTALLED_BY_THE_SCRIPT = sorted(
 )
 
 
-# The pinned SHA256 of the syft executable inside syft_1.54.1_linux_amd64.tar.gz.
-_SYFT_LINUX_AMD64_EXECUTABLE = "dbf75864e7a7ff9e1fbf00552c31483f693188632a9f68f343cd7653dac513d6"  # pragma: allowlist secret
+# The pinned SHA256 of the syft executable inside syft_1.57.1_linux_amd64.tar.gz.
+_SYFT_LINUX_AMD64_EXECUTABLE = "de3982edbbc250c4a40764c7b1f30bbf54b681f9b99391ee6b85bfdfa5d4dffe"  # pragma: allowlist secret
 
 
 def _pins_dir(tmp_path: Path, digest_overrides: dict | None = None) -> Path:
@@ -114,12 +114,15 @@ def _dockerfile_instructions() -> str:
     )
 
 
+@pytest.mark.unit
 class TestTheDockerfileAndTheTableAgree:
     """The ARG lines and TOOL_VERSIONS are the same fact written twice."""
 
     @pytest.mark.parametrize("tool", _INSTALLED_BY_THE_SCRIPT)
     def test_the_arg_version_matches_the_pinned_version(self, tool):
-        arg = f"{tool.upper()}_VERSION"
+        # A Dockerfile ARG cannot carry a hyphen usefully (`${CFN-GUARD_VERSION}`
+        # parses as a default-value expansion), so cfn-guard is CFN_GUARD_VERSION.
+        arg = f"{tool.upper().replace('-', '_')}_VERSION"
         match = re.search(
             rf'^ARG {arg}="([^"]+)"$', DOCKERFILE.read_text(), re.MULTILINE
         )
@@ -180,6 +183,7 @@ class TestTheDockerfileAndTheTableAgree:
         assert "get-pip.py" not in _dockerfile_instructions()
 
 
+@pytest.mark.unit
 class TestOpengrepReachesTheImageThroughThePin:
     """The exempted tool still has to be provisioned, and provisioned verified."""
 
@@ -204,6 +208,7 @@ class TestOpengrepReachesTheImageThroughThePin:
         )
 
 
+@pytest.mark.unit
 class TestArchResolution:
     @pytest.mark.parametrize(
         "machine,expected",
@@ -226,6 +231,7 @@ class TestArchResolution:
         assert "s390x" in str(raised.value)
 
 
+@pytest.mark.unit
 class TestTheExactlyOneMemberRule:
     def test_a_member_in_a_subdirectory_is_still_found(self, tmp_path):
         """A vendor moving the binary out of the archive root must keep working."""
@@ -273,6 +279,7 @@ class TestTheExactlyOneMemberRule:
         assert target.read_text() == "binary"
 
 
+@pytest.mark.unit
 class TestTheHttpsGuard:
     def test_a_non_https_asset_url_is_refused(self, tmp_path, monkeypatch):
         """The table is reviewed, so this guards a bad edit to it rather than a
@@ -292,6 +299,7 @@ class TestTheHttpsGuard:
         assert "non-https" in str(raised.value)
 
 
+@pytest.mark.unit
 class TestTheDigestCheckCanFail:
     """A pinned digest that cannot reject anything is decoration.
 
@@ -336,7 +344,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": "0"  # pragma: allowlist secret
+                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": "0"  # pragma: allowlist secret
                 * 64
             },
         )
@@ -376,7 +384,7 @@ class TestTheDigestCheckCanFail:
         pins = _pins_dir(
             tmp_path,
             {
-                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": real_digest,  # pragma: allowlist secret
+                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": real_digest,  # pragma: allowlist secret
                 # The executable digest too: the fixture's member is not the real
                 # syft, and the installer checks the member against its own pin.
                 _SYFT_LINUX_AMD64_EXECUTABLE: hashlib.sha256(payload).hexdigest(),
@@ -397,6 +405,7 @@ class TestTheDigestCheckCanFail:
         )
 
 
+@pytest.mark.unit
 class TestABareExecutableAsset:
     """opengrep publishes the executable itself; there is no archive to open."""
 
@@ -414,7 +423,7 @@ class TestABareExecutableAsset:
         pins = _pins_dir(
             tmp_path,
             {
-                "a66aa3278457f02b287b985a45b6762aebcaba5000f2689245fd1ed86d1456c7": hashlib.sha256(  # pragma: allowlist secret
+                "46e8133cc490f9f50518061590ce2f6be5a08afaeda034471c0ceda4b3899808": hashlib.sha256(  # pragma: allowlist secret
                     payload
                 ).hexdigest()
             },
@@ -450,6 +459,7 @@ class TestABareExecutableAsset:
         assert not bin_dir.exists() or list(bin_dir.iterdir()) == []
 
 
+@pytest.mark.unit
 class TestTheExecutableDigestIsChecked:
     """The extracted executable is checked against its own pin, not only the archive.
 
@@ -467,7 +477,7 @@ class TestTheExecutableDigestIsChecked:
         pins = _pins_dir(
             tmp_path,
             {
-                "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47": archive_digest,  # pragma: allowlist secret
+                "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c": archive_digest,  # pragma: allowlist secret
                 _SYFT_LINUX_AMD64_EXECUTABLE: executable_digest
                 or hashlib.sha256(payload).hexdigest(),
             },
@@ -560,6 +570,7 @@ class TestTheExecutableDigestIsChecked:
         assert os.access(installed, os.X_OK)
 
 
+@pytest.mark.unit
 class TestLoadPinsLeavesSysModulesAlone:
     """The regression these tests could not see in themselves.
 
@@ -639,6 +650,7 @@ class TestLoadPinsLeavesSysModulesAlone:
                     sys.modules[name] = module
 
 
+@pytest.mark.integration
 class TestTheScriptRunsWithNothingInstalled:
     """The container build invokes this before the ASH wheel exists.
 
@@ -702,9 +714,9 @@ from automated_security_helper.utils.tool_downloads import (  # noqa: E402
     THIRD_PARTY_LICENSES,
 )
 
-_SYFT_ARCHIVE_DIGEST = "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47"  # pragma: allowlist secret
-_TRIVY_ARCHIVE_DIGEST = "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"  # pragma: allowlist secret
-_TRIVY_LINUX_AMD64_EXECUTABLE = "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e"  # pragma: allowlist secret
+_SYFT_ARCHIVE_DIGEST = "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c"  # pragma: allowlist secret
+_TRIVY_ARCHIVE_DIGEST = "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf"  # pragma: allowlist secret
+_TRIVY_LINUX_AMD64_EXECUTABLE = "6a972c69606c7b3ea4c6bdcc6fc9332ea9ad38381624310c1e85cc77345909f3"  # pragma: allowlist secret
 
 # The fixture archives below hold a shell script, not the real syft or trivy, and the
 # installer checks the extracted member against its own executable pin. Re-pinning
@@ -781,6 +793,7 @@ _TRIVY_NOTICE_URL = next(
 )
 
 
+@pytest.mark.unit
 class TestLicenseFilesTravelWithTheBinary:
     def test_archive_license_lands_beside_the_binary(self, tmp_path, monkeypatch):
         archive = _tarball({"syft": b"#!/bin/sh\n", "LICENSE": b"syft license\n"})
@@ -897,7 +910,7 @@ class TestLicenseFilesTravelWithTheBinary:
         pins = _pins_dir(
             tmp_path,
             {
-                'version="v1.54.1",\n        license="Apache-2.0",\n'
+                'version="v1.57.1",\n        license="Apache-2.0",\n'
                 '        repository="https://github.com/anchore/syft"': (
                     'version="v1.0.0",\n        license="Apache-2.0",\n'
                     '        repository="https://github.com/anchore/syft"'
@@ -952,6 +965,7 @@ class TestLicenseFilesTravelWithTheBinary:
 
 
 class TestLicensesOnly:
+    @pytest.mark.unit
     def test_opengrep_gets_its_files_and_a_source_section(self, tmp_path, monkeypatch):
         entry = THIRD_PARTY_LICENSES["opengrep"]
         payloads = {f.url: f"{f.name} text\n".encode() for f in entry.files}
@@ -978,6 +992,7 @@ class TestLicensesOnly:
         for command in entry.source_checkout:
             assert command in source
 
+    @pytest.mark.unit
     def test_a_tool_whose_files_are_in_its_archive_is_refused(self, tmp_path):
         """--licenses-only has no archive; it must not invent a second download."""
         with pytest.raises(SystemExit) as raised:
@@ -987,6 +1002,7 @@ class TestLicensesOnly:
         assert "release archive" in str(raised.value)
         assert not (tmp_path / "tp" / "syft").exists()
 
+    @pytest.mark.integration
     def test_the_mode_works_under_a_bare_interpreter(self):
         result = subprocess.run(  # nosec B603 - fixed interpreter and script path
             [sys.executable, "-I", "-S", str(SCRIPT), "--verify-third-party", "--help"],
@@ -1013,6 +1029,7 @@ class TestLicensesOnly:
         ("0.12.23.1", "0.12.23", False),
     ],
 )
+@pytest.mark.unit
 def test_the_version_match_is_a_whole_version(output, version, expected):
     assert installer.reports_version(output, version) is expected
 
@@ -1021,9 +1038,36 @@ def test_the_version_match_is_a_whole_version(output, version, expected):
     os.name == "nt",
     reason="runs only in the Linux image build; the fixtures are POSIX executables",
 )
+@pytest.mark.integration
 class TestVerifyThirdParty:
     """The last step of the image build. Each negative case is one mutation of a
-    tree on which the positive case passes, so a failure is about that mutation."""
+    tree on which the positive case passes, so a failure is about that mutation.
+
+    Integration tier: ``_tree`` writes ``#!/bin/sh`` scripts that
+    ``verify_third_party`` runs to read their versions, so every test here starts
+    child processes."""
+
+    @pytest.fixture(autouse=True)
+    def _bundled_components(self, tmp_path, monkeypatch):
+        """What the version probes of non-executable entries read in the image:
+        the rules bundle's manifest under ASH_CFN_GUARD_RULES_DIR."""
+        rules = tmp_path / "cfn-guard-rules"
+        registry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"].version
+        manifest_dir = rules / f"aws-guard-rules-registry-{registry}"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / ".ash-rules-manifest.json").write_text(
+            json.dumps({"version": registry})
+        )
+        monkeypatch.setenv("ASH_CFN_GUARD_RULES_DIR", str(rules))
+        self.rules = rules
+        # verify_third_party asks uv for its tool directory whenever any entry has a
+        # version probe, and resolves uv on the process PATH, where the unit tool
+        # guard's stand-in is first. The stand-in records `uv tool dir` as a tool
+        # start, so every test here failed at teardown. The only probe in the table
+        # (the rules bundle) reads its manifest from ASH_CFN_GUARD_RULES_DIR and
+        # names no `{uv_tool_dir}`, so the answer is not used; a probe that did
+        # need it would fail loudly as "uv did not answer".
+        monkeypatch.setattr(installer, "_uv_tool_dir", lambda: None)
 
     @staticmethod
     def _tree(tmp_path: Path):
@@ -1049,6 +1093,8 @@ class TestVerifyThirdParty:
                     payloads[f.url] if f.url else b"archive member\n"
                 )
             (directory / "SOURCE").write_text(entry.source_notice())
+            if entry.version_probe:
+                continue
             for name in entry.executable_names:
                 exe = bin_dir / name
                 exe.write_text(
@@ -1104,6 +1150,20 @@ class TestVerifyThirdParty:
         (Path(path) / "uv").unlink()
         self._fails(pins, third_party, path, "uv: uv is not on PATH")
 
+    def test_a_rules_bundle_at_another_version(self, tmp_path):
+        pins, third_party, path = self._tree(tmp_path)
+        for manifest in self.rules.glob("*/.ash-rules-manifest.json"):
+            manifest.write_text(json.dumps({"version": "0.9.0"}))
+        self._fails(
+            pins, third_party, path, "aws-guard-rules-registry: its version probe"
+        )
+
+    def test_a_probed_entry_needs_no_executable_on_path(self, tmp_path):
+        """The rules bundle is not on PATH, and need not be."""
+        pins, third_party, path = self._tree(tmp_path)
+        assert not (Path(path) / "aws-guard-rules-registry").exists()
+        assert installer.verify_third_party(pins, third_party, path, []) == []
+
     def test_a_secondary_executable_may_be_absent(self, tmp_path):
         """After #740 the release archive installs uv alone; uvx then exists only
         as the PyPI wheel's copy, which this check leaves out."""
@@ -1139,7 +1199,9 @@ class TestVerifyThirdParty:
         )
         (third_party / "index.json").unlink()
         (Path(path) / "uv").write_text('#!/bin/sh\necho "uv 0.1.0"\n')
-        pinned = THIRD_PARTY_LICENSES["uv"].version
+        # The message names the pinned release, so read it from the pin instead of
+        # spelling it: the literal went stale when the uv pin moved.
+        pinned = THIRD_PARTY_LICENSES["uv"].version.lstrip("v")
         self._fails(pins, third_party, searched, f"does not report {pinned}", site_dirs)
 
     def test_every_release_copy_is_checked_not_only_the_first(self, tmp_path):
@@ -1188,6 +1250,7 @@ class TestVerifyThirdParty:
         assert list(home.iterdir()) == []
 
 
+@pytest.mark.unit
 class TestTheGuardsTheReviewFoundUntested:
     """Each of these guards survived a mutation probe before it had a test."""
 
@@ -1266,6 +1329,117 @@ class TestTheGuardsTheReviewFoundUntested:
         assert not (tmp_path / "bin" / "syft").exists()
 
 
+@pytest.mark.unit
+class TestARulesBundleCarriesItsLicenses:
+    """`install-pinned-tool aws-guard-rules-registry --rules-bundle` in the image.
+
+    The registry's release zip holds no license file, so with ASH_THIRD_PARTY_DIR
+    set its URL-pinned LICENSE and NOTICE go in first, and a bad one stops the
+    rules from being installed at all.
+    """
+
+    _BUNDLE_DIGEST = "dc21aaad601c673843c299191d864cd9b9db32475b1937d930d6069ddde73296"  # pragma: allowlist secret
+    _CONTENTS_DIGEST = "5b5c48e45051dbd862894d9fd494deee1f52319163ea19ebabd8fb08896cd323"  # pragma: allowlist secret
+    _RULE = b"rule A { }\n"
+
+    @classmethod
+    def _zip(cls) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            bundle.writestr("output/wa-Security-Pillar.guard", cls._RULE)
+        return buffer.getvalue()
+
+    @classmethod
+    def _contents(cls) -> str:
+        """contents_sha256 for the one rule file ``_zip`` holds."""
+        line = f"wa-Security-Pillar.guard\t{_sha(cls._RULE)}\n"
+        return _sha(line.encode("ascii"))
+
+    def _setup(self, tmp_path, monkeypatch, license_payloads):
+        from automated_security_helper.utils.tool_downloads import RULES_BUNDLES
+
+        entry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"]
+        archive = self._zip()
+        served = {RULES_BUNDLES["aws-guard-rules-registry"].url: archive}
+        real = {f.url: f"{f.name} text\n".encode() for f in entry.files}
+        served.update(license_payloads or real)
+        pins = _pins_dir(
+            tmp_path,
+            {
+                self._BUNDLE_DIGEST: _sha(archive),
+                self._CONTENTS_DIGEST: self._contents(),
+                **_url_file_overrides(real),
+            },
+        )
+        server = _Server(served)
+        monkeypatch.setattr(installer, "download", server)
+        return pins, server, entry
+
+    def test_licenses_land_beside_the_rules(self, tmp_path, monkeypatch):
+        pins, server, entry = self._setup(tmp_path, monkeypatch, None)
+        third_party = tmp_path / "tp"
+        installed = installer.install_bundle(
+            "aws-guard-rules-registry", tmp_path / "rules", pins, third_party
+        )
+        directory = third_party / "aws-guard-rules-registry"
+        assert sorted(p.name for p in directory.iterdir()) == [
+            "LICENSE",
+            "NOTICE",
+            "SOURCE",
+        ]
+        assert entry.commit in (directory / "SOURCE").read_text()
+        assert (installed / "wa-Security-Pillar.guard").is_file()
+
+    def test_a_tampered_license_installs_no_rules(self, tmp_path, monkeypatch):
+        entry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"]
+        tampered = {f.url: b"not the license\n" for f in entry.files}
+        pins, server, _ = self._setup(tmp_path, monkeypatch, tampered)
+        with pytest.raises(SystemExit) as raised:
+            installer.install_bundle(
+                "aws-guard-rules-registry", tmp_path / "rules", pins, tmp_path / "tp"
+            )
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not (tmp_path / "rules").exists() or not any(
+            (tmp_path / "rules").iterdir()
+        )
+
+    def test_without_the_dir_only_the_rules_are_written(self, tmp_path, monkeypatch):
+        pins, server, _ = self._setup(tmp_path, monkeypatch, None)
+        installer.install_bundle("aws-guard-rules-registry", tmp_path / "rules", pins)
+        assert not (tmp_path / "tp").exists()
+        assert len(server.calls) == 1, "only the bundle itself is downloaded"
+
+    def test_the_installed_rules_pass_the_check_against_the_same_pins(
+        self, tmp_path, monkeypatch
+    ):
+        pins, _, _ = self._setup(tmp_path, monkeypatch, None)
+        rules = tmp_path / "rules"
+        installer.install_bundle("aws-guard-rules-registry", rules, pins)
+        assert (
+            installer.installed_bundle_problem("aws-guard-rules-registry", rules, pins)
+            is None
+        )
+
+    def test_the_real_contents_pin_refuses_this_archive(self, tmp_path, monkeypatch):
+        """With only the archive digest moved, the one-file archive is not the
+        pinned contents, and nothing is installed."""
+        archive = self._zip()
+        from automated_security_helper.utils.tool_downloads import RULES_BUNDLES
+
+        monkeypatch.setattr(
+            installer,
+            "download",
+            _Server({RULES_BUNDLES["aws-guard-rules-registry"].url: archive}),
+        )
+        pins = _pins_dir(tmp_path, {self._BUNDLE_DIGEST: _sha(archive)})
+        with pytest.raises(SystemExit) as raised:
+            installer.install_bundle(
+                "aws-guard-rules-registry", tmp_path / "rules", pins
+            )
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert list((tmp_path / "rules").iterdir()) == []
+
+
 # ---------------------------------------------------------------------------
 # The Python tools: bandit, checkov and semgrep
 #
@@ -1326,6 +1500,7 @@ def _semgrep():
     return entry, entry.version.lstrip("v"), {f.name: f.url for f in entry.files}
 
 
+@pytest.mark.unit
 class TestPythonToolLicenses:
     @pytest.fixture
     def tool_dir(self, tmp_path, monkeypatch):
@@ -1502,7 +1677,11 @@ class TestPythonToolLicenses:
         assert "found 0" in str(raised.value)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on PATH")
+@pytest.mark.runs_real_tools(
+    reason="what the real uv prints for `tool dir` under FORCE_COLOR is the question"
+)
 def test_uv_tool_dir_is_a_plain_path_even_when_color_is_forced(monkeypatch):
     """Measured: with FORCE_COLOR set, `uv tool dir` wraps the path in ANSI codes
     even when its stdout is a pipe, and the dist-info lookup then found nothing."""
@@ -1513,6 +1692,7 @@ def test_uv_tool_dir_is_a_plain_path_even_when_color_is_forced(monkeypatch):
 
 
 class TestUvToolPins:
+    @pytest.mark.unit
     def test_every_python_tool_is_pinned_to_its_entry(self, tmp_path):
         argv = installer.uv_tool_pins(_pins_dir(tmp_path))
         expected = []
@@ -1529,6 +1709,7 @@ class TestUvToolPins:
             a.split(".")[1] for a in argv if a.startswith("scanners.")
         }
 
+    @pytest.mark.unit
     def test_ash_reads_them_as_exact_version_constraints(self, tmp_path):
         """The overrides go through ASH's own parser in the image; check the value
         that reaches each scanner is an exact pin, not a range or a string with a
@@ -1546,6 +1727,7 @@ class TestUvToolPins:
                 f"=={version}"
             )
 
+    @pytest.mark.integration
     def test_the_mode_prints_them_under_a_bare_interpreter(self, tmp_path):
         """The Dockerfile word-splits this output into `ashx dependencies install`."""
         pins = _pins_dir(tmp_path)
@@ -1566,3 +1748,140 @@ class TestUvToolPins:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.split() == installer.uv_tool_pins(pins)
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership and modes")
+class TestAssertRootOnly:
+    """`--assert-root-only`: nobody but the owner can change the path or move it.
+
+    The tests cannot create files owned by root, so they trust the uid that owns
+    their own tmp_path. root_only_problems also walks every ancestor up to "/", and
+    those belong to the host: under a user namespace they show as the overflow uid,
+    and an image may make one group-writable. So the tests count only the problems
+    that name tmp_path or a path below it, which are the ones they set up.
+    """
+
+    def _tree(self, tmp_path, parent_mode):
+        parent = tmp_path / "shared"
+        rules = parent / "rules" / "bundle"
+        rules.mkdir(parents=True)
+        (rules / "a.guard").write_text("rule a { }\n")
+        for path in (rules.parent, rules):
+            path.chmod(0o755)
+        (rules / "a.guard").chmod(0o644)
+        parent.chmod(parent_mode)
+        return rules.parent
+
+    @staticmethod
+    def _local(problems, tmp_path):
+        """The problems naming tmp_path or a path below it."""
+        kept = []
+        for problem in problems:
+            named = Path(problem.split(": ", 1)[0])
+            if named == tmp_path or tmp_path in named.parents:
+                kept.append(problem)
+        return kept
+
+    def _problems(self, path, tmp_path, trusted=None):
+        owner = os.stat(tmp_path).st_uid
+        problems = installer.root_only_problems([path], trusted or (owner,))
+        return self._local(problems, tmp_path)
+
+    @pytest.mark.unit
+    def test_a_root_only_tree_passes(self, tmp_path):
+        assert self._problems(self._tree(tmp_path, 0o755), tmp_path) == []
+
+    @pytest.mark.unit
+    def test_a_world_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
+        """In a directory anyone can write, the rules directory could be renamed."""
+        target = self._tree(tmp_path, 0o777)
+        problems = self._problems(target, tmp_path)
+        assert any(str(target.parent) in p and "write" in p for p in problems)
+
+    @pytest.mark.unit
+    def test_a_sticky_world_writable_parent_passes(self, tmp_path):
+        assert self._problems(self._tree(tmp_path, 0o1777), tmp_path) == []
+
+    @pytest.mark.unit
+    def test_a_writable_file_inside_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle" / "a.guard").chmod(0o666)
+        assert any("a.guard" in p for p in self._problems(target, tmp_path))
+
+    @pytest.mark.unit
+    def test_a_group_writable_file_inside_fails(self, tmp_path):
+        """Group write counts as much as world write: the group need not be root's."""
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle" / "a.guard").chmod(0o664)
+        problems = self._problems(target, tmp_path)
+        assert any("a.guard" in p and "write" in p for p in problems), problems
+
+    @pytest.mark.unit
+    def test_a_group_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o775)
+        problems = self._problems(target, tmp_path)
+        assert any(str(target.parent) in p and "write" in p for p in problems)
+
+    @pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="no symlinks")
+    @pytest.mark.unit
+    def test_a_symlink_inside_is_judged_as_the_link_not_its_target(self, tmp_path):
+        """lstat, not stat. The link points at the bundle's own root-only rule
+        file, so following it would find nothing wrong; the link itself is a name
+        in the bundle that the check must see as it is."""
+        target = self._tree(tmp_path, 0o755)
+        link = target / "bundle" / "b.guard"
+        try:
+            link.symlink_to("a.guard")
+        except OSError:
+            pytest.skip("symlinks need privileges here")
+        if hasattr(os, "lchmod"):
+            try:
+                # The permissive mode is the fixture: the installer's permission
+                # check has to see a link that other users can write.
+                os.lchmod(link, 0o777)  # nosec B103
+            except (NotImplementedError, OSError):
+                pass
+        if not os.lstat(link).st_mode & 0o022:
+            pytest.skip("a symlink here has a mode that lets no one else write it")
+        problems = self._problems(target, tmp_path)
+        assert any(p.startswith(f"{link}:") for p in problems), problems
+        assert not any(
+            p.startswith(f"{target / 'bundle' / 'a.guard'}:") for p in problems
+        )
+
+    @pytest.mark.unit
+    def test_a_sticky_directory_inside_still_fails(self, tmp_path):
+        """Inside the target, sticky is no excuse: the content itself must be root's."""
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle").chmod(0o1777)
+        assert any("bundle" in p for p in self._problems(target, tmp_path))
+
+    @pytest.mark.unit
+    def test_an_owner_that_is_not_trusted_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o755)
+        owner = os.stat(tmp_path).st_uid
+        problems = self._problems(target, tmp_path, trusted=(owner + 1,))
+        assert any(f"owned by uid {owner}" in p for p in problems)
+
+    @pytest.mark.integration
+    def test_the_mode_exits_nonzero_and_names_the_path(self, tmp_path):
+        target = self._tree(tmp_path, 0o777)
+        result = subprocess.run(  # nosec B603 - fixed interpreter and script path
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                str(SCRIPT),
+                "--assert-root-only",
+                str(target),
+                "--trusted-uid",
+                str(os.getuid()),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert str(target.parent) in result.stderr
+        target.parent.chmod(0o755)

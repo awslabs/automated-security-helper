@@ -59,17 +59,20 @@ Failure modes and known limitations
   to avoid.
 * ``render()`` is for humans and its layout is not a contract. Consumers that
   need structure should read ``model_dump()``.
-* Nothing here validates. A plan is only ever built by
+* Almost nothing here validates. A plan is only ever built by
   :func:`automated_security_helper.workspace.resolver.resolve_workspace`, which
   has already refused anything unusable; a plan constructed by hand can hold
-  states resolution would never produce.
+  states resolution would never produce. The one state refused at construction
+  is a project skipped with no reason: it appeared in neither
+  ``skipped_projects`` nor ``active_projects``, so the payload and the dry-run
+  counts left it out while the body still labelled it skipped.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 from automated_security_helper.models.core import (
     AshSuppression,
@@ -146,7 +149,41 @@ class ProjectPlan(BaseModel):
             None,
             description=(
                 "Path of the config file resolved for this project, or null when "
-                "the project has none and took ASH's default config."
+                "the project has none and took ASH's default config. The path the "
+                "project holds it at, not the file a symlink there reaches."
+            ),
+        ),
+    ] = None
+    operator_config: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The operator's config file layered over config_source: every "
+                "field it sets is final, and the project's own config fills only "
+                "the fields it leaves unset. The --config file on the CLI, or the "
+                "registered profile under the MCP server. Null when the operator "
+                "named none, or when the project has no config of its own, so "
+                "that config_source is the operator's file itself."
+            ),
+        ),
+    ] = None
+    operator_config_digest: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "Digest of the bytes of every file the operator's config is built "
+                "from, when the plan was resolved. The operator's config is the "
+                "registered profile under the MCP server, otherwise the --config "
+                "file: the file layered over this project's own config "
+                "(operator_config), or the file this project resolves because it "
+                "declares none. For such a project it is config_source on the "
+                "CLI; under an MCP session whose client patched the profile, "
+                "config_source is the session's copy and the digest is still the "
+                "registered profile's. Recorded for every scanned project when "
+                "the operator named a config, null otherwise, so a rewrite of "
+                "that file between plan and scan can be told from the plan."
             ),
         ),
     ] = None
@@ -194,6 +231,22 @@ class ProjectPlan(BaseModel):
             ),
         ),
     ] = False
+    severity_ceiling: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The workspace policy's max_severity_threshold as it applies to "
+                "this project; null when the workspace declares none. Carried so "
+                "the scan can bind a scanner's own options.severity_threshold to "
+                "the ceiling whenever one exists: effective_severity_threshold is "
+                "the project-wide answer only, and threshold_tightened_by_policy "
+                "says whether that value moved, not whether a ceiling is in force. "
+                "A ceiling MEDIUM over a project declaring MEDIUM tightened "
+                "nothing, and still caps a scanner whose own option says CRITICAL."
+            ),
+        ),
+    ] = None
     policy_suppressions: Annotated[
         List[AshSuppression],
         Field(
@@ -236,7 +289,13 @@ class ProjectPlan(BaseModel):
             description=(
                 "Whether findings from policy_scanners affect this project's exit "
                 "code. Carried per project so no consumer has to reach back into "
-                "the policy to interpret policy_scanners."
+                "the policy to interpret policy_scanners. With the gate off, a "
+                "policy scanner's MISSING tool and its stale content database do "
+                "not fail the project either, both being recorded per scanner; a "
+                "rule a scanner could not evaluate is recorded per run, not per "
+                "scanner, and a tool ASH could not stop may still write into the "
+                "project's output, so those two fail the project whichever config "
+                "asked for the scanner."
             ),
         ),
     ] = False
@@ -245,8 +304,12 @@ class ProjectPlan(BaseModel):
         Field(
             default_factory=dict,
             description=(
-                "Effective tool_version constraint per scanner, including those "
-                "inherited from a scanner's built-in default."
+                "Effective tool_version constraint per scanner the project "
+                "enables, including one inherited from a scanner's built-in "
+                "default. A disabled scanner's pin is here only when the "
+                "workspace policy switches that scanner on (policy_scanners), "
+                "because the scan then applies it; otherwise its tool does not "
+                "run and its pin cannot conflict with another project's."
             ),
         ),
     ]
@@ -260,6 +323,19 @@ class ProjectPlan(BaseModel):
                 "registration is process-global: two projects wanting different "
                 "sets cannot both be honoured in one run, so the resolver has to "
                 "compare them before anything is scanned."
+            ),
+        ),
+    ]
+    plugin_module_names: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "How a refusal names each of this project's plugin-module "
+                "entries: an entry the config read from the environment maps to "
+                "its masked form, so the value never appears in a message; an "
+                "entry not in the map is named as it is, which covers names "
+                "given on the command line."
             ),
         ),
     ]
@@ -278,6 +354,34 @@ class ProjectPlan(BaseModel):
         Optional[str],
         Field(None, description="Human-readable explanation of the skip."),
     ] = None
+
+    #: The values and keys this project's config read from the environment
+    #: (``error_text.config_environment_values``), set by the resolver. For the
+    #: run's failure handlers, which hold no project config: the prewarm carries
+    #: the union of every project's on an error it raises, so a crash that
+    #: quotes one is redacted. A private attribute, never a field, because the
+    #: values are what must not be shown: model_dump, model_dump_json and repr
+    #: leave it out, the MCP resolve tool dumps every entry, and model_copy
+    #: keeps it.
+    _environment_values: Tuple[str, ...] = PrivateAttr(default=())
+
+    @model_validator(mode="after")
+    def _a_skipped_project_states_why(self) -> "ProjectPlan":
+        """A skipped project carries a reason, or it is not a plan entry.
+
+        ``skipped_projects`` is built from the reason and ``active_projects``
+        from the flag, so an entry with the flag and no reason was in neither:
+        absent from the payload and from the ``N to scan, M skipped`` count,
+        while the body still labelled it skipped. The resolver always sets both;
+        a plan built by hand has to as well.
+        """
+        if self.skipped and self.skip_reason is None:
+            raise ValueError(
+                f"project '{self.key}' is skipped with no skip_reason; a skipped "
+                "project states why, or it is absent from skipped_projects and "
+                "active_projects alike"
+            )
+        return self
 
     @property
     def gate_threshold(self) -> Optional[str]:
@@ -371,7 +475,8 @@ class WorkspacePlan(BaseModel):
                 "Path of the workspace policy file that was applied, or null when "
                 "the workspace declares no policy. Recorded because a ceiling "
                 "changes verdicts, so which file imposed it has to be answerable "
-                "from the output rather than by re-running discovery."
+                "from the output rather than by re-running discovery. The path "
+                "it was found or named at, not the file a symlink there reaches."
             ),
         ),
     ] = None
@@ -397,6 +502,17 @@ class WorkspacePlan(BaseModel):
 
         Layout is not a contract; consumers wanting structure should use
         ``model_dump()``.
+        """
+        return "\n".join(self.render_lines())
+
+    def render_lines(self) -> List[str]:
+        """The lines of :meth:`render`, each one line of the layout.
+
+        A line can quote a path the caller or the tree chose (the workspace
+        file, its root, a project's folder and config file), and a newline in
+        that path is not a line of the layout. A printer that shows each line
+        on one line (``ash scan --dry-run``) keeps the path whole; the joined
+        text cannot tell the two kinds of newline apart.
         """
         skipped = self.skipped_projects
         lines: List[str] = [
@@ -444,6 +560,11 @@ class WorkspacePlan(BaseModel):
                 f"{_INDENT}{'config:':<{_FIELD_WIDTH}}"
                 f"{project.config_source or 'ASH default config'}"
             )
+            if project.operator_config:
+                lines.append(
+                    f"{_INDENT}{'operator:':<{_FIELD_WIDTH}}"
+                    f"{project.operator_config}  (the fields it sets are final)"
+                )
             # Both values when policy moved the threshold, so the reader can see
             # what was declared and what will be enforced. One value otherwise:
             # printing "CRITICAL -> CRITICAL" everywhere would bury the real cases.
@@ -483,4 +604,4 @@ class WorkspacePlan(BaseModel):
         lines.append(
             "Nothing has been scanned. This is a resolution and validation pass only."
         )
-        return "\n".join(lines)
+        return lines

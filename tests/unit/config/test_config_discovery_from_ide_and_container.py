@@ -30,6 +30,9 @@ from automated_security_helper.interactions.run_ash_scan import (
     _resolve_config_fail_on_findings,
 )
 
+# In-process: the unit tier.
+pytestmark = pytest.mark.unit
+
 SOURCES = {
     "pyproject.toml": (
         '[project]\nname = "app"\n\n'

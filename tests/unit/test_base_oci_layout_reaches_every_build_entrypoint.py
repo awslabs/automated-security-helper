@@ -64,6 +64,7 @@ CONTEXT_NO_DIGEST = f"{BASE_OCI_LAYOUT_CONTEXT}=oci-layout://{LAYOUT_DIR}"
 BASE_ARG = f"BASE_IMAGE={BASE_OCI_LAYOUT_CONTEXT}"
 
 
+@pytest.mark.unit
 def test_the_context_name_is_the_one_every_entrypoint_uses():
     """One name, three files. A mismatch would point FROM at a context nobody attached."""
     assert BASE_OCI_LAYOUT_CONTEXT == "ash-base-image"
@@ -80,7 +81,7 @@ def test_the_context_name_is_the_one_every_entrypoint_uses():
 def recorded_commands(monkeypatch):
     calls: List[List[str]] = []
 
-    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
+    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False, env=None):
         recorded = [str(item) for item in cmd_list if item is not None]
         calls.append(recorded)
 
@@ -119,6 +120,7 @@ def _pairs(argv: List[str], flag: str) -> List[str]:
     return [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == flag]
 
 
+@pytest.mark.unit
 class TestThePythonEntrypoint:
     """``_build_image``: the python-container legs and every validate-container leg."""
 
@@ -259,8 +261,13 @@ class TestThePythonEntrypoint:
 # --------------------------------------------------------------------------- powershell
 
 
+@pytest.mark.unit
 class TestThePowerShellEntrypoint:
-    """``utils/ash_helpers.ps1``: the powershell scan legs. Text assertions; no pwsh here."""
+    """``utils/ash_helpers.ps1``: the powershell scan legs, asserted as text.
+
+    The refusal of a malformed value is also run under pwsh, in
+    tests/unit/test_powershell_wrapper_matches_ash.py ("layout" in _FAILURES).
+    """
 
     @pytest.fixture
     def body(self) -> str:
@@ -276,10 +283,12 @@ class TestThePowerShellEntrypoint:
         branch_at = body.index("if ($ociRunnerName -in @('nerdctl', 'finch'))")
         else_at = body.index("else", branch_at)
         branch = body[branch_at:else_at]
+        # Without embedded quotes: the build command is an argument array handed to the
+        # runner directly, where `"...`" quotes would reach it as literal characters.
         assert (
-            '"--build-context", "`"ash-base-image=oci-layout://$baseLayoutDir`""'
-            in branch
+            '"--build-context", "ash-base-image=oci-layout://$baseLayoutDir"' in branch
         )
+        assert '`"ash-base-image' not in branch
         assert '"--build-arg", "BASE_IMAGE=ash-base-image"' in branch
         assert '"--pull=false"' in branch
 
@@ -301,6 +310,7 @@ class TestThePowerShellEntrypoint:
 # --------------------------------------------------------------------------- completeness
 
 
+@pytest.mark.unit
 class TestEveryBuildEntrypointIsCovered:
     def test_every_build_entrypoint_reads_the_variable(self):
         missing = [

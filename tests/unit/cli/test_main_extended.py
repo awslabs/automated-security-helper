@@ -6,6 +6,8 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 
+pytestmark = pytest.mark.unit
+
 
 @patch("automated_security_helper.cli.main.run_ash_scan_cli_command")
 def test_main_cli_help(mock_run_ash_scan):

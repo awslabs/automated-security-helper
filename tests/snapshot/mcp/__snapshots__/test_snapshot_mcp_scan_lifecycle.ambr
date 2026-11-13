@@ -10,10 +10,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': True,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 2,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -22,7 +27,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': True,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -59,8 +75,9 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
       ]),
       'stale_content_databases': list([
@@ -68,6 +85,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -88,12 +107,17 @@
       ]),
     ]),
     'result': dict({
-      'completed_scanners': 2,
+      'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 0,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -102,35 +126,32 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 0,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
       }),
       'scanners': dict({
-        'bandit': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'high': 1,
-              'suppressed': 1,
-            }),
-          }),
-        }),
-        'detect-secrets': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'critical': 1,
-            }),
-          }),
-        }),
       }),
       'severity_counts': dict({
-        'critical': 1,
-        'high': 1,
+        'critical': 0,
+        'high': 0,
         'info': 0,
         'low': 0,
         'medium': 0,
-        'suppressed': 1,
+        'suppressed': 0,
+        'unknown': 0,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
       ]),
       'stale_content_databases': list([
@@ -138,9 +159,11 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
-      'total_scanners': 2,
+      'total_scanners': 0,
       'unevaluated_rules': list([
       ]),
       'warnings': list([
@@ -164,6 +187,8 @@
         dict({
           'config_path': None,
           'coverage': dict({
+            'could_not_stop': list([
+            ]),
             'incomplete_converters': list([
             ]),
             'incomplete_scanners': list([
@@ -179,8 +204,9 @@
           'error_message': None,
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
+          'requested_severity_threshold': None,
           'scan_id': '<SCAN_ID>',
-          'severity_threshold': 'MEDIUM',
+          'severity_threshold': None,
           'start_time': '2026-01-15T12:00:00',
           'status': 'completed',
           'warnings': list([
@@ -219,14 +245,6 @@
       ]),
       list([
         'info',
-        'Cleaning up existing results file...',
-      ]),
-      list([
-        'debug',
-        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
-      ]),
-      list([
-        'info',
         'Scan started with ID: <SCAN_ID>',
       ]),
       list([
@@ -239,11 +257,11 @@
     'result': dict({
       'directory_path': '<TMP>/allowed/project',
       'important': dict({
-        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every 5 seconds instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'connection_management': 'Poll get_scan_progress(scan_id) every 5 seconds for updates. The scan continues server-side independently of the client connection. Stop when is_complete is true, then read the status: completed, incomplete, failed or cancelled.',
         'next_steps': list([
-          '1. Poll get_scan_progress(scan_id) every 5 seconds to keep connection alive',
-          "2. Check progress['is_complete'] or progress['status'] for completion",
-          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+          '1. Store scan_id and poll get_scan_progress(scan_id) every 5 seconds',
+          '2. Stop polling when is_complete is true, then read the status: completed, incomplete, failed, or cancelled',
+          '3. Fetch results for completed or incomplete scans and review coverage; for failed or cancelled scans, read the status and error before retrying',
         ]),
       }),
       'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
@@ -268,6 +286,9 @@
       '_filter': 'summary',
       '_source_function': 'get_scan_summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -280,18 +301,25 @@
           'total': 3,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -329,8 +357,12 @@
         'completed_scanners': 2,
         'total_scanners': 2,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_summary',
   })
@@ -344,49 +376,51 @@
       ]),
     ]),
     'result': dict({
-      'completed_scanners': 2,
+      'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': 'Error executing scan: scanner orchestration crashed',
+      'exit_code': 1,
+      'exit_code_meaning': 'scan errors / scanner failures',
+      'finished_scanners': 0,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
       ]),
-      'is_complete': False,
+      'is_complete': True,
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': True,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 0,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
       }),
       'scanners': dict({
-        'bandit': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'high': 1,
-              'suppressed': 1,
-            }),
-          }),
-        }),
-        'detect-secrets': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'critical': 1,
-            }),
-          }),
-        }),
       }),
       'severity_counts': dict({
-        'critical': 1,
-        'high': 1,
+        'critical': 0,
+        'high': 0,
         'info': 0,
         'low': 0,
         'medium': 0,
-        'suppressed': 1,
+        'suppressed': 0,
+        'unknown': 0,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
       ]),
       'stale_content_databases': list([
@@ -394,9 +428,11 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
-      'total_scanners': 2,
+      'total_scanners': 0,
       'unevaluated_rules': list([
       ]),
       'warnings': list([
@@ -414,12 +450,17 @@
       ]),
     ]),
     'result': dict({
-      'completed_scanners': 2,
+      'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 0,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -428,35 +469,32 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 0,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
       }),
       'scanners': dict({
-        'bandit': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'high': 1,
-              'suppressed': 1,
-            }),
-          }),
-        }),
-        'detect-secrets': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'critical': 1,
-            }),
-          }),
-        }),
       }),
       'severity_counts': dict({
-        'critical': 1,
-        'high': 1,
+        'critical': 0,
+        'high': 0,
         'info': 0,
         'low': 0,
         'medium': 0,
-        'suppressed': 1,
+        'suppressed': 0,
+        'unknown': 0,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
       ]),
       'stale_content_databases': list([
@@ -464,9 +502,11 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
-      'total_scanners': 2,
+      'total_scanners': 0,
       'unevaluated_rules': list([
       ]),
       'warnings': list([
@@ -495,8 +535,9 @@
           'error_message': 'Error executing scan: scanner orchestration crashed',
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
+          'requested_severity_threshold': None,
           'scan_id': '<SCAN_ID>',
-          'severity_threshold': 'MEDIUM',
+          'severity_threshold': None,
           'start_time': '2026-01-15T12:00:00',
           'status': 'failed',
           'warnings': list([
@@ -535,14 +576,6 @@
       ]),
       list([
         'info',
-        'Cleaning up existing results file...',
-      ]),
-      list([
-        'debug',
-        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
-      ]),
-      list([
-        'info',
         'Scan started with ID: <SCAN_ID>',
       ]),
       list([
@@ -555,11 +588,11 @@
     'result': dict({
       'directory_path': '<TMP>/allowed/project',
       'important': dict({
-        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every 5 seconds instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'connection_management': 'Poll get_scan_progress(scan_id) every 5 seconds for updates. The scan continues server-side independently of the client connection. Stop when is_complete is true, then read the status: completed, incomplete, failed or cancelled.',
         'next_steps': list([
-          '1. Poll get_scan_progress(scan_id) every 5 seconds to keep connection alive',
-          "2. Check progress['is_complete'] or progress['status'] for completion",
-          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+          '1. Store scan_id and poll get_scan_progress(scan_id) every 5 seconds',
+          '2. Stop polling when is_complete is true, then read the status: completed, incomplete, failed, or cancelled',
+          '3. Fetch results for completed or incomplete scans and review coverage; for failed or cancelled scans, read the status and error before retrying',
         ]),
       }),
       'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
@@ -584,16 +617,16 @@
       'context': dict({
         'error_category': 'scan_incomplete',
         'output_dir': '<TMP>/allowed/project/.ash/ash_output',
+        'output_holds_previous_results': True,
       }),
-      'error': 'Scan of output_dir <TMP>/allowed/project/.ash/ash_output is not complete. Results are not available.',
+      'error': "Scan of output_dir <TMP>/allowed/project/.ash/ash_output is not complete. Results are not available: the last scan there ended without results, and ASH put back the results of the scan before it, which are not that scan's.",
       'error_category': 'scan_incomplete',
       'error_type': 'MCPResourceError',
       'operation': 'get_scan_results',
       'success': False,
       'suggestions': list([
-        'Wait for the scan to complete',
-        'Check if the scan process is still running',
-        'Verify that the scan was started correctly',
+        'Run the scan again',
+        "get_scan_progress with the scan's id says how it ended",
       ]),
       'timestamp': None,
     }),
@@ -609,49 +642,51 @@
       ]),
     ]),
     'result': dict({
-      'completed_scanners': 2,
+      'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': 'ASH exited with code 2',
+      'exit_code': 2,
+      'exit_code_meaning': 'actionable findings at or above threshold',
+      'finished_scanners': 0,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
       ]),
-      'is_complete': False,
+      'is_complete': True,
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': True,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 0,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
       }),
       'scanners': dict({
-        'bandit': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'high': 1,
-              'suppressed': 1,
-            }),
-          }),
-        }),
-        'detect-secrets': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'critical': 1,
-            }),
-          }),
-        }),
       }),
       'severity_counts': dict({
-        'critical': 1,
-        'high': 1,
+        'critical': 0,
+        'high': 0,
         'info': 0,
         'low': 0,
         'medium': 0,
-        'suppressed': 1,
+        'suppressed': 0,
+        'unknown': 0,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
       ]),
       'stale_content_databases': list([
@@ -659,9 +694,11 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
-      'total_scanners': 2,
+      'total_scanners': 0,
       'unevaluated_rules': list([
       ]),
       'warnings': list([
@@ -679,12 +716,17 @@
       ]),
     ]),
     'result': dict({
-      'completed_scanners': 2,
+      'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 0,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -693,35 +735,32 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 0,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
       }),
       'scanners': dict({
-        'bandit': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'high': 1,
-              'suppressed': 1,
-            }),
-          }),
-        }),
-        'detect-secrets': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'critical': 1,
-            }),
-          }),
-        }),
       }),
       'severity_counts': dict({
-        'critical': 1,
-        'high': 1,
+        'critical': 0,
+        'high': 0,
         'info': 0,
         'low': 0,
         'medium': 0,
-        'suppressed': 1,
+        'suppressed': 0,
+        'unknown': 0,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
       ]),
       'stale_content_databases': list([
@@ -729,9 +768,11 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
-      'total_scanners': 2,
+      'total_scanners': 0,
       'unevaluated_rules': list([
       ]),
       'warnings': list([
@@ -760,8 +801,9 @@
           'error_message': 'ASH exited with code 2',
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
+          'requested_severity_threshold': None,
           'scan_id': '<SCAN_ID>',
-          'severity_threshold': 'MEDIUM',
+          'severity_threshold': None,
           'start_time': '2026-01-15T12:00:00',
           'status': 'failed',
           'warnings': list([
@@ -800,14 +842,6 @@
       ]),
       list([
         'info',
-        'Cleaning up existing results file...',
-      ]),
-      list([
-        'debug',
-        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
-      ]),
-      list([
-        'info',
         'Scan started with ID: <SCAN_ID>',
       ]),
       list([
@@ -820,11 +854,11 @@
     'result': dict({
       'directory_path': '<TMP>/allowed/project',
       'important': dict({
-        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every 5 seconds instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'connection_management': 'Poll get_scan_progress(scan_id) every 5 seconds for updates. The scan continues server-side independently of the client connection. Stop when is_complete is true, then read the status: completed, incomplete, failed or cancelled.',
         'next_steps': list([
-          '1. Poll get_scan_progress(scan_id) every 5 seconds to keep connection alive',
-          "2. Check progress['is_complete'] or progress['status'] for completion",
-          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+          '1. Store scan_id and poll get_scan_progress(scan_id) every 5 seconds',
+          '2. Stop polling when is_complete is true, then read the status: completed, incomplete, failed, or cancelled',
+          '3. Fetch results for completed or incomplete scans and review coverage; for failed or cancelled scans, read the status and error before retrying',
         ]),
       }),
       'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
@@ -849,16 +883,16 @@
       'context': dict({
         'error_category': 'scan_incomplete',
         'output_dir': '<TMP>/allowed/project/.ash/ash_output',
+        'output_holds_previous_results': True,
       }),
-      'error': 'Scan of output_dir <TMP>/allowed/project/.ash/ash_output is not complete. Results are not available.',
+      'error': "Scan of output_dir <TMP>/allowed/project/.ash/ash_output is not complete. Results are not available: the last scan there ended without results, and ASH put back the results of the scan before it, which are not that scan's.",
       'error_category': 'scan_incomplete',
       'error_type': 'MCPResourceError',
       'operation': 'get_scan_results',
       'success': False,
       'suggestions': list([
-        'Wait for the scan to complete',
-        'Check if the scan process is still running',
-        'Verify that the scan was started correctly',
+        'Run the scan again',
+        "get_scan_progress with the scan's id says how it ended",
       ]),
       'timestamp': None,
     }),
@@ -876,10 +910,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': False,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 3,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -894,7 +933,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': True,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 1,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -942,8 +992,9 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
         dict({
           'reason': 'missing_dependencies',
@@ -956,6 +1007,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'incomplete',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 3,
@@ -976,12 +1029,17 @@
       ]),
     ]),
     'result': dict({
-      'completed_scanners': 2,
+      'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 0,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -990,35 +1048,32 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 0,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
       }),
       'scanners': dict({
-        'bandit': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'high': 1,
-              'suppressed': 1,
-            }),
-          }),
-        }),
-        'detect-secrets': dict({
-          'source': dict({
-            'severity_counts': dict({
-              'critical': 1,
-            }),
-          }),
-        }),
       }),
       'severity_counts': dict({
-        'critical': 1,
-        'high': 1,
+        'critical': 0,
+        'high': 0,
         'info': 0,
         'low': 0,
         'medium': 0,
-        'suppressed': 1,
+        'suppressed': 0,
+        'unknown': 0,
       }),
-      'severity_threshold': 'MEDIUM',
+      'severity_threshold': None,
       'skipped_scanners': list([
       ]),
       'stale_content_databases': list([
@@ -1026,9 +1081,11 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
-      'total_scanners': 2,
+      'total_scanners': 0,
       'unevaluated_rules': list([
       ]),
       'warnings': list([
@@ -1052,6 +1109,8 @@
         dict({
           'config_path': None,
           'coverage': dict({
+            'could_not_stop': list([
+            ]),
             'incomplete_converters': list([
             ]),
             'incomplete_scanners': list([
@@ -1073,8 +1132,9 @@
           'error_message': None,
           'output_directory': '<TMP>/allowed/project/.ash/ash_output',
           'process_id': None,
+          'requested_severity_threshold': None,
           'scan_id': '<SCAN_ID>',
-          'severity_threshold': 'MEDIUM',
+          'severity_threshold': None,
           'start_time': '2026-01-15T12:00:00',
           'status': 'incomplete',
           'warnings': list([
@@ -1113,14 +1173,6 @@
       ]),
       list([
         'info',
-        'Cleaning up existing results file...',
-      ]),
-      list([
-        'debug',
-        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
-      ]),
-      list([
-        'info',
         'Scan started with ID: <SCAN_ID>',
       ]),
       list([
@@ -1133,11 +1185,11 @@
     'result': dict({
       'directory_path': '<TMP>/allowed/project',
       'important': dict({
-        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every 5 seconds instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'connection_management': 'Poll get_scan_progress(scan_id) every 5 seconds for updates. The scan continues server-side independently of the client connection. Stop when is_complete is true, then read the status: completed, incomplete, failed or cancelled.',
         'next_steps': list([
-          '1. Poll get_scan_progress(scan_id) every 5 seconds to keep connection alive',
-          "2. Check progress['is_complete'] or progress['status'] for completion",
-          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+          '1. Store scan_id and poll get_scan_progress(scan_id) every 5 seconds',
+          '2. Stop polling when is_complete is true, then read the status: completed, incomplete, failed, or cancelled',
+          '3. Fetch results for completed or incomplete scans and review coverage; for failed or cancelled scans, read the status and error before retrying',
         ]),
       }),
       'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
@@ -1162,6 +1214,9 @@
       '_filter': 'summary',
       '_source_function': 'get_scan_summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': False,
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1174,18 +1229,31 @@
           'total': 3,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 1,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+        dict({
+          'detail': 'MISSING',
+          'reason': 'missing_dependencies',
+          'scanner': 'semgrep',
+          'status': 'MISSING',
+        }),
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1238,8 +1306,12 @@
         'completed_scanners': 2,
         'total_scanners': 3,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'incomplete',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_summary',
   })
@@ -1255,6 +1327,8 @@
     'result': dict({
       'actionable_findings': 2,
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
       'coverage_complete': True,
       'incomplete_converters': list([
       ]),
@@ -1377,8 +1451,18 @@
     'result': dict({
       '_filter': 'minimal',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
       'summary_stats': dict({
@@ -1399,6 +1483,8 @@
         'skipped': 0,
         'total': 3,
       }),
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1414,8 +1500,18 @@
     'result': dict({
       '_filter': 'minimal',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
       'summary_stats': dict({
@@ -1437,6 +1533,8 @@
         'suppressed': 0,
         'total': 2,
       }),
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1452,6 +1550,9 @@
     'result': dict({
       '_filter': 'summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1464,18 +1565,25 @@
           'total': 3,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1513,8 +1621,12 @@
         'completed_scanners': 2,
         'total_scanners': 2,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1530,30 +1642,40 @@
     'result': dict({
       '_filter': 'summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
-          'actionable': 2,
-          'critical': 1,
+          'actionable': 1,
+          'critical': 0,
           'high': 1,
           'info': 0,
           'low': 0,
           'medium': 0,
           'suppressed': 1,
-          'total': 3,
+          'total': 1,
         }),
         'scan_stats': dict({
-          'failed': 2,
+          'error': 0,
+          'failed': 1,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1576,8 +1698,12 @@
         'completed_scanners': 1,
         'total_scanners': 1,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1593,30 +1719,40 @@
     'result': dict({
       '_filter': 'summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
-          'actionable': 2,
+          'actionable': None,
           'critical': 1,
           'high': 0,
           'info': 0,
           'low': 0,
           'medium': 0,
           'suppressed': 0,
-          'total': 3,
+          'total': 1,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1631,7 +1767,7 @@
               'suppressed': 0,
             }),
             'duration': 0,
-            'findings_count': 2,
+            'findings_count': 0,
             'status': 'FAILED',
             'suppressed_findings': 1,
           }),
@@ -1654,8 +1790,12 @@
         'completed_scanners': 2,
         'total_scanners': 2,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1675,6 +1815,8 @@
     'result': dict({
       'actionable_findings': 2,
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
       'coverage_complete': True,
       'incomplete_converters': list([
       ]),
@@ -1926,6 +2068,7 @@
           'error_message': None,
           'output_directory': '<TMP>/allowed/running/.ash/ash_output',
           'process_id': None,
+          'requested_severity_threshold': None,
           'scan_id': '<RUNNING_SCAN_ID>',
           'severity_threshold': 'MEDIUM',
           'start_time': '2026-01-15T12:00:00',
@@ -1943,6 +2086,7 @@
           'error_message': None,
           'output_directory': '<TMP>/allowed/running/.ash/ash_output',
           'process_id': None,
+          'requested_severity_threshold': None,
           'scan_id': '<RUNNING_SCAN_ID>',
           'severity_threshold': 'MEDIUM',
           'start_time': '2026-01-15T12:00:00',
@@ -1958,6 +2102,7 @@
           'error_message': None,
           'output_directory': '<TMP>/allowed/finished/.ash/ash_output',
           'process_id': None,
+          'requested_severity_threshold': None,
           'scan_id': '<FINISHED_SCAN_ID>',
           'severity_threshold': 'MEDIUM',
           'start_time': '2026-01-15T12:00:00',
@@ -2127,10 +2272,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 2,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -2139,7 +2289,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -2176,6 +2337,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2185,6 +2347,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'cancelled',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2207,10 +2371,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': True,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 2,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -2219,7 +2388,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': True,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -2256,6 +2436,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2265,6 +2446,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2287,10 +2470,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': 'ASH exited with code 2',
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 2,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -2299,7 +2487,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -2336,6 +2535,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2345,6 +2545,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2367,10 +2569,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': False,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 3,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -2385,7 +2592,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': True,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 1,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -2433,6 +2651,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2447,6 +2666,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'incomplete',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 3,
@@ -2469,10 +2690,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': True,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 2,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -2481,7 +2707,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': True,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -2518,6 +2755,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2527,6 +2765,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2549,10 +2789,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 0,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -2561,7 +2806,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 0,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
       }),
       'scanners': dict({
@@ -2573,6 +2829,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2582,6 +2839,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -2604,10 +2863,15 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
       'error_message': None,
+      'exit_code': None,
+      'exit_code_meaning': None,
+      'finished_scanners': 2,
       'incomplete_converters': list([
       ]),
       'incomplete_scanners': list([
@@ -2616,7 +2880,18 @@
       'no_scanner_ran': False,
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'output_holds_previous_results': False,
+      'output_superseded': False,
+      'requested_severity_threshold': None,
+      'results_available': False,
       'scan_id': '<SCAN_ID>',
+      'scanner_status_counts': dict({
+        'failed': 2,
+        'passed': 0,
+        'pending': 0,
+        'running': 0,
+        'skipped': 0,
+      }),
       'scanner_statuses': dict({
         'bandit': dict({
           'dependencies_satisfied': True,
@@ -2653,6 +2928,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2662,6 +2938,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'running',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2686,7 +2964,7 @@
         'aggregated_results': dict({
           'exists': True,
           'path': '<TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
-          'size_bytes': 7139,
+          'size_bytes': 7247,
         }),
         'csv': dict({
           'exists': False,
@@ -2838,7 +3116,6 @@
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
         'error_category': 'file_not_found',
       }),
@@ -2953,7 +3230,6 @@
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
         'error_category': 'file_not_found',
       }),
@@ -2977,7 +3253,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <TMP>/cwd',
+        'run_ash_scan tool called',
       ]),
       list([
         'error',
@@ -2988,6 +3264,8 @@
       'error': 'Config input is outside the permitted roots: <TMP>/outside/.ash.yaml. Set ASH_MCP_ALLOWED_CONFIG_ROOTS to the directories the MCP server may read config from -- a shared policy file governing several checkouts belongs there -- or keep the config inside a directory already granted by ASH_MCP_ALLOWED_ROOTS.',
       'error_category': 'invalid_path',
       'error_type': 'config_input_not_permitted',
+      'exit_code': 3,
+      'exit_code_meaning': 'invalid config or refused input',
       'success': False,
     }),
     'tool': 'run_ash_scan',
@@ -2998,12 +3276,14 @@
     'client_messages': list([
       list([
         'error',
-        "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
+        "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source, or holds no file. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
       ]),
     ]),
     'result': dict({
-      'error': "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
+      'error': "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source, or holds no file. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
       'error_type': 'delivered_source_missing',
+      'exit_code': 4,
+      'exit_code_meaning': 'workspace definition or policy error',
       'session_id': 'session-c',
       'success': False,
     }),
@@ -3021,6 +3301,8 @@
     'result': dict({
       'error': "mcp-session-id must not contain path separators: '../escape'",
       'error_type': 'invalid_session_id',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'success': False,
     }),
     'tool': 'run_ash_scan',
@@ -3037,6 +3319,8 @@
     'result': dict({
       'error': "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
       'error_type': 'no_source_delivered',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -3059,6 +3343,8 @@
       'error': "Scan output directory is not inside the scan target: '.ash' is a symlink; project directories must be real directories",
       'error_category': 'invalid_path',
       'error_type': 'output_dir_not_permitted',
+      'exit_code': 3,
+      'exit_code_meaning': 'invalid config or refused input',
       'success': False,
     }),
     'tool': 'run_ash_scan',
@@ -3081,9 +3367,28 @@
       ]),
     ]),
     'result': dict({
-      'error': "Failed to start scan: Invalid severity threshold: 'SEVERE'. Must be one of: ALL, LOW, MEDIUM, HIGH, CRITICAL",
-      'error_type': 'scan_start_failure',
+      'context': dict({
+        'error_category': 'invalid_parameter',
+        'valid_values': list([
+          'ALL',
+          'LOW',
+          'MEDIUM',
+          'HIGH',
+          'CRITICAL',
+        ]),
+      }),
+      'error': "Invalid severity threshold: 'SEVERE'. Must be one of: ALL, LOW, MEDIUM, HIGH, CRITICAL",
+      'error_category': 'invalid_parameter',
+      'error_type': 'MCPResourceError',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
+      'operation': 'scan_directory',
       'success': False,
+      'suggestions': list([
+        'Valid severity thresholds are: ALL, LOW, MEDIUM, HIGH, CRITICAL',
+        'Check the spelling of the severity threshold; any case is accepted',
+      ]),
+      'timestamp': None,
     }),
     'tool': 'run_ash_scan',
   })
@@ -3104,6 +3409,8 @@
       'error': "Scan target is outside the permitted roots: <TMP>/outside. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
       'error_category': 'invalid_path',
       'error_type': 'scan_target_not_permitted',
+      'exit_code': 4,
+      'exit_code_meaning': 'workspace definition or policy error',
       'success': False,
     }),
     'tool': 'run_ash_scan',
@@ -3120,6 +3427,8 @@
     'result': dict({
       'error': "No source has been delivered under this session id, but 1 other session(s) currently hold delivered source. This session id is most likely not stable across calls, so the upload and this scan resolved to different workspaces. Pass the source_dir that set_source_git or set_source_zip_finalize returned, rather than omitting it. Refusing to scan: falling back to the server's working directory would report a clean result for a tree that is not yours.",
       'error_type': 'session_source_mismatch',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'session_id': 'session-a',
       'success': False,
     }),

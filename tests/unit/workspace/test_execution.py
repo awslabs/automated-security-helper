@@ -14,6 +14,7 @@ because a fake orchestrator could not prove anything about it.
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # nosec B404 -- builds throwaway git repositories for the changed-files gate
 import sys
 import threading
@@ -30,11 +31,13 @@ from automated_security_helper.models.workspace import (
     SkippedProjectReason,
     WorkspaceExitCode,
 )
+from automated_security_helper.workspace import execution as execution_module
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
     execute_workspace,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.git_fixture import run_git
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +97,7 @@ class FakeOrchestrator:
     def execute_scan(self, phases=None):
         from automated_security_helper.models.asharp_model import (
             AshAggregatedResults,
+            ConverterStatusInfo,
             ScannerTargetStatusInfo,
         )
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -110,6 +114,10 @@ class FakeOrchestrator:
             raise spec["raise"]
 
         model = AshAggregatedResults()
+        # The configuration the scan ran with, as the results record it, for a
+        # test of what the recorded config decides (a scanner's own threshold).
+        if "ash_config" in spec:
+            model.ash_config = spec["ash_config"]
         model.sarif = SarifReport.model_validate(spec.get("sarif") or _sarif(count=0))
 
         # A real scan writes a scanner_results entry for every scanner it ran --
@@ -136,6 +144,47 @@ class FakeOrchestrator:
         # The explicit spec wins, so a test can say a scanner did not complete.
         for name, info in (spec.get("scanner_results") or {}).items():
             model.scanner_results[name] = ScannerTargetStatusInfo(**info)
+        # Converter rows as ConvertPhase records them, for the converter half of
+        # the completeness verdict.
+        for name, row in (spec.get("converter_results") or {}).items():
+            model.converter_results[name] = ConverterStatusInfo.model_validate(row)
+        # The per-target reports, as ScanResultProcessor serializes them, for a test
+        # that needs what a report recorded beyond the row.
+        model.additional_reports.update(spec.get("additional_reports") or {})
+        # The scan phase saves the per-project results file itself, before the
+        # workspace layer sees the model (ScanPhase, AshAggregatedResults.save_model).
+        # Off by default so the fixtures that assert the workspace's own write stay
+        # exact; a test about what the scan left behind turns it on.
+        if spec.get("save_results"):
+            model.save_model(self.output_dir)
+            # The report phase writes the project's own reports beside the
+            # results, and the tools write their own output under scanners/.
+            reports = self.output_dir / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "ash.sarif").write_text("{}\n", encoding="utf-8")
+            tools = self.output_dir / "scanners" / "bandit"
+            tools.mkdir(parents=True, exist_ok=True)
+            (tools / "raw.json").write_text("{}\n", encoding="utf-8")
+        # The SARIF report the scan's own SARIF reporter wrote, recorded on the
+        # model as ReportPhase records it (record_reports_written), for a test of
+        # what the verdict counts from. Off by default, so every other fixture's
+        # counts keep coming from the model it built.
+        if "written_sarif" in spec:
+            from automated_security_helper.utils.inner_run_outcome import (
+                record_reports_written,
+            )
+
+            reports = self.output_dir / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "ash.sarif").write_text(
+                json.dumps(spec["written_sarif"]), encoding="utf-8"
+            )
+            record_reports_written(model, [("ash.sarif", "sarif")])
+        # The raw values this project's own masking exposed, kept on the model as
+        # secret_masking._record keeps them, for a test of the workspace's
+        # cross-project masking.
+        if "secret_values" in spec:
+            model._secret_values = set(spec["secret_values"])
         return model
 
 
@@ -206,6 +255,7 @@ def _run(tmp_path, plan, **overrides):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestPerProjectScoping:
     def test_one_orchestrator_per_project(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
@@ -309,6 +359,7 @@ class TestPerProjectScoping:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestPerProjectThresholds:
     def test_a_project_below_its_own_threshold_passes(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
@@ -533,6 +584,58 @@ class TestPerProjectThresholds:
         assert entry.actionable_finding_count == 1
         assert entry.ceiling_unreachable_findings == {}
 
+    def test_a_non_gating_policy_scanners_level_only_finding_is_not_disclosed(
+        self, tmp_path
+    ):
+        """The verdict's policy_scanners_gate exclusion, applied to the disclosure.
+
+        semgrep is a scanner only the workspace policy asked for, with the gate
+        off: its findings are judged at no threshold, so the ceiling never
+        claimed them. Red at the base: the executor called the counter without
+        the project's non-gating scanners, so the helper's own exclusion never
+        ran in production and semgrep's level-only finding was disclosed as one
+        the ceiling could not reach. bandit's is the control: the project's own
+        scanner, still disclosed.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0].model_copy(
+            update={"policy_scanners": ["semgrep"], "policy_scanners_gate": False}
+        )
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        plan.projects[0] = project
+        sarif = _sarif(level="error", count=2)
+        sarif["runs"][0]["results"][1]["properties"]["scanner_name"] = "semgrep"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        # Controls: semgrep's finding is present and policy-origin, and bandit's
+        # is actionable, so the missing semgrep key is the exclusion's doing.
+        assert entry.finding_count == 2
+        assert entry.policy_origin_finding_count == 1
+        assert entry.actionable_finding_count == 1
+        assert entry.ceiling_unreachable_findings == {"bandit": 1}
+
+    def test_a_gating_policy_scanners_level_only_finding_is_disclosed(self, tmp_path):
+        """The other arm: with the gate on, semgrep's finding decides the verdict,
+        so the ceiling's claim covers it and the disclosure names both scanners."""
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0].model_copy(
+            update={"policy_scanners": ["semgrep"], "policy_scanners_gate": True}
+        )
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        plan.projects[0] = project
+        sarif = _sarif(level="error", count=2)
+        sarif["runs"][0]["results"][1]["properties"]["scanner_name"] = "semgrep"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        assert entry.actionable_finding_count == 2
+        assert entry.ceiling_unreachable_findings == {"bandit": 1, "semgrep": 1}
+
     def test_the_aggregate_exit_code_reflects_the_strictest_failing_project(
         self, tmp_path
     ):
@@ -585,6 +688,7 @@ def _scanner(status, *, excluded=False, satisfied=True):
     }
 
 
+@pytest.mark.unit
 class TestScannerCompleteness:
     """A project whose scanners did not all run must not report clean.
 
@@ -595,12 +699,10 @@ class TestScannerCompleteness:
     for the same reason a finding-count verdict cannot tell "nothing was wrong"
     from "nothing was checked".
 
-    Workspace mode keeps its own contract rather than borrowing single-project
-    precedence. An incomplete project is an unknown, so it lands on
-    ``INTERNAL_ERROR`` (1) -- which in workspace mode sits BELOW
-    ``ACTIONABLE_FINDINGS`` (2), the reverse of single-project mode, because an
-    unknown must not suppress a certainty. ``WORKSPACE_ERROR`` (4) is untouched:
-    it means nothing was attempted, and these projects were.
+    An incomplete project is an unknown, so it lands on ``INTERNAL_ERROR`` (1),
+    which ranks ABOVE ``ACTIONABLE_FINDINGS`` (2), as in single-project mode.
+    ``WORKSPACE_ERROR`` (4) is untouched: it means nothing was attempted, and these
+    projects were.
     """
 
     def test_a_missing_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
@@ -671,6 +773,13 @@ class TestScannerCompleteness:
         outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
         assert outcome.payload.projects[0].scan_incomplete is incomplete
         assert outcome.exit_code == code
+        # Named once, in its own field, as a single scan's payload names it; grype
+        # ran, so it is not among the scanners that did not complete.
+        project = outcome.payload.projects[0]
+        assert [r["name"] for r in project.stale_content_databases] == (
+            ["grype-db"] if policy == "fail" else []
+        )
+        assert project.incomplete_scanners == []
 
     def test_an_error_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
         """ERROR and MISSING are the same news: the scanner did not complete."""
@@ -732,13 +841,13 @@ class TestScannerCompleteness:
         assert entry.scan_incomplete is False
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
-    def test_findings_still_outrank_an_incomplete_project(self, tmp_path):
-        """Workspace precedence is preserved, not replaced by single-project's.
+    def test_an_incomplete_project_outranks_another_project_s_findings(self, tmp_path):
+        """Workspace precedence is single-project's: 1 ahead of 2.
 
-        Single-project mode answers 1 when both hold. Workspace mode answers 2,
-        and that difference is deliberate -- see the ordering rationale in
-        models/workspace.py. Collapsing the two models here would make a CI gate
-        that retries 1 stop blocking on real findings.
+        Reverses this test's earlier expectation (ACTIONABLE_FINDINGS), by design:
+        `ash --source-dir P` answers 1 when a scanner did not complete, so P inside
+        a workspace must too, whatever another project found. The findings stay in
+        the payload; see the ordering rationale in models/workspace.py.
         """
         _, plan = _make_workspace(tmp_path, ("api", "LOW"), ("web", "MEDIUM"))
         FakeOrchestrator.behaviour["api"] = {
@@ -752,10 +861,12 @@ class TestScannerCompleteness:
         outcome = _run(tmp_path, plan)
         verdicts = {p.project: p.scan_incomplete for p in outcome.payload.projects}
 
-        # Control: the incomplete project really is flagged, so 2 is precedence
-        # winning rather than the completeness pass never having fired.
+        # Control: both facts really are present, so 1 is precedence and not the
+        # findings having gone missing.
         assert verdicts == {"api": False, "web": True}
-        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        thresholds = {p.project: p.exceeds_threshold for p in outcome.payload.projects}
+        assert thresholds == {"api": True, "web": False}
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
     def test_a_complete_clean_project_still_reports_success(self, tmp_path):
         """Load-bearing: the gate must not fail every workspace it looks at."""
@@ -924,6 +1035,315 @@ class TestScannerCompleteness:
         assert rollup["bandit"]["dependencies_satisfied"] is True
 
 
+def _missing(reason):
+    return {
+        **_scanner("MISSING", satisfied=False),
+        "missing_reason": reason,
+    }
+
+
+def _skipped(reason):
+    return {**_scanner("SKIPPED", excluded=True), "skipped_reason": reason}
+
+
+def _written(tmp_path) -> Dict[str, Any]:
+    return json.loads(
+        (tmp_path / "out" / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.unit
+class TestScannerReasonsInTheWorkspace:
+    """The workspace says why a scanner did not run, as a single scan does.
+
+    Each project's own ``projects/<key>/ash_aggregated_results.json`` has the
+    rows' missing_reason and skipped_reason. The workspace's own file rolls the
+    scanner rows up to the worst status across projects, and docs/content/docs/
+    output-formats.md says its ``scanner_results`` carry the same two fields. So a
+    rolled-up SKIPPED or MISSING row names, for each project at that status, the
+    project and its reason: ``<project>: <reason>``, joined with ``; `` in
+    workspace-file order. Each project's own reasons travel in-process on its
+    ``WorkspaceProjectResult.scanner_reasons``, the map the rollup reads; the
+    written ``workspace`` block does not carry that map (the field is excluded
+    from the dump, since the rolled-up row is the public surface), so the tests
+    read it from the run's payload and check the written entry omits it.
+    """
+
+    def test_each_project_entry_keeps_its_scanners_reasons(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("PASSED"),
+                "cfn-nag": _missing("its tool cfn_nag_scan was not found on PATH"),
+                "grype": _skipped("excluded from this run (--exclude-scanners)"),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {
+            "cfn-nag": "its tool cfn_nag_scan was not found on PATH",
+            "grype": "excluded from this run (--exclude-scanners)",
+        }, entry
+        # The map is in-process only; the written entry omits it by design.
+        project = _written(tmp_path)["workspace"]["projects"][0]
+        assert "scanner_reasons" not in project, project
+
+    def test_an_error_row_lists_the_error_its_report_recorded(self, tmp_path):
+        """An ERROR scanner says why, from the first error its reports recorded.
+
+        A scanner whose constructor raised is ERROR with no reason field on its
+        row; the scan phase records the constructor's error on its report. An MCP
+        client reads the project's entry, not ash.log, so without this it learns
+        only that the scanner failed.
+        """
+        constructor_error = (
+            "Scanner bandit could not be constructed, so it did not run: "
+            "RuntimeError: boom"
+        )
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("ERROR"),
+                "grype": _scanner("ERROR"),
+                "semgrep": _scanner("PASSED"),
+            },
+            "additional_reports": {
+                "bandit": {
+                    "None": {
+                        "scanner_name": "bandit",
+                        "status": "ERROR",
+                        "errors": [constructor_error],
+                    }
+                },
+                # Control: an ERROR whose report recorded no error is not listed.
+                "grype": {"source": {"scanner_name": "grype", "status": "ERROR"}},
+            },
+        }
+        outcome = _run(tmp_path, plan)
+
+        written = _written(tmp_path)
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {"bandit": constructor_error}, entry
+        assert "scanner_reasons" not in written["workspace"]["projects"][0]
+        # The rollup keeps its reason fields for SKIPPED and MISSING rows.
+        row = written["scanner_results"]["bandit"]
+        assert row["status"] == "ERROR", row
+        assert row.get("missing_reason") is None, row
+        assert row.get("skipped_reason") is None, row
+
+    def test_an_error_from_a_scan_that_raised_lists_its_message(self, tmp_path):
+        """The executor records a raised scan()'s error in the report's raw_results.
+
+        That ERROR's report has no ``errors`` of its own: the message is
+        ``raw_results.errors[0]``, beside the exception and its stack trace. The
+        message is listed; the stack trace, which a report keeps for a reader of
+        the results file, is not.
+        """
+        message = "Failed to execute bandit scanner on source: bandit crashed"
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("ERROR")},
+            "additional_reports": {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "ERROR",
+                        "raw_results": {
+                            "errors": [message, "a second error"],
+                            "status": "failed",
+                            "exception": "bandit crashed",
+                            "stack_trace": "Traceback (most recent call last):\n...",
+                        },
+                    }
+                }
+            },
+        }
+        outcome = _run(tmp_path, plan)
+
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {"bandit": message}, entry
+        project = _written(tmp_path)["workspace"]["projects"][0]
+        assert "scanner_reasons" not in project, project
+
+    def test_a_listed_error_carries_no_environment_value(self, tmp_path, monkeypatch):
+        """Listed redacted with the project config's environment values.
+
+        The listed message goes to the workspace results and the MCP response,
+        where env values are never written, and a report's error can name an
+        option the project's config read from the environment: a tool's stderr
+        line about a file it could not load, say.
+        """
+        value = "/nonexistent/ENVCANARY-listed-error/bandit.toml"
+        monkeypatch.setenv("ASH_CONFIG_FILE_FROM_ENV", value)
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        ash_dir = Path(plan.projects[0].path) / ".ash"
+        ash_dir.mkdir(parents=True, exist_ok=True)
+        (ash_dir / "ash.yaml").write_text(
+            "project_name: api\n"
+            "scanners:\n"
+            "  bandit:\n"
+            "    options:\n"
+            "      config_file: ${ASH_CONFIG_FILE_FROM_ENV}\n",
+            encoding="utf-8",
+        )
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("ERROR")},
+            "additional_reports": {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "ERROR",
+                        "raw_results": {
+                            "errors": [f"[main] WARNING could not load {value}"],
+                            "status": "failed",
+                        },
+                    }
+                }
+            },
+        }
+        outcome = _run(tmp_path, plan)
+
+        entry = outcome.payload.projects[0]
+        reason = (entry.scanner_reasons or {}).get("bandit", "")
+        assert "could not load" in reason, entry
+        assert "ENVCANARY-listed-error" not in reason, reason
+        # Nothing written carries the value either: the per-project map is not
+        # dumped, and the rollup names no reason for an ERROR row.
+        assert "ENVCANARY-listed-error" not in json.dumps(_written(tmp_path))
+
+    def test_a_rolled_up_missing_row_names_each_project_and_its_reason(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"cfn-nag": _missing("no cfn_nag_scan on PATH")},
+        }
+        FakeOrchestrator.behaviour["web"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"cfn-nag": _missing("no ruby on PATH")},
+        }
+        _run(tmp_path, plan)
+
+        row = _written(tmp_path)["scanner_results"]["cfn-nag"]
+        assert row["status"] == "MISSING", row
+        assert row.get("missing_reason") == (
+            "api: no cfn_nag_scan on PATH; web: no ruby on PATH"
+        ), row
+        assert row.get("skipped_reason") is None, row
+
+    def test_only_the_projects_at_the_rolled_up_status_are_named(self, tmp_path):
+        """MISSING in one project and SKIPPED in another rolls up MISSING.
+
+        The SKIPPED project's reason is not a reason the scanner is MISSING, so
+        it is not on the row; it stays on that project's own in-process entry.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "grype": _skipped("excluded from this run (--exclude-scanners)")
+            },
+        }
+        FakeOrchestrator.behaviour["web"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"grype": _missing("no grype on PATH")},
+        }
+        outcome = _run(tmp_path, plan)
+
+        written = _written(tmp_path)
+        row = written["scanner_results"]["grype"]
+        assert row["status"] == "MISSING", row
+        assert row.get("missing_reason") == "web: no grype on PATH", row
+        assert row.get("skipped_reason") is None, row
+        api = next(p for p in outcome.payload.projects if p.project == "api")
+        assert api.scanner_reasons == {
+            "grype": "excluded from this run (--exclude-scanners)"
+        }, api
+        assert "scanner_reasons" not in written["workspace"]["projects"][0]
+
+    def test_a_rolled_up_skipped_row_names_each_project_and_its_reason(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _skipped("not named by --scanners")},
+        }
+        FakeOrchestrator.behaviour["web"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _skipped("disabled in the configuration (enabled: false)")
+            },
+        }
+        _run(tmp_path, plan)
+
+        row = _written(tmp_path)["scanner_results"]["bandit"]
+        assert row["status"] == "SKIPPED", row
+        assert row.get("skipped_reason") == (
+            "api: not named by --scanners; "
+            "web: disabled in the configuration (enabled: false)"
+        ), row
+        assert row.get("missing_reason") is None, row
+
+    def test_the_rolled_up_reason_reads_back_through_the_results_model(self, tmp_path):
+        """What ``ash report`` over the workspace output reads."""
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+        )
+
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"cfn-nag": _missing("no cfn_nag_scan on PATH")},
+        }
+        _run(tmp_path, plan)
+
+        model = AshAggregatedResults.model_validate_json(
+            (tmp_path / "out" / "ash_aggregated_results.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        row = model.scanner_results["cfn-nag"]
+        assert row.missing_reason == "api: no cfn_nag_scan on PATH", row
+
+    def test_a_scanner_that_ran_has_no_reason_on_the_rollup(self, tmp_path):
+        """Control: only SKIPPED and MISSING rows carry a reason."""
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("PASSED")},
+        }
+        _run(tmp_path, plan)
+
+        written = _written(tmp_path)
+        row = written["scanner_results"]["bandit"]
+        assert row.get("missing_reason") is None, row
+        assert row.get("skipped_reason") is None, row
+        assert written["workspace"]["projects"][0].get("scanner_reasons", {}) == {}
+
+    def test_a_workspace_block_without_reasons_still_loads(self, tmp_path):
+        """Control: a workspace file written before the field reads with none."""
+        from automated_security_helper.models.workspace import WorkspaceResults
+
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"cfn-nag": _missing("no cfn_nag_scan on PATH")},
+        }
+        _run(tmp_path, plan)
+        block = _written(tmp_path)["workspace"]
+        for project in block["projects"]:
+            project.pop("scanner_reasons", None)
+
+        loaded = WorkspaceResults.model_validate(block)
+
+        (project,) = loaded.projects
+        assert getattr(project, "scanner_reasons", {}) == {}
+        assert project.scanners == {"cfn-nag": "MISSING"}
+
+
 # ---------------------------------------------------------------------------
 # Failures and timeouts
 # ---------------------------------------------------------------------------
@@ -951,6 +1371,100 @@ class TestScannerCompleteness:
 PROJECT_TIMEOUT = 3.0
 
 
+@pytest.mark.unit
+class TestConverterCompleteness:
+    """A project whose converter lost coverage is incomplete, as ``ash --source-dir P`` is.
+
+    ``_compute_exit_code`` asks ``incomplete_converters`` alongside the scanner
+    questions: a notebook that could not be converted, a converter that crashed, or
+    one whose tool was absent with inputs to convert. The workspace verdict asked
+    only the scanner questions, so the same project passed inside a workspace.
+    """
+
+    @staticmethod
+    def _project(tmp_path, converter_row):
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("PASSED")},
+            "converter_results": {"jupyter": converter_row},
+        }
+        return plan
+
+    def test_a_failed_conversion_makes_the_project_incomplete(self, tmp_path):
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "nbconvert timed out"}]},
+        )
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: every scanner completed and nothing was found.
+        assert entry.incomplete_scanners == []
+        assert entry.exceeds_threshold is False
+
+        assert entry.scan_incomplete is True
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+        assert entry.incomplete_converters == {
+            "jupyter": "could not convert 1 input: nb.ipynb"
+        }
+
+    def test_a_crashed_converter_makes_the_project_incomplete(self, tmp_path):
+        plan = self._project(tmp_path, {"failure": "RuntimeError: boom"})
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        assert entry.scan_incomplete is True
+        assert entry.incomplete_converters == {"jupyter": "RuntimeError: boom"}
+
+    def test_the_gate_off_still_reports_the_converter(self, tmp_path):
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "timed out"}]},
+        )
+
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        entry = outcome.payload.projects[0]
+
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+        assert list(entry.incomplete_converters) == ["jupyter"]
+
+    def test_an_absent_tool_with_nothing_to_convert_is_complete(self, tmp_path):
+        plan = self._project(
+            tmp_path, {"dependencies_satisfied": False, "candidate_inputs": 0}
+        )
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.incomplete_converters == {}
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_the_mcp_coverage_for_the_project_names_the_converter(self, tmp_path):
+        """An MCP client polling the project is told why it is incomplete."""
+        from automated_security_helper.cli.mcp.workspace import _project_coverage
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            coverage_has_gap,
+        )
+
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "timed out"}]},
+        )
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        coverage = _project_coverage(entry)
+
+        assert coverage["incomplete_converters"] == [
+            {"converter": "jupyter", "reason": "could not convert 1 input: nb.ipynb"}
+        ]
+        assert coverage_has_gap(coverage)
+
+
+@pytest.mark.unit
 class TestFailureHandling:
     def test_a_failing_project_does_not_stop_the_others(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("fine", "MEDIUM"))
@@ -967,11 +1481,12 @@ class TestFailureHandling:
         FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
         assert _run(tmp_path, plan).exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
-    def test_a_failing_project_does_not_mask_another_project_findings(self, tmp_path):
-        """A gate that retries 1 as infrastructure trouble would never block.
+    def test_a_failing_project_outranks_another_project_s_findings(self, tmp_path):
+        """1 ahead of 2, as in a single-directory scan, and the findings still shown.
 
-        The failed project stays disclosed in the payload; what changes is that it
-        no longer decides the exit code when a real finding is present.
+        Reverses this test's earlier expectation (ACTIONABLE_FINDINGS), by design.
+        The other project's findings do not decide the exit code any more, so the
+        payload is where they must stay visible.
         """
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("dirty", "LOW"))
         FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
@@ -979,11 +1494,14 @@ class TestFailureHandling:
 
         outcome = _run(tmp_path, plan)
 
-        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses["broken"] is ProjectRunStatus.FAILED
         errors = {p.project: p.error for p in outcome.payload.projects}
         assert "boom" in (errors["broken"] or "")
+        dirty = next(p for p in outcome.payload.projects if p.project == "dirty")
+        assert dirty.exceeds_threshold is True
+        assert dirty.finding_count == 7
 
     def test_the_failure_message_names_the_project(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))
@@ -1055,9 +1573,16 @@ class TestFailureHandling:
 
         error = outcome.payload.projects[0].error or ""
         assert "timed out" in error.lower()
-        assert str(PROJECT_TIMEOUT) in error
+        # The budget as every timeout message prints its limit: whole, in its
+        # quoted token ('3' s), never the float's own "3.0s". Spelled here from
+        # the constant, not by the code under test's limit_text, so a change in
+        # how a limit prints fails this cell too.
+        assert PROJECT_TIMEOUT.is_integer(), PROJECT_TIMEOUT
+        assert f"'{int(PROJECT_TIMEOUT)}' s project_timeout" in error, error
 
-    def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(self, tmp_path):
+    def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(
+        self, tmp_path, monkeypatch
+    ):
         """The defect: a queued project was never given a deadline.
 
         The deadline check skipped any project with no start time, which is
@@ -1070,7 +1595,18 @@ class TestFailureHandling:
         The wedge here releases on an event rather than sleeping, so the test
         asserts the workspace returned while the worker was still running --
         which is the whole property -- without depending on a sleep duration.
+
+        The bound allows for the one grace the pool gives every abandoned
+        worker's stop after the loop (``_ABANDONED_STOP_GRACE_SECONDS``), paid
+        on this path too so a worker that comes back inside it brings the
+        secret values its findings exposed into the cross-project masking set.
+        That wait is bounded and part of the contract; the open-ended wait on a
+        held slot is the defect this test pins. The grace is set small here, so
+        the bound is a fixed number that does not grow with the production
+        constant and the run does not wait out the whole production grace.
         """
+        grace = 0.3
+        monkeypatch.setattr(execution_module, "_ABANDONED_STOP_GRACE_SECONDS", grace)
         _, plan = _make_workspace(
             tmp_path,
             ("wedged", "MEDIUM"),
@@ -1088,7 +1624,11 @@ class TestFailureHandling:
         finally:
             release.set()
 
-        assert elapsed < 5.0, f"took {elapsed:.1f}s; the budget was 0.2s"
+        bound = PROJECT_TIMEOUT + grace + 2.0
+        assert elapsed < bound, (
+            f"took {elapsed:.1f}s; the project_timeout was {PROJECT_TIMEOUT}s plus "
+            f"the {grace}s grace, bound {bound}s"
+        )
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses == {
             "wedged": ProjectRunStatus.FAILED,
@@ -1115,6 +1655,50 @@ class TestFailureHandling:
         assert "never started" in error
         assert "project_timeout" in error
 
+    def test_every_project_timeout_text_prints_the_shared_limit_token(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """The budget goes through error_text.timeout_limit_token, the one
+        formatter every timeout message prints its limit with, so these texts
+        cannot drift from the scanners': the start line, the abandoned
+        project's ERROR line and reason, and the never-started project's ERROR
+        line and reason all show the stand-in token."""
+        import logging
+
+        from automated_security_helper.utils import error_text
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        caplog.set_level(logging.INFO, logger=ASH_LOGGER.name)
+        monkeypatch.setattr(
+            error_text,
+            "timeout_limit_token",
+            lambda limit, values: "<the shared token>",
+        )
+        _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("queued", "MEDIUM"))
+        release = threading.Event()
+        FakeOrchestrator.behaviour["wedged"] = {"block": release}
+        try:
+            outcome = _run(
+                tmp_path, plan, project_timeout=PROJECT_TIMEOUT, max_parallel_projects=1
+            )
+        finally:
+            release.set()
+
+        errors = {p.project: p.error or "" for p in outcome.payload.projects}
+        lines = caplog.text.splitlines()
+
+        def line_with(words: str) -> str:
+            return next((line for line in lines if words in line), "")
+
+        for text in (
+            line_with("workspace project(s)"),
+            line_with("and was abandoned"),
+            line_with("never started"),
+            errors["wedged"],
+            errors["queued"],
+        ):
+            assert "<the shared token>" in text, (text, caplog.text)
+
     def test_spare_capacity_still_drains_the_queue(self, tmp_path):
         """Only a fully-exhausted pool gives up; one lost slot of two does not."""
         _, plan = _make_workspace(
@@ -1136,6 +1720,90 @@ class TestFailureHandling:
         assert statuses["wedged"] is ProjectRunStatus.FAILED
         assert statuses["queued-a"] is ProjectRunStatus.COMPLETED
         assert statuses["queued-b"] is ProjectRunStatus.COMPLETED
+
+    def test_a_worker_back_from_an_abandoned_project_is_not_counted_lost(
+        self, tmp_path
+    ):
+        """An abandoned project that ends on its own gives its worker back.
+
+        Lost workers were a tally that only went up, so once a second project was
+        abandoned the pool counted as exhausted although the first had finished
+        and its worker was running the next project: what was still queued was
+        failed as never started. Two workers and a 2s budget: ``slow`` overruns
+        and ends at 2.5s, ``then`` runs on its worker from 2.5s to 4s, and
+        ``wedged``, started at 1s, is abandoned at 3s with ``last`` still queued.
+        """
+        _, plan = _make_workspace(
+            tmp_path,
+            ("slow", "MEDIUM"),
+            ("first", "MEDIUM"),
+            ("wedged", "MEDIUM"),
+            ("then", "MEDIUM"),
+            ("last", "MEDIUM"),
+        )
+        release = threading.Event()
+        FakeOrchestrator.behaviour["slow"] = {"sleep": 2.5}
+        FakeOrchestrator.behaviour["first"] = {"sleep": 1.0}
+        FakeOrchestrator.behaviour["wedged"] = {"block": release}
+        FakeOrchestrator.behaviour["then"] = {"sleep": 1.5}
+        try:
+            outcome = _run(tmp_path, plan, project_timeout=2.0, max_parallel_projects=2)
+        finally:
+            release.set()
+
+        errors = {p.project: p.error for p in outcome.payload.projects}
+        statuses = {p.project: p.status for p in outcome.payload.projects}
+        assert "never started" not in (errors["last"] or ""), errors
+        assert statuses["last"] is ProjectRunStatus.COMPLETED, errors
+        assert statuses["then"] is ProjectRunStatus.COMPLETED, errors
+        assert statuses["slow"] is ProjectRunStatus.FAILED, errors
+        assert statuses["wedged"] is ProjectRunStatus.FAILED, errors
+
+    def test_an_abandoned_project_with_a_cancel_event_is_logged_as_stopped(
+        self, tmp_path, caplog
+    ):
+        """A project the caller gave a cancel event is stopped, not left running.
+
+        The abandonment was logged the same way with or without one: "Its worker
+        cannot be interrupted and will run to completion in the background". With
+        an event the project is cancelled at once and its worker comes back, so the
+        log said the opposite of what happened.
+        """
+        from automated_security_helper.core.cancellation import CancelEvent
+
+        _, plan = _make_workspace(tmp_path, ("slow", "MEDIUM"))
+        FakeOrchestrator.behaviour["slow"] = {"sleep": 1.0}
+        events = {"slow": CancelEvent()}
+
+        execute_workspace(
+            plan,
+            _settings(tmp_path, project_timeout=0.3),
+            orchestrator_factory=FakeOrchestrator.create,
+            cancel_events=events,
+        )
+
+        assert events["slow"].is_set()
+        assert "will run to completion in the background" not in caplog.text, (
+            caplog.text
+        )
+        assert "is being stopped" in caplog.text, caplog.text
+
+    def test_an_abandoned_project_without_one_is_stopped_but_not_waited_for(
+        self, tmp_path, caplog
+    ):
+        """Without a caller event the pool builds one, so the abandon is a stop
+        there too; what the log must still say is that the workspace result
+        does not wait for that stop to finish."""
+        _, plan = _make_workspace(tmp_path, ("slow", "MEDIUM"))
+        FakeOrchestrator.behaviour["slow"] = {"sleep": 1.0}
+
+        _run(tmp_path, plan, project_timeout=0.3)
+
+        assert "will run to completion in the background" not in caplog.text, (
+            caplog.text
+        )
+        assert "is being stopped" in caplog.text, caplog.text
+        assert "does not wait for its stop to finish" in caplog.text, caplog.text
 
     def test_an_abandoned_project_does_not_write_a_results_file(self, tmp_path):
         """Otherwise its subtree contradicts the workspace verdict.
@@ -1181,6 +1849,7 @@ class TestFailureHandling:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestConcurrencyBound:
     def test_max_parallel_projects_is_honoured(self, tmp_path):
         """Counts concurrent occupancy rather than timing it.
@@ -1266,13 +1935,29 @@ class TestConcurrencyBound:
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    """git for a fixture repository, reading none of the developer's own config.
+
+    A global or system config, or the ignore file git reads by default from
+    ``$XDG_CONFIG_HOME/git/ignore``, can list ``.ash/``, and ``git add`` of a
+    fixture's ``.ash/ash_output`` then staged nothing. Each test's own home
+    (tests/conftest.py) hides the developer's ``~/.gitconfig`` and default ignore
+    file, but not a config ``GIT_CONFIG_GLOBAL`` names or the system config. Measured
+    on the scan-set and committed-output modules, with ``GIT_CONFIG_GLOBAL`` naming a
+    config whose ``core.excludesFile`` lists it: 85 tests failed, and one passed with
+    nothing staged. ``GIT_CONFIG_GLOBAL`` and ``GIT_CONFIG_NOSYSTEM`` keep those
+    configs out, and ``core.excludesFile`` given on the command line takes the place
+    of the default ignore file. The fixture repository's own config and
+    ``.gitignore`` still apply.
+    """
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
     return subprocess.run(  # nosec B603 B607 -- list args, no shell, fixture repo only
-        ["git", *args],
+        ["git", "-c", f"core.excludesFile={os.devnull}", *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
         check=False,
         timeout=30,
+        env=env,
     )
 
 
@@ -1292,13 +1977,11 @@ def _init_repo(path: Path, *, commit_extra: bool = False) -> None:
 
 @pytest.fixture
 def git_available() -> bool:
-    probe = subprocess.run(  # nosec B603 B607 -- probing for git on PATH
-        ["git", "--version"], capture_output=True, text=True, check=False, timeout=30
-    )
-    return probe.returncode == 0
+    return run_git("--version", timeout=30).returncode == 0
 
 
 class TestChangedFilesGate:
+    @pytest.mark.integration
     def test_a_project_with_no_changes_is_skipped_and_recorded(
         self, tmp_path, git_available
     ):
@@ -1312,6 +1995,7 @@ class TestChangedFilesGate:
         assert entry.skip_reason is SkippedProjectReason.NO_CHANGES
         assert entry.skip_detail
 
+    @pytest.mark.integration
     def test_a_no_changes_skip_is_in_the_payload_not_just_the_log(
         self, tmp_path, git_available
     ):
@@ -1325,6 +2009,7 @@ class TestChangedFilesGate:
             ("unchanged", "no-changes")
         ]
 
+    @pytest.mark.integration
     def test_a_no_changes_skip_does_not_fail_the_workspace(
         self, tmp_path, git_available
     ):
@@ -1338,6 +2023,7 @@ class TestChangedFilesGate:
         outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
+    @pytest.mark.integration
     def test_a_workspace_where_every_project_is_unchanged_exits_zero(
         self, tmp_path, git_available
     ):
@@ -1368,6 +2054,7 @@ class TestChangedFilesGate:
         ]
         assert FakeOrchestrator.built == []
 
+    @pytest.mark.integration
     def test_a_changed_project_is_scanned(self, tmp_path, git_available):
         if not git_available:
             pytest.skip("git is not available on PATH")
@@ -1377,6 +2064,46 @@ class TestChangedFilesGate:
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
         assert [o.key for o in FakeOrchestrator.built] == ["changed"]
 
+    @pytest.mark.integration
+    def test_the_changed_set_is_handed_to_the_projects_engine(
+        self, tmp_path, git_available
+    ):
+        """The project's own scan engine filters with it, before its reports.
+
+        The executor does not filter the results it gets back from the project's
+        orchestrator: by then that project's reports have been written from every
+        finding, and only the workspace-level merge would see the narrowed set.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("changed", "MEDIUM"))
+        _init_repo(root / "changed", commit_extra=True)
+
+        _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
+
+        kwargs = FakeOrchestrator.built[0].kwargs
+        assert kwargs["changed_files"] == {
+            (root / "changed" / "src" / "changed.py").resolve()
+        }
+        assert kwargs["metadata"]["changed_files_only"] is True
+
+    @pytest.mark.integration
+    def test_without_the_flag_no_changed_set_is_handed_over(
+        self, tmp_path, git_available
+    ):
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("changed", "MEDIUM"))
+        _init_repo(root / "changed", commit_extra=True)
+
+        _run(tmp_path, plan)
+
+        kwargs = FakeOrchestrator.built[0].kwargs
+        assert kwargs["changed_files"] is None
+        # Written on every run, False on a full scan (see run_ash_scan).
+        assert kwargs["metadata"]["changed_files_only"] is False
+
+    @pytest.mark.integration
     def test_each_project_is_evaluated_against_its_own_repository(
         self, tmp_path, git_available
     ):
@@ -1393,6 +2120,7 @@ class TestChangedFilesGate:
         assert statuses["changed"] is ProjectRunStatus.COMPLETED
         assert statuses["still"] is ProjectRunStatus.SKIPPED
 
+    @pytest.mark.integration
     def test_precommit_alone_does_not_scope_the_scan_to_a_diff(
         self, tmp_path, git_available
     ):
@@ -1413,6 +2141,7 @@ class TestChangedFilesGate:
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
         assert [o.key for o in FakeOrchestrator.built] == ["unchanged"]
 
+    @pytest.mark.unit
     def test_a_non_repository_under_precommit_is_not_an_error(self, tmp_path):
         """Inverted with the gate change above.
 
@@ -1426,12 +2155,14 @@ class TestChangedFilesGate:
         outcome = _run(tmp_path, plan, precommit=True)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.unit
     def test_the_gate_is_off_without_changed_files_only(self, tmp_path):
         """A plain workspace scan must not care whether a project is a repository."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.integration
     def test_changed_files_only_applies_the_gate(self, tmp_path, git_available):
         if not git_available:
             pytest.skip("git is not available on PATH")
@@ -1440,12 +2171,14 @@ class TestChangedFilesGate:
         outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.payload.projects[0].status is ProjectRunStatus.SKIPPED
 
+    @pytest.mark.integration
     def test_a_non_repository_under_changed_files_only_scans_fully(self, tmp_path):
         """--changed-files-only already documents a full-scan fallback; keep it."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan, changed_files_only=True)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.integration
     def test_allow_missing_projects_does_not_change_the_non_repository_fallback(
         self, tmp_path
     ):
@@ -1462,12 +2195,55 @@ class TestChangedFilesGate:
         )
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    @pytest.mark.integration
+    def test_an_option_like_base_ref_is_refused_before_any_project_runs(
+        self, tmp_path, git_available
+    ):
+        """git would read "-p" as an option; the workspace is refused, not scanned.
+
+        Before, git refused the option, so the diff had no answer and the project
+        fell back to a full scan.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("changed", "MEDIUM"))
+        _init_repo(root / "changed", commit_extra=True)
+
+        with pytest.raises(ValueError, match=r"starts with '-'"):
+            _run(tmp_path, plan, changed_files_only=True, base_ref="-p")
+
+        assert FakeOrchestrator.built == []
+        assert not (tmp_path / "out").exists()
+
+    @pytest.mark.integration
+    def test_a_missing_base_ref_scans_in_full_whatever_files_the_project_holds(
+        self, tmp_path, git_available
+    ):
+        """A file named ``origin/main...HEAD`` does not stand in for the diff.
+
+        The project has no ``origin``. Read as a path, the argument named that
+        untracked file, the diff came back empty, and the project was skipped as
+        unchanged. Read as a revision it does not exist, so the project is scanned.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        _init_repo(root / "api", commit_extra=True)
+        (root / "api" / "origin").mkdir()
+        (root / "api" / "origin" / "main...HEAD").write_text("x\n", encoding="utf-8")
+
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="origin/main")
+
+        assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+        assert [o.key for o in FakeOrchestrator.built] == ["api"]
+
 
 # ---------------------------------------------------------------------------
 # Output tree and payload
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestWorkspaceOutput:
     def test_the_unified_results_file_is_written(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
@@ -1628,6 +2404,7 @@ class TestWorkspaceOutput:
         assert Path(outcome.payload.workspace_root) == root
 
 
+@pytest.mark.unit
 class TestFolderNamedSrc:
     """A workspace containing a project literally named ``src``.
 
@@ -1674,6 +2451,7 @@ class TestFolderNamedSrc:
         assert len(roots) == 2
 
 
+@pytest.mark.unit
 class TestSettingsDefaults:
     def test_the_settings_object_is_immutable(self, tmp_path):
         """The same settings are read from several threads; mutation is a data race."""
@@ -1695,6 +2473,7 @@ class TestSettingsDefaults:
         assert self._phases_of(settings) == ["convert", "scan", "report"]
 
 
+@pytest.mark.unit
 class TestOptionalOrchestratorFactory:
     def test_the_real_orchestrator_is_the_default(self):
         """Injected only for tests; production must not have to pass one."""
@@ -1702,3 +2481,22 @@ class TestOptionalOrchestratorFactory:
 
         signature = inspect.signature(execute_workspace)
         assert signature.parameters["orchestrator_factory"].default is None
+
+
+@pytest.mark.unit
+class TestProjectThreadsKeepTheWorkspaceScope:
+    def test_each_project_is_built_with_the_workspace_root_registered(self, tmp_path):
+        """Project threads start with a copy of the run's context, which holds it."""
+        from automated_security_helper.utils import subprocess_utils
+
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        seen: List[List[str]] = []
+
+        def factory(**kwargs: Any) -> "FakeOrchestrator":
+            seen.append(subprocess_utils.scanned_trees())
+            return FakeOrchestrator.create(**kwargs)
+
+        with subprocess_utils.scanning_tree(root):
+            execute_workspace(plan, _settings(tmp_path), orchestrator_factory=factory)
+
+        assert seen == [[str(root.absolute())], [str(root.absolute())]]

@@ -12,7 +12,6 @@ finally:return fixes for reporters (from test_finally_return_fix):
 - cloudwatch_logs_reporter.py :: validate_plugin_dependencies
 """
 
-import inspect
 import logging
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -22,6 +21,8 @@ import pytest
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # PR#274 Bug #94 -- base/reporter_plugin.py:45-51 -- configure() writes self._config
@@ -29,16 +30,26 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 class TestReporterPluginConfigure:
     """configure() must write self.config, not self._config."""
 
-    def test_configure_sets_public_config(self):
-        """After configure(cfg), self.config should be cfg."""
-        from automated_security_helper.base.reporter_plugin import ReporterPluginBase
+    def test_configure_sets_public_config(self, tmp_path):
+        """After configure(cfg), self.config should be cfg.
 
-        source = inspect.getsource(ReporterPluginBase.configure)
-        # The fix should write self.config = config, not self._config = config
-        assert "self.config = config" in source, (
-            "configure() must assign to self.config, not self._config"
+        Read from the behavior, not the source text: ``configure`` holds the
+        section to the reporter's declared model before it assigns, so its
+        source no longer reads ``self.config = config``.
+        """
+        from tests.unit.base.test_reporter_plugin_low_declarations import (
+            _DeclaredConfig,
+            _reporter,
         )
-        assert "self._config" not in source, "configure() must not use self._config"
+
+        reporter = _reporter(tmp_path)
+        given = _DeclaredConfig(extension="regression.json")
+
+        reporter.configure(given)
+
+        assert reporter.config is given
+        assert getattr(reporter, "_config", None) is None
+        assert "_config" not in reporter.__dict__
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +82,10 @@ class TestInvalidExpirationWarnsInsteadOfSilentSkip:
         suppression = MagicMock()
         suppression.rule_id = "TEST-RULE"
         suppression.expiration = "not-a-date"
+        # The matcher reads the entry's ``expires`` (the single date both
+        # spellings, expiration and expires, resolve to), so a stand-in must
+        # carry the date there too; a bare MagicMock attribute is not a date.
+        suppression.expires = "not-a-date"
         suppression.paths = []
         suppression.reason = "test"
         suppression.justification = "test"
@@ -592,7 +607,8 @@ class TestBug52SameDayExpiry:
 class TestBug54FnmatchCaseSensitivity:
     """#54: fnmatch case sensitivity is OS-dependent. On macOS/Windows,
     fnmatch.fnmatch is case-insensitive, but on Linux it's case-sensitive.
-    Fix: normalize both sides to lowercase."""
+    Fix: rule IDs are lowercased on both sides; file paths are compared with
+    fnmatchcase, case-sensitively, which is the same on every OS."""
 
     def test_rule_id_match_case_insensitive(self):
         """Rule ID matching should be case-insensitive regardless of OS."""
@@ -614,22 +630,21 @@ class TestBug54FnmatchCaseSensitivity:
             "Bug #54: exact rule ID match should be case-insensitive"
         )
 
-    def test_file_path_match_case_insensitive(self):
-        """File path matching should be case-insensitive regardless of OS."""
+    def test_file_path_match_is_case_sensitive_regardless_of_os(self):
+        """File path matching gives one answer on every OS, and it is
+        case-sensitive: on a case-sensitive filesystem ``SRC/`` is not ``src/``."""
         from automated_security_helper.utils.suppression_matcher import (
             file_path_matches,
         )
 
-        assert file_path_matches("SRC/File.py", "src/file.py"), (
-            "Bug #54: file path match should be case-insensitive"
-        )
+        assert not file_path_matches("SRC/File.py", "src/file.py")
+        assert file_path_matches("src/file.py", "src/file.py")
 
-    def test_file_path_glob_case_insensitive(self):
-        """File path glob matching should be case-insensitive."""
+    def test_file_path_glob_is_case_sensitive_regardless_of_os(self):
+        """The same for a glob."""
         from automated_security_helper.utils.suppression_matcher import (
             file_path_matches,
         )
 
-        assert file_path_matches("SRC/MyFile.py", "src/*.py"), (
-            "Bug #54: file path glob should be case-insensitive"
-        )
+        assert not file_path_matches("SRC/MyFile.py", "src/*.py")
+        assert file_path_matches("src/MyFile.py", "src/*.py")

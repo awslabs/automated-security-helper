@@ -8,6 +8,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     CdkNagPacks,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def test_cdk_nag_scanner(test_plugin_context):

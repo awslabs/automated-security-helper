@@ -147,6 +147,7 @@ def _build_image_kwargs(dockerfile: Path, **overrides: Any) -> Dict[str, Any]:
     return kwargs
 
 
+@pytest.mark.unit
 class TestThePythonEntrypoint:
     """``_build_image`` -- ``ashx build-image`` and ``ashx scan --mode container``."""
 
@@ -243,6 +244,7 @@ class TestThePythonEntrypoint:
         )
 
 
+@pytest.mark.unit
 class TestTheLocalOnlyPullFlag:
     """``--pull=false`` appears on nerdctl and finch with a verified layout, and nowhere else.
 
@@ -294,6 +296,7 @@ class TestTheLocalOnlyPullFlag:
         assert _offending_tokens(recorded_commands[0]) == [], recorded_commands[0]
 
 
+@pytest.mark.unit
 class TestThePowerShellEntrypoint:
     """``utils/ash_helpers.ps1``, asserted as text -- there is no pwsh here."""
 
@@ -342,6 +345,7 @@ class TestThePowerShellEntrypoint:
         )
 
 
+@pytest.mark.unit
 class TestEveryBuildEntrypointIsCovered:
     """The completeness guard, in the same shape as the override test's.
 

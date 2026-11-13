@@ -39,6 +39,8 @@ from tests.snapshot.console.console_inputs import (
     scan_results_model,
 )
 
+pytestmark = pytest.mark.unit
+
 WIDTHS = pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
 
 #: What ``platform.system()`` returns on the two families the module distinguishes.
@@ -126,7 +128,7 @@ def test_display_metrics_table(system, width, text_snapshot, tmp_path, monkeypat
         consoles.append(console)
         return console
 
-    monkeypatch.setattr(metrics_table, "Console", pinned_console)
+    monkeypatch.setattr(metrics_table, "ash_console", pinned_console)
 
     display_metrics_table(
         scan_results_model(with_stale_databases=True),

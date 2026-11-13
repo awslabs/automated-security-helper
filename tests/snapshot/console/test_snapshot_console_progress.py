@@ -34,6 +34,8 @@ from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.snapshot.console.console_inputs import NARROW, recording_console, rendered
 
+pytestmark = pytest.mark.unit
+
 PINNED_PROGRESS_TIME = 5_000.0
 
 

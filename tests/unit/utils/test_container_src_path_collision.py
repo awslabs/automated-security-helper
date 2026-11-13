@@ -22,6 +22,8 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_sarif(
     uri: str, rule_id: str = "python.lang.security.audit.exec-detected"

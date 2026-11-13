@@ -27,6 +27,10 @@ live synthesis, so the fixture cannot drift into fiction without something going
 import json
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def _write_report(tmp_path: Path, payload: dict) -> Path:
     path = tmp_path / "validation-report.json"

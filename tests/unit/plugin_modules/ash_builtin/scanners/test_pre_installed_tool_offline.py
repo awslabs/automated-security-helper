@@ -42,11 +42,14 @@ from automated_security_helper.utils.pre_installed_tool import (
     reset_pre_installed_tool_cache,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="fakes a POSIX venv layout (bin/python next to the tool); Windows "
-    "launchers are .exe files this fixture does not model",
-)
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="fakes a POSIX venv layout (bin/python next to the tool); Windows "
+        "launchers are .exe files this fixture does not model",
+    ),
+]
 
 # Verbatim shape of the stderr in the issue.
 UV_RESOLVE_FAILURE = """  x No solution found when resolving tool dependencies:
@@ -134,7 +137,8 @@ def offline_host(tmp_path, monkeypatch):
             monkeypatch.setenv("ASH_OFFLINE", "YES")
         else:
             monkeypatch.delenv("ASH_OFFLINE", raising=False)
-        monkeypatch.setattr(subprocess, "run", host.run)
+        # Every uv and tool run here starts through ASH's plain runner.
+        monkeypatch.setattr(subprocess_utils, "_run_plain", host.run)
         return host
 
     yield make
@@ -201,7 +205,7 @@ def test_verification_checks_the_extras_the_scan_needs(offline_host, plugin_cont
 
     dry_runs = [c for c in host.calls if c[1:3] == ["pip", "install"]]
     assert dry_runs, "the environment's extras were never checked"
-    assert dry_runs[0][-1] == "bandit[sarif,toml]>=1.7.0,<2.0.0"
+    assert dry_runs[0][-1] == "bandit[sarif,toml]>=1.7.8,<2.0.0"
     assert dry_runs[0][dry_runs[0].index("--python") + 1] == str(
         Path(host.tool_path).parent / "python"
     )
@@ -218,7 +222,7 @@ def test_offline_pre_installed_bandit_without_sarif_is_missing_with_a_named_reas
     reason = scanner.dependency_unavailable_reason
     assert reason is not None
     assert "missing extra: sarif" in reason
-    assert "uv tool install 'bandit[sarif,toml]>=1.7.0,<2.0.0'" in reason
+    assert "uv tool install 'bandit[sarif,toml]>=1.7.8,<2.0.0'" in reason
     assert "ashx build-image --offline" in reason
 
 
@@ -276,7 +280,7 @@ def test_unexplained_offline_resolve_failure_is_named_in_the_scan_error(
 
     message = str(excinfo.value)
     assert (
-        "Offline mode: uv could not resolve 'bandit[sarif,toml]>=1.7.0,<2.0.0'"
+        "Offline mode: uv could not resolve 'bandit[sarif,toml]>=1.7.8,<2.0.0'"
         in message
     )
     assert message.index("Offline mode:") < message.index("No solution found")

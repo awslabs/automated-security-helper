@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -426,13 +428,17 @@ class TestReportAttribution:
             == "https://docs.aws.amazon.com/cdk/v2/guide/policy-validation-synthesis.html"
         )
 
-        # The control: a genuine cdk-nag rule from the same scan keeps pointing at cdk-nag.
+        # The control: a genuine cdk-nag rule from the same scan keeps pointing at cdk-nag's
+        # rules document, with no fragment: the level anchor it used to carry (``#errors``,
+        # ``#warnings``) named one pack's table for the rules of every pack, and the document
+        # lists them all.
         nag_rule_ids = [rid for rid in rules if rid.startswith("AwsSolutions-")]
         assert nag_rule_ids, f"no cdk-nag rule in the same report; got {sorted(rules)}"
         nag_rule = rules[nag_rule_ids[0]]
         assert nag_rule.properties.model_extra["pack"] == "AwsSolutions"
-        assert str(nag_rule.helpUri).startswith(
-            "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#"
+        assert (
+            str(nag_rule.helpUri)
+            == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
         )
 
 

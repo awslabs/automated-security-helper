@@ -25,6 +25,9 @@ from automated_security_helper.cli.deprecations import (
     warn_deprecated_command_alias,
 )
 
+# In-process: the unit tier.
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def console_scripts():

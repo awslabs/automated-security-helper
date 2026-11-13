@@ -32,6 +32,8 @@ from automated_security_helper.interactions.run_ash_scan import (
     _run_workspace_mode,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _opts(tmp_path) -> ScanOptions:
     """A ScanOptions with no workspace plan, which is the default."""

@@ -1,5 +1,9 @@
 """Tests for core/metrics_table.py — covers metrics table generation functions."""
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 class TestMetricsTableModule:
     """Tests for metrics_table module."""

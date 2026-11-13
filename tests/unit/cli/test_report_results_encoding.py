@@ -40,12 +40,15 @@ apply to plugin loading, rich and pydantic for the duration of the call.
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
 
 from automated_security_helper.cli.report import report_command
+
+pytestmark = pytest.mark.unit
 
 # U+009D encodes to UTF-8 as C2 9D. 0x9D is one of cp1252's five unmapped bytes, which is
 # why the CI failure named that byte specifically.
@@ -101,13 +104,26 @@ def _write_results_file(output_dir):
 
 @pytest.fixture
 def reporter_plugin():
-    """A text reporter, mocked. This test is about the read, not about rendering."""
+    """A text reporter, mocked. This test is about the read, not about rendering.
+
+    The class declares the name the command looks ``--format`` up by, the way
+    test_report.py's ``_declares_name`` does: ``plugin_config_key`` reads the
+    ``name`` default of the class the ``config`` field is typed with, without
+    building the reporter. A bare MagicMock declares none, so it answered to
+    ``mocktextreporter`` and the command refused ``text`` as an unknown format
+    (exit 5) before it opened the results file. The reporter declares no
+    companion files: a MagicMock is ``os.PathLike`` and would be read as one.
+    """
     plugin = MagicMock()
     plugin.config.name = "text"
     plugin.report.return_value = "rendered"
+    plugin.companion_file_names.return_value = ()
     plugin_class = MagicMock()
     plugin_class.__name__ = "MockTextReporter"
     plugin_class.return_value = plugin
+    config_class = MagicMock()
+    config_class.model_fields = {"name": SimpleNamespace(default="text")}
+    plugin_class.model_fields = {"config": SimpleNamespace(annotation=config_class)}
     return plugin_class, plugin
 
 
@@ -116,9 +132,7 @@ def reporter_plugin():
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
 @patch("automated_security_helper.cli.report.AshAggregatedResults")
-@patch("automated_security_helper.cli.report.print")
 def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
-    _mock_print,
     mock_results_class,
     _mock_plugin_context,
     mock_plugin_manager,
@@ -126,6 +140,7 @@ def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
     _mock_load_plugins,
     tmp_path,
     reporter_plugin,
+    capfd,
 ):
     """The failing case, end to end through report_command.
 
@@ -147,6 +162,10 @@ def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
         "the results file was read but the non-cp1252 character did not survive, so "
         "some decoding happened that this test did not intend"
     )
+    # The report is written, and no refusal of the results file is printed.
+    out, err = capfd.readouterr()
+    assert "rendered" in out, out
+    assert "Could not read the scan results" not in err, err
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
@@ -154,9 +173,7 @@ def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
 @patch("automated_security_helper.cli.report.AshAggregatedResults")
-@patch("automated_security_helper.cli.report.print")
 def test_the_read_pins_an_encoding_rather_than_inheriting_one(
-    _mock_print,
     _mock_results_class,
     _mock_plugin_context,
     mock_plugin_manager,
@@ -164,6 +181,7 @@ def test_the_read_pins_an_encoding_rather_than_inheriting_one(
     _mock_load_plugins,
     tmp_path,
     reporter_plugin,
+    capfd,
 ):
     """The invariant, named directly: no text read here may pass encoding=None.
 
@@ -187,21 +205,24 @@ def test_the_read_pins_an_encoding_rather_than_inheriting_one(
     assert set(shim.text_encodings_requested) == {"utf-8"}, (
         f"expected every text read to pin utf-8; got {shim.text_encodings_requested}"
     )
+    # The read succeeded, so the report was written and nothing was refused.
+    out, err = capfd.readouterr()
+    assert "rendered" in out, out
+    assert "Could not read the scan results" not in err, err
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.resolve_config")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
-@patch("automated_security_helper.cli.report.print")
 def test_an_unreadable_results_file_still_exits_non_zero(
-    _mock_print,
     _mock_plugin_context,
     mock_plugin_manager,
     _mock_resolve_config,
     _mock_load_plugins,
     tmp_path,
     reporter_plugin,
+    capfd,
 ):
     """Pinning utf-8 must not turn a genuinely broken file into a silent success.
 
@@ -218,3 +239,8 @@ def test_an_unreadable_results_file_still_exits_non_zero(
     with pytest.raises(typer.Exit) as exit_info:
         report_command(report_format="text", output_dir=str(tmp_path))
     assert exit_info.value.exit_code == 1
+    # The refusal names the file it could not read.
+    _out, err = capfd.readouterr()
+    squeezed = "".join(err.split())
+    assert "Couldnotreadthescanresultsin" in squeezed, err
+    assert "".join(results_path.as_posix().split()) in squeezed, err

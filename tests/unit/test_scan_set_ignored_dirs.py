@@ -15,6 +15,8 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def project_with_venv_gitignore(tmp_path):

@@ -96,15 +96,13 @@ def ash_mcp_client() -> Callable[[], object]:
     rather than as a JSON-RPC error result that an assertion might read as an
     ordinary "tool returned failure" response. The two are different findings and
     should not be confusable.
+
+    The client is the local one (``serving_local_client()``), as ``ash mcp``
+    serves stdio: see ``tests/utils/mcp_transport_harness.local_in_memory_client``.
     """
-    from mcp import Client
+    from tests.utils.mcp_transport_harness import local_in_memory_client
 
-    from automated_security_helper.cli.mcp_server import mcp
-
-    def connect() -> object:
-        return Client(mcp, raise_exceptions=True)
-
-    return connect
+    return local_in_memory_client
 
 
 # Pytest markers for integration tests
@@ -124,14 +122,25 @@ def pytest_collection_modifyitems(config, items):
     ``pytest_collection_modifyitems`` receives *every* item in the session, not
     only the ones under the conftest that defines the hook. The name-based rules
     below were unscoped, so any test anywhere in the repository whose name
-    contained "workflow", "lifecycle" or "end_to_end" was marked slow -- and
-    ``tests/conftest.py`` then skips slow tests unless ``--run-slow`` is passed.
-    Any unit test whose name matched was therefore silently not running in a
-    full-suite run, including CI gates whose whole job is to fail when a workflow
-    drifts from its documented budget. Every affected test passes when executed
-    directly, which is how they were verified when written, so nothing was
-    hiding a real failure; they were simply providing no coverage while appearing
-    to.
+    contained "workflow", "lifecycle" or "end_to_end" was marked slow.
+
+    What that mark does depends on hook order. The hook in ``tests/conftest.py``
+    that skips slow tests unless ``--run-slow`` is passed is registered with
+    ``tryfirst=True``, and this hook has no ordering marker, so the skip pass
+    has already finished by the time this hook adds any mark. Today the mark
+    therefore does not decide whether a test runs; it shows up in ``-m``
+    expressions, in marker reports and in the slow count, and an unscoped rule
+    mislabels tests in all three.
+
+    That was not always the order. When the unscoped rule was found, the root
+    hook had no ordering marker, this hook ran first, and a slow mark did skip
+    the test: any unit test whose name matched was silently not running in a
+    full-suite run, including CI gates whose whole job is to fail when a
+    workflow drifts from its documented budget. Every affected test passed when
+    executed directly, which is how they were verified when written, so nothing
+    was hiding a real failure; they were simply providing no coverage while
+    appearing to. The scoping stays right for the labels, and the account stays
+    because the way it was found still applies.
 
     The failure mode is worth naming because it is invisible from either end. The
     test file gives no hint it will be skipped, and the conftest that skips it
@@ -146,39 +155,47 @@ def pytest_collection_modifyitems(config, items):
     named ``..._integration.py``, had all fourteen of its tests skipped in a full
     run while passing when the file was run on its own. Fixing one instance of a
     pattern and documenting it is not the same as removing the pattern, so the
-    ``integration`` marker now hangs off the same path scoping as everything
-    else. Detected by diffing the skipped-test IDs against a baseline, which is
-    the only signal this failure emits.
+    ``integration`` marker was moved onto the same path scoping as everything
+    else, and then off this hook altogether: each test file in this tree now
+    declares its own tier (see tests/NAMING_CONVENTIONS.md). Detected by diffing
+    the skipped-test IDs against a baseline, which is the only signal this
+    failure emits.
 
     A NOTE FOR ANYONE ADDING A TEST TO THIS DIRECTORY
     -------------------------------------------------
-    The slow rule below is a second gate, not a label. A test whose *function
-    name* contains "workflow", "lifecycle" or "end_to_end" needs both
-    ``--run-integration`` and ``--run-slow`` to execute, and running with only
-    the first produces a green result that silently skipped it. The MCP protocol,
-    scan and stdio modules therefore avoid those three words in their function
-    names on purpose, and test_marker_gating.py asserts that they still do. Name
-    a test for the property it checks rather than for the shape of the flow, and
-    it stays reachable with one flag.
+    The slow rule below is a label applied by name, not by measurement. A test
+    whose *function name* contains "workflow", "lifecycle" or "end_to_end" gets
+    the slow mark, which selects it into ``-m slow`` and out of ``-m "not
+    slow"``. It still executes under ``--run-integration`` alone, because the
+    root skip pass runs before this hook adds the mark (see above); if that
+    ordering is ever lost, the mark would also need ``--run-slow`` to execute
+    and a run with only the first flag would report green without running it.
+    The MCP protocol, scan and stdio modules avoid those three words in their
+    function names on purpose, and test_marker_gating.py asserts that they still
+    do, with one named exemption, so almost no test here depends on that
+    ordering. Name a test for the property it checks rather than for the shape
+    of the flow, and its label stays honest.
     """
-    integration_root = Path(__file__).resolve().parent.parent
+    # This directory, not tests/integration: pytest loads this conftest only when it
+    # collects tests/integration/cli, so a wider root would mark a test in a sibling
+    # directory slow in a run that includes the CLI tests and not in a run of the
+    # sibling alone.
+    cli_root = Path(__file__).resolve().parent
 
     for item in items:
-        # Scoped to the integration tree, which is what every heuristic below is
-        # about. Compared against a resolved path rather than by substring: a
-        # substring test is how the unscoped version reached the whole repo.
-        if not Path(item.fspath).resolve().is_relative_to(integration_root):
+        # Scoped to this directory, which is what every heuristic below is about.
+        # Compared against a resolved path rather than by substring: a substring
+        # test is how the unscoped version reached the whole repo.
+        if not Path(item.fspath).resolve().is_relative_to(cli_root):
             continue
 
-        # What makes a test an integration test is living in this tree, not
-        # having "integration" in its path. The previous version tested the
-        # substring and so marked -- and therefore skipped -- any test anywhere
-        # in the repository whose path happened to contain the word. That is the
-        # same defect this hook's docstring describes for the slow marker, left
-        # in place when that one was fixed; a unit test named
-        # test_workspace_policy_integration.py hit it and its fourteen tests
-        # were silently skipped in the full suite while passing in isolation.
-        item.add_marker(pytest.mark.integration)
+        # No tier marker is added here. The tier (integration or e2e) is declared
+        # on each test file under the contract in tests/NAMING_CONVENTIONS.md, and
+        # adding "integration" by directory would give an e2e test a second tier.
+        # An earlier version added it by testing the substring "integration" in the
+        # path, which marked -- and therefore skipped -- a unit test named
+        # test_workspace_policy_integration.py in the full suite while it passed in
+        # isolation; a directory rule has the same shape of defect.
 
         # Add slow marker to tests that might take longer
         if any(

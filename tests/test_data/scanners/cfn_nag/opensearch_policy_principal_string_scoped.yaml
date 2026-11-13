@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  The principal is a plain String that is not "*". The rule must neither report it nor
+  raise on it. It used to raise, because the principal check called a Hash method on the
+  String, and that cost the rule's verdict on the whole template.
+
+  Reported by either rule: nothing. The action is es:ESHttpGet.
+
+Resources:
+  StringScoped:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-string-scoped
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "arn:aws:iam::123456789012:root"
+            Action: "es:ESHttpGet"
+            Resource: "*"

@@ -1,6 +1,10 @@
+import pytest
+
 from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     get_message_text,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_get_message_text_with_text():

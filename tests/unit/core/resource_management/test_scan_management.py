@@ -10,6 +10,8 @@ from automated_security_helper.core.resource_management.scan_management import (
     cancel_scan,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_registry():

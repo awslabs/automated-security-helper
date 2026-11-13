@@ -69,6 +69,7 @@ stay as they are.
 
 ## Running it
 
+<!-- doctest: illustrative reason="needs Docker and the gate's container image" -->
 ```sh
 ./run_regression.sh <image-ref> [workdir]
 ```
@@ -76,6 +77,7 @@ stay as they are.
 Use the image the gate's Lambda actually runs, so the test measures the artifact
 that ships:
 
+<!-- doctest: illustrative reason="needs AWS credentials and Docker" -->
 ```sh
 aws ecr list-images --region <region> --repository-name <gate-ecr-repo>
 ./run_regression.sh <account>.dkr.ecr.<region>.amazonaws.com/<gate-ecr-repo>:lambda-amd64
@@ -86,12 +88,14 @@ diverge. `KEEP_WORKDIR=1` retains the scratch trees.
 
 The replay alone, with no image:
 
+<!-- doctest: illustrative reason="runs from tests/integration/codecommit_gate_regression in a checkout of this repository" -->
 ```sh
 python3 assert_case.py --replay
 ```
 
 To check the checker itself:
 
+<!-- doctest: illustrative reason="runs from tests/integration/codecommit_gate_regression in a checkout of this repository" -->
 ```sh
 python3 assert_case.py --selftest
 ```
@@ -119,7 +123,7 @@ is wrong for `ERROR` scanners, which are absent from *every* `summary_stats`
 counter — not `failed`, not `passed`, not `missing`, not `skipped`. Measured on a
 4-shard pipeline, two arms, one variable changed:
 
-```
+```text
 arm A (control): merge exit 2  actionable=16 failed=1 passed=9 missing=0 skipped=0
 arm B (broken):  merge exit 0  actionable=0  failed=0 passed=8 missing=0 skipped=0
 ```
@@ -134,14 +138,14 @@ directory (os error 20)": `bandit=ERROR checkov=ERROR` with
 `passed=0 failed=0 missing=0 skipped=8`, default `ash scan` exiting 0.
 
 `summary_stats.missing` is still a correct signal *for MISSING* and is fine as a
-corroborating check. It is simply not sufficient. `--selftest` has a dedicated
+corroborating check. It is simply not sufficient. `assert_case.py --selftest` has a dedicated
 case with a scanner in `ERROR` while `summary_stats.missing` is 0, which a
 `summary_stats`-keyed checker cannot pass.
 
 The rest of this section is about a second field, which is wrong in a different
 way. Measured on 2026-08-28, on a run with four scanner tools absent:
 
-```
+```text
 summary_stats                   -> missing: 4
 execution_completion_validation -> expected_count: 1, completed_count: 1,
                                    missing_count: 0, completion_rate: 1.0,
@@ -155,7 +159,7 @@ precisely the condition it appears to report. A fix keyed on it would review wel
 pass a test written against the same assumption, and do nothing.
 
 `assert_case.py` treats `has_issues` as an advisory line only, never as a reason a
-case fails, and `--selftest` has a dedicated case that fails if it ever becomes
+case fails, and `assert_case.py --selftest` has a dedicated case that fails if it ever becomes
 load-bearing.
 
 Worth knowing *why* this was nearly missed, because the shape recurs: the first
@@ -238,8 +242,8 @@ signature under Lambda-like constraints, not merely producing some failure.
 docker runs needed to do so were blocked. Its assertion core (`assert_case.py`)
 is verified three ways: it passes on the real measured vulnerable output, it
 rejects the reconstructed Lambda-observed state on 14 independent grounds, and
-its `--selftest` passes. Its repository construction and its fail-closed path
-(no `ASH_EXIT` marker produces a loud failure, never a pass) were exercised
+its `assert_case.py --selftest` passes. Its repository construction and its fail-closed path
+(a container run that prints no exit-code marker produces a loud failure, never a pass) were exercised
 directly. The unexercised part is the single `docker run`.
 
 The replay path has no such gap: it is fully exercised, because it needs nothing
@@ -255,7 +259,7 @@ quoted, and the exit code is explicitly marked as inferred rather than observed.
 
 ## Where this should live
 
-Standalone here so it did not have to be committed while fix lanes were in
+Standalone here so it did not have to be committed while the fixes were in
 flight. It belongs in the ASH repository near the other deployment tests once
 the fixes land — `deploy/cdk/test/` holds the unit tests for this stack, but this
 is an integration fixture and needs a home that can run docker.

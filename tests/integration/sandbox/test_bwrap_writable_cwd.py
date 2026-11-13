@@ -23,7 +23,7 @@ from automated_security_helper.utils.sandbox.policy import (
     build_scanner_policy,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.requires_userns]
 
 
 def _require_bwrap() -> BwrapBackend:

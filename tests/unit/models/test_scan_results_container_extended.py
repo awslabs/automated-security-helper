@@ -1,7 +1,12 @@
 from datetime import datetime
 from pathlib import Path
+
+import pytest
+
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.core.enums import ScannerStatus
+
+pytestmark = pytest.mark.unit
 
 
 def test_scan_results_container_add_error():

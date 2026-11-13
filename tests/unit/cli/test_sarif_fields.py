@@ -10,11 +10,15 @@ the shim itself covered.
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.utils.sarif_field_analysis import (
     flatten_sarif_results,
     _flatten_object,
     get_scanner_name_from_path,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestFlattenSarifResults:

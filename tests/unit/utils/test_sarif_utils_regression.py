@@ -13,6 +13,7 @@ import inspect
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -26,6 +27,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ from pydantic import ValidationError
 
 from automated_security_helper.models.core import AshSuppression
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # AshSuppression.validate_expiration_date — format-only validation

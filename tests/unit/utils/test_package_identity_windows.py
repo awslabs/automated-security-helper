@@ -48,6 +48,8 @@ from automated_security_helper.utils import package_identity
 from automated_security_helper.utils.path_matching import _path_pattern_matches
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+pytestmark = pytest.mark.unit
+
 BUNDLED_KEY = "node_modules/aws-cdk-lib/node_modules/brace-expansion"
 TOP_KEY = "node_modules/brace-expansion"
 WIN_ROOT = PureWindowsPath("D:/a/repo/repo")
@@ -279,7 +281,9 @@ class TestMatchTimeNormalization:
                 "deploy\\cdk\\node_modules\\aws-cdk-lib\\node_modules\\brace-expansion",
                 True,
             ),
-            ("deploy\\cdk\\" + BUNDLED_KEY.replace("/", "\\"), EXPECTED, True),
+            # A backslash in the path is part of a name, not a separator: ASH
+            # reports package_path with forward slashes on every platform.
+            ("deploy\\cdk\\" + BUNDLED_KEY.replace("/", "\\"), EXPECTED, False),
             (EXPECTED, "deploy/cdk/node_modules/*/node_modules/brace-expansion", True),
             (
                 EXPECTED,

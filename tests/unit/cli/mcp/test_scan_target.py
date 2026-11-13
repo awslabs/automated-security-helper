@@ -25,6 +25,8 @@ from automated_security_helper.cli.mcp.scan_target import (
     validate_scan_target,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _clear_policy_env(monkeypatch):

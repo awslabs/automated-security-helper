@@ -17,20 +17,25 @@ concurrency:
   # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and push/tag runs feed docs and releases.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer run on any ref other than main or a tag supersedes the one in progress: a
+  # fresh push to a pull request or a branch makes the previous head's run moot, and a
+  # second dispatch on a branch replaces the first. Runs on main and on tags are never
+  # cancelled; each is the only report its commit gets. A merge_group entry has its own
+  # per-entry ref, so a second run in its group only means the entry was rebuilt and the
+  # earlier run's answer is for a queue entry that no longer exists.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   pr-title:
     name: Validate PR title
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 15s on 4-vCPU ubuntu-latest (run 41724959839) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name == 'pull_request'
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: github.event_name == 'pull_request'
         with:
           python-version: "3.12"
@@ -39,10 +44,28 @@ jobs:
         if: github.event_name == 'pull_request'
         run: pip install commitizen
 
+      # The title is printed here, and commitizen prints it again when it is refused. The
+      # runner reads a line of output as a workflow command when it starts with `::` or
+      # holds `##[`, and starts a new line at a carriage return as well as a line feed,
+      # so a title holding either break, or `##[`, is refused first without being printed.
       - name: Validate PR title with commitizen
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # Byte by byte, in the C locale, so the runner's locale cannot change the
+          # answer: [[:cntrl:]] is C0 and DEL there, and the UTF-8 bytes of C1 and of
+          # U+2028 and U+2029 are named. Only this check; commitizen keeps the
+          # runner's locale.
+          if (
+            export LC_ALL=C
+            case "$PR_TITLE" in
+              *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*) exit 0 ;;
+            esac
+            exit 1
+          ); then
+            echo "::error::the pull request title holds a line break, another control character or the legacy command marker, so it is refused without being printed. Edit the title."
+            exit 1
+          fi
           echo "Checking: $PR_TITLE"
           cz check --message "$PR_TITLE"

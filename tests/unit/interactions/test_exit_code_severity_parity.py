@@ -31,6 +31,8 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 
+pytestmark = pytest.mark.unit
+
 
 def _opts(tmp_path, min_severity="low"):
     from automated_security_helper.interactions.run_ash_scan import ScanOptions
@@ -249,19 +251,28 @@ class TestTheMinSeverityFilterResolvesSeverityLikeEverythingElse:
         assert _resolve_result_severity(result) == "critical"
         assert _severity_filters_finding(result, _SEVERITY_RANK["critical"]) is True
 
-    @pytest.mark.parametrize("level", ["none", None])
-    def test_a_level_carrying_no_severity_still_grades_as_low(self, level):
+    def test_a_none_level_grades_as_low(self):
         """Unchanged, and asserted because the rewrite routes it differently.
 
-        A missing or ``none`` level used to fall through a ``.get(level, "low")``
-        default; it now resolves to ``info``, which is absent from the
-        ``--min-severity`` scale and falls back to the same rank. Identical
-        outcome, reached two ways, so it needs pinning.
+        A ``none`` level resolves to ``info``, not through a ``.get(level, "low")``
+        default, and ``info`` is absent from the ``--min-severity``
+        scale and falls back to the same rank.
         """
-        result = SimpleNamespace(suppressions=[], level=level, properties=None)
+        result = SimpleNamespace(suppressions=[], level="none", properties=None)
 
         assert _severity_filters_finding(result, _SEVERITY_RANK["low"]) is True
         assert _severity_filters_finding(result, _SEVERITY_RANK["medium"]) is False
+
+    def test_a_missing_level_grades_as_the_missing_level(self):
+        """MISSING_SARIF_LEVEL ("warning", MEDIUM), as the gate and the counts read it.
+
+        It graded low here, through the same info fallback as ``none``, while the
+        counts read it as CRITICAL and the gate as LOW.
+        """
+        result = SimpleNamespace(suppressions=[], level=None, properties=None)
+
+        assert _severity_filters_finding(result, _SEVERITY_RANK["medium"]) is True
+        assert _severity_filters_finding(result, _SEVERITY_RANK["high"]) is False
 
     def test_a_suppressed_finding_never_qualifies(self):
         """Suppression outranks severity, however the severity was resolved."""

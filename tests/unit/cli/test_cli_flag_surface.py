@@ -6,7 +6,7 @@
 The root ``ash`` bash script used to own a parallel flag surface and was deleted
 when the Python CLI absorbed it. These tests pin the v2-era spellings that had
 no Python equivalent, and they pin the two behaviors most easily lost again:
-``scan`` must reject an unknown flag, and ``build-image`` must still forward one.
+``scan`` and ``build-image`` must each reject an unknown flag.
 
 Two measurement traps are handled explicitly rather than assumed away.
 
@@ -22,9 +22,14 @@ deliberately bogus flag "passes" that way and the check measures nothing.
 
 import click
 import pytest
+import typer
 import typer.main
 
 from automated_security_helper.cli.main import app
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+
+# In-process over the Typer app: the unit tier.
+pytestmark = pytest.mark.unit
 
 
 def _usage_error_types():
@@ -84,11 +89,18 @@ def _parse(path, argv):
 
 
 def _rejects(path, argv):
-    """True when the parser refuses ``argv``."""
+    """True when the parser refuses ``argv``.
+
+    The root group (``AshTyperGroup``) prints a usage error and raises
+    ``typer.Exit(ASH_EXIT_USAGE_ERROR)`` in its place, so that exit is a refusal
+    too. Any other exit code is not: it would be a different failure.
+    """
     try:
         _parse(path, argv)
     except USAGE_ERRORS:
         return True
+    except typer.Exit as exc:
+        return exc.exit_code == ASH_EXIT_USAGE_ERROR
     return False
 
 
@@ -347,18 +359,26 @@ class TestUnknownFlagsAreRejected:
         assert params["ash_revision_to_install"] == "v3.1.0"
 
 
-class TestBuildImageStillForwardsExtraArgs:
-    """The one command whose pass-through is deliberate.
+class TestBuildImageRefusesExtraArgs:
+    """``build-image`` takes only the options it declares, like ``scan``.
 
-    ``build-image``'s help text promises that additional arguments are forwarded
-    to ASH inside the container, so tightening it along with ``scan`` would break
-    a documented contract.
+    Container mode recomputes the exit code on the host from the host's own
+    options, so an argument forwarded to the scan inside the container would change
+    what that scan reported and not the exit code. ``ash scan --mode container``
+    takes every scan option and applies it on both sides; the contract (see
+    tests/unit/cli/test_scan_refuses_unused_arguments.py and
+    docs/content/reference/exit-codes.md) is that ``build-image`` refuses an
+    option it does not define with the usage-error exit code.
     """
 
-    def test_build_image_accepts_an_unknown_flag(self):
-        assert not _rejects(BUILD_IMAGE, ["--totally-bogus-flag"])
+    def test_build_image_rejects_an_unknown_flag(self):
+        assert _rejects(BUILD_IMAGE, ["--totally-bogus-flag"])
 
-    def test_build_image_context_settings_still_allow_extra_args(self):
+    def test_build_image_still_accepts_its_real_flags(self):
+        """Control: the rejection above is not the parser refusing everything."""
+        assert _parse(BUILD_IMAGE, ["--no-run"])["no_run"] is True
+
+    def test_build_image_context_settings_do_not_allow_extra_args(self):
         _, cmd = _resolve(BUILD_IMAGE)
-        assert cmd.context_settings.get("allow_extra_args") is True
-        assert cmd.context_settings.get("ignore_unknown_options") is True
+        assert not cmd.context_settings.get("allow_extra_args")
+        assert not cmd.context_settings.get("ignore_unknown_options")

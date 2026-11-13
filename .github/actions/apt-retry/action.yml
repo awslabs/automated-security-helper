@@ -1,0 +1,49 @@
+name: "apt with retries"
+description: "apt-get update and install on a Linux runner, retried with backoff, and falling back to archive.ubuntu.com when the Azure mirror name does not resolve"
+
+# Why: a hosted-runner DNS outage fails a bare `apt-get update && apt-get install`
+# on its first fetch. The logic is in apt-retry.sh next to this file; see its header
+# for the attempt schedule, the mirror fallback and what it cannot fix.
+
+inputs:
+  packages:
+    description: "Space-separated package names to install. Empty with update=true runs the update only."
+    required: false
+    default: ""
+  update:
+    description: "Run apt-get update before the install, inside every attempt: true or false"
+    required: false
+    default: "true"
+  attempts:
+    description: "Outer attempts, with 20 s then 60 s pauses between them"
+    required: false
+    default: "3"
+  no-install-recommends:
+    description: "Pass --no-install-recommends to apt-get install: true or false"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: apt-get with retries
+      shell: bash
+      env:
+        APT_RETRY_PACKAGES: ${{ inputs.packages }}
+        APT_RETRY_UPDATE: ${{ inputs.update }}
+        APT_RETRY_ATTEMPTS: ${{ inputs.attempts }}
+        APT_RETRY_NO_RECOMMENDS: ${{ inputs.no-install-recommends }}
+        APT_RETRY_SCRIPT: ${{ github.action_path }}/apt-retry.sh
+      run: |
+        args=(--attempts "${APT_RETRY_ATTEMPTS}")
+        if [ -z "${APT_RETRY_PACKAGES}" ]; then
+          args+=(--update-only)
+        elif [ "${APT_RETRY_UPDATE}" = "true" ]; then
+          args+=(--update)
+        fi
+        if [ "${APT_RETRY_NO_RECOMMENDS}" = "true" ]; then
+          args+=(--no-install-recommends)
+        fi
+        # Unquoted on purpose: the package list is split on whitespace.
+        # shellcheck disable=SC2086
+        bash "${APT_RETRY_SCRIPT}" "${args[@]}" -- ${APT_RETRY_PACKAGES}

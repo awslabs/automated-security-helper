@@ -51,12 +51,14 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-create-release.yml"
 JOB = "create-release-pr"
 NOTES_V380 = REPO_ROOT / ".github" / "release-notes" / "v3.8.0.md"
 
-# The same skip idiom as tests/unit/test_floating_major_tag_workflow.py, for the
+# The same skip idiom as tests/unit/test_ash_bash_entrypoint_build_failure.py, for the
 # same reason: on a Windows runner `bash` is the WSL stub, and the steps under test
 # only ever run on ubuntu-latest.
 _REQUIRES_BASH = [
@@ -111,7 +113,13 @@ def _step_script(step_id: str) -> str:
 
 def _git(repo: Path, *args: str, env: dict) -> str:
     return subprocess.run(
-        ["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True
+        ["git", *args],
+        cwd=repo,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     ).stdout.strip()
 
 
@@ -244,6 +252,7 @@ def _requires_bash(cls):
     return cls
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheThreeXLineCapsAMajor:
     def test_a_bang_commit_ships_as_a_minor_and_is_named(self, fixture: Fixture):
@@ -297,6 +306,7 @@ class TestTheThreeXLineCapsAMajor:
         assert bump.outputs.get("new_version") == "3.7.1", bump.describe()
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheCapIsBounded:
     def test_auto_lets_the_same_history_go_major(self, fixture: Fixture):
@@ -331,6 +341,7 @@ class TestTheCapIsBounded:
         assert "::error::Unknown release-line" in line.proc.stdout, line.describe()
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheBumpStepBackstop:
     def test_it_fails_when_three_x_is_selected_and_the_bump_lands_on_four(
@@ -352,6 +363,7 @@ class TestTheBumpStepBackstop:
         assert "bumped" not in bump.outputs, "the step went on to report a bump"
 
 
+@pytest.mark.unit
 class TestTheReleaseLineSetting:
     def test_the_line_is_committed_as_auto(self):
         # v4 is at 4.0.0, where `3.x` refuses to run (see the guard tests above), so
@@ -367,6 +379,7 @@ class TestTheReleaseLineSetting:
         assert not (trigger["workflow_dispatch"] or {}).get("inputs")
 
 
+@pytest.mark.unit
 class TestTheChangelogTemplate:
     """The v3.8.0 notes render under v3.8.0, and only there."""
 
@@ -447,14 +460,38 @@ REAL_CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 TEMPLATE = REPO_ROOT / ".github" / "changelog" / "CHANGELOG.md.j2"
 
 
+def _latest_released_version(changelog: str) -> str:
+    """The version of the newest ``## v<version> (<date>)`` entry below Unreleased."""
+    for line in changelog.splitlines():
+        if line.startswith("## v"):
+            return line.split()[1][1:]
+    raise AssertionError("CHANGELOG.md has no released entry")
+
+
 @pytest.fixture
 def real_changelog_fixture(tmp_path: Path) -> Fixture:
     """A scratch repo carrying the real CHANGELOG.md, template and v3.8.0 notes."""
     if not CZ_BIN.exists():
         pytest.skip(f"commitizen is not installed next to {sys.executable}")
-    if "## Unreleased" not in REAL_CHANGELOG.read_text(encoding="utf-8").splitlines():
+    changelog = REAL_CHANGELOG.read_text(encoding="utf-8")
+    if "## Unreleased" not in changelog.splitlines():
         pytest.skip("CHANGELOG.md has no Unreleased section on this checkout")
-    fx = Fixture(tmp_path)
+    # The scratch repo is tagged at the newest released entry the real changelog
+    # carries, because that is the tag commitizen's incremental changelog looks
+    # for: it matches the entry's version against the repo's tags by name
+    # similarity (threshold 0.89, under which "v3.7.1" does not match "v3.7.0")
+    # and with no match `cz bump` exits 16 (NO_REVISION) before writing, while
+    # the fold step's dry run fails the same way and refuses with "next tag could
+    # not be determined". A fixed v3.7.0 tag went stale the moment the v3.7.1
+    # entry landed in CHANGELOG.md.
+    latest = _latest_released_version(changelog)
+    major, minor, _patch = latest.split(".")
+    if f"{major}.{int(minor) + 1}.0" != "3.8.0":
+        pytest.skip(
+            "the curated notes under test are v3.8.0's, and the next minor after "
+            f"the newest changelog entry v{latest} is not 3.8.0"
+        )
+    fx = Fixture(tmp_path, version=latest)
     (fx.repo / ".github" / "changelog").mkdir(parents=True)
     (fx.repo / ".github" / "release-notes").mkdir(parents=True)
     shutil.copy(TEMPLATE, fx.repo / ".github" / "changelog" / TEMPLATE.name)
@@ -468,7 +505,7 @@ def real_changelog_fixture(tmp_path: Path) -> Fixture:
     )
     _git(fx.repo, "add", "-A", env=fx.env)
     _git(fx.repo, "commit", "-q", "-m", "chore: real changelog", env=fx.env)
-    _git(fx.repo, "tag", "-f", "v3.7.0", env=fx.env)
+    _git(fx.repo, "tag", "-f", f"v{latest}", env=fx.env)
     fx.commit("feat!: drop the old default")
     return fx
 
@@ -479,6 +516,7 @@ def _missing_after_release(fx: Fixture, before: list[str]) -> list[str]:
     return [ln for ln in before if ln not in entry]
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheUnreleasedSectionSurvivesTheBump:
     """commitizen replaces `## Unreleased` wholesale; the fold step must save it."""
@@ -522,6 +560,7 @@ class TestTheUnreleasedSectionSurvivesTheBump:
         )
 
 
+@pytest.mark.integration
 @_requires_bash
 class TestTheFoldStepEdges:
     @staticmethod

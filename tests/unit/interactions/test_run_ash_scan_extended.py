@@ -8,6 +8,8 @@ import pytest
 from automated_security_helper.core.enums import RunMode, ExecutionPhase
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.skip(reason="WIP test")
 @patch("automated_security_helper.utils.log.get_logger")

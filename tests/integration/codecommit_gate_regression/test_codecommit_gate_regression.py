@@ -218,7 +218,7 @@ def test_the_derived_mapping_covers_every_documented_exit_code():
     """Including exit code 4, which the transcribed copy omitted entirely.
 
     ASH_EXIT_CODES is the published set. The gate's `_verdict` names only 0-3 and
-    falls through for anything else, so 4 must map to the fallback -- and the
+    falls through for anything else, so 4 and 5 must map to the fallback -- and the
     derivation has to produce that rather than leave a hole, because a harness
     with no entry for a code cannot score a run that exits with it.
     """
@@ -235,8 +235,10 @@ def test_the_derived_mapping_covers_every_documented_exit_code():
     assert "unknown" in mapping, "the fallback arm is not recorded"
 
     # The semantics, not just the presence: 4 means nothing was scanned, so it
-    # must not be reported as a scan that passed or one that found findings.
+    # must not be reported as a scan that passed or one that found findings. 5, a
+    # usage error, means the same and reaches the same fallback.
     assert mapping["4"] == "errored"
+    assert mapping["5"] == "errored"
     assert mapping["0"] == "passed"
     assert mapping["2"] == "failed"
 

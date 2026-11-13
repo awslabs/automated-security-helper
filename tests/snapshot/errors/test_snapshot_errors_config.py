@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 NOT_YAML = "project_name: snapshot\nscanners: [bandit\n"
 
 # Two violations: a field of the wrong type, and an internal-only field that a user

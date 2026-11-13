@@ -1,0 +1,24 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for StarResourceAccessPolicyRule (automated_security_helper/assets/appsec_cfn_rules).
+  The principal is a top-level Array holding "*". cfn-model's own wildcard helper raises
+  on that shape, but its policy parser hands the rule the Array as written, so the rule
+  has to read it without raising and report it. It used to raise, which cost the rule's
+  verdict on the whole template.
+
+  Reported by the rule: ArrayStar. The action is es:ESHttpGet, so
+  ResourcePolicyStarAccessVerbPolicyRule reports nothing here.
+
+Resources:
+  ArrayStar:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-array-star
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              - "*"
+            Action: "es:ESHttpGet"
+            Resource: "*"

@@ -2,8 +2,12 @@
 plus idempotency regression test for AshAggregatedResults.to_flat_vulnerabilities().
 """
 
+import pytest
+
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
+
+pytestmark = pytest.mark.unit
 
 
 class TestScanResultsContainerFactories:

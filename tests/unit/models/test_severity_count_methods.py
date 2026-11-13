@@ -15,6 +15,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestScannerSeverityCountTotal:
     """ScannerSeverityCount.total property."""

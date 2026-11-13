@@ -1,0 +1,3 @@
+$ ash config update ash.yaml --set fail_on_findings --set fail_on_findings=false
+Not updating ash.yaml: Invalid config override: 'fail_on_findings'. Expected format: key.path=value
+[exit code: 3]

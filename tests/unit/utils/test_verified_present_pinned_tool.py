@@ -35,6 +35,7 @@ Nothing here touches the network. Downloads are served from bytes built in the
 test, and the pinned digests are patched to describe those bytes.
 """
 
+import sys
 import hashlib
 import io
 import os
@@ -57,6 +58,7 @@ from automated_security_helper.utils.download_utils import (
     find_verified_pinned_executable,
     install_pinned_tool,
     pinned_install_already_satisfied,
+    receipt_root,
 )
 from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
@@ -64,6 +66,18 @@ from automated_security_helper.utils.tool_downloads import (
     _EXECUTABLE_DIGESTS,
     get_tool_asset,
 )
+
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("receipt_home")]
+
+
+def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
+    """An install writes its receipt under Path.home(), here the test's own home.
+
+    This module wrote nine grype.json receipts into the developer's real
+    ~/.ash/install-receipts.
+    """
+    assert receipt_root().is_relative_to(tmp_path), receipt_root()
+
 
 PINNED_GRYPE = b"\x7fELF pinned grype v0.111.0 build\n"
 OTHER_VERSION_GRYPE = b"\x7fELF grype v0.110.0 build\n"
@@ -89,6 +103,13 @@ def _tarball(member_bytes: bytes) -> bytes:
 
 
 class _FakeResponse(io.BytesIO):
+    """A urlopen response: a context manager with the headers the body copy
+    reads (``_copy_whole_body`` checks the copied bytes against Content-Length)."""
+
+    def __init__(self, payload: bytes = b""):
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
+
     def __enter__(self):
         return self
 
@@ -145,8 +166,17 @@ def on_path(tmp_path, monkeypatch):
     def find_executable(command, *args, **kwargs):
         return str(resolved.grype) if command == "grype" and resolved.grype else None
 
+    def find_executable_for_scan(command, root, *args, **kwargs):
+        # The install command looks a tool up as a scan of the source tree
+        # does (find_executable_for_scan, bound by name on its module); the
+        # scope is ignored here, so the command resolves the same copy the
+        # rest of the test sees.
+        return find_executable(command)
+
     monkeypatch.setattr(subprocess_utils, "find_executable", find_executable)
-    monkeypatch.setattr(dependencies_module, "find_executable", find_executable)
+    monkeypatch.setattr(
+        dependencies_module, "find_executable_for_scan", find_executable_for_scan
+    )
     monkeypatch.setattr(
         subprocess_utils,
         "path_independent_dirs",
@@ -205,6 +235,12 @@ class TestIdenticalBinaryIsNotReinstalled:
         assert downloads.urls == []
         assert installed == at_destination
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="the stand-in is a plain 'grype' with a POSIX execute bit; "
+        "Windows executable resolution is PATHEXT-shaped and cannot "
+        "resolve a suffix-less file",
+    )
     def test_the_scanner_resolves_the_binary_that_was_verified(
         self, tmp_path, pins, monkeypatch, downloads
     ):
@@ -242,13 +278,26 @@ class TestIdenticalBinaryIsNotReinstalled:
         finally:
             subprocess_utils.clear_find_executable_cache()
 
-    def test_find_executable_searches_the_same_fallback_dirs(self, monkeypatch):
+    def test_find_executable_searches_the_same_fallback_dirs(
+        self, monkeypatch, tmp_path
+    ):
         """The skip's notion of "found by every scan" is find_executable's own list."""
-        monkeypatch.setenv("ASH_BIN_PATH", "/some/ash/bin")
+        # Anchored on every platform: "/some/ash/bin" has no drive on Windows, so it
+        # is a relative ASH_BIN_PATH there, which is not used (~/.ash/bin is).
+        ash_bin = tmp_path / "some" / "ash" / "bin"
+        monkeypatch.setenv("ASH_BIN_PATH", str(ash_bin))
         dirs = subprocess_utils.path_independent_dirs()
-        assert dirs[0] == Path("/some/ash/bin")
+        assert dirs[0] == ash_bin
+        # Then the directories of ASH's own environment: the interpreter's, and its
+        # scripts directory when that is another one (a Windows Python outside a
+        # venv). A directory an earlier `ash dependencies install --bin-path` used
+        # is not on the list.
+        own = subprocess_utils.own_environment_dirs()
+        assert own[0] == Path(sys.executable).parent
         if subprocess_utils.platform.system().lower() != "windows":
-            assert dirs[1:] == [Path("/usr/local/bin")]
+            assert dirs[1:] == [*own, Path("/usr/local/bin")]
+        else:
+            assert dirs[1:] == own
 
 
 class TestADifferentBinaryIsStillInstalled:
@@ -356,6 +405,41 @@ class TestADifferentBinaryIsStillInstalled:
         assert len(downloads.urls) == 1
         assert installed == bin_dir / "grype"
         assert not installed.is_symlink()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="O_NOFOLLOW is 0 on Windows, so the open follows the link there",
+    )
+    def test_a_link_swapped_in_after_the_by_name_check_is_refused(
+        self, tmp_path, pins, on_path, monkeypatch
+    ):
+        """The candidate is judged on the descriptor that is hashed, not by name.
+
+        A plain file is at the destination when ``is_symlink`` answers, and a link
+        to a file holding the pinned bytes is there by the time the candidate is
+        opened. Judged by name and then hashed through a plain open, that link was
+        accepted and its target left to change later; opened once without following
+        a link, it is refused.
+        """
+        pinned_elsewhere = _binary(tmp_path / "writable-elsewhere", PINNED_GRYPE)
+        bin_dir = tmp_path / "ash-bin"
+        at_destination = _binary(bin_dir, OTHER_VERSION_GRYPE)
+        real_is_symlink = Path.is_symlink
+
+        def swap_then_answer(self):
+            if self != at_destination:
+                return real_is_symlink(self)
+            # The by-name check saw a plain file; the link lands after it.
+            at_destination.unlink()
+            at_destination.symlink_to(pinned_elsewhere)
+            return False
+
+        monkeypatch.setattr(Path, "is_symlink", swap_then_answer)
+        assert (
+            find_verified_pinned_executable("grype", "linux", "amd64", bin_dir) is None
+        )
+        # The link's target is untouched, and still what it was.
+        assert pinned_elsewhere.read_bytes() == PINNED_GRYPE
 
     def test_a_non_executable_copy_is_reinstalled(
         self, tmp_path, pins, on_path, downloads
@@ -478,15 +562,21 @@ class TestTheExecutableDigestTable:
     def test_a_bare_executable_asset_is_its_own_executable_digest(self):
         """An asset that is the executable needs no second digest.
 
-        No asset in the table is shaped like this yet; the property reads an
-        ``archive`` attribute when one exists, and this pins what it does then.
+        opengrep publishes the executable itself (``archive`` is False), so the
+        digest of the download is the digest of the bytes that run. An archived
+        asset without an executable digest stays None: it is never a match.
         """
-        bare = SimpleNamespace(executable_sha256=None, archive=False, sha256="ab" * 32)
-        assert tool_downloads.ToolAsset.executable_digest.fget(bare) == "ab" * 32
+        opengrep = get_tool_asset("opengrep", "linux", "amd64")
+        assert opengrep.archive is False
+        assert opengrep.executable_digest == opengrep.sha256
+        assert "opengrep_manylinux_x86" not in _EXECUTABLE_DIGESTS
+
         archived = SimpleNamespace(
             executable_sha256=None, archive=True, sha256="ab" * 32
         )
         assert tool_downloads.ToolAsset.executable_digest.fget(archived) is None
+        bare = SimpleNamespace(executable_sha256=None, archive=False, sha256="ab" * 32)
+        assert tool_downloads.ToolAsset.executable_digest.fget(bare) == "ab" * 32
 
 
 class TestRecognizingAPinnedInstallCommand:
@@ -534,16 +624,29 @@ class TestTheVerdictForAVerifiedTool:
         assert self._outcome(commands_satisfied=1).declared_no_commands is False
 
     def test_a_verified_tool_missing_afterwards_is_named(self):
-        """Verified, then not found by the post-install sweep: say so."""
-        from automated_security_helper.cli.dependencies import _report_and_exit
+        """Verified, then not found by the post-install sweep: say so, and fail.
+
+        A needed tool absent after the install fails the run whether or not it
+        was named with --tool.
+        """
+        import typer
+
+        from automated_security_helper.cli.dependencies import (
+            EXIT_INSTALL_FAILED,
+            _report_and_exit,
+        )
 
         panels = io.StringIO()
-        with patch.object(
-            dependencies_module,
-            "console",
-            Console(file=panels, width=240, no_color=True),
+        with (
+            patch.object(
+                dependencies_module,
+                "console",
+                Console(file=panels, width=240, no_color=True),
+            ),
+            pytest.raises(typer.Exit) as exc,
         ):
             _report_and_exit([self._outcome(commands_satisfied=1)], requested_tools=[])
+        assert exc.value.exit_code == EXIT_INSTALL_FAILED
         printed = panels.getvalue()
         assert "Install ran but tool not found on PATH: grype" in printed
         assert "No install path on this platform" not in printed
@@ -567,6 +670,11 @@ class TestDependenciesInstall:
         monkeypatch.setattr(
             dependencies_module, "clear_find_executable_cache", lambda: None
         )
+        # The panels go to a buffer at width 240, off a terminal: a caller's
+        # FORCE_COLOR or TTY_COMPATIBLE made Rich treat it as one, and under
+        # TERM=dumb lay it out at 80 columns, which wrapped "VERIFIED PRESENT".
+        for name in ("FORCE_COLOR", "TTY_COMPATIBLE", "TTY_INTERACTIVE"):
+            monkeypatch.delenv(name, raising=False)
         self.panels = io.StringIO()
         monkeypatch.setattr(
             dependencies_module,

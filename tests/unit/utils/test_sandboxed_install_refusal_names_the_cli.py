@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils import uv_tool_runner
 from automated_security_helper.utils.sandbox import scope
+
+# In-process with monkeypatched runners: the unit tier.
+pytestmark = pytest.mark.unit
 
 
 def test_the_refusal_names_the_canonical_dependencies_install(monkeypatch, caplog):

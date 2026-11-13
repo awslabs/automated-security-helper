@@ -1,17 +1,24 @@
-# yaml-language-server: $schema=../../../src/automated_security_helper/schemas/ASHConfig.json
+# yaml-language-server: $schema=../../../automated_security_helper/schemas/AshConfig.json
+#
+# An ASH config that turns on the example plugins. Copy it to the repository you
+# scan (as .ash/.ash.yaml) or pass it with --config. The my_ash_plugins package has
+# to be installed in the environment ASH runs in, and for a copy inside a scanned
+# repository, from outside that repository's checkout; see ../README.md.
 project_name: ash_plugins_example
 ash_plugin_modules:
   - my_ash_plugins
 converters:
   my-example-converter:
     enabled: true
+    options:
+      suffixes: [".py.tmpl"]
 scanners:
   my-example-scanner:
     enabled: true
+    # options.marker sets the text the scanner looks for; the default is in
+    # my_ash_plugins/scanner.py.
 reporters:
   my-example-reporter:
     enabled: true
-    extension: example-report.md
     options:
-      # Custom option
-      format-version: v3
+      title: "ASH example report"

@@ -19,6 +19,8 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 from automated_security_helper.interactions import run_ash_nix
 
+pytestmark = pytest.mark.unit
+
 USAGE_ERROR_EXIT = 1
 
 SCAN = [
@@ -47,7 +49,7 @@ def shell_calls(monkeypatch):
     """Record any attempt to enter the shell; a refusal must make none."""
     calls: list = []
     monkeypatch.setattr(
-        run_ash_nix.subprocess, "run", lambda *a, **k: calls.append(a) or None
+        run_ash_nix, "_enter_shell", lambda *a, **k: calls.append(a) or None
     )
     return calls
 

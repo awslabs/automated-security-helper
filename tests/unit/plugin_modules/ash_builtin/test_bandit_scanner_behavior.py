@@ -6,9 +6,15 @@ discovery in ``_process_config_options`` were unexecuted.
 
 The UV mixin hooks (``_validate_uv_tool_availability``,
 ``_get_tool_installation_info``, ``_install_uv_tool``) and the module-level
-``get_uv_tool_command`` are the seams; all are patched with ``autospec`` so a
-call that does not match the real signature fails rather than being absorbed.
-No test here shells out to bandit, and none is skipped when bandit is absent.
+``get_uv_tool_command`` are the seams. The hooks are replaced with lambdas of
+the real arity. The resolver is replaced with ``lambda command, **kwargs``: the
+scanner passes it the ``from_spec`` keyword, and a stub that names only
+``command`` raised on that call, so the stubs accept the keyword rather than
+pin its name; the resolver's own arguments are pinned by
+``test_resolver_is_asked_about_the_scanners_own_command``. The verified-binary
+route is pinned in test_bandit_scanner_exclusions_reach_bandit.py, whose
+verifier stubs record their calls. No test here shells out to bandit, and none
+is skipped when bandit is absent.
 
 One block is deliberately not covered: ``configure()``'s ``except Exception``
 arm. ``self.config = config`` is a plain attribute assignment on a model without
@@ -18,12 +24,14 @@ dead code.
 """
 
 import logging
+import sys
 from pathlib import Path
 
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -32,6 +40,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScanner,
     BanditScannerConfig,
     BanditScannerConfigOptions,
+    bandit_excluded_path_globs,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
@@ -44,6 +53,12 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+
+# With only the mixin hooks patched, a scanner that passed its check would ask uv for
+# bandit's version (``uv tool run --from 'bandit[sarif,toml]...' bandit --version``),
+# which starts bandit wherever uv can reach it, so the probes answer without a process
+# (tests/unit/conftest.py).
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
 
 
 @pytest.fixture
@@ -155,32 +170,13 @@ def test_configure_with_none_leaves_the_existing_config(scanner):
 # ---------------------------------------------------------------------------
 
 
-def test_uv_missing_but_bandit_on_path_falls_back_to_direct_execution(
-    scanner, monkeypatch, tmp_path
-):
-    """With uv absent and bandit directly runnable, run it directly."""
-    monkeypatch.setattr(
-        BanditScanner, "_validate_uv_tool_availability", lambda self: False
-    )
-    monkeypatch.setattr(
-        bandit_scanner,
-        "get_uv_tool_command",
-        lambda command: [str(tmp_path / "bandit")],
-    )
-
-    assert scanner.validate_plugin_dependencies() is True
-    assert scanner.use_uv_tool is False, (
-        "the scanner must stop trying to route through uv once it has decided "
-        "to execute the binary directly"
-    )
-    assert scanner.dependencies_satisfied is True
-
-
 def test_uv_missing_and_bandit_absent_fails_validation(scanner, monkeypatch, caplog):
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: None)
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: None
+    )
 
     with caplog.at_level(logging.ERROR):
         assert scanner.validate_plugin_dependencies() is False
@@ -285,7 +281,9 @@ def test_failed_installation_falls_back_to_the_resolver(scanner, monkeypatch, ca
     monkeypatch.setattr(
         BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
     )
-    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", lambda command: None)
+    monkeypatch.setattr(
+        bandit_scanner, "get_uv_tool_command", lambda command, **kwargs: None
+    )
 
     with caplog.at_level(logging.WARNING):
         assert scanner.validate_plugin_dependencies() is False
@@ -295,43 +293,71 @@ def test_failed_installation_falls_back_to_the_resolver(scanner, monkeypatch, ca
     )
 
 
-def test_failed_installation_still_succeeds_if_the_resolver_finds_bandit(
-    scanner, monkeypatch, tmp_path
-):
-    """The resolver's answer decides the outcome, not the install failure."""
-    monkeypatch.setattr(
-        BanditScanner, "_validate_uv_tool_availability", lambda self: True
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_get_tool_installation_info", lambda self: {"available": False}
-    )
-    monkeypatch.setattr(
-        BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
-    )
-    monkeypatch.setattr(
-        bandit_scanner,
-        "get_uv_tool_command",
-        lambda command: [str(tmp_path / "bandit")],
-    )
-
-    assert scanner.validate_plugin_dependencies() is True
-
-
 def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
-    """The resolver must be queried for 'bandit', not some other tool name."""
+    """The resolver must be queried for 'bandit', not some other tool name, and
+    under the scan's own ``--from`` spec (the extras and the version range): a
+    bare ``bandit`` resolves a different environment, and a stub that threw
+    the keywords away could not tell."""
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
     asked = []
 
-    def _resolver(command):
-        asked.append(command)
+    def _resolver(command, **kwargs):
+        asked.append((command, kwargs))
 
     monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", _resolver)
 
     scanner.validate_plugin_dependencies()
 
-    assert asked == ["bandit"]
+    assert [command for command, _ in asked] == ["bandit"]
+    ((_, kwargs),) = asked
+    assert "from_spec" in kwargs, kwargs
+    assert kwargs["from_spec"].startswith("bandit[sarif,toml]"), kwargs
+    assert ">=1.7.8" in kwargs["from_spec"], kwargs
+
+
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "online"])
+@pytest.mark.parametrize("route", ["uv-absent", "install-failed"])
+def test_the_resolver_is_handed_the_scanners_offline_mode(
+    scanner, monkeypatch, route, offline
+):
+    """Both resolver calls pass the scanner's own offline reading.
+
+    Read from ASH_OFFLINE here, as ``_is_offline_mode`` reads it. Without the
+    keyword the resolver followed ASH's global mode alone: a scanner held
+    offline on its own was probed online, and the resolver's memo filed that
+    answer under the mode the probe ran in, not the one the scanner is in.
+    """
+    if route == "uv-absent":
+        monkeypatch.setattr(
+            BanditScanner, "_validate_uv_tool_availability", lambda self: False
+        )
+    else:
+        monkeypatch.setattr(
+            BanditScanner, "_validate_uv_tool_availability", lambda self: True
+        )
+        monkeypatch.setattr(
+            BanditScanner,
+            "_get_tool_installation_info",
+            lambda self: {"available": False},
+        )
+        monkeypatch.setattr(
+            BanditScanner,
+            "_install_uv_tool",
+            lambda self, timeout, retry_config: False,
+        )
+    monkeypatch.setenv("ASH_OFFLINE", "YES" if offline else "NO")
+    asked = []
+
+    def _resolver(command, **kwargs):
+        asked.append(kwargs)
+
+    monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", _resolver)
+
+    scanner.validate_plugin_dependencies()
+
+    assert [kwargs.get("offline") for kwargs in asked] == [offline]
 
 
 # ---------------------------------------------------------------------------
@@ -339,10 +365,12 @@ def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_nonexistent_configured_config_file_warns_and_adds_no_flag(
+def test_nonexistent_configured_config_file_warns_and_passes_an_empty_ini(
     plugin_context, tmp_path, caplog
 ):
-    """A configured path that is not on disk is reported, not passed to bandit."""
+    """A configured path that is not on disk is reported, not passed to bandit.
+    Bandit searches for a ``.bandit`` file itself when it is given no ini, so it
+    gets the empty one ASH writes instead."""
     missing = tmp_path / "nowhere" / "bandit.yaml"
 
     with caplog.at_level(logging.WARNING):
@@ -357,9 +385,22 @@ def test_nonexistent_configured_config_file_warns_and_adds_no_flag(
         "Configured bandit config file does not exist" in r.message
         for r in caplog.records
     ), f"expected a missing-config warning; got {[r.message for r in caplog.records]}"
-    keys = [a.key for a in scanner.args.extra_args]
-    assert "--ini" not in keys
-    assert "--configfile" not in keys
+    argv = _scan_argv(scanner, plugin_context)
+    assert "--configfile" not in argv
+    ini = _value_after(argv, "--ini")
+    assert len(ini) == 1, ini
+    assert ini[0].endswith("bandit-empty.ini"), ini
+    assert str(missing) not in ini[0], ini
+
+
+def _scan_argv(scanner, plugin_context):
+    """The argv the scanner would run bandit with for a scan of the source dir."""
+    final_args, _, _ = scanner._execute_scan(plugin_context.source_dir, "source", [])
+    return [str(arg) for arg in final_args]
+
+
+def _value_after(argv, flag):
+    return [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == flag]
 
 
 def test_dot_bandit_config_file_is_passed_as_ini(plugin_context, tmp_path):
@@ -374,15 +415,57 @@ def test_dot_bandit_config_file_is_passed_as_ini(plugin_context, tmp_path):
         ),
     )
 
-    assert extra_arg_values(scanner, "--ini") == [config_file.as_posix()]
+    argv = _scan_argv(scanner, plugin_context)
+    assert _value_after(argv, "--ini") == [config_file.as_posix()]
     assert extra_arg_values(scanner, "--configfile") == []
+
+
+def test_processing_the_options_again_builds_each_flag_once(plugin_context, tmp_path):
+    """Construction processes the options once; a second call (configure(),
+    or a caller that processes them again) appended another --ini,
+    --confidence-level, --severity-level and --exclude token beside the first.
+    The option arguments now start again from the base ones on every call."""
+    config_file = tmp_path / ".bandit"
+    config_file.write_text("[bandit]\nexclude = /test\n", encoding="utf-8")
+    scanner = BanditScanner(
+        context=plugin_context,
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                config_file=config_file, confidence_level="low"
+            )
+        ),
+    )
+    once = [(arg.key, arg.value) for arg in scanner.args.extra_args]
+
+    scanner._process_config_options()
+
+    assert [(arg.key, arg.value) for arg in scanner.args.extra_args] == once
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert keys.count("--ini") == 1
+    assert keys.count("--confidence-level") == 1
+    assert keys.count("--severity-level") == 1
+    assert sum(key.startswith("--exclude=") for key in keys) == 1
+    argv = _scan_argv(scanner, plugin_context)
+    assert _value_after(argv, "--ini") == [config_file.as_posix()]
+
+    # Rebuilt from the base, not deduplicated by key: a version that kept the
+    # first --confidence-level it saw would also build each flag once, and
+    # keep the stale value after configure() with another.
+    scanner.configure(
+        BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                config_file=config_file, confidence_level="high"
+            )
+        )
+    )
+    assert extra_arg_values(scanner, "--confidence-level") == ["high"]
 
 
 @pytest.mark.parametrize("filename", ["bandit.yaml", "bandit.toml", "custom.yaml"])
 def test_other_config_filenames_are_passed_as_configfile(
     plugin_context, tmp_path, filename
 ):
-    """Anything not named .bandit goes through --configfile."""
+    """Anything not named .bandit goes through --configfile, beside the empty --ini."""
     config_file = tmp_path / filename
     config_file.write_text("skips: []\n", encoding="utf-8")
 
@@ -394,63 +477,70 @@ def test_other_config_filenames_are_passed_as_configfile(
     )
 
     assert extra_arg_values(scanner, "--configfile") == [config_file.as_posix()]
-    assert extra_arg_values(scanner, "--ini") == []
+    # Beside it, the one --ini is ASH's empty file, which ends bandit's own
+    # .bandit search (bandit_scanner.BanditScannerConfigOptions.config_file).
+    argv = _scan_argv(scanner, plugin_context)
+    (ini,) = _value_after(argv, "--ini")
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
 @pytest.mark.parametrize(
-    "relative_path, expected_flag",
+    "relative_path",
     [
-        (".bandit", "--ini"),
-        (".ash/.bandit", "--ini"),
-        ("bandit.yaml", "--configfile"),
-        (".ash/bandit.yaml", "--configfile"),
-        ("bandit.toml", "--configfile"),
-        (".ash/bandit.toml", "--configfile"),
+        ".bandit",
+        ".ash/.bandit",
+        "bandit.yaml",
+        ".ash/bandit.yaml",
+        "bandit.toml",
+        ".ash/bandit.toml",
     ],
 )
-def test_config_file_is_discovered_in_the_source_directory(
-    plugin_context, relative_path, expected_flag, caplog
+def test_a_config_file_in_the_source_directory_is_not_used(
+    plugin_context, relative_path
 ):
-    """With no configured path, each known location is discovered in turn."""
-    discovered = plugin_context.source_dir / relative_path
-    discovered.parent.mkdir(parents=True, exist_ok=True)
-    discovered.write_text("# bandit config\n", encoding="utf-8")
+    """The repository being scanned does not choose bandit's config.
 
-    with caplog.at_level(logging.INFO):
-        scanner = BanditScanner(context=plugin_context, config=BanditScannerConfig())
+    ASH used to pass the first of these it found. Now none is passed, and bandit
+    gets an empty --ini written outside the scanned tree, so it does not read a
+    .bandit under the target on its own either.
+    """
+    in_tree = plugin_context.source_dir / relative_path
+    in_tree.parent.mkdir(parents=True, exist_ok=True)
+    in_tree.write_text("[bandit]\nskips = B602\n", encoding="utf-8")
 
-    # Discovery builds these paths by interpolating source_dir into an f-string
-    # with a literal forward slash, so on Windows the value comes back with a
-    # backslashed prefix and a forward slash before the filename. Both
-    # separators resolve to the same file there, but the strings differ from the
-    # one a Path builds natively, so each side is normalized before comparing.
-    # The comparison stays a full-path list equality: a wrong flag, a wrong
-    # file, a wrong directory or a second emitted arg all still fail.
-    discovered_args = [
-        Path(value).as_posix() for value in extra_arg_values(scanner, expected_flag)
-    ]
-    assert discovered_args == [discovered.as_posix()], (
-        f"{relative_path} should be passed via {expected_flag}; "
-        f"extra_args={[(a.key, a.value) for a in scanner.args.extra_args]}"
-    )
-    assert any("Using bandit config file" in r.message for r in caplog.records)
+    scanner = BanditScanner(context=plugin_context, config=BanditScannerConfig())
+    argv = _scan_argv(scanner, plugin_context)
+
+    assert in_tree.as_posix() not in " ".join(argv)
+    assert "--configfile" not in argv
+    (ini,) = _value_after(argv, "--ini")
+    assert not in_scanned_tree(ini, plugin_context.source_dir)
+    assert Path(ini).parent != Path(scanner.results_dir)
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
-def test_no_config_file_anywhere_adds_no_config_flag(scanner, plugin_context):
-    """An empty source dir means bandit runs on its own defaults."""
-    keys = [a.key for a in scanner.args.extra_args]
-    assert "--ini" not in keys
-    assert "--configfile" not in keys
+def test_no_config_file_anywhere_passes_only_the_empty_ini(scanner, plugin_context):
+    """With nothing configured bandit gets no --configfile and ASH's empty --ini,
+    so it runs on its defaults and does not look for a .bandit itself."""
+    argv = _scan_argv(scanner, plugin_context)
+    assert "--configfile" not in argv
+    (ini,) = _value_after(argv, "--ini")
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
 def test_a_directory_named_like_a_config_file_is_not_used(plugin_context):
-    """Discovery requires a file; a directory of the same name is ignored."""
+    """A directory named .bandit in the tree chooses nothing: no --configfile,
+    and the one --ini is ASH's empty file, not the decoy."""
     decoy = plugin_context.source_dir / ".bandit"
     decoy.mkdir()
 
     scanner = BanditScanner(context=plugin_context, config=BanditScannerConfig())
 
-    assert extra_arg_values(scanner, "--ini") == []
+    argv = _scan_argv(scanner, plugin_context)
+    assert decoy.as_posix() not in " ".join(argv)
+    assert "--configfile" not in argv
+    (ini,) = _value_after(argv, "--ini")
+    assert Path(ini).read_text(encoding="utf-8") == "[bandit]\n"
 
 
 # ---------------------------------------------------------------------------
@@ -470,17 +560,6 @@ def test_confidence_level_is_passed_through(plugin_context, confidence):
     assert extra_arg_values(scanner, "--confidence-level") == [confidence]
     # Severity filtering is ASH's job, so bandit is always asked for everything.
     assert extra_arg_values(scanner, "--severity-level") == ["all"]
-
-
-def test_additional_formats_each_add_a_format_flag(plugin_context):
-    scanner = BanditScanner(
-        context=plugin_context,
-        config=BanditScannerConfig(
-            options=BanditScannerConfigOptions(additional_formats=["json", "html"])
-        ),
-    )
-
-    assert extra_arg_values(scanner, "--format") == ["json", "html"]
 
 
 def test_no_additional_formats_adds_no_format_flag(scanner):
@@ -517,10 +596,15 @@ def test_excluded_paths_are_folded_into_the_exclude_token(plugin_context):
     assert len(tokens) == 1
     value = tokens[0][len("--exclude=") :]
     entries = value.split(",")
-    assert str(Path("**").joinpath("vendor", "**")) in entries
+    # Anchored at the source directory, as each scan anchors them at its
+    # target (they were "**/vendor/**" and "<known>/**").
+    anchor = Path(plugin_context.source_dir).as_posix()
+    for entry in bandit_excluded_path_globs(anchor, "vendor"):
+        assert entry in entries
     # The built-in ignore list is still present alongside the user's entry.
     for known in KNOWN_IGNORE_PATHS:
-        assert str(Path(known).joinpath("**")) in entries
+        for entry in bandit_excluded_path_globs(anchor, known):
+            assert entry in entries
 
 
 # ---------------------------------------------------------------------------
@@ -554,46 +638,52 @@ def test_execute_scan_writes_converted_results_to_their_own_directory(scanner):
     assert results_file == Path(scanner.results_dir) / "converted" / "bandit.sarif"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "global_ignore_paths never reach bandit's argv. _execute_scan merges them "
-        "into config.options.excluded_paths for the duration of _resolve_arguments, "
-        "but the --exclude= token is built by _process_config_options, and the base "
-        "_resolve_arguments has its _process_config_options() call commented out. "
-        "The token is therefore assembled once at construction, before any global "
-        "ignores are known, and the merge/restore in _execute_scan has no effect on "
-        "the emitted command. Remove this xfail once resolution rebuilds the token."
-    ),
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bandit's walk does not join paths with '/' on Windows, so the scanner "
+    "adds no ignored-path entries to --exclude there (_ignore_excludes)",
 )
 def test_global_ignore_paths_reach_the_exclude_argument(scanner):
-    """Globally ignored paths should be excluded from the bandit invocation."""
+    """Globally ignored paths are excluded from the bandit invocation.
+
+    Translated to the bandit glob that skips exactly the ignored directory's
+    files (``bandit_exclude_globs``: ``generated/**`` becomes
+    ``<target>/generated/*``), anchored at the target as bandit's walk spells it.
+    """
+    source = scanner.context.source_dir
+    (source / "generated").mkdir()
+    (source / "generated" / "x.py").write_text("x = 1\n", encoding="utf-8")
+    (source / "app.py").write_text("y = 2\n", encoding="utf-8")
+
     final_args, _, _ = scanner._execute_scan(
-        target=scanner.context.source_dir,
+        target=source,
         target_type="source",
         global_ignore_paths=[
-            IgnorePathWithReason(path="generated", reason="build output")
+            IgnorePathWithReason(path="generated/**", reason="build output")
         ],
     )
 
     exclude = [a for a in final_args if a.startswith("--exclude=")]
-    assert exclude, f"no --exclude token in argv: {final_args}"
-    expected = str(Path("**").joinpath("generated", "**"))
-    assert any(expected in token for token in exclude), (
-        f"global ignore path missing from {exclude}"
-    )
+    assert len(exclude) == 1, f"expected one --exclude token in argv: {final_args}"
+    entries = exclude[0][len("--exclude=") :].split(",")
+    assert f"{source.as_posix()}/generated/*" in entries
+    assert not any(entry.endswith("app.py") for entry in entries)
 
 
-def test_global_ignores_are_visible_during_resolution_but_not_in_argv(scanner):
-    """Pin the mechanism behind the xfail above.
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bandit's walk does not join paths with '/' on Windows, so the scanner "
+    "adds no ignored-path entries to --exclude there (_ignore_excludes)",
+)
+def test_the_exclude_argument_is_assembled_at_resolution(scanner):
+    """One --exclude in argv, built for the scan, and the options left alone.
 
-    The merge does happen -- code running inside _resolve_arguments can see the
-    global ignore in config.options.excluded_paths -- but the --exclude= token in
-    argv is the one built at construction time, so the merge changes nothing that
-    bandit will act on. Separating the two halves means a future fix to either
-    one is visible here.
+    It used to be built once at construction, and the scan's global ignore paths
+    were merged into ``excluded_paths`` where nothing read them again.
     """
+    source = scanner.context.source_dir
+    (source / "generated").mkdir()
+    (source / "generated" / "x.py").write_text("x = 1\n", encoding="utf-8")
     seen_during_resolution = {}
     real_resolve = type(scanner)._resolve_arguments
 
@@ -603,31 +693,21 @@ def test_global_ignores_are_visible_during_resolution_but_not_in_argv(scanner):
         ]
         return real_resolve(self, target=target, results_file=results_file)
 
-    original_token_count = len(exclude_tokens(scanner))
-
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(BanditScanner, "_resolve_arguments", _capture)
         final_args, _, _ = scanner._execute_scan(
-            target=scanner.context.source_dir,
+            target=source,
             target_type="source",
             global_ignore_paths=[
-                IgnorePathWithReason(path="generated", reason="build output")
+                IgnorePathWithReason(path="generated/**", reason="build output")
             ],
         )
 
-    assert "generated" in seen_during_resolution["paths"], (
-        "the merge into excluded_paths did not happen at all"
-    )
+    assert seen_during_resolution["paths"] == []
     argv_excludes = [a for a in final_args if a.startswith("--exclude=")]
-    assert len(argv_excludes) == original_token_count == 1, (
-        f"resolution did not rebuild the exclude token; argv has "
-        f"{len(argv_excludes)} and the scanner held {original_token_count}"
-    )
-    assert "generated" not in argv_excludes[0], (
-        "if this now contains the global ignore, resolution started rebuilding "
-        "the token -- drop the xfail on "
-        "test_global_ignore_paths_reach_the_exclude_argument"
-    )
+    assert len(argv_excludes) == 1
+    assert f"{source.as_posix()}/generated/" in argv_excludes[0]
+    assert len(exclude_tokens(scanner)) == 1
 
 
 def test_global_ignore_paths_do_not_accumulate_across_scans(scanner):

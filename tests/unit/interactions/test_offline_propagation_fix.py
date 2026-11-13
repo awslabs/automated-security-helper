@@ -77,9 +77,9 @@ def test_offline_flag_sets_env_var(tmp_path):
             else:
                 os.environ.pop("ASH_OFFLINE", None)
 
-    assert captured_env.get("ASH_OFFLINE") == "YES", (
-        "ASH_OFFLINE was not set to 'YES' when offline=True"
-    )
+    # The one name, not the mapping: a failure would print the whole environment.
+    offline = captured_env.get("ASH_OFFLINE")
+    assert offline == "YES", "ASH_OFFLINE was not set to 'YES' when offline=True"
 
 
 @pytest.mark.unit
@@ -140,6 +140,6 @@ def test_offline_false_does_not_set_env_var(tmp_path):
             else:
                 os.environ.pop("ASH_OFFLINE", None)
 
-    assert captured_env.get("ASH_OFFLINE") is None, (
-        "ASH_OFFLINE should not be set when offline=False"
-    )
+    # The one name, not the mapping: a failure would print the whole environment.
+    offline = captured_env.get("ASH_OFFLINE")
+    assert offline is None, "ASH_OFFLINE should not be set when offline=False"

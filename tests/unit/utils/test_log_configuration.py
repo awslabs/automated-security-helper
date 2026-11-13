@@ -37,28 +37,37 @@ from automated_security_helper.utils.log import (
     configure_windows_safe_logging,
     get_logger,
 )
+from tests.utils.windows_console import windows_logging_kept_in_the_test
 
-CI_INDICATORS = [
-    "CI",
-    "GITHUB_ACTIONS",
-    "AZURE_PIPELINES",
-    "JENKINS_URL",
-    "BUILDKITE",
-    "CIRCLECI",
-    "TRAVIS",
-    "APPVEYOR",
-]
+pytestmark = pytest.mark.unit
+
+# Every variable the product reads as a CI runner (CI beside its marker list), so
+# a fixture that clears them cannot fall behind the list the product reads.
+CI_INDICATORS = ["CI", *log_module._CI_RUNNER_MARKERS]
 
 
 class FakeStream:
-    """A stdout/stderr stand-in with controllable encoding and reconfigure."""
+    """A stdout/stderr stand-in with controllable encoding and reconfigure.
 
-    def __init__(self, encoding="utf-8", reconfigure_error=None, detach_error=None):
+    It is a console a person reads unless ``terminal`` says it is redirected.
+    """
+
+    def __init__(
+        self,
+        encoding="utf-8",
+        reconfigure_error=None,
+        detach_error=None,
+        terminal=True,
+    ):
         if encoding is not _OMITTED:
             self.encoding = encoding
         self._reconfigure_error = reconfigure_error
         self._detach_error = detach_error
+        self._terminal = terminal
         self.written = []
+
+    def isatty(self):
+        return self._terminal
 
     def write(self, text):
         self.written.append(text)
@@ -95,8 +104,12 @@ class EncodinglessStream(FakeStream):
 
 @pytest.fixture
 def on_windows(monkeypatch):
-    """Make the module believe it is running on Windows, with a clean env."""
+    """Make the module believe it is running on Windows, with a clean env.
+
+    The locale is set once a process, so each test starts as if it had not been.
+    """
     monkeypatch.setattr(log_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(log_module, "_locale_step_done", False)
     for name in CI_INDICATORS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
@@ -150,12 +163,36 @@ def closed_logger():
 
 
 def test_re_registering_an_existing_level_is_a_no_op():
-    """TRACE is registered at import time; a second call must not raise."""
+    """TRACE is registered at import time; a second call must not raise, and
+    must not move the name: a name re-pointed to the new number would make every
+    logger get_logger pins to TRACE take that number for the rest of the
+    process."""
     before = logging.TRACE
 
     addLoggingLevel("TRACE", 99)
 
     assert logging.TRACE == before
+    assert logging.getLevelName("TRACE") == before
+    assert logging.getLevelName(99) != "TRACE"
+
+
+def test_a_bare_level_attribute_gets_its_name_registered_at_its_own_number(
+    monkeypatch,
+):
+    """Another library may set ``logging.ZZ_BARE = 42`` without ``addLevelName``;
+    the name is then registered at 42, the attribute's value, not at the number
+    this call asked for."""
+    monkeypatch.setattr(logging, "ZZ_BARE_LEVEL", 42, raising=False)
+    assert not isinstance(logging.getLevelName("ZZ_BARE_LEVEL"), int)
+    try:
+        addLoggingLevel("ZZ_BARE_LEVEL", 7)
+
+        assert logging.getLevelName("ZZ_BARE_LEVEL") == 42
+        assert logging.getLevelName(42) == "ZZ_BARE_LEVEL"
+        assert logging.getLevelName(7) != "ZZ_BARE_LEVEL"
+    finally:
+        logging._levelToName.pop(42, None)
+        logging._nameToLevel.pop("ZZ_BARE_LEVEL", None)
 
 
 def test_an_existing_level_name_is_rejected_even_with_a_free_method_name():
@@ -174,6 +211,8 @@ def test_an_existing_level_name_is_rejected_even_with_a_free_method_name():
     addLoggingLevel("INFO", 3, methodName="zz_unused_method")
 
     assert logging.INFO == 20
+    assert logging.getLevelName("INFO") == 20
+    assert 3 not in logging._levelToName
     assert not hasattr(logging, "zz_unused_method")
 
 
@@ -247,7 +286,23 @@ def test_the_new_module_level_function_logs_to_the_root_logger(registered_level)
     with patch.object(logging, "log") as root_log:
         logging.zz_rootlevel("to root", "extra")
 
-    root_log.assert_called_once_with(9, "to root", "extra")
+    # The wrapper asks for its own frame to be skipped, so the record names the
+    # caller of logging.zz_rootlevel(): one frame on Python 3.11 and later, two
+    # before, on top of the stacklevel of 1 a caller gets by default.
+    stacklevel = 2 if sys.version_info >= (3, 11) else 3
+    root_log.assert_called_once_with(9, "to root", "extra", stacklevel=stacklevel)
+
+
+def test_a_stacklevel_given_to_the_module_level_function_is_added_to(
+    registered_level,
+):
+    registered_level("ZZ_ROOTSTACK", 9)
+
+    with patch.object(logging, "log") as root_log:
+        logging.zz_rootstack("to root", stacklevel=3)
+
+    wrapper_frames = 1 if sys.version_info >= (3, 11) else 2
+    root_log.assert_called_once_with(9, "to root", stacklevel=3 + wrapper_frames)
 
 
 def test_a_custom_method_name_is_honored(registered_level):
@@ -311,6 +366,24 @@ def test_any_ci_indicator_forces_the_encoding_issue_verdict(on_windows, indicato
     on_windows.setenv(indicator, "1")
 
     assert _detect_encoding_issues() is True
+
+
+@pytest.fixture
+def every_runner_name_set(monkeypatch):
+    """The environment of a host that names a CI runner by every variable the
+    product reads. A test takes it before ``on_windows`` in its arguments, so that
+    fixture starts from this environment."""
+    monkeypatch.setenv("CI", "true")
+    for name in log_module._CI_RUNNER_MARKERS:
+        monkeypatch.setenv(name, "1")
+
+
+def test_the_windows_fixture_clears_every_runner_name_the_product_reads(
+    every_runner_name_set, on_windows
+):
+    on_windows.setattr(sys, "stdout", FakeStream(encoding="utf-8"))
+
+    assert _detect_encoding_issues() is False
 
 
 @pytest.mark.parametrize(
@@ -378,15 +451,53 @@ def test_the_filter_rewrites_emoji_when_an_encoding_issue_is_detected(on_windows
     assert record.msg == "[OK] done"
 
 
-def test_the_filter_strips_residual_non_ascii_after_substitution(on_windows):
-    """A character with no mapping is dropped rather than left to raise later."""
+def test_the_filter_escapes_a_character_the_console_cannot_write_and_drops_none(
+    on_windows,
+):
+    """The rule, one for every test of the filter: a character is written as it
+    is where the console's streams both encode it, as its escape (``\\xNN``,
+    ``\\uNNNN``) where they do not, and where nothing is known of the console
+    (``_writes`` None: a CI runner, an unnamed encoding) every character
+    outside ASCII is its escape. Nothing is dropped, since a dropped character
+    could join the text on each side of it into an escape or a command.
+    """
     on_windows.setattr(sys, "stdout", FakeStream(encoding="cp1252"))
+    on_windows.setattr(sys, "stderr", FakeStream(encoding="cp1252"))
     log_filter = WindowsSafeFilter()
     record = logging.LogRecord("n", logging.INFO, "f", 1, "café ☃", None, None)
 
     log_filter.filter(record)
 
-    assert record.msg.encode("ascii") == b"caf "
+    # cp1252 writes the "é", and has no snowman.
+    assert record.msg == "café \\u2603"
+
+
+def test_the_filter_escapes_every_such_character_for_a_redirected_console(
+    on_windows,
+):
+    """Redirected to a file or a pipe, the code page the streams name is the
+    console's, not the reader's, so the ASCII rule applies."""
+    on_windows.setattr(sys, "stdout", FakeStream(encoding="cp1252", terminal=False))
+    on_windows.setattr(sys, "stderr", FakeStream(encoding="cp1252", terminal=False))
+    log_filter = WindowsSafeFilter()
+    record = logging.LogRecord("n", logging.INFO, "f", 1, "café ☃", None, None)
+
+    log_filter.filter(record)
+
+    assert record.msg == "caf\\xe9 \\u2603"
+
+
+def test_the_filter_with_no_console_knowledge_escapes_every_such_character(
+    on_windows,
+):
+    on_windows.setattr(sys, "stdout", FakeStream(encoding="cp1252"))
+    log_filter = WindowsSafeFilter()
+    log_filter._writes = None
+    record = logging.LogRecord("n", logging.INFO, "f", 1, "café ☃", None, None)
+
+    log_filter.filter(record)
+
+    assert record.msg == "caf\\xe9 \\u2603"
 
 
 # ---------------------------------------------------------------------------
@@ -479,8 +590,14 @@ def test_configure_treats_a_stream_without_encoding_as_needing_repair(on_windows
     setlocale.assert_called_once()
 
 
-def test_configure_falls_back_to_a_codec_writer_when_reconfigure_fails(on_windows):
-    """reconfigure raising OSError must fall through to wrapping the raw buffer."""
+def test_configure_falls_back_to_a_utf8_writer_when_reconfigure_fails(on_windows):
+    """reconfigure raising OSError must fall through to wrapping the raw buffer
+    in a UTF-8 text layer, one with a ``buffer``, which the checked stderr wrap
+    hands out (log._utf8_writer_in_place_of). It writes through, so a byte write
+    below it cannot overtake held text, and replaces what it cannot encode,
+    rather than raise on the console it was put in place to fix."""
+    import io
+
     on_windows.setattr(
         sys, "stdout", FakeStream(encoding="cp1252", reconfigure_error=OSError("nope"))
     )
@@ -491,10 +608,11 @@ def test_configure_falls_back_to_a_codec_writer_when_reconfigure_fails(on_window
     with patch("locale.setlocale"):
         configure_windows_safe_logging()
 
-    import codecs
-
-    assert isinstance(sys.stdout, codecs.StreamWriter)
-    assert isinstance(sys.stderr, codecs.StreamWriter)
+    for stream in (sys.stdout, sys.stderr):
+        assert isinstance(stream, io.TextIOWrapper)
+        assert stream.encoding == "utf-8"
+        assert stream.write_through is True
+        assert stream.errors == "replace"
 
 
 def test_configure_gives_up_quietly_when_the_buffer_cannot_be_detached(on_windows):
@@ -640,23 +758,35 @@ def test_get_logger_installs_exactly_one_windows_safe_filter(closed_logger):
     assert sum(isinstance(f, WindowsSafeFilter) for f in logger.filters) == 1
 
 
-def test_get_logger_selects_the_windows_color_system_on_windows(
+def test_get_logger_lets_rich_detect_the_color_system_on_windows(
     closed_logger, monkeypatch
 ):
+    """On Windows the console is built to detect its color system, not told one.
+
+    A color system named outright ("windows") is bound whatever file the console
+    writes to, so a child ash whose output a test captured wrote escapes around
+    every level name and highlighted number, on Windows alone. With "auto" Rich
+    reads the file: a console keeps its color, a pipe gets plain text. The
+    legacy_windows setting is what tells Rich which escapes an old Windows
+    console takes, so that half of the Windows branch stays.
+    """
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setattr(log_module.platform, "system", lambda: "Windows")
+    # A CI runner sets a CI variable, which takes configure_windows_safe_logging's
+    # Windows branch here: the module docstring's second hazard.
+    windows_logging_kept_in_the_test(monkeypatch)
 
     get_logger(name=closed_logger("win_color"), show_progress=False, use_color=True)
 
     kwargs = console_cls.call_args.kwargs
-    assert kwargs["color_system"] == "windows"
+    assert kwargs["color_system"] == "auto"
     assert kwargs["legacy_windows"] is True
 
 
 def test_get_logger_selects_the_auto_color_system_elsewhere(closed_logger, monkeypatch):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setattr(log_module.platform, "system", lambda: "Linux")
 
     get_logger(name=closed_logger("nix_color"), show_progress=False, use_color=True)
@@ -668,7 +798,7 @@ def test_get_logger_disables_the_color_system_when_color_is_off(
     closed_logger, monkeypatch
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
 
     get_logger(name=closed_logger("no_color"), show_progress=False, use_color=False)
 
@@ -679,7 +809,7 @@ def test_get_logger_constrains_the_console_width_inside_a_container(
     closed_logger, monkeypatch
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setenv("ASH_IN_CONTAINER", "YES")
 
     get_logger(name=closed_logger("container"), show_progress=False)
@@ -691,7 +821,7 @@ def test_get_logger_leaves_the_console_width_unset_outside_a_container(
     closed_logger, monkeypatch
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.delenv("ASH_IN_CONTAINER", raising=False)
 
     get_logger(name=closed_logger("no_container"), show_progress=False)
@@ -706,7 +836,7 @@ def test_get_logger_routes_the_console_to_stderr_on_request(
     closed_logger, monkeypatch, env_value, expected
 ):
     console_cls = create_autospec(Console)
-    monkeypatch.setattr(log_module, "Console", console_cls)
+    monkeypatch.setattr(log_module, "ash_console", console_cls)
     monkeypatch.setenv("ASH_LOG_TO_STDERR", env_value)
 
     get_logger(name=closed_logger(f"stderr_{env_value}"), show_progress=False)

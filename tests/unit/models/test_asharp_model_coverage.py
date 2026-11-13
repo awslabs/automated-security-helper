@@ -2,12 +2,16 @@
 
 import json
 
+import pytest
+
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerStatusInfo,
     ConverterStatusInfo,
 )
 from automated_security_helper.core.enums import ScannerStatus
+
+pytestmark = pytest.mark.unit
 
 AshAggregatedResults.model_rebuild()
 

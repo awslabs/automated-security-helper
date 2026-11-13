@@ -9,15 +9,20 @@ literal expectation rather than derived from the implementation, so that a
 change in the ladder's internals cannot quietly move the gate.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
+    resolve_scanner_threshold,
     sarif_level_fails_threshold,
     severity_fails_threshold,
     stricter_of,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +181,109 @@ class TestSeverityFailsThreshold:
         assert severity_fails_threshold("SEVERE", None) is False
 
 
+class TestOffTableThresholdIsSaidOnce:
+    """An off-table threshold gates like CRITICAL, and the ladder says so once.
+
+    The ladder used to gate such a value silently, so a plugin's ``"low"`` or a
+    typo loosened the gate to critical-only with nothing in the log. The gate
+    itself is unchanged (the pins above); the warning is the addition, one per
+    value per process because the gate runs once per finding.
+    """
+
+    @pytest.fixture
+    def ash_log(self, monkeypatch, caplog):
+        import logging
+
+        from automated_security_helper.utils import severity_ladder
+
+        logger = logging.getLogger("test-severity-ladder")
+        logger.propagate = True
+        monkeypatch.setattr(severity_ladder, "_ash_logger", lambda: logger)
+        monkeypatch.setattr(severity_ladder, "_WARNED_OFF_TABLE", set())
+        caplog.set_level(logging.WARNING, logger=logger.name)
+        return caplog
+
+    def test_the_module_holds_no_logger_at_import(self):
+        """The "ash" logger is looked up when the warning is logged, never at
+        import. core.constants imports this module before utils.log sets ASHLogger
+        as the logger class, so a module-level getLogger("ash") made the CLI's
+        "ash" logger a plain logging.Logger for the whole process (the
+        test_log_class pin went red on every shard)."""
+        import logging
+
+        from automated_security_helper.utils import severity_ladder
+
+        module_loggers = [
+            name
+            for name, value in vars(severity_ladder).items()
+            if isinstance(value, logging.Logger)
+        ]
+        assert module_loggers == []
+        assert severity_ladder._ash_logger().name == "ash"
+
+    def test_an_off_table_threshold_is_warned_about_and_gates_like_critical(
+        self, ash_log
+    ):
+        assert severity_fails_threshold("HIGH", "BOGUS") is False
+        assert severity_fails_threshold("CRITICAL", "BOGUS") is True
+
+        warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+        assert warnings == [
+            (
+                "Severity threshold 'BOGUS' is not one of ALL, LOW, MEDIUM, HIGH, "
+                "CRITICAL (case-sensitive); it gates like CRITICAL, so only critical "
+                "findings fail against it"
+            )
+        ]
+
+    def test_a_lower_case_threshold_is_warned_about_once_per_value(self, ash_log):
+        for _ in range(3):
+            assert severity_fails_threshold("LOW", "low") is False
+        assert sarif_level_fails_threshold("note", "low") is False
+        assert severity_fails_threshold("MEDIUM", "medium") is False
+
+        values = [
+            r.getMessage().split("'")[1]
+            for r in ash_log.records
+            if r.levelname == "WARNING"
+        ]
+        assert values == ["low", "medium"]
+
+    def test_a_value_that_is_not_a_ladder_shaped_word_is_described_not_quoted(
+        self, ash_log
+    ):
+        """The value is whatever an external plugin passed through; a threshold
+        pointed at an environment variable would have put that variable's value
+        in ash.log. A ladder-shaped word (a typo, a case slip) is quoted in full;
+        anything else is described by its length and never printed."""
+        secret_shaped = "p@ss word/with:junk=" + "x" * 40  # pragma: allowlist secret
+        assert severity_fails_threshold("CRITICAL", secret_shaped) is True
+
+        warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert secret_shaped not in warnings[0]
+        assert "x" * 40 not in warnings[0]
+        assert warnings[0].startswith(
+            f"Severity threshold a {len(secret_shaped)}-character value "
+            "(not shown: not a ladder-shaped word) is not one of ALL, LOW, MEDIUM, "
+            "HIGH, CRITICAL (case-sensitive)"
+        )
+
+    @pytest.mark.parametrize("value", ["Hi-gh", "medium.1", "x" * 32])
+    def test_a_ladder_shaped_word_is_still_quoted(self, ash_log, value):
+        assert severity_fails_threshold("CRITICAL", value) is True
+        warnings = [r.getMessage() for r in ash_log.records if r.levelname == "WARNING"]
+        assert warnings[0].startswith(f"Severity threshold {value!r} is not one of ")
+
+    def test_a_ladder_value_and_no_threshold_log_nothing(self, ash_log):
+        for threshold in SEVERITY_THRESHOLDS:
+            severity_fails_threshold("HIGH", threshold)
+        severity_fails_threshold("HIGH", None)
+        severity_fails_threshold("HIGH", "")
+
+        assert [r for r in ash_log.records if r.levelname == "WARNING"] == []
+
+
 # ---------------------------------------------------------------------------
 # Tests: sarif_level_fails_threshold
 #
@@ -221,14 +329,24 @@ class TestSarifLevelFailsThreshold:
         for level in ALL_SARIF_LEVELS:
             assert sarif_level_fails_threshold(level, empty) is False
 
-    def test_missing_level_is_treated_as_note(self):
-        """Matches run_ash_scan, which reads a missing level as 'note'."""
-        assert sarif_level_fails_threshold(None, "LOW") is True
-        assert sarif_level_fails_threshold(None, "MEDIUM") is False
+    def test_missing_level_is_treated_as_the_missing_level(self):
+        """MISSING_SARIF_LEVEL, "warning" (MEDIUM), as every grader reads it.
 
-    def test_unrecognised_level_is_treated_as_note(self):
-        assert sarif_level_fails_threshold("wibble", "LOW") is True
-        assert sarif_level_fails_threshold("wibble", "MEDIUM") is False
+        It was "note" here (LOW) while the results model defaulted to "error"
+        (CRITICAL), so one result had two grades.
+        """
+        assert sarif_level_fails_threshold(None, "MEDIUM") is True
+        assert sarif_level_fails_threshold(None, "HIGH") is False
+
+    def test_unrecognised_level_is_treated_as_the_missing_level(self):
+        assert sarif_level_fails_threshold("wibble", "MEDIUM") is True
+        assert sarif_level_fails_threshold("wibble", "HIGH") is False
+
+    def test_the_missing_level_is_sarifs_default(self):
+        """SARIF 2.1.0 3.27.10: with no level from the rule, "SET level to "warning"."""
+        from automated_security_helper.utils.severity_ladder import MISSING_SARIF_LEVEL
+
+        assert MISSING_SARIF_LEVEL == "warning"
 
     def test_accepts_a_sarif_level_enum(self):
         """The reporter reads result.level, which is a str-backed enum."""
@@ -267,3 +385,110 @@ class TestTheTwoViewsAgree:
         """The one documented divergence: a HIGH finding under a CRITICAL gate."""
         assert sarif_level_fails_threshold("error", "CRITICAL") is True
         assert severity_fails_threshold("HIGH", "CRITICAL") is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: the threshold a scanner is graded against always is one
+# ---------------------------------------------------------------------------
+
+
+class TestResolveScannerThreshold:
+    """A threshold of None turns the gate off, so the resolver never returns one."""
+
+    def test_a_scanner_threshold_wins(self):
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold("HIGH", config) == ("HIGH", "config")
+
+    @pytest.mark.parametrize("value", ["${ASH_X}", "bogus"])
+    def test_a_scanner_threshold_off_the_ladder_comes_back_as_given(self, value):
+        """The summary row pairs a scanner's own threshold, as written, with the
+        source answered here (ScannerStatisticsCalculator._threshold_resolution
+        guards the pairing); a value off the ladder is returned, never replaced."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(value, config) == (value, "config")
+
+    @pytest.mark.parametrize("value", ["high", " High ", "HIGH"])
+    def test_a_scanner_threshold_on_the_ladder_is_normalized(self, value):
+        """An external plugin's section is free text: ``"high"`` graded as an
+        unrecognised value, which fails CRITICAL only, not as HIGH."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(value, config) == ("HIGH", "config")
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_a_blank_scanner_threshold_falls_through_to_the_global_one(self, value):
+        """An empty threshold turns the gate off; a blank value in a scanner's
+        section is an unset one, not a request for no gate."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(value, config) == ("LOW", "global")
+
+    def test_the_global_threshold_is_the_fallback(self):
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="LOW")
+        )
+
+        assert resolve_scanner_threshold(None, config) == ("LOW", "global")
+
+    @pytest.mark.parametrize("configured", [None, 3], ids=["none", "not-a-string"])
+    def test_a_global_threshold_that_is_not_one_reads_as_no_config(self, configured):
+        """A validated config cannot hold either; a config built without validation
+        can, and None would have graded the scanner with no gate at all."""
+        from automated_security_helper.core.constants import (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+        )
+
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold=configured)
+        )
+
+        assert resolve_scanner_threshold(None, config) == (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+            "global",
+        )
+
+    @pytest.mark.parametrize("configured", ["", "   "], ids=["empty", "blank"])
+    def test_a_blank_global_threshold_falls_to_the_default(self, configured):
+        """``""`` returned as the global threshold turned every scanner's gate off:
+        the resolver's own promise is that it never returns such a value."""
+        from automated_security_helper.core.constants import (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+        )
+
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold=configured)
+        )
+
+        assert resolve_scanner_threshold(None, config) == (
+            ASH_DEFAULT_SEVERITY_LEVEL,
+            "global",
+        )
+
+    @pytest.mark.parametrize("configured", ["low", " Low ", "LOW"])
+    def test_a_global_threshold_on_the_ladder_is_normalized(self, configured):
+        """The global value is normalized as the scanner's own is: ``"low"`` graded
+        as an unrecognised value, which fails CRITICAL only, not as LOW."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold=configured)
+        )
+
+        assert resolve_scanner_threshold(None, config) == ("LOW", "global")
+
+    def test_a_global_threshold_off_the_ladder_comes_back_as_given(self):
+        """Pinned beside the scanner-side rule: an unrecognised global value is
+        shown as written and graded at its unrecognised rank, never replaced."""
+        config = SimpleNamespace(
+            global_settings=SimpleNamespace(severity_threshold="bogus")
+        )
+
+        assert resolve_scanner_threshold(None, config) == ("bogus", "global")

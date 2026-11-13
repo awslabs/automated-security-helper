@@ -23,6 +23,7 @@ Negative control: putting back ``default_factory=is_offline_mode`` and reading
 case fail.
 """
 
+from pathlib import Path
 from typing import Callable, NamedTuple
 
 import pytest
@@ -53,6 +54,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfig,
     SyftScannerConfigOptions,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScanner,
+    TrivyScannerConfig,
+    TrivyScannerConfigOptions,
+)
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
@@ -60,8 +66,19 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 def _arg_keys(scanner) -> list:
     return [a.key for a in scanner.args.extra_args]
+
+
+def _checkov_scan_argv_offline(scanner) -> bool:
+    # checkov decides --skip-download per scan, in _execute_scan (the offline
+    # mode is read at the moment it is asked), so the probe reads the scan's
+    # resolved argv rather than the construction-time extra_args.
+    argv, _, _ = scanner._execute_scan(Path(scanner.context.source_dir), "source", [])
+    return "--skip-download" in argv
 
 
 def _grep_cache_verdict(env_var: str) -> Callable:
@@ -88,7 +105,7 @@ CASES = {
         CheckovScannerConfig,
         CheckovScannerConfigOptions,
         "checkov",
-        lambda s: "--skip-download" in _arg_keys(s),
+        _checkov_scan_argv_offline,
     ),
     "grype": Case(
         GrypeScanner,
@@ -121,6 +138,16 @@ CASES = {
         "syft",
         lambda s: s.extra_env.get("SYFT_CHECK_FOR_APP_UPDATE") == "false",
     ),
+    # trivy shares trivy-repo's argument building (TrivyScannerBase).
+    "trivy": Case(
+        TrivyScanner,
+        TrivyScannerConfig,
+        TrivyScannerConfigOptions,
+        "",  # community plugin: not a declared ScannerConfigSegment field
+        lambda s: (
+            "--offline-scan" in _arg_keys(s) and "--skip-db-update" in _arg_keys(s)
+        ),
+    ),
     "trivy-repo": Case(
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
@@ -133,7 +160,8 @@ CASES = {
 }
 
 params = pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
-# trivy-repo is a community plugin, so ScannerConfigSegment has no field for it.
+# trivy and trivy-repo are community plugins, so ScannerConfigSegment has no field
+# for them.
 SEGMENT_CASES = {k: c for k, c in CASES.items() if c.segment_field}
 segment_params = pytest.mark.parametrize(
     "case", list(SEGMENT_CASES.values()), ids=list(SEGMENT_CASES)
@@ -245,7 +273,10 @@ def test_semgrep_offline_rules_reach_the_subprocess(
 
     scanner = SemgrepScanner(context=test_plugin_context, config=config)
 
-    assert scanner.extra_subprocess_env() == {"SEMGREP_RULES": f"{cache}/*"}
+    assert scanner.extra_subprocess_env() == {
+        "SEMGREP_ENABLE_VERSION_CHECK": "0",
+        "SEMGREP_RULES": f"{cache}/*",
+    }
 
 
 @pytest.mark.parametrize(
@@ -254,15 +285,18 @@ def test_semgrep_offline_rules_reach_the_subprocess(
 def test_offline_rule_cache_is_held_to_its_staleness_bound(
     case, online, test_plugin_context
 ):
-    """Offline, the rule cache is a content database the staleness gate must check."""
+    """Offline with no cache configured, no rule cache is in use.
+
+    The grep family answers a content database only once a scan command
+    actually read a cache (``_grep_scanner_base``: ``_cache_dir_in_use`` is
+    written by the scan); the ``online`` fixture deletes the cache variables,
+    so a construction here can never have one to report."""
     config = case.config_cls()
     _go_offline(online)
 
     scanner = case.scanner_cls(context=test_plugin_context, config=config)
 
-    assert [db.scanner for db in scanner.content_databases_in_use()] == [
-        case.segment_field
-    ]
+    assert scanner.content_databases_in_use() == []
 
 
 @pytest.mark.parametrize(
@@ -305,8 +339,15 @@ def test_grype_online_db_bound_is_set_online(online, test_plugin_context):
 
 
 def _scanner_options_with_offline() -> set:
-    """Every scanner options class shipped in plugin_modules that has an ``offline`` field."""
+    """Every scanner options class shipped in plugin_modules that declares ``offline``.
+
+    Declares it itself: ``ScannerOptionsBase`` also declares it, because
+    ``_scanner_offline`` reads it for every scanner, so every class has the field.
+    A scanner that declares its own is one whose tool can go online, and that is
+    what needs a case below.
+    """
     import importlib
+    import inspect
     import pkgutil
 
     import automated_security_helper.plugin_modules as plugin_modules
@@ -322,7 +363,7 @@ def _scanner_options_with_offline() -> set:
         cls = stack.pop()
         stack.extend(cls.__subclasses__())
         if cls.__module__.startswith(plugin_modules.__name__) and (
-            "offline" in cls.model_fields
+            "offline" in inspect.get_annotations(cls)
         ):
             found.add(cls)
     return found
@@ -349,7 +390,9 @@ def test_offline_option_default_is_a_plain_false():
     longer changes behavior; it would make config dumps and the generated schema
     depend on the environment they were produced in.
     """
-    for options_cls in _scanner_options_with_offline():
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    for options_cls in _scanner_options_with_offline() | {ScannerOptionsBase}:
         field = options_cls.model_fields["offline"]
         assert field.default_factory is None, options_cls.__qualname__
         assert field.default is False, options_cls.__qualname__

@@ -54,4 +54,4 @@ DEPENDENCIES
   cfn-nag (= 0.8.10)
 
 BUNDLED WITH
-   2.4.22
+   2.6.9

@@ -29,6 +29,8 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.enums import PackageManager
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def plugin_context(tmp_path):
@@ -107,6 +109,15 @@ class TestPep440Requirement:
 
 class TestGetInstallationCommandsRendersRanges:
     """The renderer is the thing an installer actually calls."""
+
+    @pytest.fixture(autouse=True)
+    def _environment_with_pip(self, monkeypatch):
+        # pip dependencies install with pip only where the running environment has
+        # pip; tests/unit/utils/test_python_package_installs.py covers the uv form.
+        from automated_security_helper.utils import python_installer
+
+        monkeypatch.setattr(python_installer, "pip_is_importable", lambda: True)
+        monkeypatch.setattr(python_installer, "is_uv_tool_environment", lambda: False)
 
     def test_pip_dependency_carries_the_range(self, plugin_context):
         plugin = _plugin_with_dependency(

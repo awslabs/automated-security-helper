@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.suppression_matcher import (
@@ -12,6 +14,8 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
     check_for_expiring_suppressions,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_rule_id_matches_with_none():
@@ -71,7 +75,7 @@ def test_should_suppress_finding_with_invalid_expiration():
         mock_suppression = MagicMock()
         mock_suppression.rule_id = "TEST-001"
         mock_suppression.file_path = "src/file.py"
-        mock_suppression.expiration = "invalid-date"
+        mock_suppression.expires = "invalid-date"
         mock_suppression.line_start = None
         mock_suppression.line_end = None
 
@@ -92,7 +96,7 @@ def test_check_for_expiring_suppressions_with_invalid_date():
         mock_instance = MagicMock()
         mock_instance.rule_id = "TEST-001"
         mock_instance.file_path = "src/file.py"
-        mock_instance.expiration = "invalid-date"
+        mock_instance.expires = "invalid-date"
 
         # Mock the logger
         with patch(

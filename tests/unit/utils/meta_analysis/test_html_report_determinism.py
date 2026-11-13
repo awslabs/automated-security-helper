@@ -19,6 +19,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from tests.utils.helpers import importing_this_checkout
+
+pytestmark = pytest.mark.integration
+
 RENDER = """
 import sys
 import typer
@@ -58,10 +64,20 @@ def _fixture(root: Path) -> Path:
 def _render(sarif_dir: Path, out_dir: Path, seed: str) -> str:
     env = {**os.environ, "PYTHONHASHSEED": seed, "COLUMNS": "200"}
     proc = subprocess.run(  # nosec B603 - fixed argv, test-only
-        [sys.executable, "-c", RENDER, str(sarif_dir), str(out_dir)],
+        [
+            sys.executable,
+            "-c",
+            importing_this_checkout(RENDER),
+            str(sarif_dir),
+            str(out_dir),
+        ],
         env=env,
         capture_output=True,
-        text=True,
+        # The child draws a rich spinner whose braille frames are UTF-8 (one of
+        # them encodes to a 0x90 byte), and the parent's locale encoding on
+        # Windows is cp1252, which has no character for 0x90.
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
         check=False,
     )

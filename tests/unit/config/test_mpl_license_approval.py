@@ -39,6 +39,9 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
+# In-process: the unit tier.
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIG = REPO_ROOT / ".ash" / ".ash_community_plugins.yaml"
 INSPECTOR_LOCK = "scripts/e2e/inspector/package-lock.json"

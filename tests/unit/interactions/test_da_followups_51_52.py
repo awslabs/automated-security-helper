@@ -18,6 +18,10 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -113,6 +117,7 @@ class TestContainerModeConfigFailOnFindings:
 
         dummy_results = MagicMock(spec=AshAggregatedResults)
         dummy_results.sarif = None
+        dummy_results.additional_reports = {}
 
         captured: dict = {}
 

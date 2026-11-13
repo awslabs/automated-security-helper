@@ -9,7 +9,346 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-11-04) ===
+    # === GuardDog false positive in this repository's own tests (line-pinned) ===
+    # GuardDog's heuristics read source text, so test code that writes a fake
+    # credentials file matches them. Pinned to the one line GuardDog reports, so a
+    # real finding elsewhere in the file is still reported. The test writes creds.env
+    # twice, at lines 738 and 954; GuardDog 3.2.0 drops a match whose code snippet
+    # is the same as one it already reported, so it reports 738 only.
+    - rule_id: "threat-filesystem-read"
+      path: "tests/integration/scanners/test_trivy_real_binary.py"
+      line_start: 738
+      line_end: 738
+      reason: >-
+        False positive. The line writes a creds.env holding a fake AWS key id and
+        secret, generated per run with secrets.choice, into the test's temporary
+        fixture tree so trivy's secret scanner has something to find. Nothing reads
+        a real credentials file.
+    # === Product code: pinned to the lines the rules report ===
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/utils/redacted_model.py
+      line_start: 298
+      line_end: 299
+      reason: >-
+        False positive. These lines map two pydantic type names to the JSON type each
+        one is shown as. No value is held.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/utils/scanner_tool_types.py
+      line_start: 34
+      line_end: 34
+      reason: >-
+        False positive. The constant names the secrets tool category; it is a label,
+        not a credential.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/utils/scanner_names.py
+      line_start: 133
+      line_end: 133
+      reason: >-
+        False positive. The table entry maps the detect-secrets scanner to the secrets
+        tool category.
+    # === Test code and its support files: one entry per rule and file ===
+    # The tests build made-up credentials, fixed temporary paths, wildcard addresses and
+    # shell calls on purpose, to check that ASH hides, refuses or confines them. Each
+    # entry below names one rule and one file, never a directory: the policy in
+    # tests/unit/config/test_no_directory_glob_secret_suppressions.py is that a new file
+    # which trips a rule is reported, not excused by an entry written for another file.
+    # The reasons describe the pattern instead of quoting a line, because a quoted line
+    # would make this file trip the same rules. Sorted by rule, then path.
+    - rule_id: B102
+      path: tests/unit/characterization/test_harness_confinement.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B102
+      path: tests/unit/cli/test_scan_messages_tell_the_truth.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B103
+      path: tests/unit/cli/mcp/test_source_delivery_deletes_read_only_scratch.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/cli/mcp/test_source_delivery_scratch_that_resists_deletion.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/config/test_a_checkout_boundary_needs_a_git_shaped_marker.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/config/test_add_suppression.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/config/test_an_undecided_walk_names_the_walk_in_the_warning.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_scanners_name_a_file_that_is_not_utf8.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
+      path: tests/unit/utils/test_scan_source.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B108
+      path: tests/unit/characterization/_harness.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/cli/test_mcp_errors_show_controls.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/interactions/test_container_image_revision.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/models/test_flat_vulnerability_ids_are_per_location.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/test_failure_reports_redact_environment_values.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B202
+      path: tests/unit/cli/test_genai_guide_ships_with_install.py
+      reason: "Test code. extractall on an archive the test built, into the test's temporary directory."
+    - rule_id: B301
+      path: tests/unit/utils/test_env_resolved_scalar_survives_copying.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/test_shown_text_is_shown_once.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B307
+      path: tests/unit/cli/mcp/test_shipped_mcp_guidance_matches_the_server.py
+      reason: "Test code. eval of the shipped guide's own example code, to check that it runs."
+    - rule_id: B310
+      path: tests/unit/characterization/test_harness_confinement.py
+      reason: "Test code. urlopen of the test's own loopback address, to check a refusal."
+    - rule_id: B324
+      path: tests/unit/characterization/_detect_secrets_double.py
+      reason: "Test code. sha1 is the hash the detect-secrets baseline format uses; the double writes it into a baseline the test reads back."
+    - rule_id: B506
+      path: tests/unit/config/test_a_patched_value_is_recorded_where_later_operations_move_it.py
+      reason: "Test code. yaml.load with a loader the test defines, on a file the test wrote."
+    - rule_id: B604
+      path: tests/conftest.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/characterization/_harness.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/plugin_modules/ash_builtin/test_bandit_excludes.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/test_conftest_helpers.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/utils/test_the_server_scoped_run_resolves_its_program_like_every_other_spawn.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/utils/home_rule.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/utils/tool_guard.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B608
+      path: tests/unit/deploy/test_agentcore_stateless_fallback_tripwire.py
+      reason: "Test code. A failure message that reads like SQL. No query is built."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/cli/test_dependencies_verdict.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/config/test_a_patched_section_spelling_lands_on_the_section.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/config/test_a_patched_value_is_recorded_where_later_operations_move_it.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/config/test_a_value_read_from_the_environment_is_hidden_inside_a_word.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/core/phases/test_unevaluated_targets_refuse_passed.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_cdk_nag_failure_lines_carry_no_environment_value.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/test_reusable_workflow_defaults.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_ignore_path_expiration.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_pre_installed_tool.py
+      reason: "False positive. An encoded sample or made-up value that the test feeds to the code under test to check it is hidden or refused. None is a credential."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/interactions/test_a_leftover_is_removed_only_through_its_own_runtime.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/cli/mcp/conftest.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/config/test_settle_trace_recordings.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/interactions/test_run_ash_container_helpers_coverage.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/plugin_modules/ash_builtin/test_cfn_nag_public_policy_rules.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_hatch_build_records_commit.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_reusable_workflow_changed_files_only.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_reusable_workflow_defaults.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_a_scan_set_is_reused_only_for_its_own_tree.py
+      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/snapshot/container/test_snapshot_container_exit_codes.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/snapshot/container/test_snapshot_container_nix.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/characterization/test_harness_confinement.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/inspect/test_each_value_is_shown_once.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_a_refused_auth_value_builds_nothing_on_the_shared_server.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_a_scan_runner_failure_shows_no_value_the_config_read.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_a_scan_that_cannot_start_does_not_hold_its_directory.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_a_workspace_failure_redacts_with_the_runs_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_an_auth_header_value_outside_latin_1_is_refused.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_get_config.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_get_config_refuses_plugin_modules_a_scan_refuses.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_mcp_scan_redaction_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_workspace_crash_surfaces_redact_env_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/test_merge_shard_errors_hide_the_file.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/test_report_refuses_invalid_plugin_options.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/config/test_config_messages_hide_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/config/test_results_errors_hide_the_file.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/resource_management/test_a_scan_entry_redacts_with_its_registered_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/interactions/test_a_leftover_is_removed_only_through_its_own_runtime.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/interactions/test_a_source_dir_that_is_not_utf8_is_refused.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/interactions/test_an_output_dir_that_is_not_utf8_works.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/interactions/test_workspace_config_warning_is_shown.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_aws_plugins/test_a_reporters_client_adds_no_retries_of_its_own.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_aws_plugins/test_security_hub_batch_import.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugins/test_a_debug_traceback_hides_env_read_module_paths.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugins/test_a_failed_imports_log_line_redacts_env_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugins/test_an_environment_value_equal_to_a_derived_module_form_keeps_whole_value_redaction.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugins/test_the_registry_and_decorators_name_a_masked_module_by_its_mask.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/reporters/test_reporter_plugin_doc_samples_run.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/test_homebrew_macos_ci_job.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_a_refused_stop_never_prints_an_environment_value.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/workspace/test_a_workspace_path_that_is_not_utf8_is_refused.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/utils/tool_guard.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: generic-api-key
+      path: tests/snapshot/container/test_snapshot_container_exit_codes.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/snapshot/container/test_snapshot_container_nix.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/inspect/test_each_value_is_shown_once.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/conftest.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/test_a_scan_copys_name_is_computed_once_per_scan.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/test_tool_errors_describe_a_wrapped_validation_error.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/mcp/test_validation_errors_leave_out_the_input.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/test_merge_shard_errors_hide_the_file.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/cli/test_report_refuses_invalid_plugin_options.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/config/test_config_messages_hide_values.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/config/test_results_errors_hide_the_file.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/interactions/test_workspace_config_warning_is_shown.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/models/test_report_id_unique_per_scan.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_a_debug_traceback_hides_env_read_module_paths.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_a_failed_imports_log_line_redacts_env_values.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_an_environment_value_equal_to_a_derived_module_form_keeps_whole_value_redaction.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
+      path: tests/unit/plugins/test_the_registry_and_decorators_name_a_masked_module_by_its_mask.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    # === Time-boxed: braces GHSA-vfj7-8cjw-p6xm, no patched version (expires 2026-11-27) ===
     # braces <= 3.0.3 is affected and no fixed release exists, so neither an upgrade
     # nor an npm `overrides` pin can remove it. deploy/cdk-constructs reaches it only
     # through build tooling: micromatch, pulled in by fast-glob and
@@ -29,27 +368,351 @@ global_settings:
       package_name: "braces"
       package_version: "3.0.3"
       package_path: "deploy/cdk-constructs/node_modules/braces"
-      expiration: "2026-11-04"
+      expires: "2026-11-27"
       reason: >-
         GHSA-vfj7-8cjw-p6xm: braces 3.0.3 in deploy/cdk-constructs/package-lock.json. No patched
         version exists. Reachable only through dev/build tooling (micromatch via
         fast-glob and jsii-rosetta) and not shipped in the wheel or container image. Revisit when a fix
-        ships; see the block comment above.
+        ships; see the block comment above; expiry renewed 2026-11-04, still no patched version.
+    # === Time-boxed: deepmerge GHSA-gcqx-w48m-w2h4, no patched version (expires 2026-11-27) ===
+    # deepmerge 4.2.0 through 4.3.1 is affected (mergeObject() prototype poisoning of
+    # the returned object) and no fixed release exists: the advisory, published
+    # 2026-09-18 and updated 2026-10-27, lists no patched version, and the only fix npm
+    # offers is a major downgrade of jest to 25.1.0, which is refused. Both lockfiles,
+    # deploy/cdk and deploy/cdk-constructs, reach deepmerge 4.3.1 through jest-config
+    # as a dev dependency ("dev": true); none of it ships in the wheel or the
+    # container image. One entry per lockfile, because package_path pins one install
+    # path. Revisit when a fixed deepmerge ships; the transitive
+    # `npm-audit-transitive-<package>` findings are covered by these root entries, as
+    # the braces block above explains.
+    - rule_id: "GHSA-gcqx-w48m-w2h4"
+      path: "node_modules/deepmerge/package.json"
+      package_name: "deepmerge"
+      package_version: "4.3.1"
+      package_path: "deploy/cdk/node_modules/deepmerge"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk/package-lock.json. No patched
+        version exists (advisory published 2026-09-18, updated 2026-10-27). Dev dependency
+        only, reached through jest-config, not shipped in the wheel or the container image.
+        npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit when a fix ships;
+        see the block comment above.
+    - rule_id: "GHSA-gcqx-w48m-w2h4"
+      path: "node_modules/deepmerge/package.json"
+      package_name: "deepmerge"
+      package_version: "4.3.1"
+      package_path: "deploy/cdk-constructs/node_modules/deepmerge"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-gcqx-w48m-w2h4: deepmerge 4.3.1 in deploy/cdk-constructs/package-lock.json. No
+        patched version exists (advisory published 2026-09-18, updated 2026-10-27). Dev
+        dependency only, reached through jest-config, not shipped in the wheel or the
+        container image. npm's only fix is a jest 25.1.0 major downgrade, refused. Revisit
+        when a fix ships; see the block comment above.
+    # === Time-boxed: minimatch GHSA-g3hv-75wg-m249 bundled inside aws-cdk-lib (expires 2026-11-27) ===
+    # minimatch below 11.0.1 is affected (globparts amplification denial of service).
+    # The copies our lockfiles resolve are overridden to 11.x in deploy/cdk and
+    # deploy/cdk-constructs, so the only affected copy left is the one BUNDLED inside
+    # aws-cdk-lib (`inBundle` lockfile entries). npm `overrides` cannot replace a
+    # bundled dependency, and every aws-cdk-lib release through 2.275.0 (the latest at
+    # 2026-11-03) bundles minimatch ^10. It is deploy tooling only: none of it ships in
+    # the wheel or the container image. One npm-audit entry per lockfile; grype and
+    # trivy each report the same bundled copy against deploy/cdk/package-lock.json
+    # under their own id spellings, one entry per spelling. The transitive findings are
+    # covered by these root entries, as the braces block above explains. Revisit when
+    # an aws-cdk-lib release bundles minimatch 11.0.1 or later.
+    - rule_id: "GHSA-g3hv-75wg-m249"
+      path: "node_modules/aws-cdk-lib/minimatch/package.json"
+      package_name: "minimatch"
+      package_version: "10.2.5"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/minimatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
+        deploy/cdk/package-lock.json. npm overrides cannot replace a bundled dependency and
+        no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.275.0 bundles ^10).
+        Deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        aws-cdk-lib rebundles; see the block comment above.
+    - rule_id: "GHSA-g3hv-75wg-m249"
+      path: "node_modules/aws-cdk-lib/minimatch/package.json"
+      package_name: "minimatch"
+      package_version: "10.2.5"
+      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/minimatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-g3hv-75wg-m249: minimatch 10.2.5 bundled inside aws-cdk-lib 2.273.0 in
+        deploy/cdk-constructs/package-lock.json. npm overrides cannot replace a bundled
+        dependency and no aws-cdk-lib release bundles the fixed 11.0.1 yet (latest 2.275.0
+        bundles ^10). Dev dependency of the constructs package only, not shipped in the
+        wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
+        comment above.
+    - rule_id: "GHSA-g3hv-75wg-m249-minimatch"
+      path: "deploy/cdk/package-lock.json"
+      package_name: "minimatch"
+      package_version: "10.2.5"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-g3hv-75wg-m249 (grype spelling): minimatch 10.2.5 bundled inside aws-cdk-lib
+        2.273.0 in deploy/cdk/package-lock.json. The lockfile's own minimatch is overridden
+        to 11.x; the bundled copy cannot be overridden and no aws-cdk-lib release bundles
+        11.0.1 yet. Deploy tooling only, not shipped in the wheel or the container image.
+        Revisit when aws-cdk-lib rebundles; see the block comment above.
+    - rule_id: "CVE-2026-118764"
+      path: "deploy/cdk/package-lock.json"
+      package_name: "minimatch"
+      package_version: "10.2.5"
+      expires: "2026-11-27"
+      reason: >-
+        CVE-2026-118764 (GHSA-g3hv-75wg-m249, trivy spelling): minimatch 10.2.5 bundled
+        inside aws-cdk-lib 2.273.0 in deploy/cdk/package-lock.json. The lockfile's own
+        minimatch is overridden to 11.x; the bundled copy cannot be overridden and no
+        aws-cdk-lib release bundles 11.0.1 yet. Deploy tooling only, not shipped in the
+        wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
+        comment above.
+    # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8 on Python 3.10 (expires 2026-11-27) ===
+    # uv.lock holds two filelock entries. The one for Python 3.11 and later is at 4.2.1,
+    # which is outside the affected range (up to 4.2.0). The one for Python 3.10 stays at
+    # 4.0.3 because no release above 4.2.0 supports Python 3.10 and requires-python is
+    # >=3.10. filelock comes in through pre-commit and virtualenv in the dev group only;
+    # it is not in the wheel or the container image. The version is pinned in the entry,
+    # so the 4.2.1 entry is never covered and a different 3.10 version reports again.
+    # Revisit when requires-python rises or a filelock release supports Python 3.10.
+    # grype reports this id with the package name appended; the trailing * covers both
+    # spellings.
+    - rule_id: "GHSA-v4x8-3wr5-3wq8*"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.3"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-v4x8-3wr5-3wq8: filelock 4.0.3 in uv.lock, the Python 3.10 entry. Dev group only;
+        no filelock release above 4.2.0 supports Python 3.10. The Python 3.11 and later entry
+        is at 4.2.1. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-27) ===
+    # uv.lock holds two dnspython entries. The one for Python 3.11 and later is at 2.9.0,
+    # the first fixed release. The one for Python 3.10 stays at 2.8.0 because 2.9.0
+    # requires Python 3.11 and requires-python is >=3.10. dnspython comes in through
+    # email-validator, which pydantic[email] uses to validate email syntax. The version
+    # is pinned in the entries, so the 2.9.0 entry is never covered and a different 3.10
+    # version reports again. trivy reports the CVE id and grype the GHSA id with the
+    # package name appended, so there is one entry per spelling. Revisit when
+    # requires-python rises or a dnspython release supporting Python 3.10 ships.
+    - rule_id: "CVE-2026-114605*"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expires: "2026-11-27"
+      reason: >-
+        CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    - rule_id: "GHSA-45c3-73f7-pv4m*"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-45c3-73f7-pv4m (CVE-2026-114605): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: filelock, thirteen advisories with no patched version on Python 3.10 (expires 2026-11-20) ===
+    # filelock is affected through 4.2.0 and fixed in 4.2.1, but 4.1.1 and later
+    # require Python 3.11 and this project supports 3.10, so uv.lock carries a
+    # filelock 4.0.x entry for Python 3.10 that no upgrade can patch. The 3.11 and
+    # later entry is on 4.2.4 and is not affected. Nothing in the repository imports
+    # filelock directly; it arrives only as a dependency of virtualenv and
+    # python-discovery in the dev group. pyproject.toml holds the 3.10 entry on 4.0.x
+    # with a uv constraint because 4.1.0 is affected by three more advisories.
+    # GHSA-v4x8-3wr5-3wq8 (High, ReadWriteLock) was the first entry. On 2026-10-28
+    # the same maintainers published nine Medium and three Low advisories against
+    # the same range (every one of them: affected through 4.2.0, fixed in 4.2.1,
+    # 4.2.1 requires Python 3.11), and grype's database of 2026-10-29 reports all
+    # twelve against the 4.0.12 entry. They cover SoftFileLock, StrictSoftFileLock,
+    # SoftReadWriteLock, ReadWriteLock, UnixFileLock and WindowsFileLock, none of
+    # which ASH calls. One entry per id, so a thirteenth advisory reports again
+    # instead of being swallowed; all thirteen share one expiry so the whole set is
+    # re-reviewed on one date.
+    # Revisit when filelock backports the fixes to a release that supports Python
+    # 3.10, or when this project drops 3.10.
+    - rule_id: "GHSA-v4x8-3wr5-3wq8-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-v4x8-3wr5-3wq8: filelock 4.0.12 in uv.lock, the Python 3.10 resolution.
+        No patched release supports Python 3.10 (the fix is 4.2.1, which requires
+        3.11). ASH does not call ReadWriteLock, the affected API, and does not
+        import filelock itself. The 3.11 and later entry is on the patched 4.2.4.
+        Revisit when a 3.10-compatible fix ships or Python 3.10 support ends; see
+        the block comment above.
+    - rule_id: "GHSA-fj95-fr6c-h845-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-fj95-fr6c-h845 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftReadWriteLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-69hj-f68j-2879-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-69hj-f68j-2879 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        UnixFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-cwqr-hh33-gh44-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-cwqr-hh33-gh44 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        ReadWriteLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-9c4x-gm8v-wgc4-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-9c4x-gm8v-wgc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected APIs are
+        StrictSoftFileLock and SoftReadWriteLock; ASH does not call them and does
+        not import filelock itself. The 3.11 and later entry is on the patched
+        4.2.4. Revisit when a 3.10-compatible fix ships or Python 3.10 support ends;
+        see the block comment above.
+    - rule_id: "GHSA-rfpc-qcw5-3pc4-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-rfpc-qcw5-3pc4 (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-fq56-3cx3-fjxp-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-fq56-3cx3-fjxp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-6627-m3xw-93mp-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-6627-m3xw-93mp (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        StrictSoftFileLock; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-8mx5-7m5m-r77g-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-8mx5-7m5m-r77g (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        WindowsFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-m462-7rxw-wvpg-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-m462-7rxw-wvpg (Medium): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        StrictSoftFileLock; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-9j6q-wvj5-jgjg-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-9j6q-wvj5-jgjg (Low): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock; ASH does not call it and does not import filelock itself.
+        The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-567q-5qvw-pf92-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-567q-5qvw-pf92 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        SoftFileLock on Windows; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
+    - rule_id: "GHSA-9vhv-jxww-xfm5-filelock"
+      path: "uv.lock"
+      package_name: "filelock"
+      package_version: "4.0.*"
+      expires: "2026-11-20"
+      reason: >-
+        GHSA-9vhv-jxww-xfm5 (Low): filelock 4.0.12 in uv.lock, the Python 3.10
+        resolution. Affected through 4.2.0, fixed in 4.2.1, which requires Python
+        3.11, so no patched release supports 3.10. The affected API is
+        ReadWriteLock on Windows; ASH does not call it and does not import filelock
+        itself. The 3.11 and later entry is on the patched 4.2.4. Revisit when a
+        3.10-compatible fix ships or Python 3.10 support ends; see the block comment
+        above.
     # === detect-secrets: broad patterns by path ===
     #
-    # This header used to claim detect-secrets had "no inline nosec support".
-    # It does have one: `# pragma: allowlist secret` on the offending line, and
-    # detect-secrets drops the finding when it is present. That claim steered
-    # contributors here, to a config entry covering a whole path, when a marker
-    # on the line itself was available and narrower.
+    # detect-secrets does support an inline marker: `# pragma: allowlist secret` on
+    # the offending line drops the finding.
     #
     # Prefer the inline pragma. It sits at the value it protects, so a reviewer
     # reading the line sees the decision; it travels with the code when the line
     # moves; and it leaves the rest of the file scanned, so a real secret added
     # later is still found. This repository already depends on it -- the 16
     # release checksums in automated_security_helper/utils/tool_downloads.py are
-    # each marked that way, and the comment above them explains why per-line
-    # beats suppressing the file.
+    # each marked that way.
     #
     # Reach for a path entry below only where per-line marking is not available:
     # a generated or vendored file nobody hand-edits, a format with no comment
@@ -59,11 +722,10 @@ global_settings:
     # `scripts/**` hid 31 findings; each is now a pragma on its line, and
     # tests/unit/config/test_no_directory_glob_secret_suppressions.py fails if a
     # directory glob for this rule family comes back. Some sit on the line above
-    # as `# pragma: allowlist nextline secret` instead, in two cases: where ruff
-    # format would wrap the line and carry a trailing pragma off the line it
-    # covers, and where ferret-scan reads the file, because ferret counts the
-    # word "secret" in a trailing comment as evidence and raised three such
-    # lines to high confidence.
+    # as `# pragma: allowlist nextline secret` instead, where ruff format would
+    # wrap the line and carry a trailing pragma off it, and where ferret-scan reads
+    # the file, because ferret counts the word "secret" in a trailing comment as
+    # evidence.
     # === detect-secrets: specific source files ===
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
@@ -281,6 +943,229 @@ global_settings:
         operator creates sets automountServiceAccountToken false, and so does the
         scan ServiceAccount in rbac.yaml. tests/test_manifests.py and
         tests/test_least_privilege.py pin those two.
+    # === detect-secrets: the docs-CI-runner pin tables ===
+    #
+    # Three TOML fixtures under tests/integration/docs/ci_runners/ pin every
+    # runner artifact the docs-CI legs download: Jenkins plugin jars by sha256
+    # (one per plugin, 60 and 72 lines), and the runners' own wars, binaries and
+    # a git ref. Each flagged string is a published artifact digest or commit id,
+    # the same shape as the 16 release checksums in utils/tool_downloads.py --
+    # but at 141 lines across generated-by-tooling pin tables, this is the
+    # "pattern spread over more lines than is reasonable to mark" case the
+    # header above reserves path entries for. Exact file paths, not a directory
+    # glob, so test_no_directory_glob_secret_suppressions.py stays satisfied and
+    # a new file in that directory is still scanned.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/integration/docs/ci_runners/runners.toml
+      reason: >-
+        Every flagged value is a sha256 digest (sha256 = / war_sha256 =) of a
+        published CI-runner artifact the docs legs download and verify, plus one
+        40-hex git commit pin (version =). Content-address pins, not secrets.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/integration/docs/ci_runners/jenkins/plugins-bundled.toml
+      reason: >-
+        A pin table of Jenkins plugin sha256 digests for the bundled
+        jenkinsfile-runner leg, one digest per plugin. Published artifact
+        checksums, not secrets.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/integration/docs/ci_runners/jenkins/plugins-lts.toml
+      reason: >-
+        The same pin-table shape as plugins-bundled.toml for the LTS
+        jenkinsfile-runner leg. Published artifact checksums, not secrets.
+    # === detect-secrets: placeholder commit/run ids in tests (hex heuristic) ===
+    #
+    # The hex-high-entropy heuristic fires on 40- and 32-hex fixture constants.
+    # Nearly all are the deliberately sequential "0123456789abcdef..." (zero
+    # entropy to a reader, high entropy to the detector); two are a sample git
+    # commit id. Per-file entries, each describing the flagged value, per the bandit
+    # section's one-path precedent. The reasons below describe a flagged value
+    # where quoting it would make this file match the same rule it suppresses.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: deploy/cdk-constructs/test/git-ref.test.ts
+      reason: >-
+        The flagged value is a sample 40-hex git commit id that the GitRef test
+        parses; a commit id is a public content address, not a secret. The reason
+        does not repeat the value, so this file does not flag itself.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/deploy/test_deploy_constructs_ash_ref_is_checked.py
+      reason: >-
+        The same sample commit id as git-ref.test.ts, fed to the ref check under
+        test. A public content address, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/integration/test_install_hints_on_python310.py
+      reason: >-
+        COMMIT = "0123456789abcdef0123456789abcdef01234567", the sequential
+        placeholder commit id the install-hint fixtures use.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/interactions/test_run_ash_nix.py
+      reason: >-
+        A sequential "0123456789abcdef..." placeholder id in a nix-run fixture.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/interactions/test_workspace_inner_run_records_its_outcome.py
+      reason: >-
+        RUN = "0123456789abcdef0123456789abcdef", the placeholder run id the
+        outcome-record fixture uses.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
+      reason: >-
+        _COMMIT = "0123456789abcdef0123456789abcdef01234567", the placeholder
+        commit id in the detect-secrets scanner's own behavior tests.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_docs_ci_runner_evidence.py
+      reason: >-
+        HEAD = "0123456789abcdef0123456789abcdef01234567", the placeholder head
+        commit the docs-CI evidence fixtures use.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_docs_ci_runner_judgments.py
+      reason: >-
+        HEAD = "0123456789abcdef0123456789abcdef01234567" and TOKEN =
+        "0a1b2c3d4e5f60718293a4b5c6d7e8f9": a placeholder commit id and a
+        pattern-built fixture token the judgment tests redact, not credentials.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_docs_ci_runner_launchers.py
+      reason: >-
+        SHA = "0123456789abcdef0123456789abcdef01234567", the placeholder commit
+        id the launcher fixtures use.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_docs_ci_runner_provenance.py
+      reason: >-
+        HEAD = "0123456789abcdef0123456789abcdef01234567", the placeholder commit
+        id the provenance fixtures use.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_docs_ci_runner_rewrite.py
+      reason: >-
+        HEAD and OTHER are the sequential placeholders
+        "0123456789abcdef0123456789abcdef01234567" and
+        "fedcba9876543210fedcba9876543210fedcba98", two distinguishable fake
+        commit ids the rewrite tests compare.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_docs_install_commands_can_fail.py
+      reason: >-
+        _SHA = "0123456789abcdef0123456789abcdef01234567", the placeholder commit
+        id in the install-command fixtures.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_scan_workflow_pins_the_ash_ref.py
+      reason: >-
+        The sequential placeholder commit id, once whole and once truncated to 39
+        hex digits as the negative control of the pin check under test.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_ash_install.py
+      reason: >-
+        COMMIT = "0123456789abcdef0123456789abcdef01234567", the placeholder
+        commit id in the install fixtures.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_base_ref.py
+      reason: >-
+        "a full commit id": "0123456789abcdef0123456789abcdef01234567" -- the
+        placeholder commit id in the base-ref parametrization.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_inner_run_outcome.py
+      reason: >-
+        RUN = "0123456789abcdef0123456789abcdef", the placeholder run id the
+        inner-run-outcome fixtures use.
+    # === detect-secrets: fixture URLs and placeholder keywords in tests ===
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/integration/docs/ci_runners/provenance.py
+      reason: >-
+        The flagged string is the repository path of the installed-revision asset
+        under automated_security_helper/assets/, a filename whose character mix
+        trips the base64 heuristic. A path, not a secret. The reason does not
+        quote the path, so this file does not flag itself.
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: tests/unit/test_docs_ci_runner_provenance.py
+      reason: >-
+        The same flagged string as provenance.py above: the repository path of
+        the installed-revision asset.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/cli/mcp/test_set_source_git_host_allowlist.py
+      reason: >-
+        The flagged value is a parametrized fixture https URL on a reserved
+        example domain with a port and a placeholder user and password in its
+        userinfo, exercising how the host allowlist parses userinfo. Not a
+        credential. The reason describes the URL instead of quoting it, so this
+        file does not flag itself.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/cli/mcp/test_set_source_git_host_is_the_one_ssh_dials.py
+      reason: >-
+        The flagged value is an adversarial fixture ssh URL, on a reserved example
+        domain, built to prove the host check is not confused by an encoded slash
+        in the userinfo. Not a credential.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/utils/test_ash_install.py
+      reason: >-
+        The flagged value is a fixture https URL with a placeholder user and token
+        in its userinfo: the input of the URL-redaction parametrization. The test
+        asserts the userinfo is STRIPPED from the URL, so the literal exists to
+        prove redaction.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/utils/scanner_names.py
+      reason: >-
+        The match is '"detect-secrets": "SECRETS"' in the scanner-name-to-tool-type
+        table: a scanner NAME mapped to the classification label SECRETS. Names,
+        not values.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/utils/scanner_tool_types.py
+      reason: >-
+        SECRETS_TOOL_TYPE = "SECRETS" is the tool-type classification label the
+        scanner inventory uses. A category name, not a value.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: deploy/cdk/test/ash-container-scripts.test.ts
+      reason: >-
+        'probe-secret-value' and 'probe-secret-arn' are fixture probes the
+        container-script tests plant to assert the entrypoint keeps the real
+        header value off the command line. Their values spell out that they are
+        probes.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/integration/sandbox/test_sandbox_escape.py
+      reason: >-
+        The flagged line is the parameter name "passwd_home_files", fixture
+        /etc/passwd-shaped files for the sandbox-escape probes. The keyword
+        heuristic fires on the NAME; no credential value exists.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_list_scanners_scan_selection.py
+      reason: >-
+        'password = "hunter2"' is the deliberately insecure sample source the
+        scan-selection test plants so the selected scanner has something to find.
+        The planted finding is the point of the fixture.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_session_plugins_stay_in_their_session.py
+      reason: >-
+        "AWS_SECRET_ACCESS_KEY": "fake-secret-access-key" is a fixture
+        environment whose value names itself fake; the test is about session
+        isolation, not credentials.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/converters/test_archive_plain_gzip_and_lfs_pointers.py
+      reason: >-
+        The flagged lines are planted archive member contents: a password-named
+        assignment with a numbered placeholder value and a JSON object with an
+        api-key-named field holding a placeholder. The converter tests round-trip
+        them so a later scan stage has something to find. Planted fixtures, not
+        credentials. The reason describes them instead of quoting them, so this
+        file does not flag itself.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/deploy/test_deploy_mcp_entrypoint_secret_off_the_command_line.py
+      reason: >-
+        "ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN": "probe-secret-arn" is the probe
+        fixture of a test that exists to assert the real secret stays OFF the
+        command line. The probe names itself.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/docs/test_page_claims.py
+      reason: >-
+        Both matches are documentation examples the page-claims tests execute
+        verbatim: the docs' illustrative DATABASE_PASSWORD
+        ("correct-horse-battery-staple-1234") and moto's documented dummy
+        aws_secret_access_key="testing". Doc examples under test, not credentials.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_builtin/test_npm_audit_offline_not_audited.py
+      reason: >-
+        The match is the assertion 'statuses["detect-secrets"] == "PASSED"' -- the
+        scanner's NAME in a status table. No value present.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_python_children_import_nothing_from_their_cwd.py
+      reason: >-
+        DETECT_SECRETS_WORKER names the module path
+        "automated_security_helper.utils.detect_secrets_worker". A module path,
+        not a value; the heuristic fires on the words in the name.
     # === detect-secrets on the CDK sources, scanned here for the first time ===
     #
     # The root .gitignore's Python packaging block carried a bare `lib/` rule,
@@ -320,12 +1205,14 @@ global_settings:
     #
     # Every other bandit finding in this repository is being FIXED rather than
     # suppressed — a bare `except: pass` in shipped code is a defect whatever a
-    # scanner thinks of it. These eight files are the exception, and each is listed
-    # individually rather than behind a `tests/**` glob so that a new test cannot
-    # inherit a suppression nobody looked at. That also matches the only bandit
-    # precedent already in this file, which names a single path.
+    # scanner thinks of it. The files in this section and the one after it are the
+    # exception, and each is listed individually rather than behind a `tests/**`
+    # glob so that a new test cannot inherit a suppression nobody looked at. That
+    # also matches the only bandit precedent already in this file, which names a
+    # single path. The entries below carry no finding counts: a count goes stale
+    # the first time a test is added, and each reason names the flagged value.
     #
-    # B104 — two files, 13 findings. Both are tests OF host binding, so the
+    # B104. Both files here are tests OF host binding, so the
     # literal `0.0.0.0` is the value under test, not a careless default. AgentCore
     # requires the MCP server to bind `0.0.0.0` (see the comment on
     # `mcpEnvironment()` in deploy/cdk/lib/ash-runtime-config.ts, which pins
@@ -346,7 +1233,7 @@ global_settings:
         Same as test_mcp_sse_host_binding.py: asserts the streamable-http app is
         built with the host AgentCore requires. The address is the value under
         test.
-    # B105 — four files, five findings, all of them bandit's keyword heuristic
+    # B105. Four files, all of them bandit's keyword heuristic
     # firing on a variable NAME while the value is harmless. Verified by reading
     # each line rather than by assuming, because "hardcoded password" in a public
     # security tool is worth being sure about.
@@ -380,9 +1267,9 @@ global_settings:
         message to prove ASH's own SARIF post-processor masks the password body to
         asterisks — the test at line 722 asserts the literal never survives into the
         output. The heuristic flags the fixture that exists to verify the heuristic.
-    # B108 — two files, 11 findings. In the first, the hardcoded /tmp is a path
-    # INSIDE the build container, the same shape as the codecommit-gate entry above.
-    # In the second, /tmp is the input under test and no file is ever opened there.
+    # B108. In the first file, the hardcoded /tmp is a path INSIDE the build
+    # container, the same shape as the codecommit-gate entry above. In the second,
+    # /tmp is the input under test and no file is ever opened there.
     - rule_id: B108
       path: tests/unit/deploy/buildspec_extraction.py
       reason: >-
@@ -400,6 +1287,114 @@ global_settings:
         file is created, opened or written under any of them. Writing the literal
         some other way would only hide it from bandit; the test needs that exact
         string.
+    # === bandit in tests, continued: the docs-CI and MCP-bind waves ===
+    #
+    # The same dispositions as the entries above, for the files the docs-CI
+    # harness and the MCP bind tests added. Each reason names the flagged value;
+    # per-file entries, never a glob, as the section header requires.
+    - rule_id: B103
+      path: tests/unit/assets/test_install_pinned_tool.py
+      reason: >-
+        os.lchmod(link, 0o777) builds the hazard under test: a group/world-writable
+        SYMLINK inside a tool bundle, which the installer must refuse. The test
+        skips itself when the platform cannot produce that mode. The permissive
+        mask is the fixture, not a default.
+    - rule_id: B103
+      path: tests/unit/utils/test_tool_config_dir.py
+      reason: >-
+        os.chmod(tree.outside, 0o777) makes the shared directory world-writable so
+        the test can assert write_tool_config REFUSES to write there (pytest.raises
+        OSError matching TMPDIR). The unsafe mode is the input of a refusal test.
+    - rule_id: B104
+      path: automated_security_helper/cli/mcp/__init__.py
+      reason: >-
+        Not a bind. The flagged line is the startup LOG helper that reproduces
+        uvicorn's "running on" message: host = "0.0.0.0" if config.host is None
+        mirrors the display default uvicorn itself logs; the socket was bound
+        elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+        asserts a non-loopback bind is refused without the explicit opt-in.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
+      reason: >-
+        Tests OF host binding, the same disposition as
+        test_mcp_sse_host_binding.py above: "0.0.0.0" is the value under test in
+        origin-check assertions, not a careless default.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+      reason: >-
+        The file exists to assert a non-loopback bind is REFUSED;
+        NON_LOOPBACK_HOSTS lists "0.0.0.0" and friends as the refused inputs. A
+        refusal test cannot avoid naming the address it refuses.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_upstream_host_check.py
+      reason: >-
+        The same disposition: "0.0.0.0" is the fixture host in assertions about
+        the upstream Host-header check. The address is the value under test.
+    - rule_id: B108
+      path: tests/integration/docs/ci_runners/fixture.py
+      reason: >-
+        SYSTEM_TMP = "/tmp" is a named constant describing the host directory
+        whose pytest-of-<user> pruning behavior the docs-CI fixture accounts for.
+        The harness never creates its own files at that literal; its work areas
+        come from pytest tmp factories.
+    - rule_id: B108
+      path: tests/snapshot/container/runtime/test_container_image_permissions.py
+      reason: >-
+        "/tmp" appears in PRUNED, the tuple of mount points the in-container
+        permission walk skips. A list of paths excluded from a find, not a
+        writable temp path this process uses.
+    - rule_id: B108
+      path: tests/unit/deploy/test_deploy_pipeline_config_source.py
+      reason: >-
+        CDK_CONFIG_PATH = "/tmp/ash-config/.ash.yaml" is the value the CDK
+        projects give ASH_CONFIG inside the container; the comment above it
+        records that each test moves it into its own directory, so no shared /tmp
+        file is written by the tests.
+    - rule_id: B108
+      path: tests/unit/test_container_permissions_probe_covers_the_image.py
+      reason: >-
+        "/tmp" sits in PRUNED, the set of mount points the probe's walk must
+        skip -- the test asserts the probe covers everything else. A skip list,
+        not a temp file location.
+    - rule_id: B108
+      path: tests/unit/test_dockerfile_directory_permissions.py
+      reason: >-
+        The flagged line iterates ("/proc", ..., "/tmp", ...) to assert each is
+        pruned from the Dockerfile's permission sweep. Paths as assertion
+        subjects, not temp files.
+    - rule_id: B108
+      path: tests/unit/test_docs_ci_runner_fixture.py
+      reason: >-
+        Eight matches, all about the fixture's handling of the SHARED /tmp:
+        skipif guards ("no /tmp on this host"), a symlink pointed AT /tmp to
+        prove the pruner does not follow it, and pytest-of-<user> path shapes
+        under test. The only paths actually written are uuid-suffixed and
+        removed by the test that made them.
+    - rule_id: B108
+      path: tests/unit/test_docs_ci_runner_provenance.py
+      reason: >-
+        (PurePosixPath("/tmp/a b/c%d/x.whl"), "file:///tmp/a%20b/c%25d/x.whl") is
+        a URL-encoding parametrization pair; the path exists only as a string
+        being percent-encoded.
+    - rule_id: B301
+      path: tests/unit/utils/test_link_refusal_family.py
+      reason: >-
+        pickle.loads(pickle.dumps(refusal)) round-trips an exception THIS test
+        just built, asserting the refusal family survives the worker-to-parent
+        handoff whole. The bytes never leave the process; nothing untrusted is
+        loaded.
+    - rule_id: B314
+      path: tests/integration/docs/ci_runners/reports.py
+      reason: >-
+        ET.parse reads the JUnit XML the harness's own pinned CI runners just
+        wrote inside the test sandbox, counting testcases; a parse failure is
+        skipped. Input produced by the fixture run itself, not attacker XML.
+    - rule_id: B314
+      path: tests/integration/docs/ci_runners/verdict.py
+      reason: >-
+        ET.fromstring parses the JUnit file Jenkins wrote inside the leg's own
+        container, after stripping the XML 1.1 declaration Jenkins emits. The
+        harness consumes its own run's output.
     # === bandit subprocess family: unfixable in a tool that runs other tools ===
     #
     # B404 fires on `import subprocess` itself, before any call is examined. ASH's
@@ -712,19 +1707,17 @@ global_settings:
     # so nothing there wanted the subnet default.
     #
     # CFN_NAG_W40 on the ECS task's security group, by pinning its egress to TCP 443
-    # instead of every IP protocol. The PORT is pinned and not just the protocol
-    # because narrowing to all-TCP trades one finding for another: CFN_NAG_W29 passes
-    # only when FromPort equals ToPort, and IpProtocol -1 had satisfied it by naming
-    # no ports at all. That was measured, not assumed -- the all-TCP form was
-    # synthesized and scanned first, and it reported W29. Pinning 443 clears both.
+    # instead of every IP protocol. The PORT is pinned too, because all-TCP trades
+    # one finding for another: CFN_NAG_W29 passes only when FromPort equals ToPort,
+    # and IpProtocol -1 had satisfied it by naming no ports. Measured: the all-TCP
+    # form reported W29. Pinning 443 clears both.
     #
     # What follows is the remainder, where no code change satisfies the rule.
     #
     # === cfn-nag cannot see a logs grant that lives in its own IAM::Policy ===
     #
-    # CFN_NAG_W58 is a false positive on all four functions, and it is worth being
-    # exact about why, because "the function cannot write its logs" would be a real
-    # defect rather than a scanner artifact.
+    # CFN_NAG_W58 is a false positive on all four functions, not a function that
+    # cannot write its logs.
     #
     # LambdaFunctionCloudWatchLogsRule inspects two places and no others: the role's
     # inline Policies array, and an allowlist of seven AWS managed policy ARNs. Every
@@ -804,10 +1797,7 @@ global_settings:
     # AwsSolutions-IAM5, in ECR_AUTHORIZATION_TOKEN_REASON: IAM defines
     # ecr:GetAuthorizationToken with no resource ARN, so "*" is the only value the action
     # accepts. Reused here because it genuinely applies; the two rules read the same
-    # statements. (That reason has moved twice. It was a numbered list, and this comment
-    # cited "item (3)"; then one role-scoped string covering wildcard ACTIONS as well as
-    # wildcard RESOURCES; and now one string per policy, so the constant is named rather
-    # than a clause pointed at.)
+    # statements.
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -931,15 +1921,12 @@ global_settings:
 
     # === cdk-nag on the synthesized CloudFormation templates ===
     #
-    # WHY THIS BLOCK ARRIVED SO LATE, WHEN checkov AND cfn-nag WERE DONE ABOVE
+    # WHY THIS BLOCK ARRIVED AFTER checkov AND cfn-nag
     #
     # cdk-nag reports MISSING in the `ash / SAST, SCA, and IaC Scan` check, because
     # that leg installs no `cdk` extra and the scanner needs aws-cdk-lib, cdk-nag and
-    # constructs to run at all. A MISSING scanner contributes no findings, so whoever
-    # wrote the checkov and cfn-nag blocks above was reading a report in which cdk-nag
-    # had produced nothing. Its 437 findings on these same five templates were never
-    # visible to that work. They surface only in a run where the extra is installed,
-    # which is the run this block was derived from.
+    # constructs. Its 437 findings on these five templates surface only in a run where
+    # the extra is installed, which is the run this block was derived from.
     #
     # WHAT ASH EVALUATES HERE THAT THE TEMPLATES WERE NOT AUTHORED AGAINST
     #
@@ -952,13 +1939,11 @@ global_settings:
     # compliance regimes and a payment-card standard that no part of this project
     # claims to implement.
     #
-    # Saying that plainly matters more than it might look. Clearing a HIPAA or PCI rule
-    # id is not the same as being HIPAA- or PCI-compliant, and suppressing one is not a
-    # claim of non-compliance either. ASH has adopted no compliance posture; these
-    # packs are enabled here because they exercise more of the scanner. The entries
-    # below therefore say what each rule wants, what satisfying it would cost, and why
-    # it is out of scope for a template an adopter parameterizes -- not that a risk was
-    # weighed and accepted against a control ASH is audited on.
+    # Clearing a HIPAA or PCI rule id is not the same as being HIPAA- or PCI-compliant,
+    # and suppressing one is not a claim of non-compliance either. ASH has adopted no
+    # compliance posture; these packs are enabled here because they exercise more of
+    # the scanner. The entries below say what each rule wants, what satisfying it would
+    # cost, and why it is out of scope for a template an adopter parameterizes.
     #
     # 116 of the 437 findings are already suppressed and do not appear below. Those
     # carry reviewed reasons in the templates' own Metadata.cdk_nag blocks, written by
@@ -985,14 +1970,12 @@ global_settings:
     #
     # PATHS ARE NAMED FILE BY FILE, AND SO ARE RULES
     #
-    # No entry below globs. `deploy/cdk/templates/**` with a `*-IAMNoInlinePolicy` rule
-    # id would collapse 20 entries into one, and it was written that way first; the
-    # problem is that a sixth template, or a fifth pack, then inherits a suppression
-    # nobody read. The five files and the four pack-qualified rule ids are named
-    # individually for the same reason the detect-secrets block below gives. Counts
-    # quoted per entry are the counts measured on THIS revision -- `cdk synth`
-    # regenerates these templates, so treat a drifted count as a prompt to re-measure
-    # rather than as a defect in the reason.
+    # No entry below globs. A `deploy/cdk/templates/**` entry with a
+    # `*-IAMNoInlinePolicy` rule id would collapse 20 entries into one, but a sixth
+    # template, or a fifth pack, would then inherit a suppression nobody read. The
+    # five files and the four pack-qualified rule ids are named individually. Counts
+    # quoted per entry were measured on THIS revision; `cdk synth` regenerates the
+    # templates, so a drifted count is a prompt to re-measure, not a defect.
     #
     # --- IAMNoInlinePolicy: the rule's own subject is not what these templates hold ---
     #
@@ -1000,13 +1983,11 @@ global_settings:
     # rule reads "The IAM Group, User, or Role contains an inline policy" and asks for
     # customer-managed policies instead, for reusability, versioning and rollback.
     #
-    # Measured before writing this, not assumed: not one AWS::IAM::Role in any of the
-    # five templates carries a `Policies` array. Every finding is on a standalone
-    # AWS::IAM::Policy resource attached through `Roles`, which is what CDK emits for
-    # `grant*` and `addToPolicy`, and the per-file finding counts equal the
-    # AWS::IAM::Policy counts exactly -- 5, 4, 15, 7 and 4. So the rule is not reacting
-    # to a policy embedded in a role; it treats a role's separately-attached Policy
-    # resource as one.
+    # Measured: no AWS::IAM::Role in any of the five templates carries a `Policies`
+    # array. Every finding is on a standalone AWS::IAM::Policy resource attached
+    # through `Roles` (what CDK emits for `grant*` and `addToPolicy`), and the per-file
+    # finding counts equal the AWS::IAM::Policy counts exactly -- 5, 4, 15, 7 and 4.
+    # So the rule treats a role's separately-attached Policy resource as inline.
     #
     # Two reasons no code change here is the right answer. First, the CDK grant model
     # produces these: a customer-managed policy per grant would mean hand-writing every
@@ -2021,40 +3002,30 @@ global_settings:
     #
     # WHY THE RULES THROW
     #
-    # These templates are environment-agnostic on purpose -- deploy/cdk/scripts/
-    # synth-templates.sh depends on it, because a template with a baked-in account id
-    # is neither reproducible nor launchable by an adopter -- and they are
-    # parameterized so an adopter can point them at their own key, CIDR and image tag.
-    # The consequence is that the properties these rules want to inspect are
-    # CloudFormation intrinsics rather than literals: an Fn::Join over ECR repository
-    # attributes, a Ref to a parameter, an Fn::If over a condition. Three of the four
-    # messages say exactly that, naming the value that "resolved to a non-primitive".
-    # The fourth, "items.map is not a function", is the same shape reaching a rule that
-    # does not handle it.
+    # These templates are environment-agnostic and parameterized on purpose
+    # (deploy/cdk/scripts/synth-templates.sh depends on it), so the properties these
+    # rules inspect are CloudFormation intrinsics rather than literals: an Fn::Join
+    # over ECR repository attributes, a Ref to a parameter, an Fn::If over a
+    # condition. Three of the four messages say so, naming the value that "resolved to
+    # a non-primitive". The fourth, "items.map is not a function", is the same shape
+    # reaching a rule that does not handle it.
     #
     # WHY THE TEMPLATE'S OWN SUPPRESSION DOES NOT ALREADY COVER THEM
     #
-    # It looks as though it should, and this is the part worth being precise about.
-    # Every resource named below already carries a reviewed in-template suppression for
-    # exactly this case: Metadata.cdk_nag.rules_to_suppress with id
-    # CdkNagValidationFailure, written by deploy/cdk/lib/ash-nag-suppressions.ts, whose
-    # reason names the intrinsics and the affected rules. ASH honors in-template
-    # suppressions -- 116 of this scanner's 437 findings are suppressed that way -- but
-    # the honoring is keyed by rule id: _template_suppression_reason in
-    # automated_security_helper/utils/cdk_nag_wrapper.py compares the suppression's id
-    # against the finding's rule id, and against that id with any bracketed scope
-    # stripped. cdk-nag emits a validation failure under the CRASHED RULE's own id, so
-    # a record arrives as AwsSolutions-EC23 while the suppression covering it is filed
-    # under CdkNagValidationFailure. The two never compare equal, and the reviewed
-    # reason sitting in the same file is never reached.
+    # Every resource named below carries a reviewed in-template suppression for this
+    # case: Metadata.cdk_nag.rules_to_suppress with id CdkNagValidationFailure, written
+    # by deploy/cdk/lib/ash-nag-suppressions.ts. ASH honors in-template suppressions,
+    # but keyed by rule id (_template_suppression_reason in
+    # automated_security_helper/utils/cdk_nag_wrapper.py). cdk-nag emits a validation
+    # failure under the CRASHED RULE's own id, so a record arrives as
+    # AwsSolutions-EC23 while the suppression is filed under CdkNagValidationFailure.
+    # The two never compare equal.
     #
-    # That is a mechanism worth fixing upstream of these entries rather than papering
-    # over indefinitely -- either by having the wrapper treat a CdkNagValidationFailure
-    # suppression as covering any rule that threw on that resource, or by having it
-    # report crashes under a rule id of their own so they are filterable as a class.
-    # Until one of those lands, naming the records here is the only way to keep the
-    # exit code honest, and it is why they are grouped and labelled separately instead
-    # of being mixed in with the compliance findings above.
+    # Worth fixing upstream of these entries: have the wrapper treat a
+    # CdkNagValidationFailure suppression as covering any rule that threw on that
+    # resource, or report crashes under a rule id of their own. Until then, naming the
+    # records here keeps the exit code honest, and they are grouped and labelled
+    # separately from the compliance findings above.
     - rule_id: AwsSolutions-CB5
       path: deploy/cdk/templates/AshDistributedPipeline.template.json
       reason: >-
@@ -2290,6 +3261,41 @@ global_settings:
         template creates no secret, so the ECR repositories are the only resources
         it trips this on. The check is a minimum length of 1 on a property an
         unbound Fn::If presents as ''. See the block comment above.
+    # W1030 is the same minimum-length check reported by the cdk-nag wrapper's own
+    # synth, which started flagging these parameter defaults when aws-cdk-lib 2.276.0
+    # updated its bundled property specs. One entry per template, nine records in all.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Three records: SecretString from McpAuthHeaderValue, EncryptionConfiguration.KmsKey
+        from KmsKeyArn, and RequestHeaderAllowlist.0 from McpAuthHeaderName. The
+        empty-string default is the documented feature-off sentinel for an optional
+        input (KMS key, MCP auth header and value), validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        One record, EncryptionConfiguration.KmsKey from KmsKeyArn. The empty-string
+        default is the documented feature-off sentinel for an optional KMS key,
+        validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        One record, EncryptionConfiguration.KmsKey from KmsKeyArn. The empty-string
+        default is the documented feature-off sentinel for an optional KMS key,
+        validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Two records: SecretString from McpAuthHeaderValue and
+        EncryptionConfiguration.KmsKey from KmsKeyArn. The empty-string default is
+        the documented feature-off sentinel for an optional input (KMS key, MCP auth
+        value), validated before use.
+    - rule_id: W1030
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Two records, EncryptionConfiguration.KmsKey from KmsKeyArn on the two
+        repositories. The empty-string default is the documented feature-off
+        sentinel for an optional KMS key, validated before use.
 
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml
@@ -2311,67 +3317,46 @@ global_settings:
     # would be far worse than the cost of checking the whole set.
     #
     # Two mechanisms produce the base64 matches, and a reviewer can confirm each
-    # one against the file. Deliberately NOT stating a count, per file or in total:
-    # `cdk synth` regenerates these templates, so any count written here rots the
-    # same way a line range does. An earlier revision stated per-file counts in the
-    # reasons below anyway, and they went stale the first time a suppression reason
-    # changed shape.
+    # one against the file. No count is stated, per file or in total: `cdk synth`
+    # regenerates these templates, so any count written here rots like a line range.
     #
-    # A third mechanism used to appear here and no longer does: `aws:cdk:path`
-    # metadata values such as `AshFargate/Vpc/PublicSubnet1/NATGateway` were
-    # flagged as base64 high-entropy strings. `"pathMetadata": false` in
-    # deploy/cdk/cdk.json removed them, which was done for template size rather
-    # than for this rule but eliminates those findings as a side effect. See the
-    # header of deploy/cdk/test/ash-template-size.test.ts.
+    # A third mechanism no longer appears: `aws:cdk:path` metadata values such as
+    # `AshFargate/Vpc/PublicSubnet1/NATGateway` were flagged as base64 strings.
+    # `"pathMetadata": false` in deploy/cdk/cdk.json removed them (done for template
+    # size; see the header of deploy/cdk/test/ash-template-size.test.ts).
     #
-    #   1. CDK logical resource ids — a CamelCase construct path concatenated
+    #   1. CDK logical resource ids -- a CamelCase construct path concatenated
     #      with a deterministic hash, e.g. `ConfigMcpAuthHeaderSecret99D04B65`,
     #      `Shard1ProjectRoleDefaultPolicy4B7CA148`,
     #      `VpcPrivateSubnet2RouteTableA678073B`. These are JSON object KEYS in
     #      the Resources block, not values.
-    #   2. cdk-nag suppression reasons — upstream cdk-nag base64-encodes some
-    #      reason text and records that it did so with a sibling
-    #      `"is_reason_encoded": true`. That marker is the structural proof: it
-    #      sits in the same JSON object as any such match. The plaintext is ours,
-    #      in `deploy/cdk/lib/ash-nag-suppressions.ts`.
+    #   2. cdk-nag suppression reasons -- upstream cdk-nag base64-encodes some
+    #      reason text and records that with a sibling `"is_reason_encoded": true`
+    #      in the same JSON object. The plaintext is ours, in
+    #      `deploy/cdk/lib/ash-nag-suppressions.ts`.
     #
     #      THIS MECHANISM CURRENTLY CONTRIBUTES NOTHING. The app synthesizes zero
     #      `"is_reason_encoded": true` entries: every reason it writes is pure
-    #      ASCII, so nothing gets encoded. It is documented anyway because it is
-    #      one em dash away from coming back, and because a reviewer who finds a
-    #      base64 blob in a template needs to know this is where it came from.
+    #      ASCII. It is documented because it is one em dash away from coming back.
     #
-    #      WHICH reasons get encoded is worth stating precisely, because an
-    #      earlier version of this comment got it wrong and claimed only
-    #      `CdkNagValidationFailure` reasons are encoded. That is false; the
-    #      suppression id does not predict it. What does, measured when the set
-    #      was non-empty: every encoded reason decoded to text containing a
-    #      non-ASCII character (U+2014, an em dash), and every un-encoded one was
-    #      pure ASCII. A clean split with no exceptions. Since confirmed against
-    #      cdk-nag 2.38.2 by synthesizing one plain reason beside one carrying an
-    #      em dash, so this is no longer only an observation from the output side.
-    #
-    #      Practical consequence, and the reason the set is empty: an em dash in
-    #      any reason moves it into the encoded set and can create a new finding
-    #      here. It also reaches an adopter as an opaque blob in the artifact they
-    #      launch, which is the worse half — a justification nobody can read is
-    #      not doing its job. Keeping reasons ASCII avoids both.
+    #      What decides encoding is not the suppression id (an earlier version of
+    #      this comment claimed that) but non-ASCII text: every encoded reason
+    #      decoded to text containing U+2014, an em dash, and every un-encoded one
+    #      was pure ASCII. Confirmed against cdk-nag 2.38.2 by synthesizing one
+    #      plain reason beside one carrying an em dash. An em dash in any reason can
+    #      create a new finding here and reaches an adopter as an opaque blob in the
+    #      artifact they launch. Keeping reasons ASCII avoids both.
     #
     # PATHS ARE NAMED FILE BY FILE, NOT GLOBBED
     #
-    # `deploy/cdk/templates/**` would be one entry instead of five, and it was
-    # written that way first. The problem is what a trailing `**` means: it is a
-    # whole-subtree match at any depth, so a sixth template added later inherits
-    # the suppression without anyone having looked at it. Naming the five files
-    # costs four extra entries and makes a new template fail loudly instead.
-    # This also matches the convention the rest of this file already uses for
-    # entries justified by inspection; the broad globs above (`tests/**`,
-    # `docs/**`) are category suppressions, which is a different claim.
+    # A `deploy/cdk/templates/**` entry would be one instead of five, but a trailing
+    # `**` matches the whole subtree, so a sixth template added later would inherit
+    # the suppression unread. Naming the five files costs four extra entries and
+    # makes a new template fail loudly. The broad globs above (`tests/**`, `docs/**`)
+    # are category suppressions, which is a different claim.
     #
-    # Line ranges would be the wrong way to narrow further: `cdk synth`
-    # regenerates these files and the line numbers drift, and a `line_start`
-    # with no `line_end` covers to end of file — so a range would silently widen
-    # rather than narrow.
+    # Line ranges would not narrow further: `cdk synth` regenerates these files, the
+    # line numbers drift, and a `line_start` with no `line_end` covers to end of file.
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
@@ -2450,19 +3435,19 @@ global_settings:
     # needs its line updated, which is the point of not using a range or a glob.
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 253
-      line_end: 253
-      reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
-    - rule_id: threat-process-download-exec
-      path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 469
-      line_end: 469
+      line_start: 1030
+      line_end: 1030
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 738
-      line_end: 738
+      line_start: 1518
+      line_end: 1518
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 1612
+      line_end: 1612
+      reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 443
@@ -2475,38 +3460,38 @@ global_settings:
       reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 288
-      line_end: 288
+      line_start: 292
+      line_end: 292
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 296
-      line_end: 296
+      line_start: 300
+      line_end: 300
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 771
-      line_end: 771
+      line_start: 784
+      line_end: 784
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
-      line_start: 1448
-      line_end: 1448
+      line_start: 1471
+      line_end: 1471
       reason: "Symlink target in a synthetic archive that the gate under test must reject."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_defense_in_depth.py
-      line_start: 403
-      line_end: 403
+      line_start: 406
+      line_end: 406
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 486
-      line_end: 486
+      line_start: 1199
+      line_end: 1199
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
-      line_start: 380
-      line_end: 380
+      line_start: 417
+      line_end: 417
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
@@ -2526,6 +3511,346 @@ global_settings:
     - rule_id: "CKV_DOCKER_2"
       path: "automated_security_helper/assets/Dockerfile"
       reason: "Generated Dockerfile for CLI tool — HEALTHCHECK not applicable"
+    # === Checkov GitHub Actions: the docs-CI runner dispatch input ===
+    - rule_id: "CKV_GHA_7"
+      path: ".github/workflows/ash-docs-ci-runners.yml"
+      reason: >-
+        The workflow_dispatch input is `legs`, a closed choice list selecting
+        WHICH docs-CI test legs a manual dispatch runs (all, act,
+        gitlab-ci-local, the two jenkinsfile-runners, codebuild-agent,
+        circleci). It selects test jobs; it is not a build parameter and no
+        build output is derived from it, which is the supply-chain concern
+        CKV_GHA_7 (SLSA build-parameter hygiene) encodes. Removing it would
+        remove the ability to re-run one leg by hand, the reason the dispatch
+        trigger exists.
+    # === gitleaks: fixture tokens in tests ===
+    #
+    # gitleaks' generic-api-key rule fires on two test fixtures. Per-file
+    # entries naming the flagged value, as the bandit-in-tests section does.
+    - rule_id: "generic-api-key"
+      path: "tests/unit/docs/test_page_claims.py"
+      reason: >-
+        The match is the docs' illustrative example DATABASE_PASSWORD =
+        "correct-horse-battery-staple-1234", embedded here because this test
+        executes the documentation's own snippets verbatim. A published doc
+        example, not a credential.
+    - rule_id: "generic-api-key"
+      path: "tests/unit/test_docs_ci_runner_judgments.py"
+      reason: >-
+        The flagged line assigns the TOKEN constant a pattern-built 32-hex
+        fixture value (it starts 0a1b2c3d) that the judgment tests use as the thing
+        that must be redacted from runner output. The fixture exists to prove
+        redaction. The reason does not repeat the assignment, so this file does not
+        flag itself.
+    # === PR #820: suppressions for the test files and generated fixtures this branch adds ===
+    # Each entry names one rule and one file; an entry the base already carries is not repeated.
+    # The bandit entries this section once carried are in the sorted test-code section above.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/utils/redacted_model.py
+      line_start: 298
+      line_end: 299
+      reason: >-
+        False positive. These lines map two pydantic type names to the JSON type each
+        one is shown as. No value is held. Pinned to the two lines, so a real finding
+        elsewhere in the file still reports.
+    # === The #865 chain's test files: bandit ===
+    # The unified bug-fixes chain added test files whose fixtures trip the same
+    # bandit rules the sorted test-code section above already covers. Per-file
+    # entries, never a glob, one rule and one file each, with that section's
+    # established reasons; an entry the base already carries is not repeated.
+    - rule_id: B102
+      path: tests/unit/test_a_leaked_run_scope_fails_its_test.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B102
+      path: tests/unit/utils/test_tool_downloads_refusals_and_the_rules_probe.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B103
+      path: tests/unit/cli/mcp/test_session_paths_workspace_is_private.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B108
+      path: tests/unit/config/test_sandbox_environment_setting.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/schemas/test_filter_results_by_files_uri_forms.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/scripts/test_verify_external_target_scan.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_child_tool_starts_record_what_a_child_starts.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_content_db_refresh_resolves_caches_and_locks_as_the_tools_do.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_link_chain.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_normalizers_injective.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B301
+      path: tests/unit/core/resource_management/test_one_category_per_lookup_error_and_full_disk.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/core/test_exceptions_low_unset_variable_error_copy.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/sandbox/test_scope_low_hardening.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/test_redacted_model_record_and_scalar_maker.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/test_report_path_links_names_and_pickling.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B310
+      path: tests/unit/utils/conftest.py
+      reason: >-
+        Test code. The conftest helper restores the real urlopen behind
+        download_utils' _open_url seam for tests that opt into a real local
+        fetch; the URLs it receives are the tests' own loopback addresses.
+    - rule_id: B506
+      path: tests/unit/utils/test_yaml_aliases_refuse_a_document_past_the_expansion_bound.py
+      reason: "Test code. yaml.load with the bounded NoRecursiveAliasLoader under test, on documents the test builds."
+    - rule_id: B506
+      path: tests/unit/utils/test_yaml_aliases_refuse_a_document_past_the_node_bound.py
+      reason: "Test code. yaml.load with the bounded NoRecursiveAliasLoader under test, on documents the test builds."
+    - rule_id: B604
+      path: tests/unit/base/test_a_custom_install_command_keeps_its_shell_flag.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/cli/test_dependencies_a_shell_command_is_one_command_line.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/cli/test_dependencies_install_passes_the_shell_flag.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/cli/test_dependencies_refuses_before_creating.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/utils/test_subprocess_utils_stops_resolution_and_records_edges.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    # === The #865 chain's test files: detect-secrets ===
+    # Per-file entries with the established reasons, as above. Each flagged line
+    # was read: every value is a made-up fixture, a planted probe, or a name the
+    # keyword heuristic fires on; none is a credential.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/assets/test_install_pinned_tool_redirects_and_races.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/config/test_sandbox_environment_setting.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/interactions/test_run_ash_nix.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/utils/sandbox/test_backends_low_hardening.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/utils/test_ash_install_records_and_markers.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-PRIVATE-KEY
+      path: tests/unit/converters/test_archive_member_admission.py
+      reason: >-
+        False positive. A PEM header line whose body says it is not a key,
+        planted as a fixture archive member so the converter's admission rules
+        have a secret-shaped file to handle. No key material exists.
+    - rule_id: SECRET-PRIVATE-KEY
+      path: tests/unit/interactions/test_run_ash_container_input_and_run_edges.py
+      reason: >-
+        False positive. A PEM header string the test plants and then asserts is
+        ABSENT from the container run's output lines; redaction is the
+        assertion. No key material exists.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/base/test_a_plugin_whose_check_raised_is_excluded_with_a_warning.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_a_refusal_before_the_runner_shows_no_value_the_config_read.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_mcp_server_get_scan_progress_keeps_the_producers_view.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/test_plugin_list_shows_what_a_scan_selects.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/resource_management/test_error_handling_categories_and_paths.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/resource_management/test_scan_registry_lookups_and_claims.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/resource_management/test_scanner_status_summary.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/test_engine_phase_scope_handlers_and_check_failures.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/interactions/test_run_ash_container_input_and_run_edges.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/models/test_asharp_model_low4_a_failed_failure_report_does_not_block_the_save.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_aws_plugins/test_s3_reporter_upload_holds_no_secret_value.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_builtin/converters/test_jupyter_converter_edge_inputs.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_semgrep_scanner_direct_binary_verified.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_baseline_entries_are_known.py
+      reason: "False positive. The flagged value is a detect-secrets TYPE NAME in a baseline fixture, the label of a detector, not a value."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugins/test_discovery_failure_line_redacts_env_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/reporters/test_gitlab_sast_scan_section.py
+      reason: "False positive. Synthesized B105 finding texts fed to the reporter under test; the quoted sample assignments are the findings' own message bodies."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/scripts/test_validate_ferret_plugin.py
+      reason: "False positive. The flagged line asserts the validator's own keyword PATTERN matches a sample string; the sample exists to prove detection."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/sandbox/test_fs_guard_a_refused_pre_check_is_redacted_from_the_executor.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_detect_secrets_worker_caches_lines_per_key.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_detect_secrets_worker_output_records.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_secret_masking_keys_urls_and_edges.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_secret_masking_reported_ranges.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_severity_ladder.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/workspace/test_a_failed_outcome_is_returned_when_the_exposed_values_cannot_be_read.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/workspace/test_a_reduction_that_raises_keeps_the_values_the_scan_exposed.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    # === The #865 chain's test files: gitleaks ===
+    # Per-file entries naming the flagged value, as the gitleaks fixture-token
+    # section above does.
+    #
+    # Why these live here and not inline: ASH runs gitleaks with
+    # --ignore-gitleaks-allow and neutralizes .gitleaksignore, so the inline
+    # "gitleaks:allow" markers these fixture lines carry are inert by design
+    # in ASH scans; this config is the suppression mechanism the existing
+    # gitleaks entries already use. All seven findings are deliberate,
+    # permanent test fixtures, so the entries carry no expiration, as the
+    # other gitleaks false-positive entries do. The required PR check reads
+    # this config from the BASE commit, so these entries take effect at
+    # merge; the pre-merge residual on the PR's own run is by design.
+    - rule_id: "generic-api-key"
+      path: "tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_probe_selection_and_report_shapes.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_response_logging.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/utils/test_ash_install_failures_are_logged_redacted.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "private-key"
+      path: "tests/unit/interactions/test_run_ash_container_input_and_run_edges.py"
+      reason: >-
+        False positive. The flagged lines plant a PEM header string and then
+        assert it is ABSENT from the container run's output; redaction is the
+        assertion. No key body exists.
+    # === The #865 chain's product lines: pinned to the lines the rules report ===
+    # Documentation placeholders, labels and a by-design seam inside the
+    # masking/redaction and dependency-install machinery. Line-pinned, as the
+    # product-code section at the top of this file does, so a real finding
+    # elsewhere in each file still reports.
+    - rule_id: B104
+      path: automated_security_helper/utils/secret_masking.py
+      line_start: 458
+      line_end: 458
+      reason: >-
+        False positive. "0.0.0.0" here is a schema-satisfying placeholder in the
+        tuple of synthetic replacement values a masked SARIF field can take, not
+        a bind address; no socket is opened.
+    - rule_id: B604
+      path: automated_security_helper/cli/dependencies.py
+      line_start: 1785
+      line_end: 1785
+      reason: >-
+        Forwards a CustomCommand's user-declared shell flag; the seam the
+        comment above the line documents. The command string is the operator's
+        own declared install command, not derived input.
+    - rule_id: B608
+      path: automated_security_helper/utils/content_db_refresh.py
+      line_start: 837
+      line_end: 837
+      reason: >-
+        False positive. The flagged f-string is an operator-facing WARNING line
+        about ASH's grype database refresh; no SQL is constructed anywhere in
+        the function.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: automated_security_helper/interactions/run_ash_nix.py
+      line_start: 198
+      line_end: 198
+      reason: >-
+        False positive. A docstring placeholder URL naming the credential shape
+        shown_flake_ref REDACTS. No value is held.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
+      line_start: 150
+      line_end: 150
+      reason: >-
+        False positive. A comment placeholder URL above the regex that MASKS a
+        URL's userinfo in log excerpts. No value is held.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: automated_security_helper/utils/secret_masking.py
+      line_start: 2261
+      line_end: 2261
+      reason: >-
+        False positive. A docstring placeholder URL naming the defect the
+        masking code fixes (credentials in pydantic URL fields used to survive
+        masking). No value is held.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: automated_security_helper/utils/secret_masking.py
+      line_start: 2960
+      line_end: 2960
+      reason: >-
+        False positive. A comment placeholder URL naming the credential spelling
+        the quoting lambda below it covers. No value is held.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/plugin_modules/ash_builtin/reporters/gitlab_sast_reporter.py
+      line_start: 50
+      line_end: 50
+      reason: >-
+        False positive. The constant names the rule-id PREFIX the reporter
+        strips when classifying secret findings; a label, not a value.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: automated_security_helper/utils/detect_secrets_worker.py
+      line_start: 138
+      line_end: 138
+      reason: >-
+        False positive. Docstring examples of the key/value spellings the
+        worker's column-finding logic distinguishes. No value is held.
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in
@@ -2794,10 +4119,10 @@ reporters:
 scanners:
   bandit:
     enabled: true
+    # .ash/bandit.yaml is named with --config-overrides, as grype's config is below.
     options:
       confidence_level: all
       ignore_nosec: false
-      config_file: .ash/bandit.yaml
   cdk-nag:
     enabled: true
     options:
@@ -2816,7 +4141,8 @@ scanners:
         - all
       additional_formats: []
       skip_path: []
-      config_file: .ash/.checkov.yaml
+      # .ash/.checkov.yaml is not named here: a checkov config file inside the
+      # scanned tree is not passed to checkov, whoever names it.
       severity_threshold: LOW
   detect-secrets:
     enabled: true
@@ -2824,8 +4150,9 @@ scanners:
     enabled: true
   grype:
     enabled: true
-    options:
-      config_file: .ash/.grype.yaml
+    # .ash/.grype.yaml is named with --config-overrides where this repository
+    # scans itself (.github/workflows/ash-repo-scan.yml): a config file inside the
+    # scanned tree does not choose a scanner's own config file.
   opengrep:
     enabled: true
   semgrep:

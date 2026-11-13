@@ -65,6 +65,7 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 
 ## Variables
 
+<!-- doctest: options of=terraform:deploy/terraform/modules/fargate complete -->
 | Variable | Contract | Type | Default | Notes |
 |---|---|---|---|---|
 | `container_image_uri` | — | `string` | *required* | Architecture must match `cpu_architecture`. |
@@ -77,14 +78,14 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 | `mcp_auth_header_value` | `McpAuthHeaderValue` | `string` (sensitive) | `null` | Secrets Manager. Requires TLS or an explicit opt-out. |
 | `mcp_allowed_host` | `McpAllowedHost` | `list(string)` | `[]` | *Additional* hosts; the ALB DNS name is added automatically. |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Sets `ASH_OFFLINE`. |
-| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. |
+| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. A scan uses it only when the scanned directory has no config file and the client names none. |
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-mcp"` | Max 25 characters; ALB and target group names derive from it. |
-| `container_command` | — | `list(string)` | MCP launcher | Override for an image not built by `ash-image-pipeline`. |
+| `container_command` | — | `list(string)` | `["/usr/local/bin/ash-mcp-serve"]` | The MCP launcher. Override for an image not built by `ash-image-pipeline`. |
 | `internal` | — | `bool` | `true` | Internet exposure should be deliberate. |
 | `certificate_arn` | — | `string` | `null` | Set to get an HTTPS listener. |
 | `allow_plaintext_auth_header` | — | `bool` | `false` | Opt out of the TLS requirement above. |
-| `ssl_policy` | — | `string` | TLS 1.3 policy | HTTPS listeners only. |
+| `ssl_policy` | — | `string` | `"ELBSecurityPolicy-TLS13-1-2-2021-06"` | A TLS 1.3 policy. HTTPS listeners only. |
 | `listener_port` | — | `number` | `null` | Defaults to 443 with a certificate, else 80. |
 | `container_port` | — | `number` | `8000` | ASH's own MCP default. |
 | `ingress_cidr_blocks` | — | `list(string)` | `[]` | Empty means unreachable. Set this or the SG list. |

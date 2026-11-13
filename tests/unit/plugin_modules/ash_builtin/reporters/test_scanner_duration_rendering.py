@@ -36,6 +36,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporte
     TextReporter,
 )
 
+pytestmark = pytest.mark.unit
+
 BANDIT_SECONDS = 90.0
 BANDIT_RENDERED = "1m 30s"
 SEMGREP_SECONDS = 2.5

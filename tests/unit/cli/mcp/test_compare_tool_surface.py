@@ -26,6 +26,8 @@ from typing import Any, Dict, List
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPT = REPO_ROOT / ".github" / "actions" / "validate-mcp" / "compare_tool_surface.py"
 
