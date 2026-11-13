@@ -78,9 +78,10 @@ ash --version
 awslabs/automated-security-helper v{{RELEASE}}
 ```
 
-The install provides three names for the same program: `ash`, `ashv3`, and
-`automated-security-helper`. On Windows, Git Bash and MSYS2 ship an unrelated shell
-named `ash` that can come first on your `PATH`. Use `ashv3` there.
+The install provides four names for the same program: `ash`, `ashv3`,
+`automated-security-helper`, and `agentic-security-harness`. On Windows, Git Bash and
+MSYS2 ship an unrelated shell named `ash` that can come first on your `PATH`. Use
+`ashv3` there.
 
 To move to another version, run the same command with the new tag and add `--force`.
 

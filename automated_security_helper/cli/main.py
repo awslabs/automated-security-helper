@@ -408,7 +408,7 @@ class AshTyperGroup(TyperGroup):
 app = typer.Typer(
     name="ash",
     cls=AshTyperGroup,
-    help="Automated Security Helper · one workflow for your security scanners.",
+    help="Automated Security Helper, the agentic security harness · one workflow for your scanners.",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
     # Not on a CI runner: locals can hold secrets (utils/log.py).

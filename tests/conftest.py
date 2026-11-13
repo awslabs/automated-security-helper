@@ -2782,7 +2782,9 @@ def _argv_of(args: Any) -> List[str]:
 
 
 #: ASH's console scripts (pyproject.toml's [project.scripts]): each runs the same CLI.
-_ASH_PROGRAMS = frozenset({"ash", "ashv3", "automated-security-helper"})
+_ASH_PROGRAMS = frozenset(
+    {"ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
+)
 
 
 def _installs_tools(argv: List[str]) -> bool:

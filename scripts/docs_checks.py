@@ -1992,7 +1992,9 @@ def check_session_variables(
 # The CLI model
 # ---------------------------------------------------------------------------
 
-ASH_PROGRAMS = frozenset({"ash", "ashv3", "automated-security-helper"})
+ASH_PROGRAMS = frozenset(
+    {"ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
+)
 ASH_PACKAGE = "automated-security-helper"
 ASH_MODULE = "automated_security_helper"
 CONTAINER_RUNTIMES = frozenset({"docker", "podman", "finch", "nerdctl"})
