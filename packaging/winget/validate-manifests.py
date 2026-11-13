@@ -254,7 +254,9 @@ def invalid(manifest_type: str, exc: jsonschema.ValidationError) -> Failure:
 # Almquist shell, which is why the v4 command is `ashx`, so the MSIX has no ash.exe alias
 # and Commands must not list it. The same set is NOT_EXPOSED_SCRIPTS in
 # packaging/msix/msix.py, which checks the MSIX manifest; change both together.
-NOT_EXPOSED_SCRIPTS = frozenset({"ash"})
+# `agentic-security-harness` is in the set though it is not deprecated: the MSIX has one
+# launcher executable per exposed name and none is built for the product-name alias.
+NOT_EXPOSED_SCRIPTS = frozenset({"ash", "agentic-security-harness"})
 
 
 def project_metadata(repo: Path) -> tuple[str, list[str]]:

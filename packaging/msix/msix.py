@@ -256,7 +256,9 @@ def _packaged_version(pyproject: dict) -> str:
 # packaging/assert-package-contents.py carries the same set as
 # DEPRECATED_SCRIPTS_NOT_EXPOSED, because it judges the BUILT package against its wheel's
 # entry points and runs without this file. Change both together.
-NOT_EXPOSED_SCRIPTS = frozenset({"ash"})
+# `agentic-security-harness` is in the set though it is not deprecated: the MSIX has one
+# launcher executable per exposed name and none is built for the product-name alias.
+NOT_EXPOSED_SCRIPTS = frozenset({"ash", "agentic-security-harness"})
 
 
 def _console_scripts(pyproject: dict) -> set[str]:

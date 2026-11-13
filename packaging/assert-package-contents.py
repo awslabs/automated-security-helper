@@ -568,7 +568,11 @@ def wheel_console_scripts(data: bytes) -> set[str]:
 #
 # packaging/msix/msix.py (NOT_EXPOSED_SCRIPTS) and packaging/winget/validate-manifests.py
 # carry the same set for the source manifests; change all three together.
-DEPRECATED_SCRIPTS_NOT_EXPOSED = frozenset({"ash"})
+#
+# `agentic-security-harness` is in the set too, though it is not deprecated: it is the
+# product-name alias added to [project.scripts] for pip, Homebrew and the container, and
+# the Windows launchers (one executable per exposed name) do not build one for it.
+DEPRECATED_SCRIPTS_NOT_EXPOSED = frozenset({"ash", "agentic-security-harness"})
 
 
 def check_entry_points(
