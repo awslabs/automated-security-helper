@@ -1000,7 +1000,10 @@ def _uv_tools_dir_stamp() -> str:
     uv) reads "absent" or a directory that never moves, and the memo then
     degrades to its TTL -- never a wrong answer longer than that.
     """
-    named = os.environ.get("UV_TOOL_DIR", "").strip()
+    # No get() default: the docs table records UV_TOOL_DIR as read with none
+    # (the sandbox policy's read), and the docs-freshness check holds every
+    # read of a variable to its documented default.
+    named = (os.environ.get("UV_TOOL_DIR") or "").strip()
     if named:
         base = Path(os.path.expanduser(named))
     else:

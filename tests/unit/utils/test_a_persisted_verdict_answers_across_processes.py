@@ -40,10 +40,12 @@ def copy_and_uv(tmp_path):
     copy = tmp_path / "pathbin" / "checkov"
     copy.parent.mkdir()
     copy.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    os.chmod(copy, 0o755)
+    # The Path method, as every executable test stub in this suite sets its
+    # bit: the stubs must be executable (find_tool_interpreter stats them).
+    copy.chmod(0o755)
     uv = tmp_path / "uv"
     uv.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    os.chmod(uv, 0o755)
+    uv.chmod(0o755)
     return copy, uv
 
 
@@ -227,7 +229,7 @@ def _venv_shaped_copy(tmp_path, system_site=False):
     (venv / "bin").mkdir(parents=True)
     interpreter = venv / "bin" / "python"
     interpreter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    os.chmod(interpreter, 0o755)
+    interpreter.chmod(0o755)
     (venv / "pyvenv.cfg").write_text(
         "home = /usr/bin\n"
         f"include-system-site-packages = {'true' if system_site else 'false'}\n"
@@ -239,7 +241,7 @@ def _venv_shaped_copy(tmp_path, system_site=False):
     copy = tmp_path / "venvbin" / "checkov"
     copy.parent.mkdir()
     copy.write_text(f"#!{interpreter}\nraise SystemExit(0)\n", encoding="utf-8")
-    os.chmod(copy, 0o755)
+    copy.chmod(0o755)
     return copy, site
 
 

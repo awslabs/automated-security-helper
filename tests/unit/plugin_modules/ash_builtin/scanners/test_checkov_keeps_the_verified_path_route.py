@@ -17,8 +17,6 @@ fails loudly.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from unittest.mock import patch
 
@@ -53,7 +51,9 @@ def _verified_copy(tmp_path):
     copy = tmp_path / "pathbin" / "checkov"
     copy.parent.mkdir()
     copy.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    os.chmod(copy, 0o755)
+    # The Path method, as every executable test stub in this suite sets its
+    # bit: the stub must be executable (the honored check reads X_OK).
+    copy.chmod(0o755)
     return copy
 
 
