@@ -922,17 +922,22 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         """The base pre-scan, with a configuration handed to ``scan()`` applied first.
 
         The executor passes each target's scanner configuration to ``scan()``,
-        and the base ``_pre_scan`` replaces ``self.config`` with it after the
-        dependency check and without rebuilding anything (``configure()`` is
-        called by nothing on that route), so the argv built at construction
-        stayed: the old ``--confidence-level``, no ``--ignore-nosec``, the old
-        ``--ini`` or ``--configfile``, while the ``--exclude`` rebuilt per scan
-        took the new ``excluded_paths`` and the run looked configured. Here a
-        configuration that differs from the current one is applied
-        (``_apply_config``) before the base runs its dependency check, so the
-        check and the argv read the configuration the scan runs under; one
-        equal to the current configuration, which the executor passes on every
-        target, changes nothing.
+        and the base ``_pre_scan`` used to replace ``self.config`` with it
+        without rebuilding anything (``configure()`` is called by nothing on
+        that route), so the argv built at construction stayed: the old
+        ``--confidence-level``, no ``--ignore-nosec``, the old ``--ini`` or
+        ``--configfile``, while the ``--exclude`` rebuilt per scan took the new
+        ``excluded_paths`` and the run looked configured. Here a configuration
+        that differs from the current one is applied (``_apply_config``) before
+        the base runs its dependency check, so the check and the argv read the
+        configuration the scan runs under; one equal to the current
+        configuration, which the executor passes on every target, changes
+        nothing. ``None`` is handed down, so the base's own swap (which now
+        also runs before its dependency check) does not run a second time --
+        which makes the validation reset here bandit's own duty: the new
+        configuration can change the requirement the check verifies
+        (``tool_version``, extras), so the memoized verdict and the
+        verified-PATH record no longer answer for it.
         """
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
@@ -943,6 +948,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             ):
                 self.config = replacement
                 self._apply_config()
+                self._reset_dependency_validation()
         return super()._pre_scan(target, target_type, None, *args, **kwargs)
 
     def validate_plugin_dependencies(self) -> bool:

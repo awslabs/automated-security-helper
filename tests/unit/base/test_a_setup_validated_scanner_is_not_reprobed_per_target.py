@@ -92,6 +92,33 @@ def test_a_failed_validation_is_still_probed_per_target(plugin_context, tmp_path
     assert calls == [1, 1]
 
 
+def test_a_bad_per_target_config_raises_before_the_missing_skip(
+    plugin_context, tmp_path
+):
+    """Pinned: the config swap precedes the dependency check in _pre_scan.
+
+    A per-target config that cannot be validated therefore raises even for a
+    scanner whose dependencies are missing, where it used to be skipped first.
+    Pinned as right rather than caught: the config is the scan request's own
+    input, so one that does not validate is an error to report, not something
+    to discard silently while recording MISSING for an unrelated reason; a
+    scanner whose tool IS present raised on the same config before the reorder
+    too; and scan()'s template wraps _pre_scan for exactly this (the except
+    around its _pre_scan call sets end_time and re-raises to the executor,
+    naming the dependency check as the work that can raise).
+    """
+    import pydantic
+
+    scanner, calls = _counting_scanner(plugin_context, [False])
+    target = tmp_path / "target"
+    target.mkdir()
+
+    with pytest.raises(pydantic.ValidationError):
+        scanner._pre_scan(target, target_type="source", config={"name": "not-counting"})
+    # The request itself was bad: the dependency check never ran for it.
+    assert calls == []
+
+
 def test_a_transient_setup_failure_gets_its_per_target_retry(plugin_context, tmp_path):
     scanner, calls = _counting_scanner(plugin_context, [False, True])
     assert scanner.validate_plugin_dependencies_once() is False

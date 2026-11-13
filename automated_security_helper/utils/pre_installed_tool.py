@@ -238,11 +238,13 @@ _PERSISTED_VERDICT_TTL_SECONDS = 24 * 3600.0
 #: judge verifies the interpreter's environment (installed version, extras,
 #: dependencies), not the launcher file, and a `pip uninstall` or downgrade in
 #: that environment rewrites no launcher. Where the environment is pinned in
-#: the record's key (the shebang interpreter plus its site-packages
+#: the record's key (an ISOLATED venv's interpreter plus its site-packages
 #: directories' mtimes, which move on any install, uninstall or downgrade
 #: there; or a content-addressed Nix store path), the full TTL applies; where
-#: it cannot be (a native binary, an `env` shebang, an unrecognized layout),
-#: the record answers only this long past the in-process memo.
+#: it cannot be (a native binary, a system interpreter whose pip writes to
+#: directories the stamp does not read, a venv that re-opens the system's
+#: site-packages, a user-site script), the record answers only this long past
+#: the in-process memo.
 _UNPINNED_VERDICT_TTL_SECONDS = 3600.0
 
 
@@ -315,6 +317,30 @@ def _open_verdict_store(*, create: bool) -> Optional[int]:
     return fd
 
 
+def _is_isolated_venv(prefix: Path) -> bool:
+    """Whether ``prefix`` is a venv whose packages ALL live under it.
+
+    ``pyvenv.cfg`` is the venv marker (PEP 405); one that sets
+    ``include-system-site-packages = true`` re-opens the base environment,
+    whose directories the identity fragment does not stamp. A prefix with no
+    ``pyvenv.cfg`` is a system interpreter's, where pip writes to directories
+    the ``lib/python*/site-packages`` glob does not read either
+    (``/usr/local/lib/...`` on Debian-family, ``lib64`` on Fedora/RHEL), so
+    only an isolated venv's site-packages mtimes pin the whole environment.
+    """
+    try:
+        with open(
+            prefix / "pyvenv.cfg", "r", encoding="utf-8", errors="replace"
+        ) as handle:
+            for line in handle:
+                key, _, value = line.partition("=")
+                if key.strip().lower() == "include-system-site-packages":
+                    return value.strip().lower() != "true"
+        return True
+    except OSError:
+        return False
+
+
 def _environment_identity(resolved: str) -> Tuple[str, bool]:
     """A material fragment naming the copy's Python environment, and whether it pins it.
 
@@ -323,16 +349,23 @@ def _environment_identity(resolved: str) -> Tuple[str, bool]:
     size move for none of `pip uninstall <a dependency>`, a downgrade, or an
     in-place venv rebuild. So the fragment carries the interpreter that
     provides the copy (``find_tool_interpreter``'s reviewed read: the shebang,
-    the environment beside a wrapped script, a Windows launcher), stat through
-    any symlink -- mtime and size move on an interpreter swap or rebuild --
-    and each site-packages directory's mtime beside it: a directory whose
-    mtime moves whenever a distribution is added, removed or replaced there,
-    dist-info directories included. A Nix store copy is pinned by its
-    content-addressed path, which the key's resolved path already carries.
-    ``pinned`` False -- no interpreter found, a user-site script (whose
-    shebang interpreter does not describe the environment that provides it,
-    ``_in_user_site``), no site-packages found beside the interpreter -- sends
-    the record to the short TTL (``_UNPINNED_VERDICT_TTL_SECONDS``) instead.
+    an ``env`` shebang resolved through PATH, the environment beside a wrapped
+    script, a Windows launcher), stat through any symlink -- mtime and size
+    move on an interpreter swap or rebuild -- and each site-packages
+    directory's mtime beside it: a directory whose mtime moves whenever a
+    distribution is added, removed or replaced there, dist-info directories
+    included. A Nix store copy is pinned by its content-addressed path, which
+    the key's resolved path already carries.
+
+    ``pinned`` True ONLY for an isolated venv (``_is_isolated_venv``): there
+    every install, uninstall and downgrade lands under the stamped
+    directories. Everything else is unpinned and takes the short TTL
+    (``_UNPINNED_VERDICT_TTL_SECONDS``): a system interpreter's pip writes to
+    directories the stamp does not read (``/usr/local/lib``, ``lib64``), a
+    ``--system-site-packages`` venv re-opens those, a user-site script's
+    shebang interpreter does not describe the environment that provides it
+    (``_in_user_site``), and a copy with no interpreter or no site-packages
+    offers nothing to stamp.
 
     Limits, accepted: an edit INSIDE an installed package that adds or removes
     no directory entry does not move site-packages' mtime (it also rewrites no
@@ -361,7 +394,7 @@ def _environment_identity(resolved: str) -> Tuple[str, bool]:
             parts.append(f"{directory}\x00{os.stat(directory).st_mtime_ns}")
         except OSError:
             parts.append(f"{directory}\x00gone")
-    return ("\x00".join(parts), True)
+    return ("\x00".join(parts), _is_isolated_venv(prefix))
 
 
 def _store_name(

@@ -27,6 +27,9 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     checkov_scanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+    BanditScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
 )
@@ -177,6 +180,57 @@ def test_a_config_swap_in_pre_scan_revalidates_without_the_flip(checkov, tmp_pat
     # target scans with), with the route restored and the record cleared.
     assert observed == [(True, None, 123)]
     assert checkov.config.options.scan_timeout == 123
+
+
+def test_a_bandit_config_swap_resets_the_validation_too(tmp_path):
+    """Bandit swaps the config ITSELF in its _pre_scan override and hands the
+    base None, so the base swap's reset never runs for it: the reset is
+    bandit's own duty right after _apply_config. Without it, a per-target
+    config with another tool_version reused the setup verdict, and the early
+    honored-record check accepted a PATH copy verified against the OLD
+    requirement.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("x = 1\n")
+    output = tmp_path / "out"
+    output.mkdir()
+    context = PluginContext(source_dir=source, output_dir=output, config=AshConfig())
+    bandit = BanditScanner(context=context)
+
+    copy = _verified_copy(tmp_path)
+    bandit.use_uv_tool = False
+    bandit._verified_pre_installed_executable = str(copy)
+    bandit._dependencies_validated = True
+    bandit.dependencies_satisfied = True
+
+    observed = []
+
+    def recording_validate(self):
+        observed.append(
+            (
+                self.use_uv_tool,
+                self._verified_pre_installed_executable,
+                self.config.options.scan_timeout,
+            )
+        )
+        self.dependencies_satisfied = True
+        return True
+
+    changed = bandit.config.model_dump(by_alias=True)
+    changed["options"]["scan_timeout"] = 321
+
+    with patch.object(
+        BanditScanner, "validate_plugin_dependencies", recording_validate
+    ):
+        unchanged = bandit.config.model_dump(by_alias=True)
+        assert bandit._pre_scan(source, target_type="source", config=unchanged)
+        assert observed == []
+
+        assert bandit._pre_scan(source, target_type="source", config=changed)
+
+    assert observed == [(True, None, 321)]
+    assert bandit.config.options.scan_timeout == 321
 
 
 def test_a_decision_repointed_at_uv_is_not_honored(checkov, tmp_path):

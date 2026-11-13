@@ -221,13 +221,19 @@ def test_the_reset_forgets_the_store_too(store, copy_and_uv, monkeypatch):
     assert calls == [1, 1]
 
 
-def _venv_shaped_copy(tmp_path):
-    """A console script whose shebang names a venv's python, with site-packages."""
+def _venv_shaped_copy(tmp_path, system_site=False):
+    """A console script whose shebang names an isolated venv's python."""
     venv = tmp_path / "venv"
     (venv / "bin").mkdir(parents=True)
     interpreter = venv / "bin" / "python"
     interpreter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     os.chmod(interpreter, 0o755)
+    (venv / "pyvenv.cfg").write_text(
+        "home = /usr/bin\n"
+        f"include-system-site-packages = {'true' if system_site else 'false'}\n"
+        "version = 3.12.15\n",
+        encoding="utf-8",
+    )
     site = venv / "lib" / "python3.12" / "site-packages"
     site.mkdir(parents=True)
     copy = tmp_path / "venvbin" / "checkov"
@@ -264,6 +270,17 @@ def test_a_changed_environment_misses(store, copy_and_uv, monkeypatch, tmp_path)
     _forget_memo()
     _verify_once(copy, uv)
     assert calls == [1, 1]
+
+
+def test_a_system_site_venv_is_not_pinned(store, copy_and_uv, monkeypatch, tmp_path):
+    """include-system-site-packages re-opens directories the stamp never reads."""
+    _, uv = copy_and_uv
+    copy, _ = _venv_shaped_copy(tmp_path, system_site=True)
+    _counting_verify(monkeypatch)
+    _verify_once(copy, uv)
+    (record_path,) = store.glob("*.json")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["ttl_seconds"] == pit._UNPINNED_VERDICT_TTL_SECONDS
 
 
 def test_an_unpinnable_environment_gets_the_short_ttl(store, copy_and_uv, monkeypatch):
