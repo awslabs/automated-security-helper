@@ -137,7 +137,15 @@ class TestTheConfigFold:
             warnings
         )
 
-    def test_a_configured_canonical_section_wins_key_by_key(self):
+    def test_the_alias_section_overlays_a_canonical_one_key_by_key(self):
+        """The alias side wins where both set the same key.
+
+        The case that decides the direction is not a hand-written config (lint
+        flags those): ``apply_config_overrides`` round-trips through
+        ``model_dump()``, which emits the canonical section with every default
+        filled in, so on any override run the canonical side is machine-written
+        defaults and the alias side is what the operator wrote.
+        """
         segment = ScannerConfigSegment.model_validate(
             {
                 "semgrep": {
@@ -149,12 +157,28 @@ class TestTheConfigFold:
         )
 
         dumped = segment.model_dump(by_alias=True)
-        assert dumped["opengrep"]["enabled"] is True, (
-            "the canonical section was written on purpose and must win"
+        assert dumped["opengrep"]["enabled"] is False, (
+            "the alias section holds the operator's words and must win"
         )
         assert dumped["opengrep"]["options"]["exclude_rule"] == ["from.alias"], (
             "keys only the alias set still carry over"
         )
+
+    def test_a_semgrep_override_survives_the_dump_round_trip(self):
+        """`--config-overrides scanners.semgrep.enabled=false` must disable
+        opengrep: apply_config_overrides round-trips through model_dump(), so
+        the dumped opengrep defaults sit beside the override's semgrep section
+        and must not overwrite it."""
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.resolve_config import (
+            apply_config_overrides,
+        )
+
+        config = apply_config_overrides(
+            AshConfig(project_name="alias-roundtrip"),
+            ["scanners.semgrep.enabled=false"],
+        )
+        assert config.scanners.opengrep.enabled is False
 
     def test_an_unknown_extra_scanner_is_left_alone(self):
         """Control: the fold must not eat real third-party scanner sections."""
@@ -182,10 +206,20 @@ class TestTheCliNameResolution:
         ]
 
     def test_dependencies_install_takes_the_same_aliases(self):
-        """`ashx dependencies install --tool semgrep` installs opengrep's tool."""
+        """`ashx dependencies install --tool semgrep` installs opengrep's tool,
+        through the same case- and punctuation-insensitive lookup as every
+        other entry point; the exact-name table stays for ArchiveConverter."""
         from automated_security_helper.cli.dependencies import (
             DEPRECATED_TOOL_ALIASES,
+            _resolve_tool_aliases,
         )
 
         for alias, canonical in SCANNER_NAME_ALIASES.items():
-            assert DEPRECATED_TOOL_ALIASES.get(alias) == canonical
+            assert _resolve_tool_aliases([alias]) == {alias: canonical}
+            spelled = alias.upper()
+            assert _resolve_tool_aliases([spelled]) == {spelled: canonical}
+        assert DEPRECATED_TOOL_ALIASES == {"ArchiveConverter": "archive"}
+        assert _resolve_tool_aliases(["ArchiveConverter"]) == {
+            "ArchiveConverter": "archive"
+        }
+        assert _resolve_tool_aliases(["bandit"]) == {"bandit": "bandit"}

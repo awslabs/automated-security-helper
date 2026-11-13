@@ -11,6 +11,8 @@ mcp_get_scan_results into smaller, purpose-specific views.
 import copy
 from typing import Any, Dict, List, Optional
 
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
+
 
 def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     """Filter results to return only summary information."""
@@ -178,9 +180,16 @@ def apply_content_filters(
     Returns:
         Filtered results with only matching scanners and severities.
     """
-    scanner_list = (
-        [s.strip().lower() for s in scanners.split(",")] if scanners else None
-    )
+
+    # A retired scanner name (``semgrep``) selects the plugin that serves it,
+    # the same resolution every other entry point applies. Both sides go
+    # through it: the request, and the stored report names, so a results file
+    # written before the retirement (its rows named ``semgrep``) still answers
+    # a request for either spelling.
+    def _scanner_key(name: str) -> str:
+        return canonical_scanner_name(name.strip()).lower()
+
+    scanner_list = [_scanner_key(s) for s in scanners.split(",")] if scanners else None
     severity_list = (
         [s.strip().lower() for s in severities.split(",")] if severities else None
     )
@@ -191,7 +200,7 @@ def apply_content_filters(
         filtered_results["scanner_reports"] = {
             name: data
             for name, data in filtered_results["scanner_reports"].items()
-            if name.lower() in scanner_list
+            if _scanner_key(name) in scanner_list
         }
 
     if (
@@ -202,7 +211,7 @@ def apply_content_filters(
         if scanner_list:
             new_scanner_results = {}
             for name, data in orig.items():
-                if name.lower() in scanner_list:
+                if _scanner_key(name) in scanner_list:
                     if severity_list and "severity_counts" in data:
                         data = data.copy()
                         data["severity_counts"] = {
@@ -235,7 +244,7 @@ def apply_content_filters(
             for name, data in filtered_results["raw_results"][
                 "additional_reports"
             ].items()
-            if name.lower() in scanner_list
+            if _scanner_key(name) in scanner_list
         }
 
     _severity_keys = {"critical", "high", "medium", "low", "info", "suppressed"}

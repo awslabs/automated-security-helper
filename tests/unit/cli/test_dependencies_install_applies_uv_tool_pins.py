@@ -204,7 +204,8 @@ class TestTheOverridesReachTheInstallCommand:
         specs = recorded_install(
             ["--config-overrides", "scanners.bandit.options.tool_version===1.2.3"]
         )
-        assert specs["bandit"] == "bandit==1.2.3"
+        # bandit installs with its declared extras; the override pins the version.
+        assert specs["bandit"] == "bandit[sarif,toml]==1.2.3"
         assert not specs["checkov"].endswith(
             "==" + THIRD_PARTY_LICENSES["checkov"].version.lstrip("v")
         )

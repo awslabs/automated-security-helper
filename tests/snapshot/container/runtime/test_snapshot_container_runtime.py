@@ -29,7 +29,7 @@ on 3.x; v4 removed that script, and its scans go through ``ashx --mode container
 Only
 bandit is selected: its version is fixed when the image is built, and the
 fixture's two bandit findings are the same on every architecture. grype and
-semgrep read advisory and rule data that changes daily.
+opengrep read advisory and rule data that changes daily.
 """
 
 from __future__ import annotations

@@ -2438,9 +2438,12 @@ def _compute_exit_code(
         # registered names, so ScannerSelectionError did not fire; semgrep then
         # declared the platform unsupported and was recorded SKIPPED; the other nine
         # were not selected and were SKIPPED too; findings were 0; exit 0. A scan
-        # that ran no scanner reported the tree clean. The same shape holds today
-        # for any single selected scanner that declines its platform (opengrep,
-        # which also serves the semgrep alias, declines Windows the same way).
+        # that ran no scanner reported the tree clean. No builtin declares a
+        # platform unsupported today (opengrep, which serves the semgrep alias,
+        # ships a windows/amd64 build and is merely disabled by default on
+        # Windows through its config default, a different mechanism), but the
+        # shape returns with any future scanner that overrides
+        # unsupported_platform_reason, so the guard stays.
         #
         # .github/scripts/assert_scanners_completed.py already asserted this and
         # caught that case in CI, which is the reason it has to be here as well:

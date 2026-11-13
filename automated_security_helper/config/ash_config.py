@@ -403,9 +403,16 @@ class ScannerConfigSegment(_PluginConfigSegment):
           each named in a warning: carrying them as extras would show settings
           that nothing reads (semgrep's ``tool_version`` and ``install_timeout``
           described its retired uv-tool install, which opengrep does not have).
-        * A section already present under the canonical name wins key by key
-          (``_merge_config_values`` with the canonical side as overlay): an
-          operator who configured both wrote the canonical one on purpose.
+        * A section already present under the canonical name is the base and
+          the alias section is the overlay, key by key -- the same choice as
+          ``_read_field_name_spellings_as_aliases`` above, for the same reason:
+          ``apply_config_overrides`` round-trips through ``model_dump()``, which
+          emits the canonical section with every default filled in, so on any
+          override run the canonical side is mostly machine-written defaults
+          while the alias side holds what the operator actually wrote
+          (``scanners.semgrep.enabled=false`` must win over the dumped
+          ``enabled: true``). A hand-written config with both spellings is
+          flagged by ``ashx config lint``.
         """
         if not isinstance(data, dict):
             return data
@@ -446,7 +453,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
                         f"{canonical} counterpart and were dropped"
                     )
             if canonical in data:
-                data[canonical] = _merge_config_values(section, data[canonical])
+                canonical_section = data[canonical]
+                if isinstance(canonical_section, BaseModel):
+                    canonical_section = canonical_section.model_dump(exclude_unset=True)
+                data[canonical] = _merge_config_values(canonical_section, section)
             else:
                 data[canonical] = section
         return data

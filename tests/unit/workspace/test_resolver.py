@@ -167,7 +167,7 @@ def test_incompatible_scanner_pins_refuse_and_name_both_constraints(tmp_path):
         tmp_path,
         "api",
         "project_name: api\nscanners:\n  bandit:\n"
-        '    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
+        '    options:\n      tool_version: ">=1.7.0,<2.0.0"\n',
     )
     _project(
         tmp_path,
@@ -184,7 +184,7 @@ def test_incompatible_scanner_pins_refuse_and_name_both_constraints(tmp_path):
     assert "bandit" in message
     assert "api" in message
     assert "web" in message
-    assert ">=1.125.0,<2.0.0" in message
+    assert ">=1.7.0,<2.0.0" in message
     assert ">=2.0.0" in message
 
 
@@ -192,20 +192,20 @@ def test_compatible_but_different_pins_are_accepted_and_recorded(tmp_path):
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.7.0,<2.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.130.0"\n',
+        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.8.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
     plan = resolve_workspace(workspace)
 
     projects = _by_key(plan)
-    assert projects["api"].scanner_pins["bandit"] == ">=1.125.0,<2.0.0"
-    assert projects["web"].scanner_pins["bandit"] == ">=1.130.0"
+    assert projects["api"].scanner_pins["bandit"] == ">=1.7.0,<2.0.0"
+    assert projects["web"].scanner_pins["bandit"] == ">=1.8.0"
 
 
 def test_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
@@ -214,7 +214,7 @@ def test_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.125.0rc1"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.8.0rc1"\n',
     )
     _project(
         tmp_path,
@@ -230,19 +230,26 @@ def test_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
 
 
 def test_a_single_project_pin_is_never_a_conflict(tmp_path):
-    """One project declaring an exotic pin has nothing to conflict with."""
+    """One project declaring an exotic pin has nothing to conflict with.
+
+    checkov because its options declare no default ``tool_version``: the
+    unpinned project contributes no effective checkov pin, so api's exotic
+    prerelease floor is the only pin for the scanner and there is no pair to
+    compare. (bandit would not show this: its built-in default is an effective
+    pin on every project.)
+    """
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.125.0rc1"\n',
+        'project_name: api\nscanners:\n  checkov:\n    options:\n      tool_version: ">=3.2.0rc1"\n',
     )
     _project(tmp_path, "web")
     workspace = _workspace(tmp_path, ["api", "web"])
 
     plan = resolve_workspace(workspace)
 
-    assert _by_key(plan)["api"].scanner_pins["bandit"] == ">=1.125.0rc1"
-    assert "bandit" not in _by_key(plan)["web"].scanner_pins
+    assert _by_key(plan)["api"].scanner_pins["checkov"] == ">=3.2.0rc1"
+    assert "checkov" not in _by_key(plan)["web"].scanner_pins
 
 
 def test_shared_default_pins_do_not_conflict(tmp_path):

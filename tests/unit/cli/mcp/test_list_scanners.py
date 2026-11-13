@@ -39,11 +39,13 @@ def scanners():
 
     Module-scoped because the call is no longer cheap: it instantiates every
     scanner and runs each dependency check, and checkov and the uv-tool scanners
-    accounted for most of the measured 7.3 seconds -- they detect their versions
-    during construction, which is the same cost a real scan pays at startup.
+    account for most of the several seconds that takes -- they detect their
+    versions during construction, which is the same cost a real scan pays at
+    startup. (The per-call figure was measured before the semgrep scanner
+    retired, so it is not quoted here; the shape of the cost is unchanged.)
 
-    Calling it per test cost roughly 15 x 7.3s and took this file from a couple of
-    seconds to 26. Sharing one snapshot loses nothing: every test below asserts
+    Calling it per test multiplies that cost by every test that reads the
+    snapshot. Sharing one snapshot loses nothing: every test below asserts
     about a single observation of one environment, and none of them mutates it. The
     stub-injection tests deliberately do NOT use this fixture -- they replace the
     discovered scanner set, so they need their own call.

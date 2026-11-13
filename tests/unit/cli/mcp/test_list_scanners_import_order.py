@@ -75,7 +75,9 @@ class TestListScannersIsImportOrderIndependent:
 
         missing = VENDORED_SCANNER_NAMES - names
         assert not missing, f"mcp_list_scanners() lost {missing} to a stale resolve"
-        assert len(names) >= 13
+        # Nine builtin scanners (semgrep retired behind the opengrep alias)
+        # plus the three vendored ones.
+        assert len(names) >= 12
 
     def test_complete_when_the_memo_is_demonstrably_short(self):
         """Same guarantee, with the memo's shortness asserted rather than assumed.
@@ -136,7 +138,8 @@ class TestLoadedScannerClasses:
         assert VENDORED_SCANNER_CLASSES <= names, (
             f"resolved from the memo rather than the loaders; got {sorted(names)}"
         )
-        assert len(resolved) >= 13
+        # Nine builtin scanner classes plus the three vendored ones.
+        assert len(resolved) >= 12
 
     def test_returns_no_duplicates(self):
         """The internal and vendored lists overlap in principle; dedupe anyway.

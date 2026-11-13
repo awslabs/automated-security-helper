@@ -243,7 +243,7 @@ ashx build-image --build-target ci --custom-containerfile ./my-dockerfile
 
 ```bash
 # Complex configuration overrides
-ashx --config-overrides 'scanners.semgrep.options.rules=["p/ci", "p/owasp-top-ten"]'
+ashx --config-overrides 'scanners.opengrep.options.config=["p/ci", "p/owasp-top-ten"]'
 ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 

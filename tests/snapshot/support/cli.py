@@ -16,10 +16,9 @@ run happens inside :func:`pinned_console`, which says what it pins and why.
 outputs that draw a box around an absolute path.
 
 :func:`simulated_host` makes this process answer as another OS and CPU. Patching
-``platform.system`` alone is not enough, because two scanner configs read it while
-their class body runs, at import:
+``platform.system`` alone is not enough, because one scanner config reads it while
+its class body runs, at import:
 
-- ``OpengrepScannerConfig.enabled = platform.system().lower() != "windows"``
 - ``OpengrepScannerConfig.enabled = platform.system().lower() != "windows"``
 
 pydantic copies those defaults into the core schema of every model that nests the

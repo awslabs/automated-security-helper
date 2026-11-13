@@ -39,7 +39,7 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.process_env import set_environ
-from automated_security_helper.utils.scanner_names import SCANNER_NAME_ALIASES
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
@@ -77,10 +77,6 @@ EXIT_BAD_SELECTION = 2
 # start exiting 2, and it warns so they can move to the new key.
 DEPRECATED_TOOL_ALIASES: dict[str, str] = {
     "ArchiveConverter": "archive",
-    # Retired scanner names resolve to the plugin that serves them
-    # (utils/scanner_names.SCANNER_NAME_ALIASES holds the canonical table):
-    # `--tool semgrep` installs opengrep's tool rather than exiting 2.
-    **SCANNER_NAME_ALIASES,
 }
 
 
@@ -88,14 +84,20 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
     """Map each requested `--tool` name to the plugin name to select it by.
 
     A deprecated alias maps to its replacement and prints one warning to stderr per
-    alias, however many times it was passed. Every other name maps to itself, so an
-    unknown name is still refused by the caller exactly as before.
+    alias, however many times it was passed. A retired scanner name resolves
+    through ``canonical_scanner_name`` -- the same case- and punctuation-
+    insensitive lookup every other entry point applies, so ``--tool Semgrep``
+    installs opengrep's tool too. Every other name maps to itself, so an unknown
+    name is still refused by the caller exactly as before.
     """
     resolved: dict[str, str] = {}
     for tool in tools:
         if tool in resolved:
             continue
         replacement = DEPRECATED_TOOL_ALIASES.get(tool)
+        if replacement is None:
+            canonical = canonical_scanner_name(tool)
+            replacement = canonical if canonical != tool else None
         if replacement is None:
             resolved[tool] = tool
             continue

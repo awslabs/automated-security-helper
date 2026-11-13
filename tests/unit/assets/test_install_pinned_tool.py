@@ -1379,14 +1379,19 @@ class TestPythonToolLicenses:
         assert sorted(server.calls) == sorted(_BANDIT_URL_FILES.values())
         source = (directory / "SOURCE").read_text()
         entry = THIRD_PARTY_LICENSES["bandit"]
+        # bandit is Apache-2.0, so no copyleft "Corresponding source" pointer
+        # (that shape is opengrep's and has its own test); the provenance lines
+        # must still name the upstream, the tag, the commit and the install.
         for needle in (
-            "Corresponding source",
+            "License: Apache-2.0",
             entry.repository,
-            f"tag:        {entry.version}",
+            "Release tag:",
+            entry.version,
             entry.commit,
             f"PyPI bandit=={version}",
         ):
             assert needle in source, needle
+        assert "Corresponding source" not in source
 
     def test_a_fetched_license_that_misses_its_digest_is_refused(
         self, tmp_path, monkeypatch, tool_dir

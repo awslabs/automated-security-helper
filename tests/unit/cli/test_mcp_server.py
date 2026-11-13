@@ -1045,7 +1045,7 @@ class TestResources:
         result = get_ash_help()
         assert "ASH" in result
         assert "Bandit" in result
-        assert "Semgrep" in result
+        assert "Opengrep" in result
 
 
 # ---------------------------------------------------------------------------

@@ -219,6 +219,18 @@ class TestApplyContentFilters:
         assert "bandit" in result["raw_results"]["scanner_results"]
         assert "semgrep" not in result["raw_results"]["scanner_results"]
 
+    def test_a_retired_name_selects_the_plugin_that_serves_it(self):
+        """`scanners="semgrep"` matches opengrep rows: the alias resolves
+        through canonical_scanner_name on both the request and the stored
+        report names, so results written before the retirement still answer."""
+        current = {"scanner_reports": {"opengrep": {"a": 1}, "bandit": {"b": 2}}}
+        filtered = apply_content_filters(current, scanners="semgrep")
+        assert list(filtered["scanner_reports"]) == ["opengrep"]
+
+        historical = {"scanner_reports": {"semgrep": {"a": 1}, "bandit": {"b": 2}}}
+        filtered = apply_content_filters(historical, scanners="opengrep")
+        assert list(filtered["scanner_reports"]) == ["semgrep"]
+
     def test_scanner_filter_on_scanner_reports(self, full_results):
         result = apply_content_filters(full_results, scanners="semgrep")
         assert "semgrep" in result["scanner_reports"]

@@ -417,6 +417,13 @@ class TestBumpGuidance:
         assert '_THIRD_PARTY_HASHES["opengrep/LICENSE"]' in steps
         assert '_THIRD_PARTY_HASHES["opengrep/COPYRIGHT"]' in steps
 
+    def test_a_uv_tool_pin_never_points_at_the_binary_table(self, pins):
+        """A PyPI-installed (distribution) tool's bump guidance must not tell
+        anyone to edit TOOL_VERSIONS, which holds release-binary pins only.
+        bandit is the distribution pin now that semgrep is retired."""
+        steps = self._steps(pins, "bandit", "9.0.0")
+        assert "TOOL_VERSIONS" not in steps, steps
+
     def test_the_report_points_at_guidance_that_exists(self, pins):
         pin = {p.tool: p for p in checker.enumerate_pins(pins)}["trivy"]
         report = checker.render_report(
