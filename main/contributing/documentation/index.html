@@ -123,22 +123,6 @@ SOFTWARE.
     </div>
     <div data-md-component="announce">
       
-        <aside class="md-banner">
-          <div class="md-banner__inner md-grid md-typeset">
-            
-            <span data-ash-notice="unreleased">
-      These docs describe the main branch, which is ahead of the latest release, so a
-      feature described here may not be in a release yet.
-      The install commands on these pages install the latest release,
-      <code>v3.8.0</code>, not main:
-      <a href="../../..">read the latest release's docs</a> for what they
-      install. To run what these pages describe,
-      <a href="../../how-to/install/#install-from-main">install from main</a>.
-    </span>
-          </div>
-          
-        </aside>
-      
     </div>
     
       <div data-md-color-scheme="default" data-md-component="outdated" hidden>
@@ -5001,10 +4985,10 @@ version is a directory of the <code>gh-pages</code> branch, and <code>versions.j
 branch lists them for the version selector in the site header.</p>
 <ul>
 <li>Every push to <code>main</code> publishes the version <code>main</code>, titled "main (unreleased)". Its
-  pages say that they describe unreleased code, and link to the latest release. Its
+  pages carry no notice or banner. Its
   <a href="../releases/#version-pinned-pages">version-pinned pages</a> are served as committed,
-  so their install commands pin the current release, and the notice says so: a reader
-  of the <code>main</code> docs is advised to install the latest release, never <code>main</code>. Where a
+  so their install commands pin the current release: a reader of the <code>main</code> docs
+  installs the latest release, never <code>main</code>. Where a
   template needs the release number itself, as in a sample of <code>ash --version</code> output,
   it writes <code>{{RELEASE}}</code>; the ref of an install command is written <code>v{{VERSION}}</code>,
   the placeholder the release tooling moves, and the static checks report
@@ -5056,8 +5040,8 @@ of the branch: a stylesheet, a sitemap, a page no version has, and an old page f
   because 0.0.0 is older;</li>
 <li>every page of every version configures the version selector and loads the theme
   script that reads <code>versions.json</code>;</li>
-<li>every page of a release carries the outdated notice, every page of <code>main</code> carries the
-  unreleased one, and no page carries the other;</li>
+<li>every page of a release carries the outdated notice, and no page of <code>main</code> carries
+  a notice or an announce banner;</li>
 <li><code>latest/</code> is a copy of 0.0.1, and the other versions name <code>latest/</code> as canonical;</li>
 <li>the version-pinned pages of each release pin that release and no other. On <code>main</code>,
   outside tables and <code>text</code> blocks, they pin exactly the current release, in every
