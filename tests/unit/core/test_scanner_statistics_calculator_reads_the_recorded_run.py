@@ -139,6 +139,20 @@ class TestDuration:
         # Red at the base: 5.5, the scanner-level report counted on top of the target.
         assert stats["bandit"]["duration"] == 1.5
 
+    def test_a_scanner_level_duration_is_read_when_no_target_has_one(self):
+        model = _model(
+            {
+                "bandit": {
+                    "source": _report("bandit"),
+                    "None": _report("bandit", duration=4.0),
+                }
+            }
+        )
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["bandit"]["duration"] == 4.0
+
     def test_a_scanner_level_report_alone_is_still_read(self):
         """The control: with no per-target report, it is all there is."""
         model = _model({"bandit": {"None": _report("bandit", duration=4.0)}})

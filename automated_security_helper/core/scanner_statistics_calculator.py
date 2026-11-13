@@ -250,13 +250,18 @@ class ScannerStatisticsCalculator:
                 for key, report in reports.items()
                 if key is not None and key != "None"
             }
-            duration_reports = target_reports or reports
-            recorded_durations = [
-                report["duration"]
-                for report in duration_reports.values()
-                if isinstance(report.get("duration"), (int, float))
-                and not isinstance(report.get("duration"), bool)
-            ]
+
+            def _numeric_durations(candidates: dict) -> list:
+                return [
+                    report["duration"]
+                    for report in candidates.values()
+                    if isinstance(report.get("duration"), (int, float))
+                    and not isinstance(report.get("duration"), bool)
+                ]
+
+            recorded_durations = _numeric_durations(
+                target_reports
+            ) or _numeric_durations(reports)
             if recorded_durations:
                 duration = float(sum(recorded_durations))
                 ASH_LOGGER.debug(
