@@ -26,6 +26,13 @@ if not runtime.express_supported():
     pytest.skip("express mode is unix-only", allow_module_level=True)
 
 
+#: Every scripted daemon a test started, so the autouse fixture below can join
+#: each one and fail the test on anything its thread raised: a script that
+#: died early would otherwise leave a client that fell back "correctly" for the
+#: wrong reason.
+_STARTED: list["_ScriptedDaemon"] = []
+
+
 class _ScriptedDaemon:
     """Accepts one connection and answers with the scripted frames."""
 
@@ -36,6 +43,7 @@ class _ScriptedDaemon:
         self.go_frame = None
         self.received_fds = []
         self.peer_uid = None
+        self.error = None
         self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         # Bounded accept: a test whose client never connects must leave a
         # thread that ends on its own, not one blocked in accept forever.
@@ -43,32 +51,66 @@ class _ScriptedDaemon:
         self._server.bind(os.fspath(path))
         self._server.listen(1)
         self.thread = threading.Thread(target=self._serve, daemon=True)
+        _STARTED.append(self)
         self.thread.start()
 
     def _serve(self):
-        conn, _ = self._server.accept()
+        conn = None
         try:
-            self.peer_uid = runtime.peer_uid(conn)
-            data, fds, _, _ = socket.recv_fds(conn, 1, 3)
-            self.received_fds = list(fds)
-            reader = runtime.FrameReader(conn)
-            self.request = reader.read_frame()
-            for frame in self.answers:
-                runtime.send_frame(conn, frame)
-                if (
-                    self.go_frame is None
-                    and self.request.get("op") == "scan"
-                    and frame.get("ok")
-                ):
-                    # Protocol 2: the real daemon forks only after reading the
-                    # client's go, so the script reads it where the daemon
-                    # would -- right after its scan ok.
-                    self.go_frame = reader.read_frame()
+            conn, _ = self._server.accept()
+            self._converse(conn)
+        except BaseException as exc:  # noqa: BLE001 - recorded, asserted by the fixture
+            self.error = exc
         finally:
             for fd in self.received_fds:
                 os.close(fd)
-            conn.close()
-            self._server.close()
+            if conn is not None:
+                conn.close()
+            self._close_listener()
+
+    def _close_listener(self):
+        # shutdown first: close alone leaves a thread blocked in accept() on
+        # Linux, and its descriptor number free for reuse underneath it.
+        try:
+            self._server.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self._server.close()
+
+    def _read_request(self, conn):
+        self.peer_uid = runtime.peer_uid(conn)
+        _, fds, _, _ = socket.recv_fds(conn, 1, 3)
+        self.received_fds = list(fds)
+        reader = runtime.FrameReader(conn)
+        self.request = reader.read_frame()
+        return reader
+
+    def _converse(self, conn):
+        reader = self._read_request(conn)
+        for frame in self.answers:
+            runtime.send_frame(conn, frame)
+            if (
+                self.go_frame is None
+                and self.request.get("op") == "scan"
+                and frame.get("ok")
+            ):
+                # Protocol 2: the real daemon forks only after reading the
+                # client's go, so the script reads it where the daemon
+                # would -- right after its scan ok.
+                self.go_frame = reader.read_frame()
+
+
+@pytest.fixture(autouse=True)
+def _join_scripted_daemons():
+    """Every scripted daemon ends within a timeout and raised nothing."""
+    _STARTED.clear()
+    yield
+    started = list(_STARTED)
+    _STARTED.clear()
+    for daemon in started:
+        daemon.thread.join(timeout=10)
+        assert not daemon.thread.is_alive(), "a scripted daemon thread hung"
+        assert daemon.error is None, f"the scripted daemon raised: {daemon.error!r}"
 
 
 @pytest.fixture
@@ -88,7 +130,7 @@ def socket_dir():
     if len(base) > 90:
         # A long TMPDIR (a CI lane's, say) overflows the AF_UNIX name cap.
         shutil.rmtree(base, ignore_errors=True)
-        base = tempfile.mkdtemp(prefix="ash-t", dir="/tmp")
+        base = tempfile.mkdtemp(prefix="ash-t", dir="/tmp")  # nosec B108 - mkdtemp makes a private 0700 dir; the fixed parent keeps the socket path under the AF_UNIX cap
     path = os.path.join(base, "d.sock")
     assert len(path) < 100, path
     yield path
@@ -206,44 +248,79 @@ class TestTheWire:
         class _SignalAwareDaemon(_ScriptedDaemon):
             def __init__(self, path):
                 self.signal_frame = None
+                # Set once the go frame is read: from then on the client's
+                # forwarding handler is installed and stays installed until it
+                # has read the exit frame, so a signal sent after this point
+                # can only land inside the window under test.
+                self.go_read = threading.Event()
                 super().__init__(path, answers=[])
 
-            def _serve(self):
-                conn, _ = self._server.accept()
-                try:
-                    data, fds, _, _ = socket.recv_fds(conn, 1, 3)
-                    self.received_fds = list(fds)
-                    reader = runtime.FrameReader(conn)
-                    self.request = reader.read_frame()
-                    runtime.send_frame(conn, {"ok": True, "pid": 4242})
-                    # The go answers the ok first (protocol 2), then the
-                    # client blocks on the scan as a real daemon's client
-                    # does; the next frame is the forwarded signal.
-                    self.go_frame = reader.read_frame()
-                    self.signal_frame = reader.read_frame()
-                    runtime.send_frame(conn, {"exit": 143})
-                finally:
-                    for fd in self.received_fds:
-                        os.close(fd)
-                    conn.close()
-                    self._server.close()
+            def _converse(self, conn):
+                reader = self._read_request(conn)
+                runtime.send_frame(conn, {"ok": True, "pid": 4242})
+                # The go answers the ok first (protocol 2), then the
+                # client blocks on the scan as a real daemon's client
+                # does; the next frame is the forwarded signal.
+                self.go_frame = reader.read_frame()
+                self.go_read.set()
+                self.signal_frame = reader.read_frame()
+                runtime.send_frame(conn, {"exit": 143})
 
         daemon = _SignalAwareDaemon(socket_dir)
         sock = client._connect(socket_dir)
         import signal as signal_module
 
-        timer = threading.Timer(0.2, os.kill, args=(os.getpid(), signal_module.SIGTERM))
-        timer.start()
-        try:
-            outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
-        finally:
-            timer.cancel()
+        def deliver_after_the_go():
+            # A bounded wait: if the go never arrives the test fails on its
+            # outcome below, and nothing is signalled outside the window.
+            if daemon.go_read.wait(timeout=10):
+                os.kill(os.getpid(), signal_module.SIGTERM)
+
+        sender = threading.Thread(target=deliver_after_the_go, daemon=True)
+        sender.start()
+        outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
+        sender.join(timeout=10)
+        assert not sender.is_alive()
         daemon.thread.join(timeout=10)
         assert outcome == ("exit", 143)
         assert daemon.signal_frame == {
             "op": "signal",
             "signum": int(signal_module.SIGTERM),
         }
+
+    @pytest.mark.parametrize(
+        ("name", "code"), [("SIGINT", 130), ("SIGTERM", 143)], ids=["ctrl-c", "term"]
+    )
+    def test_a_signal_during_the_handshake_ends_the_run_before_the_go(
+        self, socket_dir, name, code
+    ):
+        """The daemon's ok can take seconds (its warm imports). A Ctrl-C that
+        landed meanwhile is only recorded; the client must end with the
+        signal's code instead of sending the go, which would have the daemon
+        fork a whole scan for the forwarded signal to kill."""
+        import signal as signal_module
+
+        signum = getattr(signal_module, name)
+
+        class _InterruptedHandshake(_ScriptedDaemon):
+            def _converse(self, conn):
+                reader = self._read_request(conn)
+                # The request is read, so the client's forwarding handler is
+                # installed. Calling it here records the signal exactly as a
+                # delivery during the wait would, with no timing to race.
+                handler = signal_module.getsignal(signum)
+                assert getattr(handler, "__name__", "") == "forward", handler
+                handler(int(signum), None)
+                runtime.send_frame(conn, {"ok": True, "pid": 4242})
+                # The client closes without a go: EOF, not a frame.
+                self.go_frame = reader.read_frame()
+
+        daemon = _InterruptedHandshake(socket_dir, answers=[])
+        sock = client._connect(socket_dir)
+        outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
+        daemon.thread.join(timeout=10)
+        assert outcome == ("exit", code)
+        assert daemon.go_frame is None, "no go may follow a recorded signal"
 
     def test_frames_survive_json_with_non_ascii_values(self, socket_dir):
         argv = ["scan", "--source-dir", "précis"]

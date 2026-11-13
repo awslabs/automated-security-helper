@@ -133,6 +133,22 @@ def delegated_exit_code(
         return None
 
 
+#: click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE`
+#: with the program name uppercased and `-` as `_`). Matched exactly: the older
+#: any-`_*_COMPLETE` match read an unrelated variable (a profile's
+#: `_SETUP_COMPLETE=1`, say) as a completion and silently switched express off
+#: for every scan of that shell. Pinned against pyproject's console scripts, and
+#: the only list :func:`completion_in_progress` reads.
+COMPLETION_ENV_NAMES = frozenset(
+    {
+        "_ASH_COMPLETE",
+        "_ASHV3_COMPLETE",
+        "_AUTOMATED_SECURITY_HELPER_COMPLETE",
+        "_AGENTIC_SECURITY_HARNESS_COMPLETE",
+    }
+)
+
+
 def completion_in_progress(environ: Mapping[str, str]) -> bool:
     """Whether this invocation is a shell completion, which must never scan.
 
@@ -145,31 +161,10 @@ def completion_in_progress(environ: Mapping[str, str]) -> bool:
     """
     if "COMP_WORDS" in environ or "COMP_CWORD" in environ:
         return True
-    # click's shell-completion re-invocation carries one of these variables,
-    # one per console script ASH installs (COMPLETION_ENV_NAMES; a test pins
-    # the spellings to pyproject). Any of them present means this process is
+    # One variable per console script ASH installs (COMPLETION_ENV_NAMES, the
+    # one source of truth). Any of them present means this process is
     # answering a TAB completion, which must never start a scan.
-    return (
-        "_ASH_COMPLETE" in environ
-        or "_ASHV3_COMPLETE" in environ
-        or "_AUTOMATED_SECURITY_HELPER_COMPLETE" in environ
-        or "_AGENTIC_SECURITY_HARNESS_COMPLETE" in environ
-    )
-
-
-#: click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE`
-#: with the program name uppercased and `-` as `_`). Matched exactly: the older
-#: any-`_*_COMPLETE` match read an unrelated variable (a profile's
-#: `_SETUP_COMPLETE=1`, say) as a completion and silently switched express off
-#: for every scan of that shell. Pinned against pyproject's console scripts.
-COMPLETION_ENV_NAMES = frozenset(
-    {
-        "_ASH_COMPLETE",
-        "_ASHV3_COMPLETE",
-        "_AUTOMATED_SECURITY_HELPER_COMPLETE",
-        "_AGENTIC_SECURITY_HARNESS_COMPLETE",
-    }
-)
+    return any(name in environ for name in COMPLETION_ENV_NAMES)
 
 
 def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optional[int]:
@@ -492,6 +487,17 @@ def _run_on_daemon(
             # settimeout, or in the read, and every one of them is the same
             # "end now with the signal's code", never an escaping traceback.
             try:
+                # A signal recorded while the handshake waited (the daemon's
+                # warm imports can hold the ok for seconds) ends the run HERE,
+                # before the go: nothing has forked, so this is the one free
+                # moment to honour the Ctrl-C (or the runner's SIGTERM) as a
+                # cold run would -- at once, with that signal's code. Past the
+                # go there is a scan to interrupt, and the daemon would fork a
+                # whole scan child only for the forwarded signal to kill it.
+                # The refusal and broken-handshake roads above do the same.
+                interrupted = _signal_exit_code(state["pending"])
+                if interrupted is not None:
+                    return ("exit", interrupted)
                 # The go frame is this client's commit, sent FIRST -- before
                 # the signal flush below, because the daemon's inline go read
                 # must meet the go, not a signal frame -- and only after it is
@@ -759,11 +765,21 @@ def spawn_daemon_process(environ: Mapping[str, str]) -> bool:
     logging stack initialized and main's signal handlers installed, and a fork
     with no exec would carry that state (and any lock an import holds) into
     the daemon. A new ``sys.executable`` begins in the one state the daemon's
-    own module expects. The implicit scan path keeps :func:`autostart`'s
-    double fork: that caller runs before the heavy import, single-threaded,
-    which is the state a bare fork is safe in.
+    own module expects. The interpreter's argv comes from
+    :func:`~automated_security_helper.utils.python_child.python_code_argv`, so
+    it imports nothing from the directory it starts in, and the launch itself
+    is :func:`~automated_security_helper.express.spawn.start_detached`, the one
+    spawn the subprocess choke point exempts (the daemon is ASH itself, never a
+    scanner). The environment is the daemon scrub, which keeps the
+    interpreter-shaping variables (:data:`runtime.INTERPRETER_ENV`): this
+    interpreter resolves the same ASH tree as the client that started it, and
+    the fingerprint hashes the values that matter, so a later client whose
+    values differ reads the daemon as stale. The implicit scan path keeps
+    :func:`autostart`'s double fork: that caller runs before the heavy import,
+    single-threaded, which is the state a bare fork is safe in.
     """
-    import subprocess
+    from automated_security_helper.express import spawn
+    from automated_security_helper.utils.python_child import python_code_argv
 
     idle = runtime.idle_seconds(dict(environ))
     scrubbed = runtime.scrubbed_daemon_environment(dict(environ))
@@ -771,34 +787,23 @@ def spawn_daemon_process(environ: Mapping[str, str]) -> bool:
     runtime_dir = runtime.runtime_dir()
     ready_read, ready_write = os.pipe()
     os.set_inheritable(ready_write, True)
+    argv = python_code_argv(
+        "import sys\n"
+        "from automated_security_helper.express.daemon import serve\n"
+        "serve(idle_timeout=float(sys.argv[1]), ready_fd=int(sys.argv[2]))\n"
+    ) + [str(float(idle)), str(ready_write)]
     # The daemon's own stdout/stderr go to the express log file, as the
     # autostart path arranges with its dup2s.
     log = os.open(os.fspath(log_file), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        with open(os.devnull, "rb") as devnull:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-c",
-                    (
-                        "import sys\n"
-                        "from automated_security_helper.express.daemon import serve\n"
-                        "serve(idle_timeout=float(sys.argv[1]), "
-                        "ready_fd=int(sys.argv[2]))\n"
-                    ),
-                    str(float(idle)),
-                    str(ready_write),
-                ],
-                stdin=devnull,
-                stdout=log,
-                stderr=log,
-                cwd=os.fspath(runtime_dir),
-                env=scrubbed,
-                start_new_session=True,
-                close_fds=True,
-                pass_fds=(ready_write,),
-            )
-    except (OSError, ValueError, subprocess.SubprocessError):
+        spawn.start_detached(
+            argv,
+            env=scrubbed,
+            cwd=os.fspath(runtime_dir),
+            log_fd=log,
+            keep_fd=ready_write,
+        )
+    except (OSError, ValueError):
         try:
             os.close(ready_read)
         except OSError:

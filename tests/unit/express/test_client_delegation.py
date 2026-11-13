@@ -372,6 +372,80 @@ class TestSignalExitCode:
         assert client._signal_exit_code(pending) == 143
 
 
+class TestSpawnDaemonProcess:
+    """``ash express start``'s launch is the python-child bootstrap, started by
+    the one spawn the sandbox choke point exempts."""
+
+    def _spawn(self, monkeypatch, tmp_path, environ):
+        import os
+
+        from automated_security_helper.express import spawn
+
+        seen = {}
+
+        def fake_start(argv, *, env, cwd, log_fd, keep_fd):
+            seen.update(argv=list(argv), env=dict(env), cwd=cwd, keep_fd=keep_fd)
+
+        def fake_ready(fd):
+            os.close(fd)
+            return True
+
+        monkeypatch.setattr(spawn, "start_detached", fake_start)
+        monkeypatch.setattr(runtime, "runtime_dir", lambda *_: tmp_path)
+        monkeypatch.setattr(runtime, "log_path", lambda *_: tmp_path / "express.log")
+        monkeypatch.setattr(client, "_await_readiness", fake_ready)
+        assert client.spawn_daemon_process(environ) is True
+        return seen
+
+    def test_the_bootstrap_is_the_python_child_argv_not_a_raw_list(
+        self, monkeypatch, tmp_path
+    ):
+        import sys
+
+        from automated_security_helper.utils.python_child import (
+            DROP_WORKING_DIRECTORY,
+        )
+
+        seen = self._spawn(monkeypatch, tmp_path, {runtime.IDLE_ENV: "120"})
+        argv = seen["argv"]
+        assert argv[0] == sys.executable
+        assert ("-P" in argv) is (sys.version_info >= (3, 11))
+        code = argv[argv.index("-c") + 1]
+        # The cwd entry is dropped before anything is imported, and the daemon
+        # bootstrap runs behind it.
+        assert code.startswith(DROP_WORKING_DIRECTORY)
+        assert "express.daemon import serve" in code
+        assert argv[-2] == "120.0"
+        assert argv[-1] == str(seen["keep_fd"])
+        assert seen["cwd"] == str(tmp_path)
+
+    def test_the_interpreter_shaping_variables_reach_the_new_interpreter(
+        self, monkeypatch, tmp_path
+    ):
+        """On a layout that imports ASH only through PYTHONPATH the fresh
+        interpreter fails its first import unless it inherits the variable."""
+        seen = self._spawn(
+            monkeypatch,
+            tmp_path,
+            {
+                "PYTHONPATH": "/work/ash-checkout",
+                "PYTHONHOME": "/opt/py",
+                "PYTHONUSERBASE": "/work/user-base",
+                "PYTHONNOUSERSITE": "1",
+                "VIRTUAL_ENV": "/work/venv",
+                "AWS_PROFILE": "prod",
+                "GIT_INDEX_FILE": ".git/index.hook",
+            },
+        )
+        assert seen["env"] == {
+            "PYTHONPATH": "/work/ash-checkout",
+            "PYTHONHOME": "/opt/py",
+            "PYTHONUSERBASE": "/work/user-base",
+            "PYTHONNOUSERSITE": "1",
+            "VIRTUAL_ENV": "/work/venv",
+        }
+
+
 class TestScrubbedDaemonEnvironment:
     def test_one_invocations_incidentals_do_not_become_daemon_state(self):
         """The autostarted daemon outlives the scan that started it, so the
@@ -388,6 +462,7 @@ class TestScrubbedDaemonEnvironment:
             "GIT_INDEX_FILE": ".git/index.hook",  # the hook incidental
             "ASH_CONFIG": "/cfg.yaml",  # honoured, but per-request
             "AWS_PROFILE": "prod",  # a shell credential
+            "PYTHONPATH": "/work/plugins",  # decides which ASH the daemon imports
             "VIRTUAL_ENV": "/some/venv",
         }
         kept = runtime.scrubbed_daemon_environment(environ)
@@ -398,4 +473,9 @@ class TestScrubbedDaemonEnvironment:
             "TERM": "xterm",
             "XDG_RUNTIME_DIR": "/run/user/1000",
             runtime.IDLE_ENV: "120",
+            # The interpreter-shaping set is KEPT: it decides which ASH tree and
+            # which site set the daemon's own interpreter resolves, and the
+            # fingerprint covers it.
+            "PYTHONPATH": "/work/plugins",
+            "VIRTUAL_ENV": "/some/venv",
         }

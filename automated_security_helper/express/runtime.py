@@ -279,8 +279,12 @@ def runtime_fingerprint() -> str:
     under ``--express``). The package set carries each entry's mtime, so a
     reinstall of the same versions still reads as a change, and ASH's own
     source tree is stamped (:func:`_own_tree_stamp`), so an editable install's
-    edits do too. The ASH version is not part of it because the socket path
-    already carries it (:func:`socket_path`).
+    edits do too. The values of :data:`FINGERPRINT_ENV` and the no-user-site
+    flag are hashed as well: ``sys.path`` stays out of the fingerprint on
+    purpose (see :func:`_site_entries`), which would otherwise leave the entries
+    ``PYTHONPATH`` adds invisible, and a warm scan could import different plugin
+    code than a cold one. The ASH version is not part of it because the socket
+    path already carries it (:func:`socket_path`).
     """
     digest = hashlib.sha256()
     digest.update(sys.version.encode("utf-8", "backslashreplace"))
@@ -288,6 +292,12 @@ def runtime_fingerprint() -> str:
     digest.update(
         os.path.realpath(sys.executable or "").encode("utf-8", "backslashreplace")
     )
+    environ = snapshot_environ()
+    for name in FINGERPRINT_ENV:
+        digest.update(b"\x00")
+        digest.update(environ.get(name, "").encode("utf-8", "backslashreplace"))
+    digest.update(b"\x00")
+    digest.update(str(sys.flags.no_user_site).encode("utf-8"))
     digest.update(b"\x00")
     digest.update(_own_tree_stamp().encode("utf-8"))
     for name in _site_entries():
@@ -488,12 +498,38 @@ def request_env_overrides(
     return overrides
 
 
+#: The interpreter-shaping variables: they decide which ASH tree and which site
+#: set a Python process resolves. The daemon KEEPS them on both start paths
+#: (:func:`scrubbed_daemon_environment`), so the fresh interpreter ``ash express
+#: start`` launches imports the same code its starting client runs (an ASH
+#: checkout reachable only through ``PYTHONPATH``, a ``PYTHONUSERBASE`` site)
+#: instead of failing its first import or resolving another user site -- the
+#: latter made :func:`runtime_fingerprint` permanently differ from every client's.
+INTERPRETER_ENV = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONUSERBASE",
+    "PYTHONNOUSERSITE",
+    "VIRTUAL_ENV",
+)
+
+#: The values :func:`runtime_fingerprint` hashes, beside the no-user-site flag:
+#: the ones that change which code an already-resolved interpreter imports
+#: (plugin modules named in ``ash_plugin_modules`` are imported from them). A
+#: client whose values differ from the daemon's reads it as stale and runs cold,
+#: instead of running different plugin code warm. Entries must be absolute: a
+#: relative one is read against each process's own working directory, which for
+#: the daemon is the runtime directory.
+FINGERPRINT_ENV = ("PYTHONPATH", "PYTHONHOME")
+
 #: What an autostarted daemon's own environment keeps
 #: (:func:`scrubbed_daemon_environment`): the execution basics, the terminal
-#: and runtime-directory context, and the one express setting the daemon reads.
+#: and runtime-directory context, the interpreter-shaping variables, and the
+#: one express setting the daemon reads.
 DAEMON_ENV_KEPT = frozenset(
     {
         *EXECUTION_ENV_EXACT,
+        *INTERPRETER_ENV,
         "USER",
         "LOGNAME",
         "SHELL",
@@ -510,10 +546,12 @@ def scrubbed_daemon_environment(environ: Mapping[str, str]) -> dict[str, str]:
 
     The daemon is autostarted from whatever invocation happened to come first,
     and it outlives that invocation by up to the idle window -- so the first
-    scan's incidentals (``GIT_INDEX_FILE`` from a commit hook, an activated
-    virtualenv's variables, cloud credentials in the shell) must not become
-    ambient state every later scan's child inherits. Only the names in
-    :data:`DAEMON_ENV_KEPT` survive; the scan's environment travels in each
+    scan's incidentals (``GIT_INDEX_FILE`` from a commit hook, cloud
+    credentials in the shell) must not become ambient state every later scan's
+    child inherits. Only the names in :data:`DAEMON_ENV_KEPT` survive -- the
+    interpreter-shaping set (:data:`INTERPRETER_ENV`) among them, because it
+    decides which ASH tree the daemon's own interpreter resolves and the
+    fingerprint covers its values. The scan's environment travels in each
     scan's own request instead (:func:`request_environment`), and the child's
     environment becomes exactly that request's, so nothing kept here reaches
     a scan either.

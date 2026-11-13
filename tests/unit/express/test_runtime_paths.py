@@ -79,7 +79,7 @@ class TestRuntimeDir:
         import shutil
         import tempfile
 
-        base = tempfile.mkdtemp(prefix="ash-t", dir="/tmp")
+        base = tempfile.mkdtemp(prefix="ash-t", dir="/tmp")  # nosec B108 - mkdtemp makes a private 0700 dir; the fixed parent keeps the socket path under the AF_UNIX cap
         try:
             environ = {"XDG_RUNTIME_DIR": base}
             sock = runtime.socket_path(environ)
@@ -125,3 +125,46 @@ class TestIdleSetting:
 
     def test_a_positive_integer_is_taken(self):
         assert runtime.idle_seconds({runtime.IDLE_ENV: "120"}) == 120
+
+
+class TestFingerprintCoversInterpreterShaping:
+    """``sys.path`` is left out of the fingerprint on purpose, so the entries
+    PYTHONPATH adds are covered by hashing the variable itself: a client whose
+    value differs from the daemon's must read it as stale."""
+
+    @pytest.mark.parametrize("name", runtime.FINGERPRINT_ENV)
+    def test_a_changed_value_changes_the_fingerprint(self, monkeypatch, name):
+        monkeypatch.delenv(name, raising=False)
+        unset = runtime.runtime_fingerprint()
+        monkeypatch.setenv(name, "/work/one")
+        one = runtime.runtime_fingerprint()
+        monkeypatch.setenv(name, "/work/two")
+        two = runtime.runtime_fingerprint()
+        assert len({unset, one, two}) == 3
+
+    def test_the_same_values_give_the_same_fingerprint(self, monkeypatch):
+        monkeypatch.setenv("PYTHONPATH", "/work/one")
+        assert runtime.runtime_fingerprint() == runtime.runtime_fingerprint()
+
+    def test_an_unrelated_variable_does_not_move_it(self, monkeypatch):
+        before = runtime.runtime_fingerprint()
+        monkeypatch.setenv("ASH_SOMETHING_ELSE", "x")
+        monkeypatch.setenv("AWS_PROFILE", "other")
+        assert runtime.runtime_fingerprint() == before
+
+    def test_the_no_user_site_flag_is_hashed(self, monkeypatch):
+        import sys
+        import types
+
+        before = runtime.runtime_fingerprint()
+        flags = types.SimpleNamespace(no_user_site=1 - sys.flags.no_user_site)
+        monkeypatch.setattr(runtime.sys, "flags", flags)
+        assert runtime.runtime_fingerprint() != before
+
+    def test_the_daemon_scrub_keeps_what_the_fingerprint_hashes(self):
+        """The daemon computes its fingerprint from its own scrubbed
+        environment, so every hashed variable must survive the scrub or a
+        client with PYTHONPATH set would read every daemon as stale."""
+        environ = dict.fromkeys(runtime.FINGERPRINT_ENV, "/x")
+        assert runtime.scrubbed_daemon_environment(environ) == environ
+        assert set(runtime.FINGERPRINT_ENV) <= set(runtime.INTERPRETER_ENV)

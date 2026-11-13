@@ -72,7 +72,7 @@ def _runtime_base() -> str:
         # The default temporary directory (a CI lane's TMPDIR, say) can be
         # longer than an AF_UNIX socket name allows; /tmp never is.
         shutil.rmtree(base, ignore_errors=True)
-        base = tempfile.mkdtemp(prefix="ash-x", dir="/tmp")
+        base = tempfile.mkdtemp(prefix="ash-x", dir="/tmp")  # nosec B108 - mkdtemp makes a private 0700 dir; the fixed parent keeps the socket path under the AF_UNIX cap
     # ~40 bytes of socket name land under this; stay clear of the AF_UNIX cap.
     assert len(base) < 68, f"temporary directory too long for a socket: {base}"
     return base
