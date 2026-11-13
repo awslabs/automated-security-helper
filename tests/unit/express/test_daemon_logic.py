@@ -425,6 +425,25 @@ class TestShutdownExitCodes:
         assert (100, int(signal_module.SIGKILL)) not in signals
         assert daemon.children == {}
 
+    def test_a_child_killed_by_a_signal_reports_128_plus_the_signal(
+        self, daemon, monkeypatch
+    ):
+        """The shell's own convention, outside any shutdown override: an
+        express scan whose child dies of SIGKILL reports the 137 a cold run's
+        caller would have seen, so the exit code is one more thing warm and
+        cold runs cannot disagree on."""
+        connection = _Connection(fds=[])
+        connection.sock = self._FrameSock(93)
+        connection.close = lambda: None
+        connection.child_pid = None
+        daemon.children[300] = connection
+        reapable = [(300, 9)]  # waitstatus 9 = killed by signal 9
+        monkeypatch.setattr(
+            os, "waitpid", lambda *_: reapable.pop(0) if reapable else (0, 0)
+        )
+        daemon._reap()
+        assert connection.sock.frames == [{"exit": 137}]
+
 
 class TestAutostartReadiness:
     def test_a_loser_bind_still_tells_the_client_a_daemon_serves(self, monkeypatch):
