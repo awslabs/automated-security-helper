@@ -1386,6 +1386,17 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
+  <a href="#no-private-directory-for-the-config-files-ash-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No private directory for the config files ASH writes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#semgrep-and-opengrep-show-skipped-on-windows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3427,6 +3438,17 @@ SOFTWARE.
 </li>
         
           <li class="md-nav__item">
+  <a href="#no-private-directory-for-the-config-files-ash-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No private directory for the config files ASH writes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#semgrep-and-opengrep-show-skipped-on-windows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4004,6 +4026,30 @@ For grype, see <a href="../run-offline/#scanners">What each scanner does offline
 which is the default. With it off, the exit code comes from the findings alone, so a
 scan whose only problem is the failed scanner exits 0; see
 <a href="../set-the-gate/#incomplete">Incomplete scans</a>.</p>
+<h3 id="no-private-directory-for-the-config-files-ash-writes">No private directory for the config files ASH writes<a class="headerlink" href="#no-private-directory-for-the-config-files-ash-writes" title="Permanent link">&para;</a></h3>
+<p>Symptom: a scanner fails before its tool runs, with:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>No private directory for the config files ASH writes for the scanner&#39;s tool
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>(...). Set TMPDIR to a directory only this account can write.
+</span></code></pre></div>
+<p>Cause: ASH writes each scanner's config files in a directory no other local account
+can change, and it checks every directory from the candidate (the temporary
+directory, then the output directory) up to <code>/</code>: one owned by another account, or
+writable by its group or everyone without the sticky bit, rejects the candidate.
+The parenthesis names each candidate it passed over and why, with the failing
+directory's owning uid and mode bits.</p>
+<p>When the reason is a mode (<code>can be written by other accounts and does not have the
+sticky bit</code>), or an ancestor genuinely owned by another account, set <code>TMPDIR</code> to a
+directory only your account can write, as the message says.</p>
+<p>In a rootless container or an agent sandbox — any process in a Linux user
+namespace — <code>/</code> and <code>/tmp</code> stat as owned by <code>nobody</code> (the overflow uid, 65534 by
+default), because their real owners are outside the namespace. ASH detects that
+(<code>/proc/self/uid_map</code> differs from the initial namespace's identity map) and treats
+an overflow-uid-owned ancestor like a root-owned one, so scans in such sandboxes
+work without any setting; a directory whose mode other accounts can write without
+the sticky bit is still rejected there. If you see an <code>owner is uid 65534</code>
+rejection anyway, the process is not in a user namespace (or <code>/proc</code> is not
+mounted), and the directory really is another account's: pick a <code>TMPDIR</code> under a
+path your account owns.</p>
 <h3 id="semgrep-and-opengrep-show-skipped-on-windows">semgrep and opengrep show SKIPPED on Windows<a class="headerlink" href="#semgrep-and-opengrep-show-skipped-on-windows" title="Permanent link">&para;</a></h3>
 <p>Cause: both are off by default on Windows, and semgrep publishes no Windows build, so
 it is SKIPPED even when you turn it on. A SKIPPED scanner does not fail the scan, so
@@ -4044,11 +4090,11 @@ the scanner is usually better, because the reports then say it did not run.</p>
 <h3 id="no-selected-scanner-had-a-file-to-scan">No selected scanner had a file to scan<a class="headerlink" href="#no-selected-scanner-had-a-file-to-scan" title="Permanent link">&para;</a></h3>
 <p>Symptom: the scan exits 1 with no findings, every selected scanner is SKIPPED, and the
 error names the scanners that had nothing to scan:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>No selected scanner had a file to scan: bandit was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>No selected scanner had a file to scan: bandit was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
 </span></code></pre></div>
 <p>When the config sets <code>global_settings.ignore_paths</code>, the error also shows its first three
 patterns, with a count of any others, and suggests narrowing them:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>No selected scanner had a file to scan: detect-secrets was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. The config&#39;s global_settings.ignore_paths (&#39;**&#39;) leaves every path it matches out of what the scanners read, which can leave them nothing to scan; narrow it to have those files scanned. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>No selected scanner had a file to scan: detect-secrets was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. The config&#39;s global_settings.ignore_paths (&#39;**&#39;) leaves every path it matches out of what the scanners read, which can leave them nothing to scan; narrow it to have those files scanned. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
 </span></code></pre></div>
 <p>A run whose scanners were all SKIPPED for another reason, such as a <code>--scanners</code> name
 that matches no scanner on this platform, or every selected scanner turned off in the
@@ -4071,7 +4117,7 @@ or set <code>fail_on_incomplete_scanners: false</code>; it then exits 0. <code>a
 verdict over the shards.</p>
 <h3 id="the-scan-exits-1-because-conversion-was-incomplete">The scan exits 1 because conversion was incomplete<a class="headerlink" href="#the-scan-exits-1-because-conversion-was-incomplete" title="Permanent link">&para;</a></h3>
 <p>Symptom:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they were given
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they were given
 </span></code></pre></div>
 <p>Cause: ASH converts Jupyter notebooks to Python, and extracts <code>.zip</code>, <code>.tar</code>, and <code>.gz</code>
 archives, before it scans them. A notebook that <code>nbconvert</code> could not convert, or an
@@ -4105,12 +4151,12 @@ report findings without failing, pass <code>--no-fail-on-findings</code>, or set
 <h3 id="the-command-exits-5">The command exits 5<a class="headerlink" href="#the-command-exits-5" title="Permanent link">&para;</a></h3>
 <p>Symptom: the command stops before anything runs and writes no report. A mistyped option
 prints an <code>Error</code> box:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Usage: ash scan [OPTIONS]
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Try &#39;ash scan --help&#39; for help.
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>╭─ Error ──────────────────────────────────────────────────────────────────────╮
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>│ No such option: --fail-on-finding (Possible options: --fail-on-findings,     │
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>│ --no-fail-on-findings)                                                       │
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>╰──────────────────────────────────────────────────────────────────────────────╯
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Usage: ash scan [OPTIONS]
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>Try &#39;ash scan --help&#39; for help.
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>╭─ Error ──────────────────────────────────────────────────────────────────────╮
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>│ No such option: --fail-on-finding (Possible options: --fail-on-findings,     │
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>│ --no-fail-on-findings)                                                       │
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>╰──────────────────────────────────────────────────────────────────────────────╯
 </span></code></pre></div>
 <p>Cause: a usage error. Every <code>ash</code> command exits 5 when its command line is wrong: an
 option or argument the command does not take, a value an option does not accept (such
@@ -4123,19 +4169,19 @@ with findings. Two selections exit 2 instead: an <code>ash dependencies install 
 that it has no plugin for, and a <code>--plugin-type</code> other than <code>converter</code>, <code>scanner</code>, or
 <code>reporter</code> (<a href="../../reference/exit-codes/#other">Exit codes</a>).</p>
 <!-- doctest: run expect-exit=5 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--output-formats<span class="w"> </span>nosuch
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ash<span class="w"> </span>scan<span class="w"> </span>--output-formats<span class="w"> </span>nosuch
 </span></code></pre></div>
 <p><code>ash report</code> with a format no reporter answers to lists the ones it has, whether or not
 there are results to report:</p>
 <!-- doctest: run expect-exit=5 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>nosuch
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>nosuch
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Error: Reporter plugin &#39;nosuch&#39; not found.
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>Available reporter formats:
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>  - csv
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  - cyclonedx
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>  - github-ghas
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  ...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Error: Reporter plugin &#39;nosuch&#39; not found.
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>Available reporter formats:
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  - csv
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  - cyclonedx
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  - github-ghas
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  ...
 </span></code></pre></div>
 <p>Fix: correct the command line; <code>ash &lt;command&gt; --help</code> lists each command's options.
 Scanner and reporter names use hyphens, as <code>ash plugin list</code> shows them. A single
@@ -4143,7 +4189,7 @@ misspelled name among valid ones in <code>--scanners</code> is not a usage error
 <code>No registered scanner matches ...</code> and runs the others.</p>
 <h3 id="the-scan-exits-3">The scan exits 3<a class="headerlink" href="#the-scan-exits-3" title="Permanent link">&para;</a></h3>
 <p>Symptom:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ERROR (3) Invalid configuration: Configuration validation failed for &#39;/home/me/repo/.ashrc.yaml&#39;: Invalid value at &#39;global_settings.fail_on_findings&#39;: Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ashrc.yaml
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ERROR (3) Invalid configuration: Configuration validation failed for &#39;/home/me/repo/.ashrc.yaml&#39;: Invalid value at &#39;global_settings.fail_on_findings&#39;: Extra inputs are not permitted. Run: ash config lint --config /home/me/repo/.ashrc.yaml
 </span></code></pre></div>
 <p>Cause: the configuration file has a key ASH does not know below the top level, or a
 value of the wrong type anywhere, top level included. A plugin's options with a key ASH
@@ -4152,18 +4198,18 @@ by default and the entry suppresses nothing until it is fixed; with
 <code>fail_on_unknown_keys: true</code> (the default from ASH v4) it is refused the same way, and
 the message lists the keys the entry accepts:</p>
 <!-- doctest: run expect-exit=3 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="s">fail_on_unknown_keys: true</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s">global_settings:</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s">  suppressions:</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s">    - rule: B602</span>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="s">      path: app.py</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="s">      reason: Commands come from a fixed allowlist</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="s">EOF</span>
-</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>ash<span class="w"> </span>config<span class="w"> </span>validate
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="s">fail_on_unknown_keys: true</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="s">global_settings:</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="s">  suppressions:</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="s">    - rule: B602</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="s">      path: app.py</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="s">      reason: Commands come from a fixed allowlist</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="s">EOF</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>ash<span class="w"> </span>config<span class="w"> </span>validate
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>❌ 1 error(s); a scan refuses the configuration because of these:
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>  1. Invalid value at &#39;global_settings.suppressions[0]&#39;: Value error, Unknown key &#39;rule&#39; (did you mean &#39;rule_id&#39;?) in a suppression. Accepted keys: expiration, expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>❌ 1 error(s); a scan refuses the configuration because of these:
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>  1. Invalid value at &#39;global_settings.suppressions[0]&#39;: Value error, Unknown key &#39;rule&#39; (did you mean &#39;rule_id&#39;?) in a suppression. Accepted keys: expiration, expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
 </span></code></pre></div>
 <p>A common case is an unquoted <code>expiration</code> date in a suppression: YAML reads it as a
 date, and ASH expects text. Quote it, as in <code>"2027-04-30"</code>.</p>
@@ -4188,18 +4234,18 @@ the scan refuses it with exit 3.</p>
 <p>An ignore path that expired lets its files back into the scan, so the finding in <code>app.py</code>
 counts again here:</p>
 <!-- doctest: run expect-exit=2 -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="s">global_settings:</span>
-</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="s">  ignore_paths:</span>
-</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="s">    - path: app.py</span>
-</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="s">      reason: Generated file, scanned upstream</span>
-</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="s">      expiration: &quot;2026-01-31&quot;</span>
-</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="s">EOF</span>
-</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>ash<span class="w"> </span>scan<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--no-progress
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.ashrc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="s">global_settings:</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="s">  ignore_paths:</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="s">    - path: app.py</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="s">      reason: Generated file, scanned upstream</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="s">      expiration: &quot;2026-01-31&quot;</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="s">EOF</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>ash<span class="w"> </span>scan<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--no-progress
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>The following ignore paths and suppressions have expired and no longer apply:
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>  - Ignore path &#39;app.py&#39; expired on 2026-01-31. Reason: Generated file, scanned upstream
-</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>Remove them, or move their expiration dates, in your ASH configuration file.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>The following ignore paths and suppressions have expired and no longer apply:
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>  - Ignore path &#39;app.py&#39; expired on 2026-01-31. Reason: Generated file, scanned upstream
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>Remove them, or move their expiration dates, in your ASH configuration file.
 </span></code></pre></div>
 <p>Fix: run <code>ash config validate</code>, which checks the file the way a scan does and warns
 about unknown top-level keys and a missing <code>project_name</code>, and <code>ash config get</code>, which
@@ -4207,7 +4253,7 @@ prints the configuration a scan would use. <code>ash config lint</code> also lis
 suppressions and ignore paths.</p>
 <h3 id="a-setting-in-the-repositorys-config-file-is-ignored">A setting in the repository's config file is ignored<a class="headerlink" href="#a-setting-in-the-repositorys-config-file-is-ignored" title="Permanent link">&para;</a></h3>
 <p>Symptom: a warning such as:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
 </span></code></pre></div>
 <p>Cause: some settings decide what ASH may run, read, or send, or whether a stale database
 fails the scan: sandbox grants, plugin modules, reporter destinations and credentials,
@@ -4253,9 +4299,9 @@ to skip projects that do not exist. See <a href="../scale-large-repos/">Scale to
 <h2 id="output-directory">Output directory<a class="headerlink" href="#output-directory" title="Permanent link">&para;</a></h2>
 <h3 id="the-scan-stops-because-something-in-the-output-directory-is-a-symlink">The scan stops because the output directory is a symlink<a class="headerlink" href="#the-scan-stops-because-something-in-the-output-directory-is-a-symlink" title="Permanent link">&para;</a></h3>
 <p>Symptom: the scan exits 3 before writing anything, with one of:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>ERROR (3) The output directory /home/me/out is a symlink. ASH does not write to, clear or mount its output directory through a link, whatever the sandbox mode. Pass --output-dir with a directory that is not a link, or replace the link with a directory.
-</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>ERROR (3) /home/me/repo/.ash is a symlink, on the way to the output directory /home/me/repo/.ash/ash_output. ...
-</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>ERROR (3) /home/me/out/reports is a symlink. ...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ERROR (3) The output directory /home/me/out is a symlink. ASH does not write to, clear or mount its output directory through a link, whatever the sandbox mode. Pass --output-dir with a directory that is not a link, or replace the link with a directory.
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>ERROR (3) /home/me/repo/.ash is a symlink, on the way to the output directory /home/me/repo/.ash/ash_output. ...
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>ERROR (3) /home/me/out/reports is a symlink. ...
 </span></code></pre></div>
 <p>Cause: the output directory, a directory on the way to it inside the scanned
 directory, or something ASH writes inside it, such as <code>reports</code>, is a symbolic link.
@@ -4269,7 +4315,7 @@ replace the link with a directory. Turning the sandbox off does not change this.
 <h3 id="the-scan-stops-because-a-report-file-is-a-link">The scan stops because a report file is a link<a class="headerlink" href="#the-scan-stops-because-a-report-file-is-a-link" title="Permanent link">&para;</a></h3>
 <p>Symptom: the run exits 1 before any reporter writes, with this message (<code>ash merge</code>
 prints the same text after <code>Refusing to write reports:</code>):</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a report through a link. Remove the link and run ASH again.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ERROR (1) /home/me/out/reports/ash.sarif is a symlink. ASH does not write a report through a link. Remove the link and run ASH again.
 </span></code></pre></div>
 <p>Cause: a file a reporter is about to write in <code>reports/</code> is a symbolic link or a
 directory junction. A scan clears <code>reports/</code> first, so this usually comes from
@@ -4279,8 +4325,8 @@ holds the link.</p>
 <h2 id="content-databases">Content databases<a class="headerlink" href="#content-databases" title="Permanent link">&para;</a></h2>
 <h3 id="a-content-database-is-stale">A content database is stale<a class="headerlink" href="#a-content-database-is-stale" title="Permanent link">&para;</a></h3>
 <p>Symptom:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ERROR (1) Exiting because 1 content database(s) are past their declared age bound
-</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>  Content database semgrep-offline-rules (semgrep) is stale: downloaded 2026-08-31T22:43:12Z, 40d 0h old, past its 720h bound ...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ERROR (1) Exiting because 1 content database(s) are past their declared age bound
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>  Content database semgrep-offline-rules (semgrep) is stale: downloaded 2026-08-31T22:43:12Z, 40d 0h old, past its 720h bound ...
 </span></code></pre></div>
 <p>Cause: grype, trivy, and offline semgrep and opengrep read databases that go out of
 date. ASH fails a scan whose database is past its age bound, or whose age it cannot
@@ -4306,12 +4352,12 @@ directories, such as <code>~/.cache/grype</code> and <code>~/.cache/trivy</code>
 <h3 id="a-scanner-hangs">A scanner hangs<a class="headerlink" href="#a-scanner-hangs" title="Permanent link">&para;</a></h3>
 <p>Symptom: the scan stops making progress. Every 60 seconds the log shows which scanners
 are still running:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>bandit still running on source (60s elapsed)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>bandit still running on source (60s elapsed)
 </span></code></pre></div>
 <p>Cause: each scanner has a time limit, <code>scan_timeout</code>, which defaults to 1800 seconds
 (30 minutes). A scanner that reaches it is stopped and shows as ERROR. With
 <code>scan_timeout</code> set to 65, for example:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>(bandit @ source) timed out after 65.0s and was killed. Raise scanners.bandit.options.scan_timeout if this target legitimately needs longer.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>(bandit @ source) timed out after 65.0s and was killed. Raise scanners.bandit.options.scan_timeout if this target legitimately needs longer.
 </span></code></pre></div>
 <p>There is no limit on the scan as a whole.</p>
 <p>Fix: find the scanner in the "still running" lines or in <code>ash.log</code>, and look at its
@@ -4332,8 +4378,8 @@ PyO3's maximum supported version.</p>
 <a href="../install/">Install ASH</a>.</p>
 <h3 id="the-install-fails-because-git-is-missing">The install fails because git is missing<a class="headerlink" href="#the-install-fails-because-git-is-missing" title="Permanent link">&para;</a></h3>
 <p>Symptom: uv stops with an error whose causes end in:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>  cause: Git operation failed
-</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>  cause: Git executable not found. Ensure that Git is installed and available.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>  cause: Git operation failed
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>  cause: Git executable not found. Ensure that Git is installed and available.
 </span></code></pre></div>
 <p>Cause: uv and pip fetch ASH from its git repository, which needs git.</p>
 <p>Fix: install git and run the command again.</p>
