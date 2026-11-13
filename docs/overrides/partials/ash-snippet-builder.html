@@ -79,7 +79,6 @@ ash scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
 {%- endset %}
 {% set t_local_nix -%}
 uv tool install --python 3.12 '{{ spec }}'
-export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/{{ ref }}
 ash scan --mode nix
 {%- endset %}
 

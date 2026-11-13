@@ -202,6 +202,11 @@ uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://gith
 is made, so `ash --version` does not tell the two apart. Pin a commit SHA instead of
 `@main` when you need to know which code you ran.
 
+In [Nix mode](#nix-mode), an install of `main` resolves its flake to the latest
+release's tag, because that is the version it reports. Set
+`ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main`, or the commit you
+pinned, so the scanner toolchain matches the code.
+
 ## Container image
 
 No ASH image is published. `ash --mode container` builds an image with every scanner
@@ -235,7 +240,6 @@ newer release:
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network and scans in a Nix shell" -->
 ```bash
 uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
-export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/v3.8.0
 ash scan --mode nix
 ```
 
@@ -243,12 +247,15 @@ Which flake supplies the shell's tools:
 
 - From a source checkout, ASH uses that checkout's `flake.nix`.
 - An installed ASH looks for the flake at the release tag matching the version it
-  reports, which releases newer than v3.7.x ship, so a release install works with
-  `ASH_NIX_FLAKE_REF` unset; the line above pins the scan's flake to the same release
-  the install line names, so the two cannot drift apart. Set the variable to a
-  checkout, written `path:` followed by its absolute path, or to a branch, tag or
-  commit, to scan with a different flake: an install of `main` reports the latest
-  release's version number and so resolves to that release's flake, not `main`'s.
+  reports, which releases newer than v3.7.x ship, so a release install needs nothing
+  set.
+- Set `ASH_NIX_FLAKE_REF` to scan with a different flake: a checkout, written `path:`
+  followed by its absolute path, or a branch, tag or commit of this repository or a
+  fork. An install of `main` reports the latest release's version number and so
+  resolves to that release's flake, not `main`'s; set
+  `ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main`, or a matching
+  commit, so the scanner toolchain matches the code you run (see
+  [Install from main](#install-from-main)).
 
 ## Homebrew
 

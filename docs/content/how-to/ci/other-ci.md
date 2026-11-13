@@ -140,13 +140,13 @@ the Ruby packages the [recipe](#recipe) uses for cfn-nag. The host needs:
 - Node.js is supplied by the flake. Network access is still needed for the scanners'
   databases and rules.
 
-An installed release looks for `flake.nix` at its own release tag, and the explicit
-`ASH_NIX_FLAKE_REF` pins the scan's flake to the same release the install line names:
+An installed release looks for `flake.nix` at its own release tag, so the recipe sets
+no `ASH_NIX_FLAKE_REF`; set it only to scan with a different flake, such as when
+running ASH from `main` or a fork ([Nix mode](../install.md#nix-mode)):
 
 <!-- doctest: illustrative reason="installs ASH from GitHub and needs Nix and the network" -->
 ```bash
 uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
-export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/v3.8.0
 ash_exit=0
 ash scan --mode nix --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \

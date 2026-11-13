@@ -625,8 +625,10 @@ Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools com
 ASH's `flake.nix`, so the job installs neither Ruby nor the scanner binaries. The job
 needs Nix on the runner, and ASH installed with the `cdk` extra: Nix mode does not install
 ASH, and cdk-nag runs on the Python environment ASH is installed in. ASH passes
-`nix-command` and `flakes` on each invocation. `ASH_NIX_FLAKE_REF` pins the scan's flake
-to the release the job installs, so the two cannot drift apart.
+`nix-command` and `flakes` on each invocation. The installed release resolves its flake
+to its own release tag, so the job sets no `ASH_NIX_FLAKE_REF`; set it only to scan with
+a different flake, such as when running ASH from `main` or a fork
+([Nix mode](../install.md#nix-mode)).
 
 <!-- doctest: config kind=github-actions runner=none reason="installs a released ASH, which the runner cannot swap for the pull request's build" -->
 ```yaml
@@ -638,8 +640,6 @@ permissions:
 jobs:
   ash-nix:
     runs-on: ubuntu-latest
-    env:
-      ASH_NIX_FLAKE_REF: github:awslabs/automated-security-helper/v{{VERSION}}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

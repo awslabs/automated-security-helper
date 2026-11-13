@@ -290,8 +290,10 @@ ASH's `flake.nix`, so the job needs no `apt-get` packages for the scanners and n
 and git; set the CI/CD variable `NIX_IMAGE` to an image that has them. ASH passes
 `nix-command` and `flakes` on each invocation, so you do not have to enable them in
 `nix.conf`. Nix mode does not install ASH, and cdk-nag runs on the Python environment ASH
-is installed in, so install ASH with the `cdk` extra. `ASH_NIX_FLAKE_REF` pins the scan's
-flake to the release the job installs, so the two cannot drift apart.
+is installed in, so install ASH with the `cdk` extra. The installed release resolves its
+flake to its own release tag, so the job sets no `ASH_NIX_FLAKE_REF`; set it only to scan
+with a different flake, such as when running ASH from `main` or a fork
+([Nix mode](../install.md#nix-mode)).
 
 <!-- doctest: config kind=gitlab-ci runner=none reason="installs a released ASH, which the runner cannot swap for the pull request's wheel" -->
 ```yaml
@@ -300,7 +302,6 @@ ash-scan-nix:
   image: $NIX_IMAGE
   variables:
     INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
-    ASH_NIX_FLAKE_REF: "github:awslabs/automated-security-helper/v3.8.0"
   before_script:
     - python -m venv /opt/ash
     - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
