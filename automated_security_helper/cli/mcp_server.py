@@ -349,19 +349,24 @@ async def _lifespan(_server: MCPServer) -> AsyncIterator[Dict[str, Any]]:
         yield {}
     finally:
         if _serving_stdio:
-            with anyio.CancelScope(shield=True):
-                deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
-                joiner = _begin_stopping_source_jobs()
-                await stop_running_scans(
-                    "the stdio client closed the connection",
-                    timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
-                    promptly=True,
-                )
-                await _wait_for_source_jobs(joiner, deadline)
-            # The process ends next, by the client's SIGTERM if not sooner; a tool
-            # still running then would outlive it (_stop_on_signal).
-            kill_running_groups()
-            _flush_stdout()
+            try:
+                with anyio.CancelScope(shield=True):
+                    deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+                    joiner = _begin_stopping_source_jobs()
+                    await stop_running_scans(
+                        "the stdio client closed the connection",
+                        timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
+                        promptly=True,
+                    )
+                    await _wait_for_source_jobs(joiner, deadline)
+            finally:
+                # The shield stops a cancel, not an exception: these run even
+                # when the stop raised, or the tools' groups would outlive the
+                # server and the block-buffered stdout would reach the client's
+                # pipe once fd 1 is pointed back at it. The process ends next,
+                # by the client's SIGTERM if not sooner (_stop_on_signal).
+                kill_running_groups()
+                _flush_stdout()
 
 
 mcp = MCPServer(name="ASH Security Scanner", lifespan=_lifespan)
@@ -1019,7 +1024,7 @@ async def run_ash_scan(
                 # shapes without one, a session whose delivered source is being
                 # changed and a session at its scan limit, are the "anything
                 # else" case there, with another scan of the same directory.
-                with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
+                result = with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
             return result
         if "scan_id" not in result:
             await _tell_client_error(
@@ -1813,8 +1818,10 @@ async def get_scan_results(
         # it to judge the findings.
         if actionable_only:
             results = _add_findings_list(results)
-            results.get("raw_results", {}).pop("sarif", None)
-            results.get("raw_results", {}).pop("severity_thresholds", None)
+            raw_results = results.get("raw_results")
+            if isinstance(raw_results, dict):
+                raw_results.pop("sarif", None)
+                raw_results.pop("severity_thresholds", None)
 
         # Apply response size filter based on parameter. The summary and minimal
         # filters carry the coverage keys of the document themselves, as the
@@ -3555,14 +3562,18 @@ async def stop_scans_at_server_exit(reason: str) -> bool:
     or a source clone or delivery (_begin_stopping_source_jobs) was still
     running when the wait ended.
     """
-    with anyio.CancelScope(shield=True):
-        deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
-        joiner = _begin_stopping_source_jobs()
-        still_running = await stop_running_scans(
-            reason, timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS, promptly=True
-        )
-        jobs_running = await _wait_for_source_jobs(joiner, deadline)
-    kill_running_groups()
+    try:
+        with anyio.CancelScope(shield=True):
+            deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+            joiner = _begin_stopping_source_jobs()
+            still_running = await stop_running_scans(
+                reason, timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS, promptly=True
+            )
+            jobs_running = await _wait_for_source_jobs(joiner, deadline)
+    finally:
+        # Also when the stop raised: the tools' groups must not outlive it.
+        kill_running_groups()
+        _flush_stdout()
     return bool(still_running) or jobs_running
 
 

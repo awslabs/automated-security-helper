@@ -912,6 +912,38 @@ async def _leave_the_stdio_lifespan() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("site", ["lifespan", "server exit"])
+def test_a_stop_that_raises_still_kills_the_groups_and_flushes_stdout(
+    monkeypatch, site
+):
+    """The shield stops a cancel, not an exception: the tools' groups are still
+    killed and stdout still flushed while fd 1 points at stderr."""
+    events: List[str] = []
+
+    async def stop_running_scans(reason, timeout, promptly=False):
+        raise RuntimeError("the registry failed")
+
+    monkeypatch.setattr(mcp_server, "stop_running_scans", stop_running_scans)
+    monkeypatch.setattr(mcp_server, "_serving_stdio", True)
+    monkeypatch.setattr(mcp_server, "_begin_stopping_source_jobs", lambda: object())
+    monkeypatch.setattr(
+        mcp_server, "kill_running_groups", lambda: events.append("kill")
+    )
+    monkeypatch.setattr(mcp_server, "_flush_stdout", lambda: events.append("flush"))
+
+    async def run() -> None:
+        if site == "lifespan":
+            await _leave_the_stdio_lifespan()
+        else:
+            await mcp_server.stop_scans_at_server_exit("test")
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(run())
+
+    assert events == ["kill", "flush"], events
+
+
+@pytest.mark.unit
 def test_the_stdio_lifespan_shuts_the_source_pools_down_and_drops_their_queue(
     monkeypatch, stops, recording_pools
 ):

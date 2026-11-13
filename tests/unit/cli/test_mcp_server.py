@@ -602,6 +602,32 @@ class TestGetScanProgress:
         assert "source" in scanners["checkov"], scanners
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("raw_results", [None, "text", []])
+    async def test_actionable_only_with_a_non_dict_raw_results_is_not_a_failure(
+        self, mock_ctx, raw_results
+    ):
+        """raw_results present but not a mapping must not raise AttributeError."""
+        from automated_security_helper.cli import mcp_server
+
+        document = {"success": True, "raw_results": raw_results}
+        with (
+            patch.object(
+                mcp_server,
+                "mcp_get_scan_results",
+                new_callable=AsyncMock,
+                return_value=document,
+            ),
+            patch.object(mcp_server, "filter_actionable_only", side_effect=lambda r: r),
+            patch.object(mcp_server, "_add_findings_list", side_effect=lambda r: r),
+        ):
+            result = await mcp_server.get_scan_results(
+                ctx=mock_ctx, actionable_only=True
+            )
+
+        assert result.get("error_type") != "internal_error", result
+        assert "AttributeError" not in str(result), result
+
+    @pytest.mark.asyncio
     async def test_progress_exception_handling(self, mock_ctx):
         """Exceptions produce a structured error response."""
         from automated_security_helper.cli.mcp_server import get_scan_progress

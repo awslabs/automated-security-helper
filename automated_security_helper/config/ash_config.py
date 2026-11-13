@@ -603,36 +603,6 @@ def represent_tagged_reference(
     return dumper.represent_scalar("!ENV", str(value).removeprefix(EXPLICIT_ENV_TAG))
 
 
-class _QuotedStr(str):
-    """A string ``_rewrite_config_with_entry`` writes quoted, as ``_ConfigDumper``
-    would, among existing values it writes as they were."""
-
-    __slots__ = ()
-
-
-class _EntryRewriteDumper(yaml.SafeDumper):
-    pass
-
-
-_EntryRewriteDumper.add_representer(
-    _QuotedStr,
-    lambda dumper, value: dumper.represent_scalar(
-        "tag:yaml.org,2002:str", str(value), style="'"
-    ),
-)
-
-
-def _quote_references(value: Any) -> Any:
-    """``value`` with every string that reads as ``!ENV`` marked to be quoted."""
-    if isinstance(value, dict):
-        return {k: _quote_references(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_quote_references(v) for v in value]
-    if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
-        return _QuotedStr(value)
-    return value
-
-
 # Define BuildConfig class
 class BuildConfig(RedactedSection):
     """Configuration model for build-time settings."""
@@ -839,7 +809,9 @@ class _PluginConfigSegment(RedactedSection):
         # where it was merged in silently. A document load folds there and
         # never reaches this branch; it runs for a configuration built from a
         # dict directly.
-        declared = {info.alias or name for name, info in cls.model_fields.items()}
+        declared = {
+            field_info.alias or name for name, field_info in cls.model_fields.items()
+        }
         folded = {_folded_section_name(key): key for key in declared}
         for key in list(data):
             if not isinstance(key, str) or key in declared:
@@ -3335,9 +3307,13 @@ def _same_suppression(existing: Any, suppression: AshSuppression) -> bool:
         existing_suppression = AshSuppression.model_validate(existing)
     except ValidationError:
         return False
+    # client_supplied is set by ASH, never written (the writer drops it and a
+    # value in a file is ignored), so it is no part of what the entry holds.
     return existing_suppression.model_dump(
-        mode="json", exclude_none=True
-    ) == suppression.model_dump(mode="json", exclude_none=True)
+        mode="json", exclude_none=True, exclude={"client_supplied"}
+    ) == suppression.model_dump(
+        mode="json", exclude_none=True, exclude={"client_supplied"}
+    )
 
 
 class _KeepsEnvReferences(_NoAliasSafeLoader):
@@ -4052,6 +4028,9 @@ def _write_checked(
             "the config is not writable, so the suppression is not saved",
             config_path,
         )
+    # Only now, with the containment checks passed: nothing is created through
+    # a link that leads outside the root.
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     # A new config is created as a plain create would make it; an existing
     # one's copy starts private and takes the earlier mode below. A directory
     # this process may not write refuses the staging, and the replace below
@@ -4247,7 +4226,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         not_a_file = str(e)
     if not_a_file is not None:
         raise _left_unchanged(not_a_file, config_path)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    # The directory is made in _write_checked, after its containment refusals:
+    # made here, a link pointing outside got directories created through it
+    # before the save refused.
     # The file's bytes as they are: what a failed write puts back, and where
     # its own line ending is read from. Read as the recheck before the replace
     # reads (read_config_bytes, so the same size bound): the two reads must
