@@ -965,6 +965,15 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # First, while use_uv_tool still says what construction set: the
         # tool-version probe, which construction leaves to this point.
         self.resolve_deferred_tool_version()
+        # A copy on PATH an earlier validation of this instance verified and
+        # chose to run directly is honored while it still exists: with
+        # use_uv_tool already False, a re-validation skipped the selection
+        # branch below and fell to the consolidated resolver, which paid its
+        # cold `uv tool run ... --version` probe per re-check (checkov's
+        # measured shape; bandit's resolver answer keeps the route but still
+        # pays the probe).
+        if self._honored_verified_pre_installed():
+            return True
         if not self._validate_uv_tool_availability():
             # UV is required but not present. The consolidated resolver answers
             # a bandit on PATH, if there is one; it runs directly once verified

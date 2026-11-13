@@ -193,9 +193,36 @@ _verdict_cache_lock = threading.Lock()
 
 
 def reset_pre_installed_tool_cache() -> None:
-    """Forget memoized verdicts (tests, or after installing a tool mid-process)."""
+    """Forget memoized AND persisted verdicts (tests, or after installing a tool).
+
+    The persisted store (below) outlives the process by design, so a reset
+    that cleared only the memo left every persisted "satisfied" answering
+    behind the caller's back: a test that fakes a probe, resets, and probes
+    again would read the first fake's record instead of running the second,
+    and a tool installed mid-process would keep its pre-install verdict. The
+    wipe is best-effort, through the same descriptor checks as every other
+    store access.
+    """
     with _verdict_cache_lock:
         _verdict_cache.clear()
+    directory_fd = _open_verdict_store(create=False)
+    if directory_fd is None:
+        return
+    try:
+        try:
+            names = os.listdir(directory_fd)
+        except OSError:
+            return
+        for name in names:
+            if name.endswith(".json") or (
+                name.startswith(".") and name.endswith(".tmp")
+            ):
+                try:
+                    os.unlink(name, dir_fd=directory_fd)
+                except OSError:
+                    continue
+    finally:
+        os.close(directory_fd)
 
 
 #: How long a PERSISTED satisfied verdict answers across processes. The
@@ -206,6 +233,18 @@ def reset_pre_installed_tool_cache() -> None:
 #: changed binary misses whatever the clock says; the TTL only bounds how long
 #: an unchanged copy goes unre-verified.
 _PERSISTED_VERDICT_TTL_SECONDS = 24 * 3600.0
+
+#: The TTL for a copy whose Python ENVIRONMENT the record could not pin. The
+#: judge verifies the interpreter's environment (installed version, extras,
+#: dependencies), not the launcher file, and a `pip uninstall` or downgrade in
+#: that environment rewrites no launcher. Where the environment is pinned in
+#: the record's key (the shebang interpreter plus its site-packages
+#: directories' mtimes, which move on any install, uninstall or downgrade
+#: there; or a content-addressed Nix store path), the full TTL applies; where
+#: it cannot be (a native binary, an `env` shebang, an unrecognized layout),
+#: the record answers only this long past the in-process memo.
+_UNPINNED_VERDICT_TTL_SECONDS = 3600.0
+
 
 #: Overrides where the records live; "0", "off" or "none" turns persistence
 #: off. Unset or blank, the default under the user's own state directory
@@ -276,22 +315,76 @@ def _open_verdict_store(*, create: bool) -> Optional[int]:
     return fd
 
 
-def _store_name(key: Tuple[str, int, str, Tuple[str, ...], str]) -> Optional[str]:
-    """The record file name for ``key``, or None when the copy cannot be read.
+def _environment_identity(resolved: str) -> Tuple[str, bool]:
+    """A material fragment naming the copy's Python environment, and whether it pins it.
 
-    A digest over the copy's resolved path, mtime and SIZE, the requirement,
-    the redaction values (hashed: they are env-read and never written to
-    disk), and the judging uv's path, mtime and size. A changed tool or uv
-    binary therefore misses: invalidation is a new name, and the old record
-    ages out through the sweep. The size is read here, beside the key's
-    mtime; a copy replaced between the two reads yields a name no later run
-    re-derives, which costs one re-verification and nothing else.
+    The judge (``_judge``) verifies the INTERPRETER'S ENVIRONMENT -- installed
+    version, extras, dependencies -- while the launcher file's own mtime and
+    size move for none of `pip uninstall <a dependency>`, a downgrade, or an
+    in-place venv rebuild. So the fragment carries the interpreter that
+    provides the copy (``find_tool_interpreter``'s reviewed read: the shebang,
+    the environment beside a wrapped script, a Windows launcher), stat through
+    any symlink -- mtime and size move on an interpreter swap or rebuild --
+    and each site-packages directory's mtime beside it: a directory whose
+    mtime moves whenever a distribution is added, removed or replaced there,
+    dist-info directories included. A Nix store copy is pinned by its
+    content-addressed path, which the key's resolved path already carries.
+    ``pinned`` False -- no interpreter found, a user-site script (whose
+    shebang interpreter does not describe the environment that provides it,
+    ``_in_user_site``), no site-packages found beside the interpreter -- sends
+    the record to the short TTL (``_UNPINNED_VERDICT_TTL_SECONDS``) instead.
+
+    Limits, accepted: an edit INSIDE an installed package that adds or removes
+    no directory entry does not move site-packages' mtime (it also rewrites no
+    verdict today); an unrelated install in the same environment moves it and
+    costs one re-verification, never a wrong answer.
+    """
+    if resolved.startswith("/nix/store/"):
+        return ("nix", True)
+    interpreter = find_tool_interpreter(resolved)
+    if interpreter is None:
+        return ("", False)
+    try:
+        status = os.stat(interpreter)
+    except OSError:
+        return ("", False)
+    parts = [interpreter, str(status.st_mtime_ns), str(status.st_size)]
+    if _in_user_site(resolved):
+        return ("\x00".join(parts), False)
+    prefix = Path(interpreter).parent.parent
+    site_dirs = sorted(str(path) for path in prefix.glob("lib/python*/site-packages"))
+    site_dirs += sorted(str(path) for path in prefix.glob("Lib/site-packages"))
+    if not site_dirs:
+        return ("\x00".join(parts), False)
+    for directory in site_dirs:
+        try:
+            parts.append(f"{directory}\x00{os.stat(directory).st_mtime_ns}")
+        except OSError:
+            parts.append(f"{directory}\x00gone")
+    return ("\x00".join(parts), True)
+
+
+def _store_name(
+    key: Tuple[str, int, str, Tuple[str, ...], str],
+) -> Optional[Tuple[str, bool]]:
+    """The record file name for ``key`` and whether its environment is pinned.
+
+    None when the copy cannot be read. A digest over the copy's resolved path,
+    mtime and SIZE, the requirement, the redaction values (hashed: they are
+    env-read and never written to disk), the judging uv's path, mtime and
+    size, and the ENVIRONMENT identity behind the launcher
+    (``_environment_identity``). A changed tool binary, uv, interpreter or
+    site-packages content therefore misses: invalidation is a new name, and
+    the old record ages out through the sweep. The size is read here, beside
+    the key's mtime; a copy replaced between the two reads yields a name no
+    later run re-derives, which costs one re-verification and nothing else.
     """
     resolved, mtime_ns, requirement, values, uv_executable = key
     try:
         size = os.stat(resolved).st_size
     except OSError:
         return None
+    environment, pinned = _environment_identity(resolved)
     values_digest = hashlib.sha256(
         "\x00".join(values).encode("utf-8", "surrogatepass")
     ).hexdigest()
@@ -314,10 +407,11 @@ def _store_name(key: Tuple[str, int, str, Tuple[str, ...], str]) -> Optional[str
             requirement,
             values_digest,
             uv_identity,
+            environment,
         ]
     )
     digest = hashlib.sha256(material.encode("utf-8", "surrogatepass")).hexdigest()
-    return f"{digest}.json"
+    return (f"{digest}.json", pinned)
 
 
 def _answer_from_the_store(
@@ -332,9 +426,10 @@ def _answer_from_the_store(
     costs one re-verification, never a wrong acceptance. A hit logs one line
     naming the cached verdict.
     """
-    name = _store_name(key)
-    if name is None:
+    named = _store_name(key)
+    if named is None:
         return None
+    name, pinned = named
     directory_fd = _open_verdict_store(create=False)
     if directory_fd is None:
         return None
@@ -350,12 +445,16 @@ def _answer_from_the_store(
                 or status.st_size > _VERDICT_STORE_READ_LIMIT
             ):
                 raise ValueError("not a record")
+            # Bounded+1: a record past the cap is not ours and is refused
+            # whole, never truncated into something that might still parse.
             raw = b""
             while len(raw) <= _VERDICT_STORE_READ_LIMIT:
-                chunk = os.read(file_fd, 65536)
+                chunk = os.read(file_fd, _VERDICT_STORE_READ_LIMIT + 1 - len(raw))
                 if not chunk:
                     break
                 raw += chunk
+            if len(raw) > _VERDICT_STORE_READ_LIMIT:
+                raise ValueError("record too large")
             record = json.loads(raw.decode("utf-8"))
             if not isinstance(record, dict):
                 raise ValueError("not a record")
@@ -366,8 +465,17 @@ def _answer_from_the_store(
             stored_at = record.get("stored_at")
             if not isinstance(stored_at, (int, float)) or isinstance(stored_at, bool):
                 raise ValueError("no timestamp")
+            # The record's own TTL, clamped to the full one, and clamped down
+            # again when the environment reads unpinned NOW (the write side
+            # chose the TTL, but the launcher can have changed shape since).
+            ttl = record.get("ttl_seconds")
+            if not isinstance(ttl, (int, float)) or isinstance(ttl, bool):
+                raise ValueError("no ttl")
+            ttl = min(float(ttl), _PERSISTED_VERDICT_TTL_SECONDS)
+            if not pinned:
+                ttl = min(ttl, _UNPINNED_VERDICT_TTL_SECONDS)
             age = time.time() - stored_at
-            if not (0 <= age <= _PERSISTED_VERDICT_TTL_SECONDS):
+            if not (0 <= age <= ttl):
                 raise ValueError("expired")
             executable = record.get("executable")
             requirement = record.get("requirement")
@@ -437,9 +545,10 @@ def _persist_verdict(
     """
     if verdict.status != "satisfied":
         return
-    name = _store_name(key)
-    if name is None:
+    named = _store_name(key)
+    if named is None:
         return
+    name, pinned = named
     directory_fd = _open_verdict_store(create=True)
     if directory_fd is None:
         return
@@ -447,6 +556,11 @@ def _persist_verdict(
     try:
         record = {
             "format": _VERDICT_STORE_FORMAT,
+            "ttl_seconds": (
+                _PERSISTED_VERDICT_TTL_SECONDS
+                if pinned
+                else _UNPINNED_VERDICT_TTL_SECONDS
+            ),
             "status": verdict.status,
             "executable": verdict.executable,
             "requirement": verdict.requirement,

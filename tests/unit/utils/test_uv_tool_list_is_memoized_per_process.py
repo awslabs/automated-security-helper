@@ -70,6 +70,35 @@ def test_forgetting_and_a_new_executable_re_spawn(tmp_path):
         assert spawns[2][0] == str(tmp_path / "uv2")
 
 
+def test_an_outside_install_is_seen_through_the_tools_dir_stamp(tmp_path, monkeypatch):
+    """An install or uninstall NOBODY told this runner about still invalidates.
+
+    `uv tool install`/`uninstall` create or remove `<tools dir>/<tool>`, which
+    moves the directory's mtime whoever runs them -- another runner instance,
+    another process, a hand-run uv -- and the memo is keyed on that stamp, so
+    the stale listing misses without waiting out the TTL.
+    """
+    tools_dir = tmp_path / "uv-tools"
+    tools_dir.mkdir()
+    monkeypatch.setenv("UV_TOOL_DIR", str(tools_dir))
+    runner = UVToolRunner(uv_executable=str(tmp_path / "uv"))
+    spawns = []
+
+    def fake_spawn(command, **kwargs):
+        spawns.append(command)
+        return SimpleNamespace(stdout=_LISTING)
+
+    with _available(runner), patch.object(module, "spawn_run", fake_spawn):
+        runner.list_available_tools()
+        runner.list_available_tools()
+        assert len(spawns) == 1
+
+        # The outside install: a new entry under the tools directory.
+        (tools_dir / "semgrep").mkdir()
+        runner.list_available_tools()
+        assert len(spawns) == 2
+
+
 def test_a_failed_listing_memoizes_nothing(tmp_path):
     runner = UVToolRunner(uv_executable=str(tmp_path / "uv"))
     spawns = []

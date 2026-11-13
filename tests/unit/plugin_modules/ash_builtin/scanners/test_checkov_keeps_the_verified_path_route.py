@@ -106,15 +106,77 @@ def test_a_gone_verified_copy_is_re_resolved_and_can_fail(checkov, tmp_path):
             CheckovScanner, "_validate_uv_tool_availability", return_value=True
         ),
         patch.object(
+            CheckovScanner,
+            "_get_tool_installation_info",
+            return_value={"available": False},
+        ) as info,
+        patch.object(CheckovScanner, "_install_uv_tool", return_value=False),
+        patch.object(
             checkov_scanner, "get_uv_tool_command", return_value=None
         ) as resolver,
     ):
         assert checkov.validate_plugin_dependencies() is False
 
-    # The stale record was cleared and the resolver consulted: an unusable
-    # tool still fails loudly instead of being answered from the record.
-    resolver.assert_called_once()
+    # The stale record was cleared, the route put back on uv so selection ran
+    # afresh (the installation-info read), and the resolver was consulted: an
+    # unusable tool still fails loudly instead of being answered from the
+    # record.
     assert checkov._verified_pre_installed_executable is None
+    assert checkov.use_uv_tool is True
+    info.assert_called_once()
+    resolver.assert_called_once()
+
+
+def test_a_config_swap_in_pre_scan_revalidates_without_the_flip(checkov, tmp_path):
+    """The DA-named regression: swap the config per target, then re-validate.
+
+    The swap runs BEFORE the dependency check now, so the target is checked
+    under the config it scans with, and the swap resets the memoized verdict
+    AND restores the uv route, so the re-validation runs selection afresh
+    instead of skipping into the consolidated resolver's cold probe and flip.
+    """
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "main.tf").write_text('resource "aws_s3_bucket" "b" {}\n')
+
+    copy = _verified_copy(tmp_path)
+    # What setup left behind: a satisfied, memoized validation that chose the
+    # verified PATH copy.
+    checkov.use_uv_tool = False
+    checkov._verified_pre_installed_executable = str(copy)
+    checkov._dependencies_validated = True
+    checkov.dependencies_satisfied = True
+
+    observed = []
+
+    def recording_validate(self):
+        observed.append(
+            (
+                self.use_uv_tool,
+                self._verified_pre_installed_executable,
+                self.config.options.scan_timeout,
+            )
+        )
+        self.dependencies_satisfied = True
+        return True
+
+    changed = checkov.config.model_dump(by_alias=True)
+    changed["options"]["scan_timeout"] = 123
+
+    with patch.object(
+        CheckovScanner, "validate_plugin_dependencies", recording_validate
+    ):
+        unchanged = checkov.config.model_dump(by_alias=True)
+        assert checkov._pre_scan(target, target_type="source", config=unchanged)
+        # Same config: the memoized verdict answers, nothing re-validates.
+        assert observed == []
+
+        assert checkov._pre_scan(target, target_type="source", config=changed)
+
+    # The swap re-validated, under the NEW config (the check sees what the
+    # target scans with), with the route restored and the record cleared.
+    assert observed == [(True, None, 123)]
+    assert checkov.config.options.scan_timeout == 123
 
 
 def test_a_decision_repointed_at_uv_is_not_honored(checkov, tmp_path):

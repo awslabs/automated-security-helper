@@ -993,6 +993,25 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.dependencies_satisfied = verdict
         return verdict
 
+    def _reset_dependency_validation(self) -> None:
+        """Forget this instance's dependency verdict and the route it decided.
+
+        Called when the config is swapped for one that says something else: the
+        config builds the requirement the check verifies (tool_version), so the
+        memoized verdict and the verified-PATH record no longer answer for it.
+        Dropping the record alone was not enough: the earlier decision had set
+        ``use_uv_tool`` False, and a validation that starts there skips its
+        ``if self.use_uv_tool`` selection branch and falls to the consolidated
+        resolver, which pays the cold uv probe and flips the route -- the exact
+        shape this unit removes -- so the flag goes back to the uv route the
+        decision started from, and the next validation runs selection afresh.
+        """
+        self._dependencies_validated = None
+        if self._verified_pre_installed_executable is not None:
+            self._verified_pre_installed_executable = None
+            if self.use_uv_tool is False:
+                self.use_uv_tool = True
+
     def _pre_scan(
         self,
         target: Path,
@@ -1009,6 +1028,24 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         self.start_time = datetime.now(timezone.utc)
         self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        # The config swap FIRST, before the dependency check reads anything the
+        # config decides (tool_version builds the requirement). It used to sit
+        # after the check, which meant the current target was checked against
+        # the verdict of the config it was replacing; with the verdict now
+        # memoized, it would also have left the memo answering for the old
+        # config on this very target. A config that says what this one already
+        # says is not swapped in: building it again from its dump makes every
+        # nested entry a new object (an entry that carries an identity the dump
+        # does not write got a new one on each scan) and drops the private
+        # state the first build recorded. Only a config that differs replaces
+        # it, and that resets the dependency verdict and the route it decided.
+        if config is not None:
+            if hasattr(config, "model_dump") and callable(config.model_dump):
+                config = config.model_dump(by_alias=True)
+            if config != self.config.model_dump(by_alias=True):
+                self.config = self.config.__class__.model_validate(config)
+                self._reset_dependency_validation()
 
         # Honors the setup phase's validation of this instance (memoized above)
         # instead of re-probing per target: the probes ran after start_time, so
@@ -1077,23 +1114,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 target_type=target_type,
                 level=logging.DEBUG,
             )
-        if config is not None:
-            if hasattr(config, "model_dump") and callable(config.model_dump):
-                config = config.model_dump(by_alias=True)
-            # A config that says what this one already says is not swapped in:
-            # building it again from its dump makes every nested entry a new
-            # object (an entry that carries an identity the dump does not write
-            # got a new one on each scan) and drops the private state the first
-            # build recorded. Only a config that differs replaces it.
-            if config != self.config.model_dump(by_alias=True):
-                self.config = self.config.__class__.model_validate(config)
-                # A config that differs can change what the dependency check
-                # verifies (tool_version builds the requirement), so the
-                # memoized verdict and the verified-PATH record no longer
-                # answer for it: the next validation re-probes under the new
-                # config, as every scan did before the memo existed.
-                self._dependencies_validated = None
-                self._verified_pre_installed_executable = None
+        # The swap itself already happened, before the dependency check at the
+        # top of this method; config is its dump form (or None) from there on.
         self._plugin_log(
             f"config setting: {self._setting_names(config)}",
             target_type=target_type,
