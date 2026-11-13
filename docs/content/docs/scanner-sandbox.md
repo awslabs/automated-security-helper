@@ -111,7 +111,7 @@ it needs.
   uv directory that `UV_TOOL_DIR`, `UV_PYTHON_INSTALL_DIR` or `UV_CACHE_DIR` names
   is not mounted, with a warning, when it is `/`, a home directory, a directory
   holding one, or a directory directly in one such as `~/.local`.
-- Tool caches (uv's cache, grype's and trivy's databases, semgrep's settings) are
+- Tool caches (uv's cache, grype's and trivy's databases, opengrep's settings) are
   writable only where the writes are thrown away: under bwrap (bubblewrap 0.8+ and
   Linux 5.11+) through an overlay, so writes succeed but are discarded when the
   scanner exits. firejail, Landlock, sandbox-exec, and bwrap without overlay support
@@ -217,8 +217,8 @@ it needs.
   mounted whole. It is acceptable because `sys.prefix` is the Python the operator
   chose to run ASH with, so keep that environment free of files a scanner must not
   read.
-- The offline rule cache of semgrep and opengrep, the directory
-  `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
+- The offline rule cache of opengrep, the directory
+  `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
   for that scanner wherever it is, `$HOME` included. Under sandbox-exec, the backend
   that restricts which files may be executed, no program runs from it; bwrap,
   firejail and Landlock restrict writes and reads, not exec, there. Only the
@@ -331,7 +331,6 @@ it needs.
 |---------|--------------------|--------|---------|
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
-| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep`; `$SEMGREP_RULES_CACHE_DIR` read-only | uv-managed Python |
 | opengrep | yes (registry rules) | `~/.opengrep`; `$OPENGREP_RULES_CACHE_DIR` read-only | single binary; on macOS it unpacks itself into a private directory per spawn |
 | grype | yes (database update) | grype database cache (read-only, or a throwaway overlay under bwrap) | single binary |
 | syft | no | syft cache | single binary |
@@ -393,7 +392,7 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         # The same for env_prefixes and env_names, with sandbox.env_scanners.
         env_requires_grant=False,
         # Variables in ASH's own environment naming a directory the tool reads
-        # (semgrep's SEMGREP_RULES_CACHE_DIR): mounted read-only, and not
+        # (opengrep's OPENGREP_RULES_CACHE_DIR): mounted read-only, and not
         # executable under sandbox-exec.
         # An unset or empty variable, or one naming /, $HOME or a directory above
         # it, grants nothing.

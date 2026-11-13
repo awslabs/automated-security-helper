@@ -551,7 +551,7 @@ than the server's own:
 - the gate: `fail_on_findings`, `fail_on_incomplete_scanners`, `content_db_staleness`,
   `content_db_staleness_overrides`, and `content_db_staleness_offline_image_default`
 - scanner options that drop findings by rule ID, by a baseline, or by a whole category, such as
-  `exclude_rule`, `config`, and `severity` of `opengrep` and `semgrep`, checkov's `frameworks`,
+  `exclude_rule`, `config`, and `severity` of `opengrep`, checkov's `frameworks`,
   cfn-lint's `ignore_checks`, detect-secrets' `baseline_file` and `scan_settings`, and trivy's
   `scanners` and `ignore_unfixed`
 - options that limit how much a scanner reads or reports, or that turn on its own network

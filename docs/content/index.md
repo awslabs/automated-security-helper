@@ -81,7 +81,7 @@ ashx --mode precommit
 
 ## Scanners
 
-- Code: Bandit, Semgrep, Opengrep
+- Code: Bandit, Opengrep
 - Infrastructure: Checkov, CDK-Nag, CFN-Nag
 - Secrets: detect-secrets
 - Dependencies and software inventory: Grype, npm audit, Syft

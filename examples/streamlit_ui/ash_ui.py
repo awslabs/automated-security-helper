@@ -479,9 +479,9 @@ with tab1:
 
             if offline:
                 offline_semgrep_rulesets = st.text_input(
-                    "Offline Semgrep Rulesets",
+                    "Offline Opengrep Rulesets",
                     value="p/ci",
-                    help="Specify Semgrep rulesets for use in ASH offline mode",
+                    help="Specify Opengrep rulesets for use in ASH offline mode",
                 )
             else:
                 offline_semgrep_rulesets = "p/ci"

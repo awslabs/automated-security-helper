@@ -233,7 +233,7 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Use Snyk Code alongside other ASH scanners
-uv run ashx --scanners snyk-code,bandit,semgrep --output-dir ../ash_output
+uv run ashx --scanners snyk-code,bandit,opengrep --output-dir ../ash_output
 ```
 
 ### CI/CD Integration

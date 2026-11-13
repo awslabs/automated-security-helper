@@ -135,12 +135,15 @@ See [Set the gate](set-the-gate.md) and [Exit codes](../reference/exit-codes.md)
 v2 ran git-secrets, bandit, semgrep, checkov, cfn_nag, cdk-nag, npm audit, grype, and
 syft, choosing them by the file types it found. v3 runs actionlint, bandit, cdk-nag,
 cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit,
-opengrep, semgrep, syft, trivy, and zizmor. A scanner shows as SKIPPED when the project
+opengrep, syft, trivy, and zizmor. A scanner shows as SKIPPED when the project
 has nothing for it to scan, whether or not its tool is installed: for example cdk-nag
 and cfn-nag in a project without CloudFormation templates.
 
 - git-secrets is gone. detect-secrets and gitleaks look for secrets.
-- semgrep runs the `p/ci` ruleset by default. v2 ran `--config=auto`.
+- opengrep, a fork of semgrep with the same rule syntax, replaces semgrep and runs the
+  `p/ci` ruleset by default. v2 ran semgrep with `--config=auto`. The name `semgrep` is an
+  alias for opengrep, so a `scanners.semgrep` config section and `--scanners semgrep` still
+  work.
 - More scanners can report the same problem, because v3 does not merge findings from
   different scanners.
 

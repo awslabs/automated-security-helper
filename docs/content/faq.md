@@ -144,8 +144,7 @@ ruleset past its age bound, still exits 1. See [Set the gate](how-to/set-the-gat
 
 ## Why do two scanners report the same problem?
 
-ASH runs scanners whose checks overlap and does not deduplicate their findings: semgrep and
-opengrep run the same ruleset, grype and trivy both check dependencies, and detect-secrets
+ASH runs scanners whose checks overlap and does not deduplicate their findings: grype and trivy both check dependencies, and detect-secrets
 and gitleaks both look for secrets. Each finding carries its scanner's own rule ID, so a
 suppression for one does not cover the other. To keep one of a pair, turn the other off
 by setting `scanners.opengrep.enabled` to `false` in the config or by passing
@@ -154,7 +153,7 @@ by setting `scanners.opengrep.enabled` to `false` in the config or by passing
 
 ## Does ASH work on Windows?
 
-Local mode installs and runs on Windows, but semgrep and opengrep are off there and show as
+Local mode installs and runs on Windows, but opengrep is off there and shows as
 SKIPPED, and there is no scanner sandbox. ASH's command is `ashx`, so the shell that Git for
 Windows and MSYS2 ship as `ash` does not shadow it. Container mode is not tested on Windows.
 See [Install ASH](how-to/install.md).
@@ -195,8 +194,8 @@ ashx --offline --scanners npm-audit,detect-secrets --no-progress
 ## What does a scan send over the network?
 
 ASH itself sends no telemetry. The scanners download rules and vulnerability databases, and
-some send data to their own services: for example, semgrep sends usage metrics to Semgrep
-when it uses registry rules, and npm-audit sends your dependency tree to the npm registry.
+some send data to their own services: for example, npm-audit sends your dependency tree
+to the npm registry.
 See [what leaves the machine during a scan](concepts/scanning-untrusted-code.md#what-leaves-the-machine-during-a-scan).
 
 ## Can I use ASH programmatically?

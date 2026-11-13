@@ -1,6 +1,6 @@
 # Choose scanners
 
-ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, semgrep and opengrep are off by default). This page shows how to see which scanners a scan will run, turn some off, add community scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
+ASH runs every enabled scanner it has, and all 16 built-in scanners are enabled by default (on Windows, opengrep is off by default). This page shows how to see which scanners a scan will run, turn some off, add community scanners, and set a scanner's options. The [scanner reference](../reference/scanners.md) lists each scanner with its tool and options.
 
 ## See which scanners will run
 
@@ -58,7 +58,7 @@ A scanner that is turned off, not selected, or excluded is recorded SKIPPED and 
 
 ### Run only Python-based scanners
 
-`--python-only` keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with `--python-only --scanners grype`, no scanner runs and the scan exits 1.
+`--python-only` keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with `--python-only --scanners grype`, no scanner runs and the scan exits 1.
 
 ## Add community scanners {#community}
 
@@ -119,7 +119,6 @@ Some default scanners cover the same ground, and ASH does not deduplicate their 
 
 | Scanners | What they both do |
 |---|---|
-| semgrep and opengrep | Run the same `p/ci` ruleset by default |
 | grype and trivy | Report known vulnerabilities in dependencies |
 | detect-secrets and gitleaks | Find secrets in the source |
 
@@ -153,7 +152,6 @@ Some scanner options name a file, a rule directory, or a program for the scanner
 | gitleaks | `config_file`, `baseline_path` | yes |
 | grype | `config_file` | yes |
 | opengrep | `config`, `patterns`, and `metrics` other than `off` | yes |
-| semgrep | `config`, and `metrics` other than `off` | yes |
 | syft | `config_file` | yes |
 | trivy | `config_file`, `ignore_file`, `secret_config_file` | no |
 | zizmor | `config_file` | yes |

@@ -82,7 +82,7 @@ Turn a scanner you cannot run off, or exclude it, rather than turning this gate 
 
 ## Stale content databases {#content-databases}
 
-grype, trivy, and the offline semgrep and opengrep rulesets read databases that age. ASH measures each one after the scanner runs, treats a database it cannot date as stale, and fails the scan when one is past its age bound; [Content databases](../concepts/content-databases.md#which-scanners-use-one) lists the databases and their bounds.
+grype, trivy, and the offline opengrep rulesets read databases that age. ASH measures each one after the scanner runs, treats a database it cannot date as stale, and fails the scan when one is past its age bound; [Content databases](../concepts/content-databases.md#which-scanners-use-one) lists the databases and their bounds.
 
 With `content_db_staleness: fail`, the default, a stale database fails the scan with exit 1, before `fail_on_findings` is considered, and the message says how to refresh it. A scanner that passed against the stale database is recorded ERROR, with the database named, and one that failed its threshold stays FAILED. The scan reports the stale database once, as the cause of the exit code, and does not list the scanner as incomplete as well. With `warn`, the scan continues and the reports carry the warning. To relax one database for a limited time, add an override; it applies until 00:00 UTC on its expiration date and is then ignored with a warning:
 

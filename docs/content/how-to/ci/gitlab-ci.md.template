@@ -76,7 +76,7 @@ What the `before_script` does:
   for them to scan, and MISSING in one that has something.
 - Installs ASH into a virtual environment at `/opt/ash`, outside the checkout. ASH does not
   run tools it finds inside the directory it scans, and the virtual environment carries the
-  `uv` that ASH uses to install bandit, checkov, semgrep, cfn-lint, and zizmor during the
+  `uv` that ASH uses to install bandit, checkov, cfn-lint, and zizmor during the
   scan.
 - Installs the binary scanner tools at the versions that ASH pins, checking each download
   against its pinned SHA256. It runs in an empty directory, so a config in the repository

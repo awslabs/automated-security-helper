@@ -358,9 +358,9 @@ Build arguments:
 |---|---|---|
 | `BASE_IMAGE` | `public.ecr.aws/docker/library/python:3.12-slim-bookworm` | Base image for every stage. Point it at a mirror of the same image. |
 | `INSTALL_ASH_REVISION` | `LOCAL` | `LOCAL` builds the build context. Any other value is a tag or branch cloned from GitHub, or a full commit ID fetched from it, unless the build context is ASH's own source tree, which is then built instead. |
-| `OFFLINE` | `NO` | `YES` downloads the grype and trivy databases and the semgrep and opengrep rulesets into the image, and makes every scan in it offline. |
+| `OFFLINE` | `NO` | `YES` downloads the grype and trivy databases and the opengrep rulesets into the image, and makes every scan in it offline. |
 | `BUILD_DATE_EPOCH` | `-1` | A new value makes an offline build download the databases and rulesets again; with the same value, that step comes from the build cache. ASH passes UTC midnight of the current day, in epoch seconds, for offline builds. |
-| `OFFLINE_SEMGREP_RULESETS` | `p/ci` | Space-separated semgrep registry rulesets an offline image downloads. |
+| `OFFLINE_SEMGREP_RULESETS` | `p/ci` | Space-separated registry rulesets an offline image downloads for opengrep. The variable name keeps its historical `SEMGREP` spelling. |
 | `UID`, `GID` | `500`, `100` | UID and GID of the `non-root` user. |
 
 Scanner tool versions are pinned in

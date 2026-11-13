@@ -40,7 +40,7 @@ There is no config key for offline mode. `build.build_mode` exists in the config
 |---|---|
 | grype | Reads its cached database with updates and grype's own age check off. ASH fails the scan when the database is past its age bound ([Refresh cadence](#refresh)). |
 | trivy, trivy-repo | Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound, except in the offline image, where it warns ([Refresh cadence](#refresh)). With no database, `trivy` is MISSING. Every trivy scan gets `trivy --offline-scan`, so trivy contacts no package registry. trivy does not check for a newer release either: an online scan gets `trivy --skip-version-check`, and an offline one gets `TRIVY_SKIP_VERSION_CHECK=true` in trivy's environment instead, since a trivy too old to know the flag refuses the command over it. |
-| semgrep, opengrep | Run the rulesets in `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` plus ASH's bundled rules, instead of the configured registry rulesets. MISSING when the directory is unset or empty. ASH fails the scan when the rulesets are past their age bound. |
+| opengrep | Runs the rulesets in `OPENGREP_RULES_CACHE_DIR` plus ASH's bundled rules, instead of the configured registry rulesets. MISSING when the directory is unset or empty. ASH fails the scan when the rulesets are past their age bound. |
 | detect-secrets | Runs as usual. If its settings turn on detect-secrets' verification filter, it still sends each candidate secret to the service that issued it, to check whether it is live; under the sandbox, leave detect-secrets out of `sandbox.network_scanners` to stop that. |
 | checkov | Uses the policies in the installed package and skips platform downloads. |
 | npm-audit | Does not run: npm, yarn, and pnpm audit a lockfile by asking the registry. MISSING for a project with a `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, or `pnpm-lock.yaml` beside a `package.json`, which fails the scan, and SKIPPED for a project with none. |
@@ -83,13 +83,13 @@ Do this while the host still has network access:
     "${ASH_BIN_PATH:-$HOME/.ash/bin}/trivy" image --download-db-only --cache-dir "$TRIVY_CACHE_DIR"
     ```
 
-3. For semgrep and opengrep, download the rulesets into `SEMGREP_RULES_CACHE_DIR` and
-   `OPENGREP_RULES_CACHE_DIR` and record the download time, as described in
-   [Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
+3. For opengrep, download the rulesets into `OPENGREP_RULES_CACHE_DIR` and record the
+   download time, as described in
+   [Seeding the opengrep rule cache](../docs/advanced-usage.md#seeding-the-opengrep-rule-cache).
    Without a recorded time, ASH takes the age of the oldest rules file.
 
 If you also run scanners in the sandbox ([Enable the scanner sandbox](../docs/scanner-sandbox.md)),
-semgrep and opengrep can read only the directories the sandbox mounts. Keep the rules
+opengrep can read only the directories the sandbox mounts. Keep the rules
 cache under a system directory such as `/opt`, or add it to `sandbox.extra_read_paths` in
 a config file outside every git checkout ([Who may grant](../docs/scanner-sandbox.md#who-may-grant)) or with `--config-overrides`. Then check that a
 sandboxed offline scan of a file with a known finding reports it.
@@ -98,8 +98,8 @@ sandboxed offline scan of a file with a known finding reports it.
 
 `ash build-image --offline` and `ash scan --mode container --offline` build the image with
 `OFFLINE=YES`. The build needs network access: it downloads the grype database, the trivy
-database, and the semgrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`),
-copies the rulesets for opengrep, and fails if any of them is empty. The image has
+database, and the opengrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`;
+the flag keeps its historical name), and fails if any of them is empty. The image has
 `ASH_OFFLINE` set, so every scan in it runs offline. npm-audit cannot run in it; see
 [What each scanner does offline](#scanners).
 
@@ -132,7 +132,6 @@ is before you download them, and the rulesets from the time they were downloaded
 |---|---|---|---|
 | grype | `grype-db` | 120 hours | `grype db update`, or rebuild the offline image |
 | trivy | `trivy-db` | 24 hours | `trivy image --download-db-only`, or rebuild the offline image |
-| semgrep rulesets | `semgrep-offline-rules` | 30 days | Download again, or rebuild the offline image |
 | opengrep rulesets | `opengrep-offline-rules` | 30 days | Download again, or rebuild the offline image |
 
 The trivy bound is the shortest. On an offline host, refresh the trivy cache more than once

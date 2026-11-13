@@ -1351,7 +1351,7 @@ will install its tool, and `missing_dependencies` names those scanners. It does 
 project's config, and it installs and downloads nothing. When the tool of a scanner that ASH
 installs with uv is missing, the first scan installs it if the server is online and has uv;
 such a scanner is listed in `installs_on_first_scan` and counts toward `ready`, and otherwise
-it is in `missing_dependencies`. Offline, semgrep is also missing when it has no rules cache.
+it is in `missing_dependencies`. Offline, opengrep is also missing when it has no rules cache.
 
 The [MCP tools reference](https://github.com/awslabs/automated-security-helper/blob/main/docs/content/reference/mcp-tools.md)
 lists every tool and its parameters.

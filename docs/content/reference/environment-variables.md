@@ -9,7 +9,7 @@
 
 This page is generated from the code that reads each variable by `scripts/generate_env_var_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH reads 156 environment variables: 58 of its own (`ASH_` prefix) and 98 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.
+ASH reads 155 environment variables: 58 of its own (`ASH_` prefix) and 97 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.
 
 Columns:
 
@@ -142,8 +142,7 @@ Columns:
 | `ProgramW6432` |  |  | `automated_security_helper/cli/mcp/scan_target.py` (`_denied_root_values`) | Windows equivalents, read from the shell's own directory variables so the policy follows a system installed on a drive other than C:. (`automated_security_helper/cli/mcp/scan_target.py`) |
 | `RESOLVED_DIR` | `""` |  | `ash` (`below_the_source`) | Purpose not documented in code. |
 | `RI_DEVKIT` |  |  | `automated_security_helper/plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py` (`CfnNagScanner._missing_gem_prerequisites`) | Windows is checked on RI_DEVKIT rather than on a compiler being present, and the difference is not pedantic. A first attempt probed for cc/gcc/clang; (`automated_security_helper/plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py`, `CfnNagScanner._missing_gem_prerequisites`) |
-| `SEMGREP_ENABLE_VERSION_CHECK` |  |  | `automated_security_helper/utils/process_env.py` (`hold_environ`, `release_environ`) | The variable is set before the hold is recorded: a set that raises (a value that is not a str) leaves no hold behind that no caller would release. (`automated_security_helper/utils/process_env.py`, `hold_environ`) |
-| `SEMGREP_RULES_CACHE_DIR` | `""` | `/deps/.semgrep` (core) | `automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py` (`GrepScannerBase._configure_offline_mode`, `GrepScannerBase.content_database_probe_context`)<br>`utils/grype-docker-execute.sh` (top level) | Env var pointing at the offline rule cache (e.g. SEMGREP_RULES_CACHE_DIR). (`automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py`, `GrepScannerBase.cache_dir_env_var`) |
+| `SEMGREP_RULES_CACHE_DIR` |  |  | `utils/grype-docker-execute.sh` (top level) | Purpose not documented in code. |
 | `SNYK_TOKEN` | `""` |  | `automated_security_helper/plugin_modules/ash_snyk_plugins/snyk_code_scanner.py` (`SnykCodeScanner.validate_plugin_dependencies`) | Check if SNYK_TOKEN is defined on the environment variable or if using local mode, the file ${HOME}/.config/configstore/snyk.json or ${HOME}/.config/configstore/.snyk.json exists (`automated_security_helper/plugin_modules/ash_snyk_plugins/snyk_code_scanner.py`, `SnykCodeScanner.validate_plugin_dependencies`) |
 | `SOURCE_ANCESTOR` | `/` |  | `ash` (top level) | Purpose not documented in code. |
 | `SSH_AUTH_SOCK` | `""` |  | `automated_security_helper/utils/sandbox/backends.py` (`FirejailBackend.plan`) | firejail leaves everything outside $HOME visible, including the local IPC endpoints a scanner could use to act outside the sandbox: the container runtime sockets, the per-user runtime directory (session bus, gpg-agent, rootless Docker or Podman) and the SSH agent. (`automated_security_helper/utils/sandbox/backends.py`, `FirejailBackend.plan`) |

@@ -40,7 +40,7 @@ No backend limits CPU, memory, disk use, or the number of processes. The scan ti
 
 ## Network
 
-Under the sandbox, a scanner has a network only when it declares that it needs one, or when `sandbox.network_scanners` names it. These scanners declare a need: semgrep and opengrep (registry rules), grype, trivy, and trivy-repo (vulnerability data), npm-audit (the registry's audit endpoint), and snyk-code (Snyk's service). detect-secrets needs a network only when its verification filter is on, and gets one only when `sandbox.network_scanners` names it. Every other scanner runs with no network. `--offline` removes the network from every scanner, whatever the grants say.
+Under the sandbox, a scanner has a network only when it declares that it needs one, or when `sandbox.network_scanners` names it. These scanners declare a need: opengrep (registry rules), grype, trivy, and trivy-repo (vulnerability data), npm-audit (the registry's audit endpoint), and snyk-code (Snyk's service). detect-secrets needs a network only when its verification filter is on, and gets one only when `sandbox.network_scanners` names it. Every other scanner runs with no network. `--offline` removes the network from every scanner, whatever the grants say.
 
 When `sandbox.network_scanners` is set, the list replaces the declarations: a scanner it names gets a network on every online scan, and a scanner it does not name gets none. Naming detect-secrets therefore gives it a network whether or not its verification filter is on.
 
@@ -78,4 +78,4 @@ ASH also refuses, rather than runs unsandboxed, a shell command that a scanner t
 - It does not apply in container mode. `ash scan --mode container` turns the sandbox off for the scan inside the container, and logs a warning when the sandbox was asked for; the container is the boundary there. See [Run ASH in a container](../how-to/run-in-a-container.md).
 - It does not make a scanner's results trustworthy. A scanner still reads every file in the source tree, and a hostile file can still change what it reports.
 
-One setting to plan for: an offline semgrep or opengrep scan reads its rules from the directory `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, and under the sandbox it can read only directories the sandbox mounts. Keep the rules cache under a system directory such as `/opt`, or add it to `sandbox.extra_read_paths`.
+One setting to plan for: an offline opengrep scan reads its rules from the directory `OPENGREP_RULES_CACHE_DIR` names, and under the sandbox it can read only directories the sandbox mounts. Keep the rules cache under a system directory such as `/opt`, or add it to `sandbox.extra_read_paths`.
