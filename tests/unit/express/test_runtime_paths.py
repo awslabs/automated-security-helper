@@ -41,6 +41,17 @@ class TestRuntimeDir:
         assert made == tmp_path / ".ash" / "run"
         assert stat.S_IMODE(os.lstat(made).st_mode) == 0o700
 
+    def test_home_comes_from_the_given_environment_not_the_process(
+        self, tmp_path, monkeypatch
+    ):
+        """A caller that passes an explicit environment controls the whole
+        result: Path.home() is only the answer when the mapping has no HOME."""
+        monkeypatch.setattr(
+            Path, "home", lambda: pytest.fail("the mapping's HOME must win")
+        )
+        made = runtime.runtime_dir({"HOME": str(tmp_path)})
+        assert made == tmp_path / ".ash" / "run"
+
     def test_an_xdg_value_that_is_not_a_directory_falls_back_to_home(
         self, tmp_path, monkeypatch
     ):
@@ -126,45 +137,139 @@ class TestIdleSetting:
     def test_a_positive_integer_is_taken(self):
         assert runtime.idle_seconds({runtime.IDLE_ENV: "120"}) == 120
 
+    def test_without_a_mapping_the_process_environment_is_read_by_the_constant(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv(runtime.IDLE_ENV, "77")
+        assert runtime.idle_seconds() == 77
+        monkeypatch.delenv(runtime.IDLE_ENV)
+        assert runtime.idle_seconds() == runtime.DEFAULT_IDLE_SECONDS
 
-class TestFingerprintCoversInterpreterShaping:
-    """``sys.path`` is left out of the fingerprint on purpose, so the entries
-    PYTHONPATH adds are covered by hashing the variable itself: a client whose
-    value differs from the daemon's must read it as stale."""
 
-    @pytest.mark.parametrize("name", runtime.FINGERPRINT_ENV)
-    def test_a_changed_value_changes_the_fingerprint(self, monkeypatch, name):
-        monkeypatch.delenv(name, raising=False)
-        unset = runtime.runtime_fingerprint()
-        monkeypatch.setenv(name, "/work/one")
-        one = runtime.runtime_fingerprint()
-        monkeypatch.setenv(name, "/work/two")
-        two = runtime.runtime_fingerprint()
-        assert len({unset, one, two}) == 3
+class TestOwnTreeStamp:
+    """The source-tree walk pays only where it buys something: an editable
+    install or a checkout, whose code changes with no dist-info change. A
+    package inside a site directory is fixed by its dist-info, which the
+    fingerprint already hashes."""
 
-    def test_the_same_values_give_the_same_fingerprint(self, monkeypatch):
-        monkeypatch.setenv("PYTHONPATH", "/work/one")
-        assert runtime.runtime_fingerprint() == runtime.runtime_fingerprint()
+    def test_a_package_inside_a_site_directory_is_not_walked(self, monkeypatch):
+        # runtime.py lives in <parent>/automated_security_helper/express/.
+        package_parent = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(runtime.__file__)))
+        )
+        monkeypatch.setattr(runtime, "_site_directories", lambda: [package_parent])
+        monkeypatch.setattr(
+            os, "walk", lambda *_a, **_k: pytest.fail("a regular install is not walked")
+        )
+        assert runtime._own_tree_stamp() == "installed"
 
-    def test_an_unrelated_variable_does_not_move_it(self, monkeypatch):
-        before = runtime.runtime_fingerprint()
-        monkeypatch.setenv("ASH_SOMETHING_ELSE", "x")
-        monkeypatch.setenv("AWS_PROFILE", "other")
-        assert runtime.runtime_fingerprint() == before
+    def test_a_package_outside_every_site_directory_is_walked(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(runtime, "_site_directories", lambda: [str(tmp_path)])
+        count, _, newest = runtime._own_tree_stamp().partition(":")
+        assert int(count) > 50 and int(newest) > 0
 
-    def test_the_no_user_site_flag_is_hashed(self, monkeypatch):
-        import sys
+    def test_an_edit_to_an_editable_tree_changes_the_stamp(self, monkeypatch):
+        """The stamp moves with the newest mtime of the package's modules, so
+        an edit-scan loop sees its edit."""
         import types
 
-        before = runtime.runtime_fingerprint()
-        flags = types.SimpleNamespace(no_user_site=1 - sys.flags.no_user_site)
-        monkeypatch.setattr(runtime.sys, "flags", flags)
-        assert runtime.runtime_fingerprint() != before
+        monkeypatch.setattr(runtime, "_site_directories", list)
+        mtimes = {"a.py": 100, "b.py": 200}
+        real_stat = os.stat
 
-    def test_the_daemon_scrub_keeps_what_the_fingerprint_hashes(self):
-        """The daemon computes its fingerprint from its own scrubbed
-        environment, so every hashed variable must survive the scrub or a
-        client with PYTHONPATH set would read every daemon as stale."""
-        environ = dict.fromkeys(runtime.FINGERPRINT_ENV, "/x")
+        def stat(path, *args, **kwargs):
+            # Only the modules the fake walk names are faked; pytest's own
+            # files keep their real stat.
+            name = os.path.basename(path)
+            if name in mtimes:
+                return types.SimpleNamespace(st_mtime_ns=mtimes[name])
+            return real_stat(path, *args, **kwargs)
+
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                os, "walk", lambda root: [(root, [], ["a.py", "b.py", "data.json"])]
+            )
+            patched.setattr(os, "stat", stat)
+            assert runtime._own_tree_stamp() == "2:200"
+            mtimes["a.py"] = 300  # an edit
+            assert runtime._own_tree_stamp() == "2:300"
+
+
+class TestSocketKeyCarriesTheInterpreterShape:
+    """Two shells that differ only in PYTHONPATH import different plugin code,
+    so each gets a daemon of its own. Keyed into the fingerprint instead, each
+    would read the other's daemon as stale and, under --express, stop it and its
+    in-flight scans, forever. The key is 16 hex characters either way, so the
+    socket path's length is unchanged."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "PYTHONUSERBASE",
+            "PYTHONNOUSERSITE",
+            "VIRTUAL_ENV",
+        ],
+    )
+    def test_a_changed_value_changes_the_key(self, monkeypatch, name):
+        monkeypatch.delenv(name, raising=False)
+        unset = runtime.socket_key(version="1", uid=1, prefix="/p")
+        monkeypatch.setenv(name, "/work/one")
+        one = runtime.socket_key(version="1", uid=1, prefix="/p")
+        monkeypatch.setenv(name, "/work/two")
+        two = runtime.socket_key(version="1", uid=1, prefix="/p")
+        assert len({unset, one, two}) == 3
+        assert len(one) == 16
+
+    def test_two_shells_with_different_pythonpaths_reach_different_daemons_and_neither_is_stale(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("PYTHONPATH", "/work/hook")
+        hook = runtime.socket_key(version="1", uid=1, prefix="/p")
+        hook_fingerprint = runtime.runtime_fingerprint()
+        monkeypatch.setenv("PYTHONPATH", "/work/ide")
+        ide = runtime.socket_key(version="1", uid=1, prefix="/p")
+        # Different daemons (different sockets, so no restart of each other)...
+        assert hook != ide
+        assert len(hook) == len(ide) == 16, "the socket path's length is unchanged"
+        # ...and the fingerprint is the same for both, so a daemon never reads
+        # a request from the other shape as stale.
+        assert runtime.runtime_fingerprint() == hook_fingerprint
+
+    def test_an_unrelated_variable_does_not_move_the_key(self, monkeypatch):
+        before = runtime.socket_key(version="1", uid=1, prefix="/p")
+        monkeypatch.setenv("AWS_PROFILE", "other")
+        assert runtime.socket_key(version="1", uid=1, prefix="/p") == before
+
+    def test_a_relative_entry_is_made_absolute_against_the_callers_directory(
+        self, tmp_path, monkeypatch
+    ):
+        """PYTHONPATH=. names one tree per working directory; the daemon starts
+        in the runtime directory, so the client resolves it first. Two
+        directories give two keys, and the scrub hands the daemon the absolute
+        spelling, from which it computes the key its client expects."""
+        one, two = tmp_path / "one", tmp_path / "two"
+        one.mkdir()
+        two.mkdir()
+        monkeypatch.setenv("PYTHONPATH", ".")
+        monkeypatch.chdir(one)
+        key_one = runtime.socket_key(version="1", uid=1, prefix="/p")
+        scrubbed = runtime.scrubbed_daemon_environment({"PYTHONPATH": "."})
+        assert os.path.isabs(scrubbed["PYTHONPATH"])
+        assert os.path.samefile(scrubbed["PYTHONPATH"], one)
+        monkeypatch.chdir(two)
+        assert runtime.socket_key(version="1", uid=1, prefix="/p") != key_one
+        # The daemon, started elsewhere with the absolute value, agrees with
+        # the client that started it from `one`.
+        daemon_environ = {"PYTHONPATH": scrubbed["PYTHONPATH"]}
+        monkeypatch.chdir(tmp_path)
+        assert runtime.interpreter_shape(daemon_environ) == (
+            "\x00".join((scrubbed["PYTHONPATH"], "", "", "", ""))
+        )
+
+    def test_the_daemon_scrub_keeps_every_variable_the_key_reads(self):
+        environ = dict.fromkeys(runtime.INTERPRETER_ENV, "/x")
         assert runtime.scrubbed_daemon_environment(environ) == environ
-        assert set(runtime.FINGERPRINT_ENV) <= set(runtime.INTERPRETER_ENV)

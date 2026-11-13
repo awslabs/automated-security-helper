@@ -721,6 +721,20 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the express runtime directory (the daemon's log file, 0600)",
     ),
+    (f"{_ASH}/express/client.py", "spawn_daemon_process", "os.open"): (
+        1,
+        (
+            "the express runtime directory (the daemon's log file, 0600, opened "
+            "for the detached interpreter's stdout and stderr)"
+        ),
+    ),
+    (f"{_ASH}/express/client.py", "daemon_lock_is_held", "os.open"): (
+        1,
+        (
+            "the express runtime directory's daemon lock file, opened WITHOUT "
+            "O_CREAT and write-only only to probe the flock; no bytes are written"
+        ),
+    ),
     (f"{_ASH}/express/client.py", "_remove_if_dead", "os.open"): (
         1,
         (

@@ -62,16 +62,27 @@ environment variable), so a daemon you forget about costs memory only until then
 ## What a scan sends to the daemon {#protocol}
 
 The client hands the daemon the scan's command line, its working directory, and its
-whole environment, minus two names: `LD_PRELOAD` (in a cold run it has already shaped
-the running process; applied to the forked child it could only newly shape every
-scanner subprocess) and ASH's internal express child marker. The forked child's
+whole environment, minus ASH's internal express child marker. That includes loader
+variables such as `LD_PRELOAD`: a cold run hands every scanner subprocess the value, so
+the forked scan's scanners get it too (the daemon's own process is not preloaded with
+it, which is the one difference a forked process cannot avoid). The forked child's
 environment becomes exactly what the request carries, so a variable a scanner reads --
 whichever scanner, whatever the variable -- has the same value under express as in a
 cold run; an allowlist here was always one forgotten scanner variable away from "same
 command, different findings". The environment travels only inside the request, over
 the same-user socket, to the one forked child -- the daemon's own resident environment
-is scrubbed down to the execution basics when it starts, so nothing from the
-invocation that happened to start it becomes ambient state under later scans. The
+is scrubbed when it starts, so nothing from the invocation that happened to start it
+becomes ambient state under later scans. What the scrub keeps is the execution basics
+(`PATH`, `HOME`, the temporary-directory and locale variables, `TERM`, the
+runtime-directory and idle-timeout settings) and the variables that decide which ASH
+and which site packages the daemon's interpreter imports: `PYTHONPATH`, `PYTHONHOME`,
+`PYTHONUSERBASE`, `PYTHONNOUSERSITE` and `VIRTUAL_ENV`. Those are kept because an ASH
+reachable only through `PYTHONPATH` would not start without them, and their values are
+part of the daemon's socket name: two shells that differ only in those values (a
+pre-commit hook and an IDE terminal, tox and a plain shell) each reach a daemon of
+their own, so neither reads the other's as stale or stops it. Relative `PYTHONPATH`
+entries are made absolute against the directory the client runs in before they are
+used, so the daemon imports the same tree the client names. The
 client also passes its stdin, stdout and stderr as file descriptors, so the forked
 scan writes to your terminal directly -- progress, colors and prompts behave as a cold
 run's, and nothing of the scan's output travels over the socket. Ctrl-C in the client
@@ -142,9 +153,9 @@ ASH from a hook environment of its own, which is a *different* installation than
 `ash` on your shell's PATH. A daemon started from your shell is therefore silently
 ignored by the hook. Start the daemon from the hook's own ASH instead: add `--express`
 to the hook's `args`, and the first commit starts a daemon paired with the hook
-environment, which every later commit then uses with no flag needed. Pair it with a scan
-scoped to what the commit touches (see [Run ASH with pre-commit](pre-commit.md)) for the
-fastest hook. The daemon outlives the hook process, so the warmth carries from commit to
+environment, which every later commit then uses with no flag needed. The hook's default
+`--staged` already scopes the scan to what the commit touches (see
+[Run ASH with pre-commit](pre-commit.md)), so the pair is the fastest hook. The daemon outlives the hook process, so the warmth carries from commit to
 commit, and its idle timer retires it after a quiet half hour.
 
 ## Troubleshooting {#troubleshoot}
@@ -154,7 +165,15 @@ commit, and its idle timer retires it after a quiet half hour.
   answering (a wedged daemon): find the holder with `fuser` or `lsof` on the socket,
   stop it, or remove the socket file.
 - The daemon logs to `ash-<uid>-<key>.log` next to its socket; `ash express start
-  --foreground` runs it attached to your terminal instead.
+  --foreground` runs it attached to your terminal instead. A foreground daemon runs
+  inside the CLI process, with its environment scrubbed and its signal handlers reset
+  the way a detached daemon's are before it serves, but with the CLI's imports (typer,
+  rich, the logging stack) already resident, which a detached start, a fresh
+  interpreter, does not have. It is for watching the log; to reproduce a daemon's
+  behavior exactly, start it detached.
+- `ash express start` prints "started" only after a status query shows a daemon this
+  installation's scans can use (the same fingerprint and protocol). Replacing a stale
+  daemon first checks that the old one is really gone, and exits 1 if it is not.
 - A scan that behaves differently under express than with `--no-express` is a bug to
   report: the scan's environment, arguments and working directory travel with each
   request precisely so the two cannot differ.

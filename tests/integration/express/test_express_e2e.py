@@ -44,19 +44,31 @@ pytestmark = pytest.mark.e2e
 #: correct, but it pays cold-start cost on both sides of the parity and buries
 #: the saving. The module form stays as the fallback for an environment whose
 #: script is not beside the interpreter.
+#: Windows puts the console script beside the interpreter as ``ash.exe``.
 _ASH_SCRIPT = Path(sys.executable).parent / "ash"
+if not _ASH_SCRIPT.is_file():
+    _ASH_SCRIPT = Path(sys.executable).parent / "ash.exe"
 if _ASH_SCRIPT.is_file():
     ASH = [os.fspath(_ASH_SCRIPT)]
 else:
     ASH = [sys.executable, "-m", "automated_security_helper.cli.main"]
-    # Said out loud in the run's output: a parity delta measured through the
-    # module form is dominated by the import both sides pay, so a small delta
-    # from such a run is the harness's shape, not a defect.
-    print(
-        "e2e-express: no console script beside the interpreter; running the "
-        "module form, whose warm-vs-cold delta understates the real saving.",
-        file=sys.stderr,
-    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _say_when_the_module_form_runs():
+    """Said out loud in the run's output, from a fixture so that merely
+    collecting this module (every ``-m e2e`` run does) prints nothing: a parity
+    delta measured through the module form is dominated by the import both
+    sides pay, so a small delta from such a run is the harness's shape, not a
+    defect."""
+    if ASH[0] == sys.executable and not _GATED:
+        print(
+            "e2e-express: no console script beside the interpreter; running the "
+            "module form, whose warm-vs-cold delta understates the real saving.",
+            file=sys.stderr,
+        )
+    yield
+
 
 _GATED = os.environ.get("ASH_E2E_EXPRESS") != "1"
 gated = pytest.mark.skipif(
@@ -82,9 +94,16 @@ def _runtime_base() -> str:
 def express_env():
     """A subprocess environment with a private daemon world, torn down after."""
     base = _runtime_base()
-    env = dict(os.environ)
+    # Every ASH_EXPRESS* name is dropped, not only the child marker: a setting
+    # inherited from the caller's shell or CI lane (a short idle timeout, say)
+    # would retire the daemon between ``express start`` and the transparent
+    # scan, and the scan would run cold. Each test sets only what it needs.
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("ASH_EXPRESS")
+    }
     env["XDG_RUNTIME_DIR"] = base
-    env.pop("ASH_EXPRESS_CHILD", None)
     yield env
     _run(env, "express", "stop")
     shutil.rmtree(base, ignore_errors=True)
@@ -163,17 +182,32 @@ def _report_names(out) -> set:
     return {path.name for path in reports.iterdir()}
 
 
-def _status(env) -> dict:
+def _status_payload(env) -> dict:
+    """``ash express status --json``'s object, whatever the daemon's state.
+
+    The command prints one JSON object on stdout whether or not a daemon runs
+    (``running`` says which; the exit code is 1 when none does), so every test
+    reads it here, and a missing or malformed answer is an assertion that shows
+    the command's own output instead of an IndexError or a JSON error.
+    """
     answer = _run(env, "express", "status", "--json")
-    if answer.returncode != 0:
-        return {"running": False}
-    return json.loads(answer.stdout.strip().splitlines()[-1])
+    lines = answer.stdout.strip().splitlines()
+    assert lines, (answer.returncode, answer.stdout, answer.stderr)
+    try:
+        payload = json.loads(lines[-1])
+    except ValueError:
+        pytest.fail(f"express status --json printed no JSON: {answer.stdout!r}")
+    assert isinstance(payload, dict), payload
+    return payload
+
+
+def _status(env) -> dict:
+    payload = _status_payload(env)
+    return payload if payload.get("running") else {"running": False}
 
 
 def _socket_path(env) -> str:
-    status = _run(env, "express", "status", "--json")
-    payload = json.loads(status.stdout.strip().splitlines()[-1])
-    return payload["socket"]
+    return _status_payload(env)["socket"]
 
 
 @gated
@@ -255,9 +289,7 @@ class TestExpressParity:
 
         from automated_security_helper.express import runtime as express_runtime
 
-        probe = _run(express_env, "express", "status", "--json")
-        payload = json.loads(probe.stdout.strip().splitlines()[-1])
-        socket_path = payload["socket"]
+        socket_path = _socket_path(express_env)
         os.makedirs(os.path.dirname(socket_path), mode=0o700, exist_ok=True)
 
         server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
@@ -314,11 +346,21 @@ class TestExpressParity:
             assert "refused the scan" in loud.stderr, loud.stderr
             assert (tmp_path / "out2" / "ash_aggregated_results.json").is_file()
         finally:
+            # shutdown before close: on Linux a bare close() from another
+            # thread leaves the serve thread blocked in accept() for the rest
+            # of the session, with its descriptor number free for reuse
+            # underneath it.
+            try:
+                server.shutdown(socket_module.SHUT_RDWR)
+            except OSError:
+                pass
             server.close()
+            thread.join(timeout=10)
             try:
                 os.unlink(socket_path)
             except OSError:
                 pass
+        assert not thread.is_alive(), "the impostor's serve thread did not end"
 
     def test_idle_exit_retires_the_daemon(self, express_env):
         env = dict(express_env)

@@ -11,11 +11,17 @@ and the ``--express`` autostart/restart choreography, with the socket layer
 replaced by recorded stand-ins (no daemon runs in the unit tier).
 """
 
+import signal
+
 import pytest
 
 from automated_security_helper.express import client, runtime
 
 pytestmark = pytest.mark.unit
+
+needs_sighup = pytest.mark.skipif(
+    not hasattr(signal, "SIGHUP"), reason="this platform has no SIGHUP"
+)
 
 
 class TestClassification:
@@ -94,8 +100,8 @@ class TestColdRoads:
         assert client.delegated_exit_code([], environ=environ) is None
 
     def test_every_declared_completion_name_is_read(self):
-        """The reads are spelled out one by one (so the environment audits can
-        resolve them), and this ties each spelling back to the declared set."""
+        """The declared set is the one list the check reads, so every name in
+        it must read as a completion."""
         for name in sorted(client.COMPLETION_ENV_NAMES):
             assert client.completion_in_progress({name: "complete"}), name
 
@@ -116,16 +122,19 @@ class TestColdRoads:
         """One completion variable per console script pyproject declares, in
         click's derived spelling, so a renamed or added alias cannot leave a
         completion that scans the working directory."""
-        import re
         from pathlib import Path
 
-        pyproject = (Path(__file__).resolve().parents[3] / "pyproject.toml").read_text(
-            encoding="utf-8"
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python 3.10
+            import tomli as tomllib
+
+        pyproject = tomllib.loads(
+            (Path(__file__).resolve().parents[3] / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
         )
-        block = re.search(r"\[project\.scripts\](.*?)\n\[", pyproject, re.DOTALL).group(
-            1
-        )
-        scripts = re.findall(r"(?m)^([A-Za-z0-9-]+) *=", block)
+        scripts = list(pyproject["project"]["scripts"])
         assert scripts, "no console scripts found in pyproject.toml"
         derived = {
             "_" + name.upper().replace("-", "_") + "_COMPLETE" for name in scripts
@@ -191,9 +200,16 @@ class TestColdRoads:
 class _Recorder:
     """Records the delegation choreography the tests below assert on."""
 
-    def __init__(self, monkeypatch, tmp_path, outcomes):
+    def __init__(
+        self, monkeypatch, tmp_path, outcomes, *, autostart_ok=True, await_ok=True
+    ):
         self.calls = []
         self.outcomes = list(outcomes)
+        # The two switches that make a start fail: autostart answering False
+        # (the daemon died before binding) and await_daemon answering None
+        # (it never accepted within the start window).
+        self.autostart_ok = autostart_ok
+        self.await_ok = await_ok
         path = tmp_path / "express.sock"
         # The daemonize and the sockets are the recorded stand-ins, and the
         # platform gate is forced on, so the choreography means the same thing
@@ -213,12 +229,13 @@ class _Recorder:
 
     def _await(self, path, timeout=None):
         self.calls.append("await")
-        return object()
+        return object() if self.await_ok else None
 
     def _autostart(self, environ):
         self.calls.append("autostart")
-        self.connectable = True
-        return True
+        if self.autostart_ok:
+            self.connectable = True
+        return self.autostart_ok
 
     def _stop(self, path):
         self.calls.append("stop")
@@ -276,6 +293,57 @@ class TestExpressFlagChoreography:
         assert client.delegated_exit_code(["scan", "--express"], environ={}) is None
         assert recorder.calls == ["connect", "run", "stop", "autostart", "await", "run"]
 
+    @pytest.mark.parametrize(
+        ("stale_daemon", "switches", "calls", "said"),
+        [
+            pytest.param(
+                False,
+                {"autostart_ok": False},
+                ["connect", "autostart"],
+                "the daemon did not come up; running cold. Its log is",
+                id="first-start-dies-before-binding",
+            ),
+            pytest.param(
+                False,
+                {"await_ok": False},
+                ["connect", "autostart", "await"],
+                "the daemon did not come up; running cold.",
+                id="first-start-never-accepts",
+            ),
+            pytest.param(
+                True,
+                {"autostart_ok": False},
+                ["connect", "run", "stop", "autostart"],
+                "the daemon did not come back up; running cold.",
+                id="restart-dies-before-binding",
+            ),
+            pytest.param(
+                True,
+                {"await_ok": False},
+                ["connect", "run", "stop", "autostart", "await"],
+                "the daemon did not come back up; running cold.",
+                id="restart-never-accepts",
+            ),
+        ],
+    )
+    def test_a_start_that_fails_says_why_and_runs_cold(
+        self, monkeypatch, tmp_path, capsys, stale_daemon, switches, calls, said
+    ):
+        """The four roads that promise "say why, then run cold": --express asked
+        for the daemon, so the failure is named on stderr and the scan still
+        runs (the None answer), without ever reaching the second run."""
+        monkeypatch.setattr(runtime, "log_path", lambda *_: tmp_path / "express.log")
+        recorder = _Recorder(
+            monkeypatch,
+            tmp_path,
+            outcomes=[("stale", None)] if stale_daemon else [],
+            **switches,
+        )
+        recorder.connectable = stale_daemon
+        assert client.delegated_exit_code(["scan", "--express"], environ={}) is None
+        assert recorder.calls == calls
+        assert said in capsys.readouterr().err
+
 
 class TestRequestEnvironment:
     """The request carries the client's WHOLE environment minus the denylist,
@@ -296,22 +364,25 @@ class TestRequestEnvironment:
             "KUBECONFIG": "/u/user/.kube/config",
             "SSH_AUTH_SOCK": "/run/agent.sock",
             "SOME_RANDOM_VAR": "carried-too",
-            # The denied names.
-            "LD_PRELOAD": "never-carried",
+            # The loader variables travel like any other: a cold run hands
+            # every scanner subprocess the client's value, so a warm scan's
+            # scanners must see it too.
+            "LD_PRELOAD": "carried-like-the-cold-run",
+            "LD_LIBRARY_PATH": "/opt/tool/lib",
+            # The denied name.
             runtime.CHILD_ENV: "1",
         }
         carried = runtime.request_environment(environ)
         carried_names = sorted(carried)
         assert "SOME_RANDOM_VAR" in carried_names
         assert "SEMGREP_RULES" in carried_names
-        assert "LD_PRELOAD" not in carried_names
+        assert "LD_PRELOAD" in carried_names
+        assert "LD_LIBRARY_PATH" in carried_names
         assert runtime.CHILD_ENV not in carried_names
-        assert len(carried_names) == len(environ) - 2
+        assert len(carried_names) == len(environ) - 1
 
-    def test_the_denylist_is_small_and_names_only_express_internals_and_preload(
-        self,
-    ):
-        assert runtime.REQUEST_ENV_DENYLIST == {runtime.CHILD_ENV, "LD_PRELOAD"}
+    def test_the_denylist_names_only_the_express_child_marker(self):
+        assert runtime.REQUEST_ENV_DENYLIST == {runtime.CHILD_ENV}
 
     def test_an_arbitrary_client_variable_reaches_the_child(self):
         """The regression the inversion exists for: a variable no allowlist
@@ -347,18 +418,44 @@ class TestRequestEnvironment:
 
     def test_a_denied_request_key_is_ignored_by_the_child(self):
         environ = {}
-        runtime.apply_request_env({"LD_PRELOAD": "nope"}, environ)
+        runtime.apply_request_env({runtime.CHILD_ENV: "0"}, environ)
         assert environ == {}
+
+    def test_a_loader_variable_reaches_the_child_as_in_a_cold_run(self):
+        environ = {}
+        runtime.apply_request_env({"LD_PRELOAD": "libfaketime.so"}, environ)
+        assert environ == {"LD_PRELOAD": "libfaketime.so"}
 
 
 class TestSignalExitCode:
     """A signal recorded during a refused or broken handshake must not vanish
     into a cold run: it maps to the exit code the cold run would have died
-    with, SIGTERM outranking SIGINT (a CI timeout reads as 143 even when an
-    interrupt also landed)."""
+    with. Three tiers, in this order: SIGTERM (a CI timeout reads as 143 even
+    when other signals also landed), then SIGHUP (a closed terminal, 129; the
+    branch guarded by ``hasattr`` for platforms without it), then SIGINT (130)."""
 
     def test_nothing_pending_means_no_exit(self):
         assert client._signal_exit_code([]) is None
+
+    @needs_sighup
+    def test_sighup_maps_to_129(self):
+        import signal as signal_module
+
+        assert client._signal_exit_code([int(signal_module.SIGHUP)]) == 129
+
+    @needs_sighup
+    def test_sighup_outranks_sigint(self):
+        import signal as signal_module
+
+        pending = [int(signal_module.SIGINT), int(signal_module.SIGHUP)]
+        assert client._signal_exit_code(pending) == 129
+
+    @needs_sighup
+    def test_sigterm_outranks_sighup(self):
+        import signal as signal_module
+
+        pending = [int(signal_module.SIGHUP), int(signal_module.SIGTERM)]
+        assert client._signal_exit_code(pending) == 143
 
     def test_sigint_maps_to_130(self):
         import signal as signal_module
@@ -415,6 +512,12 @@ class TestSpawnDaemonProcess:
         # bootstrap runs behind it.
         assert code.startswith(DROP_WORKING_DIRECTORY)
         assert "express.daemon import serve" in code
+        # No option that changes which site set the daemon sees: -s, -I or -E
+        # would make a spawned daemon's package listing differ from its
+        # client's. (-P only drops the cwd entry, which the fingerprint never
+        # reads.)
+        flags = argv[1 : argv.index("-c")]
+        assert not {"-s", "-I", "-E", "-S"} & set(flags), flags
         assert argv[-2] == "120.0"
         assert argv[-1] == str(seen["keep_fd"])
         assert seen["cwd"] == str(tmp_path)
@@ -437,13 +540,17 @@ class TestSpawnDaemonProcess:
                 "GIT_INDEX_FILE": ".git/index.hook",
             },
         )
-        assert seen["env"] == {
-            "PYTHONPATH": "/work/ash-checkout",
-            "PYTHONHOME": "/opt/py",
-            "PYTHONUSERBASE": "/work/user-base",
-            "PYTHONNOUSERSITE": "1",
-            "VIRTUAL_ENV": "/work/venv",
-        }
+        # By names and the one named value, never the mapping itself: a failed
+        # assertion prints its operands (tests/utils/env_assertions.py).
+        assert sorted(seen["env"]) == [
+            "PYTHONHOME",
+            "PYTHONNOUSERSITE",
+            "PYTHONPATH",
+            "PYTHONUSERBASE",
+            "VIRTUAL_ENV",
+        ]
+        spawned_path = seen["env"].get("PYTHONPATH")
+        assert spawned_path == "/work/ash-checkout"
 
 
 class TestScrubbedDaemonEnvironment:

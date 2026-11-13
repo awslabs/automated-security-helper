@@ -366,9 +366,10 @@ _ALLOWED_SIZED_READS = {
     "and discarded; kernel wakeup bytes, never tool text",
     (
         "express/client.py",
-        "autostart",
-    ): "the one readiness byte the autostarted daemon writes on its pipe after "
-    "binding its socket; a protocol byte compared with a constant, never text",
+        "_await_readiness",
+    ): "the one readiness byte a starting daemon writes on its pipe after "
+    "binding its socket (read by autostart and by spawn_daemon_process alike); "
+    "a protocol byte compared with a constant, never text",
 }
 
 

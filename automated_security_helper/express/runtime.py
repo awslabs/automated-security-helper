@@ -104,16 +104,18 @@ STOP_WAIT_SECONDS = 10.0
 #: same-uid 0600 socket in the 0700 runtime directory, is applied to the one
 #: forked child, and never lands in the daemon's own resident environment, so
 #: a credential in it has the same reach it has in a cold run's process. The
-#: denied names: the express child marker (a client's stale copy must never
-#: stop the forked scan's own re-delegation guard from being set fresh), and
-#: LD_PRELOAD, which in a cold run has already shaped the running process and
-#: in the child could only newly shape every scanner subprocess.
-REQUEST_ENV_DENYLIST = frozenset(
-    {
-        "ASH_EXPRESS_CHILD",
-        "LD_PRELOAD",
-    }
-)
+#: denied name: the express child marker (a client's stale copy must never
+#: stop the forked scan's own re-delegation guard from being set fresh).
+#:
+#: ``LD_PRELOAD`` and the other loader variables are NOT filtered: a cold run
+#: hands every scanner subprocess the client's value, so dropping it made a warm
+#: scan's scanners run without a library the same command cold runs with -- the
+#: one difference express may not introduce -- and bought no protection, since
+#: the peer is already checked to be this uid and that user can preload anything
+#: in a cold run. (The warm daemon's OWN process is not preloaded with the
+#: client's value; that is a limit of a forked process, as for any variable the
+#: dynamic loader reads at exec.)
+REQUEST_ENV_DENYLIST = frozenset({"ASH_EXPRESS_CHILD"})
 
 #: Execution basics the forked child takes from the client rather than from the
 #: shell the daemon happened to be started in: scanner subprocesses are resolved
@@ -196,6 +198,20 @@ def ash_version() -> str:
     return get_ash_version()
 
 
+def _site_directories() -> list[str]:
+    """The interpreter's site directories (system and user), not all of ``sys.path``."""
+    try:
+        import site
+
+        directories = list(site.getsitepackages())
+        directories.append(site.getusersitepackages())
+    except Exception:  # noqa: BLE001 - a -S interpreter has no site module
+        directories = [
+            entry for entry in sys.path if entry and "site-packages" in entry
+        ]
+    return directories
+
+
 def _site_entries() -> list[str]:
     """The ``*.dist-info``/``*.egg-info`` directory names in the site
     directories, sorted.
@@ -213,17 +229,8 @@ def _site_entries() -> list[str]:
     listed are skipped: the fingerprint has to be computable everywhere, and
     the client and the daemon compute it over the same survivors.
     """
-    try:
-        import site
-
-        directories = list(site.getsitepackages())
-        directories.append(site.getusersitepackages())
-    except Exception:  # noqa: BLE001 - a -S interpreter has no site module
-        directories = [
-            entry for entry in sys.path if entry and "site-packages" in entry
-        ]
     names: set[str] = set()
-    for entry in directories:
+    for entry in _site_directories():
         try:
             listed = os.scandir(entry)
         except OSError:
@@ -243,17 +250,27 @@ def _site_entries() -> list[str]:
 
 
 def _own_tree_stamp() -> str:
-    """A stamp of ASH's own installed source tree: newest mtime and file count.
+    """A stamp of ASH's own source tree: newest mtime and file count -- for
+    editable installs and source checkouts only.
 
-    For editable installs, whose code changes with no dist-info change at all:
-    a developer's edit-scan loop against a warm daemon would otherwise serve
-    the pre-edit code for up to the idle window, silently. Walking the
-    package's ~300 files costs single-digit milliseconds, which the warm path
-    saves a hundred times over.
+    An editable install's code changes with no dist-info change at all: a
+    developer's edit-scan loop against a warm daemon would otherwise serve the
+    pre-edit code for up to the idle window, silently. The whole package is
+    walked (it holds many modules and vendored data, so the walk is the cost
+    this function exists to pay only where it buys something).
+
+    A regular install is fixed by its dist-info (name, version and mtime, which
+    :func:`_site_entries` already hashes: a reinstall rewrites it), so a package
+    that sits INSIDE a site directory is not walked and stamps as ``installed``.
+    "Editable" is read from where the package is: outside every site directory.
     """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    package_parent = os.path.realpath(os.path.dirname(root))
+    for site_directory in _site_directories():
+        if os.path.realpath(site_directory) == package_parent:
+            return "installed"
     newest = 0
     count = 0
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for directory, _, files in os.walk(root):
         for name in files:
             if not name.endswith(".py"):
@@ -279,12 +296,10 @@ def runtime_fingerprint() -> str:
     under ``--express``). The package set carries each entry's mtime, so a
     reinstall of the same versions still reads as a change, and ASH's own
     source tree is stamped (:func:`_own_tree_stamp`), so an editable install's
-    edits do too. The values of :data:`FINGERPRINT_ENV` and the no-user-site
-    flag are hashed as well: ``sys.path`` stays out of the fingerprint on
-    purpose (see :func:`_site_entries`), which would otherwise leave the entries
-    ``PYTHONPATH`` adds invisible, and a warm scan could import different plugin
-    code than a cold one. The ASH version is not part of it because the socket
-    path already carries it (:func:`socket_path`).
+    edits do too. The ASH version and the interpreter-shaping variables are
+    not part of it because the socket path already carries them
+    (:func:`socket_path`, :func:`interpreter_shape`): a client whose
+    ``PYTHONPATH`` differs reaches a different daemon, never a stale one.
     """
     digest = hashlib.sha256()
     digest.update(sys.version.encode("utf-8", "backslashreplace"))
@@ -292,12 +307,6 @@ def runtime_fingerprint() -> str:
     digest.update(
         os.path.realpath(sys.executable or "").encode("utf-8", "backslashreplace")
     )
-    environ = snapshot_environ()
-    for name in FINGERPRINT_ENV:
-        digest.update(b"\x00")
-        digest.update(environ.get(name, "").encode("utf-8", "backslashreplace"))
-    digest.update(b"\x00")
-    digest.update(str(sys.flags.no_user_site).encode("utf-8"))
     digest.update(b"\x00")
     digest.update(_own_tree_stamp().encode("utf-8"))
     for name in _site_entries():
@@ -306,19 +315,67 @@ def runtime_fingerprint() -> str:
     return digest.hexdigest()
 
 
+def absolute_python_path(value: str) -> str:
+    """*value* (a ``PYTHONPATH``) with every entry made absolute against the
+    current directory.
+
+    A relative entry (``.``, ``plugins``) is read by each process against its
+    own working directory, and the daemon starts in the runtime directory, so
+    the same text names different code in the client and in the daemon. The
+    client makes its entries absolute once, before anything is hashed or
+    handed to a daemon, so both sides hold the same paths. An empty entry is
+    the current directory to Python, and is made so too.
+    """
+    if not value:
+        return ""
+    return os.pathsep.join(os.path.abspath(entry) for entry in value.split(os.pathsep))
+
+
+def interpreter_shape(environ: Optional[Mapping[str, str]] = None) -> str:
+    """The values that decide which code an interpreter of ours imports, as text.
+
+    ``PYTHONPATH`` (absolute entries, :func:`absolute_python_path`),
+    ``PYTHONHOME``, ``PYTHONUSERBASE``, ``PYTHONNOUSERSITE`` and ``VIRTUAL_ENV``
+    (:data:`INTERPRETER_ENV`). They are the daemon's own: it keeps them across
+    the scrub, so a daemon computes the same text from its environment that its
+    starting client computed from theirs. The names are spelled as literals
+    where they are read so the environment-variable reference resolves them.
+    """
+    if environ is None:
+        environ = snapshot_environ()
+    python_path = absolute_python_path(environ.get("PYTHONPATH", ""))
+    return "\x00".join(
+        (
+            python_path,
+            environ.get("PYTHONHOME", ""),
+            environ.get("PYTHONUSERBASE", ""),
+            environ.get("PYTHONNOUSERSITE", ""),
+            environ.get("VIRTUAL_ENV", ""),
+        )
+    )
+
+
 def socket_key(
     version: Optional[str] = None,
     uid: Optional[int] = None,
     prefix: Optional[str] = None,
+    shape: Optional[str] = None,
 ) -> str:
     """The short key the socket and log file names carry: hash of (uid,
-    version, installation prefix).
+    version, installation prefix, interpreter shape).
 
     The prefix (``sys.prefix``, resolved) is part of the key so two
     installations of the same ASH version -- two virtualenvs, say -- never
     share a socket. Without it the second environment's every request would
     fingerprint-refuse against the first one's daemon, and two ``--express``
     users would stop and restart each other's daemons forever.
+
+    The interpreter shape (:func:`interpreter_shape`) is part of it for the same
+    reason: two shells that differ only in ``PYTHONPATH`` (a pre-commit hook and
+    an IDE terminal, tox and a plain shell) import different plugin code, so
+    each gets a daemon of its own instead of reading the other's as stale and
+    restarting it, scans in flight included, forever. The key stays 16 hex
+    characters, so the socket path's length is unchanged.
     """
     if version is None:
         version = ash_version()
@@ -326,7 +383,9 @@ def socket_key(
         uid = os.getuid()
     if prefix is None:
         prefix = os.path.realpath(sys.prefix)
-    digest = hashlib.sha256(f"{uid}:{version}:{prefix}".encode("utf-8"))
+    if shape is None:
+        shape = interpreter_shape()
+    digest = hashlib.sha256(f"{uid}:{version}:{prefix}:{shape}".encode("utf-8"))
     return digest.hexdigest()[:16]
 
 
@@ -394,7 +453,11 @@ def runtime_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
     base = environ.get("XDG_RUNTIME_DIR", "")
     if base and os.path.isdir(base):
         return _ensure_private_dir(Path(base) / "ash-express")
-    return _ensure_private_dir(Path.home() / ".ash" / "run")
+    # HOME from the mapping the caller gave, so a caller that passes an
+    # explicit environment controls the result; the platform's own answer
+    # (Path.home) only when the mapping has none.
+    home = environ.get("HOME", "")
+    return _ensure_private_dir((Path(home) if home else Path.home()) / ".ash" / "run")
 
 
 #: The longest socket path this module will bind or connect to. AF_UNIX's
@@ -432,9 +495,9 @@ def idle_seconds(environ: Optional[Mapping[str, str]] = None) -> int:
         # Seconds of inactivity after which an idle express daemon exits.
         # `ash express start --idle-seconds` writes it for the daemon it
         # starts, and an autostarted daemon inherits it from the scan's shell.
-        raw = os.environ.get("ASH_EXPRESS_IDLE_SECONDS", "")
-    else:
-        raw = environ.get(IDLE_ENV, "")
+        # Read through the locked snapshot, under the one constant.
+        environ = snapshot_environ()
+    raw = environ.get(IDLE_ENV, "")
     try:
         value = int(raw)
     except (TypeError, ValueError):
@@ -503,8 +566,9 @@ def request_env_overrides(
 #: (:func:`scrubbed_daemon_environment`), so the fresh interpreter ``ash express
 #: start`` launches imports the same code its starting client runs (an ASH
 #: checkout reachable only through ``PYTHONPATH``, a ``PYTHONUSERBASE`` site)
-#: instead of failing its first import or resolving another user site -- the
-#: latter made :func:`runtime_fingerprint` permanently differ from every client's.
+#: instead of failing its first import or resolving another user site. Their
+#: values are part of the socket key (:func:`interpreter_shape`), so a client
+#: with other values reaches a daemon of its own rather than a stale one.
 INTERPRETER_ENV = (
     "PYTHONPATH",
     "PYTHONHOME",
@@ -512,15 +576,6 @@ INTERPRETER_ENV = (
     "PYTHONNOUSERSITE",
     "VIRTUAL_ENV",
 )
-
-#: The values :func:`runtime_fingerprint` hashes, beside the no-user-site flag:
-#: the ones that change which code an already-resolved interpreter imports
-#: (plugin modules named in ``ash_plugin_modules`` are imported from them). A
-#: client whose values differ from the daemon's reads it as stale and runs cold,
-#: instead of running different plugin code warm. Entries must be absolute: a
-#: relative one is read against each process's own working directory, which for
-#: the daemon is the runtime directory.
-FINGERPRINT_ENV = ("PYTHONPATH", "PYTHONHOME")
 
 #: What an autostarted daemon's own environment keeps
 #: (:func:`scrubbed_daemon_environment`): the execution basics, the terminal
@@ -556,7 +611,12 @@ def scrubbed_daemon_environment(environ: Mapping[str, str]) -> dict[str, str]:
     environment becomes exactly that request's, so nothing kept here reaches
     a scan either.
     """
-    return {name: value for name, value in environ.items() if name in DAEMON_ENV_KEPT}
+    kept = {name: value for name, value in environ.items() if name in DAEMON_ENV_KEPT}
+    if "PYTHONPATH" in kept:
+        # The daemon starts in the runtime directory: a relative entry would
+        # name a different tree there than in the client that started it.
+        kept["PYTHONPATH"] = absolute_python_path(kept["PYTHONPATH"])
+    return kept
 
 
 def send_frame(sock: socket.socket, frame: dict[str, Any]) -> None:

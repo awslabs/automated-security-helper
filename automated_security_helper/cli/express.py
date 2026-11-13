@@ -39,6 +39,42 @@ def _unavailable_exit(exc: Exception) -> "typer.Exit":
     return typer.Exit(ASH_EXIT_USAGE_ERROR)
 
 
+def _become_a_daemon_environment() -> None:
+    """Give this process the environment and signal state a detached daemon has.
+
+    ``--foreground`` runs the daemon in the CLI process itself, so before it
+    serves, the process environment is scrubbed to what a detached daemon
+    keeps (:func:`runtime.scrubbed_daemon_environment`: a commit hook's
+    incidentals and the shell's credentials must not become ambient state for
+    every scan's child) and the signal dispositions the CLI's own startup
+    installed are put back to the defaults a freshly started daemon begins
+    with (``serve`` installs its own handlers on top). What this cannot remove:
+    the CLI's heavy imports are already resident, so a foreground daemon's
+    scan children fork from a process that has rich, typer and the logging
+    stack loaded, and a thin start does not. Use the detached start to
+    reproduce a daemon's behavior exactly; the foreground one is for watching
+    its log.
+    """
+    import signal
+
+    from automated_security_helper.express import runtime
+    from automated_security_helper.utils.process_env import apply_environ_overrides
+
+    current = snapshot_environ()
+    kept = runtime.scrubbed_daemon_environment(current)
+    overrides = {name: None for name in current if name not in kept}
+    overrides.update(kept)
+    apply_environ_overrides(overrides)
+    for name in ("SIGINT", "SIGTERM", "SIGHUP", "SIGPIPE"):
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        try:
+            signal.signal(number, signal.SIG_DFL)
+        except (OSError, ValueError):
+            pass
+
+
 @express_app.command(name="start")
 def start_daemon(
     idle_seconds: Annotated[
@@ -105,6 +141,22 @@ def start_daemon(
             raise typer.Exit(1)
         echo("replacing a stale express daemon")
         client.stop_daemon(path)
+        # stop_daemon returns quietly when nothing answered and when the old
+        # daemon outlived its wait, so "the old one is gone" is checked here,
+        # not assumed: a spawn over a live daemon would be accepted by the
+        # readiness probe (a concurrent start's winner reads as ready) and
+        # this command would print success while the stale daemon still
+        # served -- and every later scan still refused by it.
+        if client.control_request(path, {"op": "status"}) is not None or (
+            client.daemon_lock_is_held(path)
+        ):
+            echo(
+                f"the stale express daemon at {path} is still there after the "
+                "stop; it may be finishing a scan. Check 'ash express status' "
+                "and run 'ash express stop' again.",
+                err=True,
+            )
+            raise typer.Exit(1)
     if idle_seconds is not None:
         # The spawned daemon and the foreground serve both read the
         # environment's idle setting; the option is written there so one
@@ -113,7 +165,9 @@ def start_daemon(
     if foreground:
         from automated_security_helper.express.daemon import serve
 
-        serve(idle_timeout=runtime.idle_seconds())
+        idle = runtime.idle_seconds()
+        _become_a_daemon_environment()
+        serve(idle_timeout=idle)
         return
     # Never client.autostart here: this command runs after the whole CLI
     # import, where a bare fork would carry rich, typer, logging and main's
@@ -127,6 +181,25 @@ def start_daemon(
         )
         raise typer.Exit(1)
     sock.close()
+    # The socket answering proves some daemon serves, not that it is the one
+    # just launched (a concurrent start's winner, or a daemon the stop missed,
+    # answers too), so the claim is checked against what answers: a daemon
+    # this invocation's scans would use has this fingerprint and protocol.
+    running = client.control_request(path, {"op": "status"})
+    if (
+        not isinstance(running, dict)
+        or not running.get("ok")
+        or running.get("fingerprint") != runtime.runtime_fingerprint()
+        or running.get("protocol") != runtime.PROTOCOL_VERSION
+    ):
+        echo(
+            f"a daemon answers at {path} but it is not one this installation's "
+            "scans can use (its fingerprint or protocol differs, or it did not "
+            "report a status); run 'ash express stop', then start again. Its "
+            f"log is {runtime.log_path()}",
+            err=True,
+        )
+        raise typer.Exit(1)
     echo(f"express daemon started at {path} (log: {runtime.log_path()})")
 
 

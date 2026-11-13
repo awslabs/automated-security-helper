@@ -140,7 +140,12 @@ class TestStartLaunchPath:
         fork stays the implicit scan path's, which runs before the heavy
         import (see cli/entrypoint.py)."""
         calls = []
-        monkeypatch.setattr(client, "control_request", lambda *_: None)
+        # Nothing answers before the spawn; after it, the new daemon does.
+        monkeypatch.setattr(
+            client,
+            "control_request",
+            lambda *_: _matching_status() if "spawn" in calls else None,
+        )
         monkeypatch.setattr(
             client,
             "autostart",
@@ -177,3 +182,160 @@ class TestStartLaunchPath:
         result = runner.invoke(express_app, ["start"])
         assert result.exit_code == 1
         assert "did not come up" in _all_output(result)
+
+
+def _matching_status(**overrides):
+    """A healthy daemon's status answer for THIS installation."""
+    status = {
+        "ok": True,
+        "pid": 4242,
+        "fingerprint": runtime.runtime_fingerprint(),
+        "protocol": runtime.PROTOCOL_VERSION,
+        "active_scans": 0,
+        "scans_served": 0,
+    }
+    status.update(overrides)
+    return status
+
+
+def _stale_status(**overrides):
+    return _matching_status(fingerprint="f" * 64, **overrides)
+
+
+class _Closable:
+    def close(self):
+        pass
+
+
+@needs_posix
+class TestStartVerifiesWhatItClaims:
+    """``start`` may print "started" only for a daemon this installation's
+    scans can use, and may replace a stale one only once it is really gone:
+    ``stop_daemon`` returns quietly on no answer and on timeout, and the
+    readiness probe accepts a concurrent winner's byte, so success could
+    otherwise be printed while the old daemon still served."""
+
+    def _wire(self, monkeypatch, tmp_path, answers):
+        """control_request answers from ``answers`` in order, then repeats the
+        last; the spawn and the stop are recorded."""
+        calls = []
+        queue = list(answers)
+
+        def control(path, frame):
+            calls.append(("control", frame["op"]))
+            return queue.pop(0) if len(queue) > 1 else queue[0]
+
+        monkeypatch.setattr(client, "control_request", control)
+        monkeypatch.setattr(client, "stop_daemon", lambda path: calls.append("stop"))
+        monkeypatch.setattr(
+            client,
+            "spawn_daemon_process",
+            lambda environ: calls.append("spawn") or True,
+        )
+        monkeypatch.setattr(client, "await_daemon", lambda path: _Closable())
+        monkeypatch.setattr(client, "daemon_lock_is_held", lambda path: False)
+        monkeypatch.setattr(runtime, "log_path", lambda: tmp_path / "express.log")
+        return calls
+
+    def test_a_stale_daemon_that_survives_the_stop_is_a_failure_not_a_start(
+        self, socket_path, tmp_path, monkeypatch
+    ):
+        # status -> stale idle daemon; after the stop it STILL answers.
+        calls = self._wire(monkeypatch, tmp_path, [_stale_status(), _stale_status()])
+        result = runner.invoke(express_app, ["start"])
+        assert result.exit_code == 1, _all_output(result)
+        assert "still there after the stop" in _all_output(result)
+        assert "spawn" not in calls, "nothing may be spawned over a live daemon"
+        assert "express daemon started" not in _all_output(result)
+
+    def test_a_stale_daemon_whose_lock_is_still_held_is_a_failure(
+        self, socket_path, tmp_path, monkeypatch
+    ):
+        calls = self._wire(monkeypatch, tmp_path, [_stale_status(), None])
+        monkeypatch.setattr(client, "daemon_lock_is_held", lambda path: True)
+        result = runner.invoke(express_app, ["start"])
+        assert result.exit_code == 1, _all_output(result)
+        assert "spawn" not in calls
+
+    def test_a_stale_daemon_that_is_gone_is_replaced_and_verified(
+        self, socket_path, tmp_path, monkeypatch
+    ):
+        # stale daemon; gone after the stop; the spawned one answers matching.
+        calls = self._wire(
+            monkeypatch, tmp_path, [_stale_status(), None, _matching_status()]
+        )
+        result = runner.invoke(express_app, ["start"])
+        assert result.exit_code == 0, _all_output(result)
+        assert calls.index("stop") < calls.index("spawn")
+        assert "express daemon started" in _all_output(result)
+
+    @pytest.mark.parametrize(
+        "after",
+        [
+            _stale_status(),
+            _matching_status(protocol=runtime.PROTOCOL_VERSION + 1),
+            {"ok": False, "reason": "not a daemon"},
+            None,
+        ],
+        ids=["old-fingerprint", "old-protocol", "not-ok", "silent"],
+    )
+    def test_a_start_that_ends_with_the_wrong_daemon_is_not_reported_started(
+        self, socket_path, tmp_path, monkeypatch, after
+    ):
+        """The socket answered the readiness probe, but what answers a status
+        query afterwards is not a daemon this installation's scans can use."""
+        self._wire(monkeypatch, tmp_path, [None, after])
+        result = runner.invoke(express_app, ["start"])
+        assert result.exit_code == 1, _all_output(result)
+        assert "express daemon started" not in _all_output(result)
+        assert "not one this installation's scans can use" in _all_output(result)
+
+
+@needs_posix
+class TestForegroundStartsAsADaemonWould:
+    def test_the_environment_is_scrubbed_and_signal_handlers_are_reset(
+        self, socket_path, monkeypatch
+    ):
+        import signal
+
+        from automated_security_helper.express import daemon as daemon_module
+        from automated_security_helper.utils.process_env import snapshot_environ
+
+        monkeypatch.setattr(client, "control_request", lambda *_: None)
+        monkeypatch.setenv("GIT_INDEX_FILE", ".git/index.hook")
+        monkeypatch.setenv("AWS_PROFILE", "prod")
+        monkeypatch.setenv(runtime.IDLE_ENV, "120")
+        seen = {}
+
+        def fake_serve(idle_timeout=None, ready_fd=None):
+            env = snapshot_environ()
+            seen["names"] = sorted(env)
+            seen["idle"] = idle_timeout
+            seen["sigint"] = signal.getsignal(signal.SIGINT)
+            seen["sigterm"] = signal.getsignal(signal.SIGTERM)
+
+        monkeypatch.setattr(daemon_module, "serve", fake_serve)
+        previous = {
+            number: signal.getsignal(number)
+            for number in (signal.SIGINT, signal.SIGTERM)
+        }
+        # What the CLI's own startup leaves installed.
+        signal.signal(signal.SIGINT, lambda *_: None)
+        signal.signal(signal.SIGTERM, lambda *_: None)
+        # The command mutates the real process environment (its job); the
+        # fixture-restored copy puts it back for the tests after this one.
+        saved = dict(os.environ)
+        try:
+            result = runner.invoke(express_app, ["start", "--foreground"])
+        finally:
+            for number, handler in previous.items():
+                signal.signal(number, handler)
+            os.environ.clear()
+            os.environ.update(saved)
+        assert result.exit_code == 0, _all_output(result)
+        assert "GIT_INDEX_FILE" not in seen["names"]
+        assert "AWS_PROFILE" not in seen["names"]
+        assert runtime.IDLE_ENV in seen["names"]
+        assert seen["idle"] == 120
+        assert seen["sigint"] is signal.SIG_DFL
+        assert seen["sigterm"] is signal.SIG_DFL

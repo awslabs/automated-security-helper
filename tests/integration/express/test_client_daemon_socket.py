@@ -154,7 +154,11 @@ class TestTheWire:
         outcome = client._run_on_daemon(
             sock,
             ["scan", "--source-dir", "."],
-            {"ASH_MODE": "local", "UNRELATED": "carried", "LD_PRELOAD": "denied"},
+            {
+                "ASH_MODE": "local",
+                "UNRELATED": "carried",
+                runtime.CHILD_ENV: "denied",
+            },
             explicit=False,
         )
         daemon.thread.join(timeout=10)
@@ -276,9 +280,15 @@ class TestTheWire:
             if daemon.go_read.wait(timeout=10):
                 os.kill(os.getpid(), signal_module.SIGTERM)
 
+        # An inherited SIG_IGN (nohup, a background job) would make the client
+        # leave SIGTERM ignored: the default disposition is set for the run.
+        previous = signal_module.signal(signal_module.SIGTERM, signal_module.SIG_DFL)
         sender = threading.Thread(target=deliver_after_the_go, daemon=True)
         sender.start()
-        outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
+        try:
+            outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
+        finally:
+            signal_module.signal(signal_module.SIGTERM, previous)
         sender.join(timeout=10)
         assert not sender.is_alive()
         daemon.thread.join(timeout=10)
@@ -301,6 +311,11 @@ class TestTheWire:
         import signal as signal_module
 
         signum = getattr(signal_module, name)
+        # A background job, nohup or a CI step inherits some of these as
+        # SIG_IGN, and the client then leaves them ignored (a cold run would
+        # have survived them): the test needs the forwarder installed, so the
+        # disposition is made the default for the run and restored after.
+        previous_disposition = signal_module.signal(signum, signal_module.SIG_DFL)
 
         class _InterruptedHandshake(_ScriptedDaemon):
             def _converse(self, conn):
@@ -317,7 +332,10 @@ class TestTheWire:
 
         daemon = _InterruptedHandshake(socket_dir, answers=[])
         sock = client._connect(socket_dir)
-        outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
+        try:
+            outcome = client._run_on_daemon(sock, ["scan"], {}, explicit=False)
+        finally:
+            signal_module.signal(signum, previous_disposition)
         daemon.thread.join(timeout=10)
         assert outcome == ("exit", code)
         assert daemon.go_frame is None, "no go may follow a recorded signal"

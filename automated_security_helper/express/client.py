@@ -138,14 +138,14 @@ def delegated_exit_code(
 #: any-`_*_COMPLETE` match read an unrelated variable (a profile's
 #: `_SETUP_COMPLETE=1`, say) as a completion and silently switched express off
 #: for every scan of that shell. Pinned against pyproject's console scripts, and
-#: the only list :func:`completion_in_progress` reads.
-COMPLETION_ENV_NAMES = frozenset(
-    {
-        "_ASH_COMPLETE",
-        "_ASHV3_COMPLETE",
-        "_AUTOMATED_SECURITY_HELPER_COMPLETE",
-        "_AGENTIC_SECURITY_HARNESS_COMPLETE",
-    }
+#: the only list :func:`completion_in_progress` reads. A tuple of literals, not
+#: a frozenset call, so the environment-variable reference generator resolves
+#: the names through the loop that reads them and documents each one.
+COMPLETION_ENV_NAMES = (
+    "_ASH_COMPLETE",
+    "_ASHV3_COMPLETE",
+    "_AUTOMATED_SECURITY_HELPER_COMPLETE",
+    "_AGENTIC_SECURITY_HARNESS_COMPLETE",
 )
 
 
@@ -164,7 +164,10 @@ def completion_in_progress(environ: Mapping[str, str]) -> bool:
     # One variable per console script ASH installs (COMPLETION_ENV_NAMES, the
     # one source of truth). Any of them present means this process is
     # answering a TAB completion, which must never start a scan.
-    return any(name in environ for name in COMPLETION_ENV_NAMES)
+    for name in COMPLETION_ENV_NAMES:
+        if name in environ:
+            return True
+    return False
 
 
 def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optional[int]:

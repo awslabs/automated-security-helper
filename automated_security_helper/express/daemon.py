@@ -378,13 +378,18 @@ class ExpressDaemon:
                 _log(f"warm import skipped: {failure}")
             _log("warm imports complete")
             if _thread_count() != 1:
-                # Checked again at every scan request (_scan_refusal): this
-                # line is the one that names the cause, once, where it began.
+                # A daemon that cannot fork safely serves nobody: staying
+                # resident would refuse every scan (each refusal also resets
+                # the idle timer). Retire at once -- the finally below takes
+                # the socket down -- so clients run cold immediately. The
+                # per-request check in _scan_refusal stays as the backstop for
+                # a thread started later.
                 _log(
                     f"warm imports left {_thread_count()} threads running "
-                    "(a fork of a multi-threaded process is unsafe); scans are "
-                    "refused and run cold"
+                    "(a fork of a multi-threaded process is unsafe); exiting so "
+                    "scans run cold"
                 )
+                return
             while True:
                 for key, _ in self.selector.select(timeout=1.0):
                     key.data(key.fileobj)
@@ -677,10 +682,7 @@ class ExpressDaemon:
             # multi-threaded process, where a lock held by another thread
             # stays held forever in the child. Refused, not forked; the
             # client runs the scan cold, which is always correct.
-            _log(
-                f"refusing to fork: the daemon runs {threads} threads "
-                f"({', '.join(sorted(t.name for t in threading.enumerate()))})"
-            )
+            _log(f"refusing to fork: the daemon runs {threads} threads")
             return (
                 (
                     f"the daemon is not single-threaded ({threads} threads); "

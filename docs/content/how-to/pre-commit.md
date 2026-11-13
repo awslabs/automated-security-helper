@@ -184,15 +184,18 @@ With `stages: [pre-push]`, install that hook type with
 
 ## What it costs {#cost}
 
-Measured on a repository of three files:
+Measured on a repository of three files, so these times are mostly the fixed cost of a
+run; the scan itself grows with what the commit stages:
 
 | Run | Time |
 |---|---|
 | First run, with the hook environment and scanner installs | 65 to 150 seconds |
 | Later runs | 11 to 15 seconds |
 
-checkov is the slowest scanner. Scan time grows with the size of the repository, because
-every run scans all of it. The hook environment takes about 650 MB under
+checkov is the slowest scanner. With `--staged`, which the hook passes by default, scan
+time grows with the size of the commit; without it (a hook you pointed at the whole tree),
+it grows with the size of the repository, because every run scans all of it. The hook
+environment takes about 650 MB under
 `~/.cache/pre-commit`, and bandit and checkov about 240 MB under `~/.local/share/uv`.
 
 About two seconds of every later run is ASH's own startup (the interpreter and the eager
@@ -202,8 +205,9 @@ paired with the hook's own environment, which every later hook run forks instead
 starting cold (Linux and macOS only). The pairing matters: the daemon serves exactly the
 ASH installation that started it, and pre-commit's hook environment is its own
 installation, so a daemon started from your shell's `ash` is silently ignored by the
-hook -- start it with the hook's flag, not from the shell. Pairing the daemon with a scan
-scoped to the files the commit touches is the fastest hook shape.
+hook -- start it with the hook's flag, not from the shell. The hook's default `--staged`
+already scopes the scan to the files the commit touches, so the daemon and `--staged`
+together are the fastest hook shape.
 
 ## Pre-commit and CI together {#with-ci}
 

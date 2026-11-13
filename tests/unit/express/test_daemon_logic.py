@@ -204,6 +204,32 @@ class TestScanRefusals:
         assert any("refusing to fork" in line for line in lines), lines
 
 
+@needs_posix
+class TestRetiresWhenWarmImportsLeaveThreads:
+    def test_the_loop_is_never_entered_and_the_socket_comes_down(
+        self, daemon, monkeypatch, tmp_path
+    ):
+        """A daemon that cannot fork safely serves nobody; staying up would
+        refuse every scan. It logs the cause once and exits through shutdown."""
+        from automated_security_helper.express import daemon as daemon_module
+
+        lines = []
+        shutdowns = []
+        monkeypatch.setattr(daemon_module, "warm_imports", list)
+        monkeypatch.setattr(daemon_module, "_thread_count", lambda: 2)
+        monkeypatch.setattr(daemon_module, "_log", lines.append)
+        monkeypatch.setattr(runtime, "socket_path", lambda *a, **k: tmp_path / "x.sock")
+        monkeypatch.setattr(daemon, "_shutdown", lambda: shutdowns.append(True))
+        monkeypatch.setattr(
+            daemon.selector,
+            "select",
+            lambda timeout=None: pytest.fail("the serve loop must not run"),
+        )
+        daemon.run()
+        assert shutdowns == [True]
+        assert any("exiting so scans run cold" in line for line in lines), lines
+
+
 class _TickingClock:
     """A monotonic clock that advances by a fixed step on every read."""
 
@@ -287,6 +313,7 @@ class TestWholeHandshakeDeadline:
                     return first, None
 
             def fake_handshake(connection):
+                seen["connection"] = connection
                 seen["deadline"] = connection.handshake_deadline
                 connection.close()
 
@@ -294,6 +321,9 @@ class TestWholeHandshakeDeadline:
             monkeypatch.setattr(runtime, "peer_is_this_user", lambda _s: True)
             daemon._accept(_Listener())
             assert seen["deadline"] is not None
+            # Cleared once the handshake returns, so later reads on the
+            # established connection are never armed with a spent deadline.
+            assert seen["connection"].handshake_deadline is None
         finally:
             second.close()
             first.close()
