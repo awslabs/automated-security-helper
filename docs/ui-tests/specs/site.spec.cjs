@@ -106,7 +106,7 @@ test("snippet builder: picks and backends choose one panel and the copy button c
   await backend("nix").click();
   await expect(builder.locator("[data-ash-panel]:visible")).toHaveCount(1);
   await expect(builder.locator("[data-ash-panel='gl-na']")).toBeVisible();
-  await expect(builder.locator("[data-ash-builder-status]")).toContainText("Nix mode is not in any release");
+  await expect(builder.locator("[data-ash-builder-status]")).toContainText("GitLab CI: not offered for Nix or Homebrew");
 
   const picks = await builder.locator("[data-ash-pick]").evaluateAll(buttons => buttons.map(button => button.dataset.ashPick));
   const backends = await builder.locator("[data-ash-backend]").evaluateAll(buttons => buttons.map(button => button.dataset.ashBackend));

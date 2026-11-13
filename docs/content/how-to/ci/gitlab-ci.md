@@ -280,9 +280,9 @@ the pip recipe when you want a plain `ash` executable on `PATH`.
 
 ## Run in Nix mode {#nix}
 
-!!! warning "Nix mode is on `main` only"
-    Nix mode is not in any release: v3.7.x rejects `--mode nix`. The job below installs
-    ASH from `main`. Pin a commit SHA instead when you need to know which code ran.
+!!! note "Nix mode needs a current release"
+    Nix mode is in the latest release; v3.7.x and older reject `--mode nix`. The job
+    below installs that release.
 
 Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
 ASH's `flake.nix`, so the job needs no `apt-get` packages for the scanners and no
@@ -290,18 +290,17 @@ ASH's `flake.nix`, so the job needs no `apt-get` packages for the scanners and n
 and git; set the CI/CD variable `NIX_IMAGE` to an image that has them. ASH passes
 `nix-command` and `flakes` on each invocation, so you do not have to enable them in
 `nix.conf`. Nix mode does not install ASH, and cdk-nag runs on the Python environment ASH
-is installed in, so install ASH with the `cdk` extra. A `main` install cannot find a
-release tag that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s
-flake.
+is installed in, so install ASH with the `cdk` extra. `ASH_NIX_FLAKE_REF` pins the scan's
+flake to the release the job installs, so the two cannot drift apart.
 
-<!-- doctest: config kind=gitlab-ci runner=none reason="installs ASH from main, which the runner cannot swap for the pull request's wheel" -->
+<!-- doctest: config kind=gitlab-ci runner=none reason="installs a released ASH, which the runner cannot swap for the pull request's wheel" -->
 ```yaml
 ash-scan-nix:
   stage: test
   image: $NIX_IMAGE
   variables:
-    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main"
-    ASH_NIX_FLAKE_REF: "github:awslabs/automated-security-helper/main"
+    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
+    ASH_NIX_FLAKE_REF: "github:awslabs/automated-security-helper/v3.8.0"
   before_script:
     - python -m venv /opt/ash
     - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"

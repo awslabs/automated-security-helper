@@ -745,13 +745,13 @@ branch lists them for the version selector in the site header.
 
 - Every push to `main` publishes the version `main`, titled "main (unreleased)". Its
   pages say that they describe unreleased code, and link to the latest release. Its
-  [version-pinned pages](releases.md#version-pinned-pages) are built from their
-  templates with `main` for the version, so their install commands install `main`
-  (`@main`, `git clone --branch main`, `rev: main`), and the notice says so. Where a
+  [version-pinned pages](releases.md#version-pinned-pages) are served as committed,
+  so their install commands pin the current release, and the notice says so: a reader
+  of the `main` docs is advised to install the latest release, never `main`. Where a
   template needs the release number itself, as in a sample of `ash --version` output,
-  it writes `{{RELEASE}}`, which stays the current release number. The static checks
-  report `{{RELEASE}}` written as the ref of an install command anywhere but a table
-  row or a `text` block, so the `main` version cannot install a release.
+  it writes `{{RELEASE}}`; the ref of an install command is written `v{{VERSION}}`,
+  the placeholder the release tooling moves, and the static checks report
+  `{{RELEASE}}` written as such a ref anywhere but a table row or a `text` block.
 - Running the docs workflow by hand on a release tag `vX.Y.Z` publishes the version `X.Y.Z` (see
   [Releases and versions](releases.md#the-documentation-site)). The newest release also
   gets the `latest` alias. `latest/` is a full copy of it rather than a redirect, and
@@ -810,10 +810,10 @@ of the branch: a stylesheet, a sitemap, a page no version has, and an old page f
   unreleased one, and no page carries the other;
 - `latest/` is a copy of 0.0.1, and the other versions name `latest/` as canonical;
 - the version-pinned pages of each release pin that release and no other. On `main`,
-  outside tables and `text` blocks, they pin no release, and every install-command form
-  that a page uses in 0.0.1 names `main` on that page, from `@main` to
-  `refs/heads/main`. The committed pages pin the current version, which is neither 0.0.1
-  nor 0.0.0, so this fails unless every build rendered the pages from their templates;
+  outside tables and `text` blocks, they pin exactly the current release, in every
+  install-command form that a page uses in 0.0.1. The committed pages pin the current
+  version, which is neither 0.0.1 nor 0.0.0, so this fails unless every release build
+  rendered the pages from their templates;
 - the root redirects every page of `latest/`, the old page redirects to its place under
   `latest/`, and the stand-ins are gone.
 
@@ -821,8 +821,8 @@ It deletes the branch afterwards and never pushes. It prints how many versions, 
 and redirects it checked. `tests/unit/test_docs_versions.py` plants each defect the
 check exists for (a missing setting in `mkdocs.yml`, a template without the notices,
 aliases that are not copies, a root left unversioned, an older release that takes
-`latest`, pinned pages left as committed) on a small site, and requires the check to
-report it.
+`latest`, a release's pinned pages left unrendered, a committed page pinning the wrong
+release) on a small site, and requires the check to report it.
 
 ## What a failure means
 

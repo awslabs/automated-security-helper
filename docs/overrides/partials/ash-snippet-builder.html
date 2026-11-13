@@ -6,9 +6,10 @@
   version pin replaced by `ref`. The tools the CI snippets install come from the plugin
   data (the registry), and scripts/verify_docs_freshness.py holds both these snippets
   and the CI guides' install lines to that same set. The pin is config.extra.install_ref when
-  docs/hooks/install_refs.py set it (`main`, or `v` and the release number), and
-  otherwise `v` and page.meta.ash_version, the pin the committed pages carry. No
-  release number is written in this file. A pair the docs do not teach renders as a
+  docs/hooks/install_refs.py set it (`v` and the release number, on a release build and
+  on the main version's build alike), and otherwise `v` and page.meta.ash_version, the
+  pin the committed pages carry: every build's snippets install a release, never main.
+  No release number is written in this file. A pair the docs do not teach renders as a
   "Not offered" family with a link, never an invented command. When a backend or a
   CI system changes, change its entry in `backends`, `picks` or `families` in the
   same PR as the integrations page's Backends and CI tables, which this mirrors.
@@ -25,7 +26,6 @@
 {% set ref = config.extra.install_ref or ("v" ~ page.meta.ash_version) %}
 {% set repo = config.repo_url %}
 {% set spec = "automated-security-helper[cdk] @ git+" ~ repo ~ ".git@" ~ ref %}
-{% set nix_caveat = "Nix mode is not in any release: it works from main or a source checkout only." %}
 
 {% set backends = [
   ("uvtool", "uv tool", "recommended"),
@@ -33,7 +33,7 @@
   ("pipx", "pipx", ""),
   ("pip", "pip", ""),
   ("container", "Container", "build it yourself"),
-  ("nix", "Nix", "main only"),
+  ("nix", "Nix", ""),
   ("brew", "Homebrew", "")
 ] %}
 {% set picks = [
@@ -78,8 +78,8 @@ ash scan --mode local
 ash scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
 {%- endset %}
 {% set t_local_nix -%}
-uv tool install --python 3.12 'automated-security-helper[cdk] @ git+{{ repo }}.git@main'
-export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main
+uv tool install --python 3.12 '{{ spec }}'
+export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/{{ ref }}
 ash scan --mode nix
 {%- endset %}
 
@@ -313,9 +313,9 @@ ash scan --mode local --no-progress \
    [("Shell", t_local_container)],
    [("Run ASH in a container", "how-to/run-in-a-container/"), ("Container image", "how-to/install/#container-image")]),
   ("local-nix", "local", "nix", "Local scan in Nix mode",
-   "Installs ASH from main, then scans inside a Nix shell. Needs Nix with flakes enabled.", nix_caveat,
+   "Installs ASH, then scans inside a Nix shell whose scanner tools come from the release's flake. Needs Nix with flakes enabled.", "",
    [("Shell", t_local_nix)],
-   [("Nix mode", "how-to/install/#nix-mode"), ("Install from main", "how-to/install/#install-from-main")]),
+   [("Nix mode", "how-to/install/#nix-mode"), ("Run ASH locally", "getting-started/local/")]),
   ("local-brew", "local", "brew", "Local scan with Homebrew",
    "The formula installs the latest release; it cannot install main.", "",
    [("Shell", t_local_brew)],
@@ -330,7 +330,7 @@ ash scan --mode local --no-progress \
    [(".pre-commit-config.yaml", t_pc_full), ("Shell", t_pc_full_run)],
    [("The ash-full-scan hook", "how-to/pre-commit/#full-scan")]),
   ("pc-na", "precommit", "nix", "pre-commit: not offered for Nix",
-   "There is no pre-commit snippet for this backend. The pre-commit guide has a Nix recipe for main, and a hook that runs an ASH you already installed.", nix_caveat,
+   "There is no pre-commit snippet for this backend. The pre-commit guide has a Nix hook that runs an ASH you already installed.", "",
    [],
    [("Run ASH with pre-commit", "how-to/pre-commit/"), ("Run the hook in Nix mode", "how-to/pre-commit/#nix"), ("Integrations overview", "integrations/")]),
 
@@ -343,7 +343,7 @@ ash scan --mode local --no-progress \
    [("GitHub Actions workflow", t_gha_container)],
    [("Run ASH in GitHub Actions", "how-to/ci/github-actions/#reusable"), ("Run ASH in a container", "how-to/run-in-a-container/")]),
   ("gha-na", "gha", "nix", "GitHub Actions: not offered for Nix",
-   "The reusable workflow takes local or container for ash-mode and installs ASH on the runner. The GitHub Actions guide has a Nix recipe for main.", nix_caveat,
+   "The reusable workflow takes local or container for ash-mode and installs ASH on the runner. The GitHub Actions guide has a Nix recipe.", "",
    [],
    [("Run in Nix mode", "how-to/ci/github-actions/#nix"), ("Other CI systems", "how-to/ci/other-ci/"), ("Integrations overview", "integrations/")]),
 
@@ -360,9 +360,9 @@ ash scan --mode local --no-progress \
    [(".gitlab-ci.yml", t_gl_image)],
    [("Use your own ASH image", "how-to/ci/gitlab-ci/#use-your-own-ash-image"), ("Build and host your own image", "how-to/run-in-a-container/#own-image")]),
   ("gl-na", "gitlab", "nix brew", "GitLab CI: not offered for Nix or Homebrew",
-   "The GitLab guide documents the pip, uvx, and own-image forms. Its Nix mode is covered in the other CI systems guide.", nix_caveat,
+   "The GitLab guide documents the pip, uvx, and own-image forms here, and has its own Nix mode section.", "",
    [],
-   [("Run ASH in GitLab CI", "how-to/ci/gitlab-ci/"), ("Nix mode in CI", "how-to/ci/other-ci/#nix"), ("Integrations overview", "integrations/")]),
+   [("Run ASH in GitLab CI", "how-to/ci/gitlab-ci/"), ("Nix mode in GitLab CI", "how-to/ci/gitlab-ci/#nix"), ("Integrations overview", "integrations/")]),
 
   ("ci-pip", "otherci", "uvtool pipx pip", "Other CI systems: shell recipe, pip",
    "Run it from the root of the checkout, with the virtual environment outside it. The guide wraps this recipe for Jenkins, AWS CodeBuild, Azure Pipelines, and CircleCI. It documents the pip virtual environment form, so it stands in for uv tool and pipx.", "",
@@ -373,7 +373,7 @@ ash scan --mode local --no-progress \
    [("Shell", t_ci_uvx)],
    [("The recipe", "how-to/ci/other-ci/#recipe"), ("Run without installing: uvx", "how-to/install/#run-without-installing-uvx")]),
   ("ci-na", "otherci", "container nix brew", "Other CI systems: not offered here",
-   "The shell recipe covers pip and uvx. Container mode in CI builds an image on every fresh host, and the guide explains the alternatives. Nix mode has its own section.", nix_caveat,
+   "The shell recipe covers pip and uvx. Container mode in CI builds an image on every fresh host, and the guide explains the alternatives. Nix mode has its own section.", "",
    [],
    [("Local mode or container mode", "how-to/ci/other-ci/#modes"), ("Nix mode in CI", "how-to/ci/other-ci/#nix"), ("Integrations overview", "integrations/")]),
 
@@ -386,7 +386,7 @@ ash scan --mode local --no-progress \
    [("MCP client configuration (JSON)", t_mcp_uvx)],
    [("Start the server with uvx", "how-to/mcp-server/#start-the-server-with-uvx-instead-of-an-installed-ash"), ("Setup for 16 agent platforms", "how-to/agent-plugins/#choose-your-platform")]),
   ("mcp-na", "mcp", "container nix", "MCP server: not offered for a container or Nix",
-   "The docs run the server over stdio from an installed ash or uvx. A containerized server is covered for the AWS deployments, over streamable HTTP.", nix_caveat,
+   "The docs run the server over stdio from an installed ash or uvx. A containerized server is covered for the AWS deployments, over streamable HTTP.", "",
    [],
    [("Run the server in a container", "how-to/mcp-server/#run-in-a-container"), ("Deploy ASH on AWS", "how-to/deploy-on-aws/#targets"), ("Integrations overview", "integrations/")])
 ] %}

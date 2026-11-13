@@ -253,13 +253,12 @@ uv run python scripts/version_template_manager.py generate   # render them over 
 
 The docs site renders these templates as well, through the mkdocs hook
 `docs/hooks/install_refs.py`. When it builds a release's docs it renders them with that
-release's version, which gives the committed page. When it builds the `main` version it
-renders them with `main`: `v{{VERSION}}` becomes `main`, so `@v{{VERSION}}` becomes
-`@main`, `git clone --branch v{{VERSION}}` becomes `git clone --branch main` and
-`rev: v{{VERSION}}` becomes `rev: main`; `refs/tags/v{{VERSION}}` becomes `refs/heads/main`;
-and a bare `{{VERSION}}` becomes `main`. `{{RELEASE}}` becomes the current release number,
-which is what an install of `main` reports. Any other build, such as `mkdocs serve`, shows
-the committed pages.
+release's version, which gives the committed page. Every other build, the `main`
+version's and `mkdocs serve`'s included, shows the committed pages, whose install
+commands pin the current release: the `main` docs describe unreleased code, but their
+reader is advised to install the latest release, not `main`. The hook still fails a
+`main` build whose version-pinned page has no template, so a deleted template is caught
+on the next push to `main` rather than at the next release.
 
 So write every sentence around `{{VERSION}}` to read correctly with either a release or
 `main` in its place ("installs ASH `v{{VERSION}}`", not "installs the `v{{VERSION}}`

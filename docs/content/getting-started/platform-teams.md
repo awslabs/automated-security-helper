@@ -221,8 +221,8 @@ same schedule as the ASH tag; the image route keeps both in one artifact. For on
 jobs, `uvx` runs the same pinned reference without installing it; the
 [GitHub Actions reusable workflow](../how-to/ci/github-actions.md) does this.
 
-Nix mode (`ash --mode nix`) is not in any release: v3.7.x rejects `--mode nix`, and it
-exists on `main` only. Do not plan a fleet rollout on it until a release contains it. See
+Nix mode (`ash --mode nix`) is in the latest release; v3.7.x and older reject
+`--mode nix`, so a fleet rollout on it needs a release newer than those everywhere. See
 [Nix mode](../how-to/install.md#nix-mode).
 
 ## 5. Plan content database refresh
