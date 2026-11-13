@@ -40,35 +40,48 @@ name: ASH - Dependabot Auto-Merge
 # GitHub's documented dependabot auto-merge recipe ("Automating Dependabot with
 # GitHub Actions", the "Enable auto-merge on a pull request" example): trigger on
 # `pull_request`, gate the job on the actor being dependabot[bot], read the
-# update's facts from dependabot/fetch-metadata, then `gh pr merge --auto` with
-# GITHUB_TOKEN. A workflow run triggered by dependabot gets a read-only
-# GITHUB_TOKEN by default; the job-level permissions block below is what grants
-# the two write scopes, to this job only (zizmor's excessive-permissions audit
-# flags workflow-level grants, so the workflow level stays `{}` like
-# ash-tag-on-merge.yml).
+# update's facts from dependabot/fetch-metadata, then approve and
+# `gh pr merge --auto`. The recipe's one departure here is the token the two gh
+# calls use, and it exists because of the merge queue (next section).
 #
 # The trigger lists its types explicitly because `synchronize` is load-bearing:
 # main's ruleset dismisses stale reviews on push, so every dependabot rebase
 # throws away the previous approval, and this workflow's run on the new head is
 # what re-approves it. The default types for `pull_request` are exactly these
-# three; spelling them out keeps the dependency on `synchronize` visible.
+# three; spelling them out keeps the dependency on `synchronize` visible. The
+# approval lands as ash-automations[bot], an actor this job's own gate never
+# matches (the gate reads the PR AUTHOR, which stays dependabot[bot]), and an
+# approval or an auto-merge enablement raises no opened/synchronize/reopened
+# event, so the app's actions cannot re-trigger this workflow.
 #
-# KNOWN LIMIT
+# WHY AN APP TOKEN AND NOT GITHUB_TOKEN
 #
-# The same GitHub page warns that where the target branch uses a merge queue, the
-# built-in GITHUB_TOKEN cannot add pull requests to the queue. Enabling auto-merge
-# and approving both work with GITHUB_TOKEN; if the final queue-entry step turns
-# out to refuse, the PR sits approved with auto-merge requested and a human merge
-# click is the fallback -- the failure mode is a PR that waits, never one that
-# merges too early. If that is what happens in practice, the fix is a GitHub App
-# token with merge rights, which is a credential decision, not a workflow edit.
+# The same GitHub page warns that where the target branch uses a merge queue --
+# this repository's case -- the built-in GITHUB_TOKEN cannot add pull requests
+# to the queue, so `gh pr merge --auto` under GITHUB_TOKEN leaves a PR that can
+# never enqueue. The two gh calls therefore run under a short-lived installation
+# token for ash-automations, the team-managed GitHub App installed on this
+# repository (pull-requests: write plus metadata: read), minted by the pinned
+# create-github-app-token step from the two repository secrets and scoped to
+# this one repository. GITHUB_TOKEN's only remaining job is fetch-metadata's
+# read, so the job's permissions block grants pull-requests: read and nothing
+# else: no step of this workflow holds a long-lived write token, and the
+# workflow level stays `{}` like ash-tag-on-merge.yml (zizmor's
+# excessive-permissions audit flags workflow-level grants).
+#
+# One residual to verify on the first in-scope dependabot PR: if GitHub turns
+# out to require contents: write on the App for the queue-entry step itself,
+# the failure is the same safe shape as before (the PR sits approved with
+# auto-merge requested and a human click is the fallback), and the fix is the
+# App Manager page -- the repository team adds the permission to the
+# ash-automations registration -- not a workflow edit.
 #
 # WHY THERE IS NO CHECKOUT
 #
 # Nothing here reads the tree. Not checking out means no code from the PR -- or
-# from anywhere -- executes in a job that holds a write token: the two steps are a
-# metadata read (from the PR's branch name and commit message, via the pinned
-# fetch-metadata action) and two gh calls against the API.
+# from anywhere -- executes in a job that holds a write token: the steps are a
+# token mint, a metadata read (from the PR's branch name and commit message, via
+# the pinned fetch-metadata action) and two gh calls against the API.
 
 on:
   pull_request:
@@ -105,11 +118,22 @@ jobs:
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.repository == 'awslabs/automated-security-helper'
     permissions:
-      # gh pr merge --auto needs contents: write; gh pr review --approve needs
-      # pull-requests: write. Granted to this job only, nothing else in the file.
-      contents: write
-      pull-requests: write
+      # fetch-metadata's read is the only use GITHUB_TOKEN has left; the approve
+      # and the auto-merge enablement run under the app token minted below.
+      pull-requests: read
     steps:
+      # Minted fresh per run, expires on its own, and scoped to this one
+      # repository whatever else the installation covers. The two secrets are
+      # the ash-automations App's id and private key.
+      - name: Mint an installation token for the automation app
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.ASH_AUTOMATIONS_APP_ID }}
+          private-key: ${{ secrets.ASH_AUTOMATIONS_PRIVATE_KEY }}
+          owner: awslabs
+          repositories: automated-security-helper
+
       - name: Read the update's metadata
         id: metadata
         uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
@@ -126,7 +150,10 @@ jobs:
            steps.metadata.outputs.update-type == 'version-update:semver-minor') &&
           steps.metadata.outputs.package-ecosystem != 'github_actions'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The app token, not GITHUB_TOKEN: only it can enter the merge queue
+          # (the header's token section). It makes ash-automations[bot] the
+          # reviewer and the auto-merge enabler.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Taken from the event rather than interpolated into the script, so no
           # PR-controlled text is ever shell syntax (html_url is server-built,
           # but the env route keeps that a fact about GitHub, not a load-bearing
