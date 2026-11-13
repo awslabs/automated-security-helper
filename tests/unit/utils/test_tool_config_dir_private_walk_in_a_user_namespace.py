@@ -44,6 +44,12 @@ ME = 1000
 #: The kernel's default overflow uid, what an unmapped owner stats as.
 NOBODY = 65534
 
+#: The real sandbox shape these tests reproduce is about /tmp itself, so its
+#: spelling is part of the fixture. It is only ever a key in the mocked stat
+#: tables and a prefix of the expected refusal text: every ``os.stat`` here is
+#: a fake, and nothing in these tests reads or writes the real filesystem.
+TMP = "/tmp"  # nosec B108 - a mocked stat key and message prefix, never written to
+
 
 def _walk(
     monkeypatch: pytest.MonkeyPatch,
@@ -109,11 +115,11 @@ def test_a_nobody_owned_root_passes_inside_a_user_namespace(
     """
     reason = _walk(
         monkeypatch,
-        "/tmp/ash-x",
+        TMP + "/ash-x",
         {
             "/": (NOBODY, 0o755),
-            "/tmp": (NOBODY, 0o1777),
-            "/tmp/ash-x": (ME, 0o700),
+            TMP: (NOBODY, 0o1777),
+            TMP + "/ash-x": (ME, 0o700),
         },
         overflow_uid=NOBODY,
     )
@@ -126,18 +132,18 @@ def test_a_nobody_owned_root_is_rejected_outside_a_user_namespace(
     """Outside a user namespace, uid 65534 is another account, as before."""
     reason = _walk(
         monkeypatch,
-        "/tmp/ash-x",
+        TMP + "/ash-x",
         {
             "/": (NOBODY, 0o755),
-            "/tmp": (NOBODY, 0o1777),
-            "/tmp/ash-x": (ME, 0o700),
+            TMP: (NOBODY, 0o1777),
+            TMP + "/ash-x": (ME, 0o700),
         },
         overflow_uid=None,
     )
     # The walk goes candidate-first, so /tmp is the first nobody-owned
     # ancestor it meets and the one the refusal names.
     assert reason is not None
-    assert reason.startswith("/tmp belongs to another account")
+    assert reason.startswith(TMP + " belongs to another account")
     assert "uid 65534" in reason
     assert f"uid {ME}" in reason
     assert "0o1777" in reason
