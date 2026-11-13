@@ -1352,7 +1352,8 @@ jobs:
   # tier nor a check anything requires.
   e2e-express:
     name: "e2e-express (${{ matrix.os }})"
-    needs: [ensure-cache]
+    # No `needs: [ensure-cache]`: the edge was dropped from every caller (the note
+    # above the integration tier), and a restore tolerates a miss.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     continue-on-error: true
