@@ -8,7 +8,7 @@ fragments:
 
 ## fragment: after-step:9
 
-### Step 9b (ash-scan): Run the full ASH scan
+### ash-scan: Run the full ASH scan
 
 After the build and tests, run a full security scan of the project from its
 root: `ash scan --no-progress`. Unlike the per-Unit precommit scan, this runs
@@ -19,10 +19,11 @@ Act on the exit code:
 
 - 0: record "ASH scan: passed" in the build and test summary and continue.
 - 2: actionable findings. Fix them, or, for an accepted risk, add a suppression
-  with a `reason` and an `expires` date under `global_settings.suppressions`
-  in the project's ASH configuration and rerun. List every suppression this
-  intent added in the build and test summary, with its reason and expiry, so
-  the human reviews them at the approval gate.
+  under `global_settings.suppressions` in the project's ASH configuration, with
+  the finding's `path`, `rule_id`, `line_start` and `line_end`, a `reason`, and
+  an `expires` date, and rerun. List every suppression this intent added in the
+  build and test summary, with its reason and expiry, so the human reviews them
+  at the approval gate.
 - 1: the scan is incomplete or a vulnerability database is stale. Install the
   missing tools with `ash dependencies install` and rerun. If a tool cannot run
   in this environment, exclude its scanner with `--exclude-scanners` and record

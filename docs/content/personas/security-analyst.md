@@ -47,7 +47,7 @@ reporters are on by default, and each writes its own file
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --scanners detect-secrets --output-formats sarif,junitxml
+ash scan --source-dir . --scanners detect-secrets --offline --no-progress --output-formats sarif,junitxml
 ```
 
 Suppressed findings ride along in the data formats with their reasons, so your

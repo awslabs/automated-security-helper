@@ -27,14 +27,15 @@ re-opens when the date passes.
 
 The plugin follows AI-DLC's
 [plugin authoring guide](https://github.com/awslabs/aidlc-workflows/blob/main/docs/harness-engineering/10-authoring-a-plugin.md).
-Validate, build, and test it with the tools AI-DLC ships (`<tools-dir>` is the
-tools directory of your AI-DLC install):
+Validate, test, and build it with the `aidlc plugin` verbs AI-DLC installs
+(the same commands the
+[step-by-step guide](../../../docs/content/how-to/aidlc-workflows.md) uses):
 
-<!-- doctest: illustrative reason="needs an AI-DLC install and its Bun-based plugin tools" -->
+<!-- doctest: illustrative reason="needs an AI-DLC install and its plugin tools" -->
 ```bash
-bun <tools-dir>/aidlc-plugin-validate.ts examples/aidlc-workflows/ash-scan
-bun <tools-dir>/aidlc-plugin-build.ts examples/aidlc-workflows/ash-scan claude
+aidlc plugin validate examples/aidlc-workflows/ash-scan
 aidlc plugin test examples/aidlc-workflows/ash-scan --install /path/to/your-project
+aidlc plugin build claude --plugin-root examples/aidlc-workflows/ash-scan
 ```
 
 The build emits a host-native plugin under `dist/<harness>/`, one harness at a
