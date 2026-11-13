@@ -3337,6 +3337,9 @@ class TestAMemoizedFailureIsRecoverable:
         ) as mock_run:
             assert runner.get_tool_version("bandit") is None
             assert runner.get_tool_version("bandit") is None
+            assert mock_run.call_count == 1, "the retry window answers the second"
+            uv_tool_runner._uv_version_probe_windows.clear()
+            assert runner.get_tool_version("bandit") is None
             assert mock_run.call_count == 2
 
     def test_validate_cached_tool_re_probes_past_a_memoized_failure(self, runner):

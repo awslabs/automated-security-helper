@@ -70,7 +70,16 @@ def _scripted_spawn(monkeypatch, outcomes):
     return calls
 
 
-def test_a_timed_out_version_probe_is_not_remembered(monkeypatch, stub_uv):
+def _expire_windows():
+    """Make every open version-probe retry window read as already passed."""
+    with uv_tool_runner._uv_tool_runner_cache_lock:
+        for key in uv_tool_runner._uv_version_probe_windows:
+            uv_tool_runner._uv_version_probe_windows[key] = 0.0
+
+
+def test_a_timed_out_version_probe_opens_a_retry_window_and_is_not_remembered(
+    monkeypatch, stub_uv
+):
     calls = _scripted_spawn(
         monkeypatch,
         [subprocess.TimeoutExpired(["uv"], 15), "bandit 1.7.8\n"],
@@ -78,8 +87,27 @@ def test_a_timed_out_version_probe_is_not_remembered(monkeypatch, stub_uv):
     runner = _ready_runner()
 
     assert runner.get_tool_version("bandit") is None
+    assert len(uv_tool_runner._uv_version_probe_windows) == 1
+    outcome: dict = {}
+    assert runner.get_tool_version("bandit", probe_outcome=outcome) is None
+    assert len(calls) == 1, "a call inside the window paid the probe timeout again"
+    assert "retry window" in outcome["error"]
+    assert uv_tool_runner._uv_tool_version_cache == {}, "the timeout was stored"
+
+    _expire_windows()
     assert runner.get_tool_version("bandit") == "bandit 1.7.8"
-    assert len(calls) == 2, "the timeout was served to the second caller"
+    assert len(calls) == 2
+
+
+def test_a_refresh_skips_the_retry_window(monkeypatch, stub_uv):
+    calls = _scripted_spawn(
+        monkeypatch, [subprocess.TimeoutExpired(["uv"], 15), "bandit 1.7.8\n"]
+    )
+    runner = _ready_runner()
+    assert runner.get_tool_version("bandit") is None
+
+    assert runner.get_tool_version("bandit", refresh=True) == "bandit 1.7.8"
+    assert len(calls) == 2
 
 
 def test_a_refresh_that_timed_out_keeps_the_version_found_earlier(monkeypatch, stub_uv):

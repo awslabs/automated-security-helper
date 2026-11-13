@@ -1538,7 +1538,13 @@ class UVToolRunner:
         failed cannot permanently declare a working tool broken. A probe that
         TIMED OUT is the exception: it is not remembered at all, as with a
         sandbox refusal, so it neither answers later callers nor overwrites a
-        version an earlier probe found.
+        version an earlier probe found. It opens a retry window of
+        ``_UV_PROBE_RETRY_SECONDS`` for its key, in which calls answer None without
+        probing, so concurrent callers do not each pay the timeout. A refresh that
+        times out answers None to its own caller even with a version stored:
+        ``validate_cached_tool`` reads that as "the probe did not run"
+        (``probed`` False, never ``is_functional`` from a failed probe), which its
+        callers do not treat as grounds for a reinstall.
 
         Each answer is keyed by the uv executable that gave it and whether
         the probe ran offline (see the cache's own note): a swapped or
@@ -1661,6 +1667,25 @@ class UVToolRunner:
                     hit, values, tool_name=tool_name, package_name=package_name
                 )
 
+            # A recent probe of this key timed out: not asked again until the
+            # window passes (as get_uv_tool_command's is), so k callers do not
+            # pay k probe timeouts in turn. A stored version is left alone.
+            with _uv_tool_runner_cache_lock:
+                window_key = (cache_key, environment_key)
+                window_until = _uv_version_probe_windows.get(window_key)
+                if window_until is not None and time.monotonic() >= window_until:
+                    _uv_version_probe_windows.pop(window_key, None)
+                    window_until = None
+            # A refresh is the explicit ask to probe again, so it skips the window.
+            if window_until is not None and not refresh:
+                outcome["error"] = (
+                    "a recent version probe timed out; it is asked again once the "
+                    "retry window passes"
+                )
+                return _version_shown(
+                    None, values, tool_name=tool_name, package_name=package_name
+                )
+
             raw: Optional[str] = None
             try:
                 command = [executable, "tool", "run"]
@@ -1729,6 +1754,11 @@ class UVToolRunner:
                 # this one is not stored, so the next call asks again and a
                 # refresh that timed out leaves an earlier good version alone.
                 timed_out = isinstance(error, subprocess.TimeoutExpired)
+                if timed_out:
+                    with _uv_tool_runner_cache_lock:
+                        _uv_version_probe_windows[(cache_key, environment_key)] = (
+                            time.monotonic() + _UV_PROBE_RETRY_SECONDS
+                        )
             else:
                 refused = False
                 timed_out = False
@@ -3059,6 +3089,11 @@ def _remember_scoped_miss(miss_key: str, scope: Any) -> None:
 #: the monotonic time until which the uv probe is skipped for that key. Guarded
 #: by ``_uv_tool_runner_cache_lock``; cleared with the caches.
 _uv_command_probe_windows: Dict[str, float] = {}
+#: The retry window a timed-out ``get_tool_version`` probe opened, keyed by the
+#: memo key and the (executable, offline) environment key: the monotonic time
+#: until which that probe is not spawned again and the call answers None. Guarded
+#: by ``_uv_tool_runner_cache_lock``; cleared with the caches.
+_uv_version_probe_windows: Dict[Tuple[str, Any], float] = {}
 # Keyed by _lookup_key: the name, PATH and ASH_BIN_PATH. Found paths only: a miss
 # is looked up again on the next call.
 _uv_executable_cache: Dict[Any, str] = {}
@@ -3306,6 +3341,8 @@ def invalidate_tool_version_cache(name: str) -> None:
                 doomed.append(key)
         for key in doomed:
             _uv_tool_version_cache.pop(key, None)
+            for window_key in [k for k in _uv_version_probe_windows if k[0] == key]:
+                _uv_version_probe_windows.pop(window_key, None)
             _uv_tool_version_generations[key] = (
                 _uv_tool_version_generations.get(key, 0) + 1
             )
@@ -3321,6 +3358,7 @@ def _reset_uv_tool_runner_caches() -> None:
         _uv_probe_answers.clear()
         _uv_scoped_probe_misses.clear()
         _uv_command_probe_windows.clear()
+        _uv_version_probe_windows.clear()
         _uv_executable_cache.clear()
         _executable_cache.clear()
         _uv_tool_version_cache.clear()
@@ -3347,6 +3385,7 @@ def _forget_lookups() -> None:
         _uv_probe_answers.clear()
         _uv_scoped_probe_misses.clear()
         _uv_command_probe_windows.clear()
+        _uv_version_probe_windows.clear()
         _uv_executable_cache.clear()
         _executable_cache.clear()
 
