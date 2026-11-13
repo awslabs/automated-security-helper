@@ -3317,8 +3317,19 @@ class TestAMemoizedFailureIsRecoverable:
     provenance defect. So validate_cached_tool forces a re-probe.
     """
 
-    def test_a_timeout_is_memoized_and_served_to_later_callers(self, runner):
-        """Documents the caching that makes the refresh below necessary."""
+    def test_a_failure_is_memoized_and_served_to_later_callers(self, runner):
+        """Documents the caching that makes the refresh below necessary. A
+        timeout is the exception: see the next test."""
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.subprocess_utils._run_plain",
+            return_value=MagicMock(returncode=1, stdout=""),
+        ) as mock_run:
+            assert runner.get_tool_version("bandit") is None
+            assert runner.get_tool_version("bandit") is None
+            assert mock_run.call_count == 1
+
+    def test_a_timeout_is_not_remembered(self, runner):
         runner._uv_available_cache = True
         with patch(
             "automated_security_helper.utils.subprocess_utils._run_plain",
@@ -3326,7 +3337,7 @@ class TestAMemoizedFailureIsRecoverable:
         ) as mock_run:
             assert runner.get_tool_version("bandit") is None
             assert runner.get_tool_version("bandit") is None
-            assert mock_run.call_count == 1
+            assert mock_run.call_count == 2
 
     def test_validate_cached_tool_re_probes_past_a_memoized_failure(self, runner):
         runner._uv_available_cache = True

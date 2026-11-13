@@ -177,7 +177,7 @@ def test_each_uv_call_whose_output_is_read_gets_that_environment(monkeypatch, si
     elif site == "get_tool_version":
         runner.get_tool_version("bandit", refresh=True)
     elif site == "_run_uv_cache":
-        runner._run_uv_cache("dir", timeout=30, check=False)
+        runner._run_uv_cache("dir", timeout=30)
     else:
         pre_installed_tool._dry_run("/opt/uv/bin/uv", "/opt/py/bin/python", "x")
 

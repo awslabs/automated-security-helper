@@ -150,6 +150,7 @@ PROBE_SUBJECT_MODULES = frozenset(
         "utils/test_uv_tool_runner_extended.py",
         "utils/test_uv_tool_runner_memos_and_records.py",
         "utils/test_uv_tool_runner_probe_memo_and_specs.py",
+        "utils/test_uv_tool_runner_review_findings.py",
         "utils/test_uv_tool_python_request.py",
     }
 )
