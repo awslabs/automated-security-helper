@@ -385,6 +385,50 @@ def test_a_relative_ash_bin_path_installs_into_the_default_directory(
 
 
 @pytest.mark.unit
+def test_a_relative_bin_path_typed_on_the_command_line_is_read_where_typed(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    """A relative --bin-path is the caller's own value, even when ASH_BIN_PATH holds
+    the same text: the source is asked of click, not guessed from the text.
+
+    The install used to compare the two strings, so ``ASH_BIN_PATH=rel-bin ash
+    dependencies install --bin-path rel-bin`` read the typed value as the
+    environment's, warned, and installed into ~/.ash/bin.
+    """
+    monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    project = tmp_path / "project"
+    result = _install(project, "--bin-path", "rel-bin")
+    assert result.exit_code == 0, result.output
+    out = _flat(result.output)
+    assert "ASH_BIN_PATH is the relative path" not in out, out
+    assert (project / "rel-bin").is_dir()
+    assert not (fresh_lookup / ".ash" / "bin").exists()
+
+
+@pytest.mark.unit
+def test_the_command_line_wins_over_a_different_relative_ash_bin_path(
+    tmp_path, fresh_lookup, monkeypatch
+):
+    monkeypatch.setenv("ASH_BIN_PATH", "from-env")
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    project = tmp_path / "project"
+    result = _install(project, "--bin-path", "from-cli")
+    assert result.exit_code == 0, result.output
+    assert (project / "from-cli").is_dir()
+    assert not (project / "from-env").exists()
+    assert not (fresh_lookup / ".ash" / "bin").exists()
+
+
+@pytest.mark.unit
+def test_the_install_and_its_hint_agree_on_what_anchored_means():
+    """One definition: the target, the hint and the lookup read the same function."""
+    from automated_security_helper.core.constants import is_anchored
+
+    assert subprocess_utils._is_anchored is is_anchored
+
+
+@pytest.mark.unit
 def test_an_absolute_ash_bin_path_elsewhere_still_gets_the_hint(
     tmp_path, fresh_lookup, monkeypatch
 ):
