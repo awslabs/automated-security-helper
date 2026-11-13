@@ -1,20 +1,20 @@
 {
-  "description": "Run ASH (Automated Security Helper) security scans via MCP \u2014 Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
+  "name": "ash",
+  "version": "1.0.0",
+  "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
   "mcpServers": {
     "ash": {
+      "command": "uvx",
       "args": [
         "--from=git+https://github.com/awslabs/automated-security-helper@v4.0.0",
         "ashx",
         "mcp"
       ],
-      "command": "uvx",
-      "disabled": false,
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
-      "timeout": 120000
+      "timeout": 120000,
+      "disabled": false
     }
-  },
-  "name": "ash",
-  "version": "1.0.0"
+  }
 }

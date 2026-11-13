@@ -64,7 +64,14 @@ repos:
         # exclusion: without it the hook rewrites 3,261 lines of its lockfile.
         # scripts/e2e/inspector is the fourth: the MCP Inspector the MCPB e2e leg
         # installs with `npm ci`.
-        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^(deploy|editors)/[^/]+/package(-lock)?\.json$|^scripts/e2e/inspector/package(-lock)?\.json$|^tests/snapshot/.*/__snapshots__/'
+        #
+        # ash-agent-plugins/agentic-coding/plugins/ is `agentic-plugins build` output,
+        # and the transpiler owns its bytes: the Agent Plugins Drift gate rebuilds the
+        # tree and byte-compares it to what is committed. The transpiler writes
+        # insertion-ordered keys and literal non-ASCII; this hook sorts keys and
+        # escapes them, so a reformat here fails that gate. The _base/ sources it
+        # reads are outside the pattern and still formatted.
+        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json|^(deploy|editors)/[^/]+/package(-lock)?\.json$|^scripts/e2e/inspector/package(-lock)?\.json$|^tests/snapshot/.*/__snapshots__/|^ash-agent-plugins/agentic-coding/plugins/'
         args:
           - "--autofix"
           - "--indent=2"
