@@ -115,12 +115,13 @@ from typing import (
     cast,
 )
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AnyUrl, Field, field_validator, model_validator
 
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -134,6 +135,8 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    MultiformatMessageString,
+    PropertyBag,
     ReportingDescriptor,
     Result,
     Run,
@@ -534,10 +537,10 @@ def _rule_descriptor(rule_id: str, description: str | None) -> ReportingDescript
     return ReportingDescriptor(
         id=rule_id,
         name=rule_id,
-        shortDescription={"text": text},
-        fullDescription={"text": text},
-        helpUri="https://github.com/DataDog/guarddog#heuristics",
-        properties={"tags": ["guarddog", "malicious-package"]},
+        shortDescription=MultiformatMessageString(text=text),
+        fullDescription=MultiformatMessageString(text=text),
+        helpUri=AnyUrl("https://github.com/DataDog/guarddog#heuristics"),
+        properties=PropertyBag(tags=["guarddog", "malicious-package"]),
     )
 
 
@@ -898,7 +901,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             )
         return None
 
-    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
+    def get_installation_commands(
+        self, platform: str, arch: str
+    ) -> List[List[str] | CustomCommand]:
         """No install command on Windows; see ``unsupported_platform_reason``."""
         if platform.lower() == "windows":
             return []
@@ -1762,7 +1767,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                         driver=ToolComponent(
                             name="GuardDog",
                             version=self.tool_version,
-                            informationUri="https://github.com/DataDog/guarddog",
+                            informationUri=AnyUrl(
+                                "https://github.com/DataDog/guarddog"
+                            ),
                             rules=[rules[k] for k in sorted(rules)],
                         )
                     ),

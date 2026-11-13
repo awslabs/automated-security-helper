@@ -753,6 +753,48 @@ _EXEMPT.update(
     }
 )
 
+#: The hadolint and GuardDog plugin tests' walks: committed fixture data under
+#: tests/test_data, and trees the tests build for themselves under tmp_path.
+#: Same rules as _EXEMPT.
+_EXEMPT.update(
+    {
+        (
+            "tests/integration/scanners/test_hadolint_scanner.py",
+            "copy",
+            "FIXTURES / name",
+        ): (
+            "FIXTURES is the committed tests/test_data/scanners/hadolint tree and "
+            "name one of its entries, copied into the test's own tmp_path source "
+            "tree; the walk never leaves the committed fixture data."
+        ),
+        ("tests/snapshot/scanners/test_snapshot_guarddog.py", "_tree", "root"): (
+            "root is a package directory of the committed fixture_repo under "
+            "tests/test_data, or the staged copy of one that the scanner under "
+            "test wrote beneath the run's own tmp_path; both are fixed-depth "
+            "package trees the test owns."
+        ),
+        (
+            "tests/snapshot/scanners/test_snapshot_guarddog.py",
+            "test_guarddog_summary_reports",
+            "reports",
+        ): (
+            "A glob of the run's own reports directory under tmp_path for the "
+            "one report the parametrized reporter wrote; the extension names "
+            "txt or md, never a path, and the directory holds only that run's "
+            "reports."
+        ),
+        (
+            "tests/unit/plugin_modules/ash_guarddog_plugins/test_guarddog_scanner.py",
+            "_tree",
+            "root",
+        ): (
+            "root is the staged package directory the scanner under test wrote "
+            "beneath the run's own tmp_path staging directory; the test reads it "
+            "back to compare the staged files with the fixture package."
+        ),
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def sweep() -> Sweep:

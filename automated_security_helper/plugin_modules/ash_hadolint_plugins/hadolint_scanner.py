@@ -591,7 +591,7 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             deadline = None if timeout is None else _now() + timeout
 
             responses: List[Dict[str, Any]] = []
-            exit_codes: List[int] = []
+            exit_codes: List[int | None] = []
             final_args: List[str] = []
             for chunk in chunks:
                 final_args = self._format_args(base_args, "sarif", chunk)

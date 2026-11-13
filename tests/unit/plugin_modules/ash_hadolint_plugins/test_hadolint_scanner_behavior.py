@@ -475,8 +475,11 @@ class TestScan:
         fake = FakeHadolint()
         _run(scanner, fake, monkeypatch)
         for call in fake.calls:
-            assert "HADOLINT_FORMAT" not in call["env"]
-            assert "HADOLINT_NOFAIL" not in call["env"]
+            # Names narrowed into a local first, so a failure prints the names
+            # and never the environment's values (tests/utils/env_assertions.py).
+            names = set(call["env"])
+            assert "HADOLINT_FORMAT" not in names
+            assert "HADOLINT_NOFAIL" not in names
             assert call["env"]["HADOLINT_IGNORE"] == "DL3007"
 
     def test_no_dockerfiles_is_an_empty_report_with_zero_targets(
