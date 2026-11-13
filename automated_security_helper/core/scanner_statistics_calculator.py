@@ -241,9 +241,19 @@ class ScannerStatisticsCalculator:
             reports = ScannerStatisticsCalculator._own_reports(
                 asharp_model, scanner_name
             )
+            # A failure container is filed under the key "None" (no target) beside
+            # the per-target reports. When per-target reports exist their durations
+            # are the scanner's time, and the scanner-level report is not added on
+            # top of them; it is read only when it is all there is.
+            target_reports = {
+                key: report
+                for key, report in reports.items()
+                if key is not None and key != "None"
+            }
+            duration_reports = target_reports or reports
             recorded_durations = [
                 report["duration"]
-                for report in reports.values()
+                for report in duration_reports.values()
                 if isinstance(report.get("duration"), (int, float))
                 and not isinstance(report.get("duration"), bool)
             ]

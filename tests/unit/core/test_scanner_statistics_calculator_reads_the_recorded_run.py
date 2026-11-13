@@ -122,6 +122,31 @@ class TestDuration:
 
         assert stats["bandit"]["duration"] == 2.0
 
+    def test_a_failure_container_filed_under_no_target_is_not_added_to_the_targets(
+        self,
+    ):
+        model = _model(
+            {
+                "bandit": {
+                    "source": _report("bandit", duration=1.5),
+                    "None": _report("bandit", duration=4.0),
+                }
+            }
+        )
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        # Red at the base: 5.5, the scanner-level report counted on top of the target.
+        assert stats["bandit"]["duration"] == 1.5
+
+    def test_a_scanner_level_report_alone_is_still_read(self):
+        """The control: with no per-target report, it is all there is."""
+        model = _model({"bandit": {"None": _report("bandit", duration=4.0)}})
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["bandit"]["duration"] == 4.0
+
     def test_a_row_that_recorded_a_duration_keeps_it(self):
         model = _model()
         model.scanner_results["bandit"] = ScannerTargetStatusInfo(

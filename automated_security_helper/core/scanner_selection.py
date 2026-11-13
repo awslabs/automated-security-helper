@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Literal, Mapping, Sequence
 
 from automated_security_helper.core.exceptions import ScannerSelectionError
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 
 #: Who made the scanner selection: the CLI's ``--scanners`` and
 #: ``--exclude-scanners``, or the MCP workspace tool's ``scanners`` and
@@ -68,6 +69,12 @@ _SELECTION_NAMES: Dict[str, SelectionNames] = {
 def selection_names(origin: SelectionOrigin = "cli") -> SelectionNames:
     """The names for *origin*'s selection inputs; the CLI's for any other value."""
     return _SELECTION_NAMES.get(origin, _SELECTION_NAMES["cli"])
+
+
+def _selection_key(name: str) -> str:
+    """The key two selection names are compared on: lower-cased, stripped, with a
+    retired name resolved to the scanner that serves it."""
+    return canonical_scanner_name(name.strip()).lower().strip()
 
 
 def selection_after_exclusions(
@@ -114,8 +121,12 @@ def selection_after_exclusions(
     excluded = [name for name in excluded if name.strip()]
     if not enabled or not excluded:
         return list(enabled)
-    excluded_keys = {name.lower().strip() for name in excluded}
-    remaining = [name for name in enabled if name.lower().strip() not in excluded_keys]
+    # Compared by the name a retired spelling resolves to, so
+    # ``--scanners opengrep --exclude-scanners semgrep`` is the cancelled selection
+    # it is: the scan phase serves ``semgrep`` with opengrep and would otherwise
+    # run nothing for an allowlist this check let through.
+    excluded_keys = {_selection_key(name) for name in excluded}
+    remaining = [name for name in enabled if _selection_key(name) not in excluded_keys]
     if remaining:
         return remaining
     names = selection_names(origin)
