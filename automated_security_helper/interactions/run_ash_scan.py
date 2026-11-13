@@ -1748,14 +1748,24 @@ _INCOMPLETE_SCANNER_REASONS = {
 }
 
 
+def missing_on_some_files(display_status: str) -> bool:
+    """Whether an ``incomplete_scanners`` display status is a ``FAILED (MISSING on
+    some files)`` row.
+
+    The one test behind the payload's ``missing_dependencies`` reason, shared by
+    :func:`scan_incompleteness` and the workspace surface's coverage (which has only
+    the display status the outcome stored), so the two cannot read it differently.
+    """
+    return f"({_MISSING_ON_SOME_FILES})" in display_status
+
+
 def _row_is_missing(status: str) -> bool:
     """Whether an ``incomplete_scanners`` display status is a MISSING row: the
     scanner could not run for lack of a dependency, on every file (``MISSING``) or
     on one tree (``FAILED (MISSING on some files)``)."""
-    return (
-        status.split(" (", 1)[0] == ScannerStatus.MISSING.value
-        or f"({_MISSING_ON_SOME_FILES})" in status
-    )
+    return status.split(" (", 1)[
+        0
+    ] == ScannerStatus.MISSING.value or missing_on_some_files(status)
 
 
 def incomplete_scanner_reason(
@@ -2016,7 +2026,7 @@ def scan_incompleteness(
         if metric.status == ScannerStatus.ERROR.value
     }
     missing_dependencies = tuple(
-        name for name, status in rows if f"({_MISSING_ON_SOME_FILES})" in status
+        name for name, status in rows if missing_on_some_files(status)
     )
     return ScanIncompleteness(
         scanners=rows,
@@ -8142,23 +8152,29 @@ def _run_with_options(
     gate_image_answer: Optional[bool] = (
         outer_load.image_may_differ if outer_load is not None else None
     )
+    # A local scan reads neither exit-code field from the file before it runs: the
+    # orchestrator's own resolved config decides fail_on_findings (below), and
+    # fail_on_incomplete_scanners is read from the run's results, so a pre-read
+    # here (a full unchecked load of the file) would only be thrown away.
     shared = _NOT_LOADED
-    if outer_load is not None and outer_load.loaded:
-        shared = outer_load.selected
-    if shared is _NOT_LOADED:
-        # The image-schema branch of the gate parsed the file, built the model
-        # from that document and asked about the image; this read takes all
-        # three answers, so the file is resolved once and the image's source is
-        # named once.
-        shared = _load_config_file_or_its_exit_fields(
-            opts,
-            document=outer_load.document if outer_load is not None else _NOT_LOADED,
-            image_may_differ=gate_image_answer,
-            model=outer_load.model if outer_load is not None else _NOT_LOADED,
-        )
-    config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(
-        opts, loaded=shared
-    )
+    config_fail_on_findings: Optional[bool] = None
+    if opts.mode != RunMode.local:
+        if outer_load is not None and outer_load.loaded:
+            shared = outer_load.selected
+        if shared is _NOT_LOADED:
+            # The image-schema branch of the gate parsed the file, built the model
+            # from that document and asked about the image; this read takes all
+            # three answers, so the file is resolved once and the image's source
+            # is named once.
+            shared = _load_config_file_or_its_exit_fields(
+                opts,
+                document=(
+                    outer_load.document if outer_load is not None else _NOT_LOADED
+                ),
+                image_may_differ=gate_image_answer,
+                model=outer_load.model if outer_load is not None else _NOT_LOADED,
+            )
+        config_fail_on_findings = _resolve_config_fail_on_findings(opts, loaded=shared)
     # Read from the file before the scan only where the answer cannot wait for the
     # orchestrator's resolution. A local scan's results carry the config it
     # actually resolved, which a client-delivered file is checked in; a pre-read
@@ -8193,9 +8209,10 @@ def _run_with_options(
         results = _run_nix_mode(opts, logger, image_may_differ=gate_image_answer)
     else:
         results, _local_config_fof = _run_local_mode(opts, logger)
-        # _run_local_mode resolves config via the live orchestrator; prefer that
-        # value over the file-based pre-read when it differs (e.g. config_overrides
-        # applied by the orchestrator may alter fail_on_findings).
+        # _run_local_mode resolves config via the live orchestrator (config_overrides
+        # applied by the orchestrator may alter fail_on_findings), and no file
+        # pre-read stands behind it: when it answers None the results' recorded
+        # config decides, in _compute_exit_code.
         if _local_config_fof is not None:
             config_fail_on_findings = _local_config_fof
 

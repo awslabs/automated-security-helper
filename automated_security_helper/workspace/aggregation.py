@@ -1133,14 +1133,16 @@ def no_scanner_ran_for_project(results: Any) -> bool:
         reports as FAILED.
     """
     from automated_security_helper.interactions.run_ash_scan import (
-        no_scanner_ran,
-        scanner_statuses,
+        scan_incompleteness,
     )
 
-    expected = list(
-        getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
-    )
-    return no_scanner_ran(scanner_statuses(results), expected)
+    # The one read single-project mode and the workspace outcome
+    # (execution._coverage_fields) take, not a second assembly of no_scanner_ran's
+    # inputs: it also supplies the ran_against_a_stale_database and
+    # audited_some_targets arms, without which an ERROR scanner that audited some
+    # targets read as "nothing ran" beside its own "N of M targets unevaluated"
+    # row. gate=True asks the facts whatever the gate resolves to.
+    return scan_incompleteness(results, gate=True).no_scanner_ran
 
 
 def inputs_not_scanned_for_project(

@@ -220,6 +220,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     build_project_scan_settings,
     incomplete_scanner_reason,
+    missing_on_some_files,
     resolve_workspace_execution_config,
 )
 from automated_security_helper.models.workspace import (
@@ -1811,12 +1812,21 @@ def _project_coverage(
     rows = []
     for name in outcome.incomplete_scanners:
         status = str(statuses.get(name, ""))
+        detail = str(details.get(name, status))
         rows.append(
             {
                 "scanner": name,
                 "status": status,
-                "reason": incomplete_scanner_reason(status, partial=name in partial),
-                "detail": str(details.get(name, status)),
+                # The same three inputs ScanIncompleteness.to_payload gives the
+                # reason, so one scanner reads one token on both surfaces. The
+                # outcome stores the display status, which is all
+                # ``missing_dependencies`` is derived from.
+                "reason": incomplete_scanner_reason(
+                    status,
+                    partial=name in partial,
+                    missing_dependencies=missing_on_some_files(detail),
+                ),
+                "detail": detail,
             }
         )
     return {
