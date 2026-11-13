@@ -36,7 +36,7 @@ import socket
 import struct
 import sys
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Optional
+from typing import Any, Callable, Mapping, MutableMapping, Optional
 
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -577,16 +577,27 @@ class FrameReader:
     EOF on a frame boundary; anything else -- EOF mid-frame, a line that is
     not a JSON object, a line past :data:`MAX_FRAME_BYTES` -- is a
     :class:`ExpressProtocolError`.
+
+    *before_recv*, when given, runs before every ``recv``: the daemon uses it to
+    shrink the socket's timeout to what is left of a whole-handshake deadline,
+    so a peer that dribbles bytes cannot restart the clock with each read.
     """
 
-    def __init__(self, sock: socket.socket) -> None:
+    def __init__(
+        self,
+        sock: socket.socket,
+        before_recv: Optional[Callable[[], None]] = None,
+    ) -> None:
         self._sock = sock
         self._buffer = b""
+        self._before_recv = before_recv
 
     def read_frame(self) -> Optional[dict[str, Any]]:
         while b"\n" not in self._buffer:
             if len(self._buffer) > MAX_FRAME_BYTES:
                 raise ExpressProtocolError("frame exceeds the size cap")
+            if self._before_recv is not None:
+                self._before_recv()
             chunk = self._sock.recv(65536)
             if not chunk:
                 if self._buffer:

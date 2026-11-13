@@ -39,6 +39,7 @@ import selectors
 import signal
 import socket
 import sys
+import threading
 import time
 from typing import Any, Optional
 
@@ -49,8 +50,10 @@ from automated_security_helper.utils.process_env import (
 )
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
-#: How long one connection's inline handshake reads (the request, then the go
-#: that answers the ok) may stall the single-threaded accept loop. A live
+#: How long one connection's WHOLE inline handshake (the request, then the go
+#: that answers the ok) may stall the single-threaded accept loop: a deadline
+#: for the handshake, which each read's timeout is shrunk to fit
+#: (``_Connection.arm_read``), not a fresh allowance per read. A live
 #: client has already written its request when connect returns and answers the
 #: ok in one round trip, so this is a wedged-client bound, not a budget a
 #: healthy handshake approaches -- and it must stay far under the client's own
@@ -142,9 +145,45 @@ def _signal_scan(pid: int, signum: int) -> None:
         pass
 
 
+def _signal_group(pgid: int, signum: int) -> None:
+    """Deliver *signum* to the process group alone, with no single-pid fallback.
+
+    For a group whose leader may already be reaped: once the group is empty its
+    number can be handed out again, so a ``kill`` fallback could signal an
+    unrelated process of this user. ``killpg`` is safe while any member lives
+    (the kernel keeps the group id reserved), and an empty group is ``ESRCH``,
+    which is ignored. The residual window -- an empty group's number reused as a
+    NEW group id inside the kill grace -- is accepted: it is rare, same-uid
+    only, and the alternative was leaking scanner subprocesses that ignore
+    SIGTERM.
+    """
+    try:
+        os.killpg(pgid, signum)
+    except OSError:
+        pass
+
+
 def concurrency_cap() -> int:
-    """How many scan children may run at once: the CPU count, at least one."""
+    """How many scan children may run at once: the CPUs this process may use.
+
+    ``sched_getaffinity`` where the platform has it, so taskset, a cpuset and a
+    container's CPU pinning lower the cap the way they lower what actually runs;
+    ``cpu_count`` (the machine's CPUs) elsewhere. At least one.
+    """
+    getter = getattr(os, "sched_getaffinity", None)
+    if getter is not None:
+        try:
+            usable = len(getter(0))
+        except OSError:
+            usable = 0
+        if usable > 0:
+            return usable
     return max(os.cpu_count() or 1, 1)
+
+
+def _thread_count() -> int:
+    """How many threads this process runs; the daemon's design needs exactly one."""
+    return threading.active_count()
 
 
 def should_idle_exit(
@@ -177,9 +216,28 @@ class _Connection:
 
     def __init__(self, sock: socket.socket) -> None:
         self.sock = sock
-        self.reader = runtime.FrameReader(sock)
+        #: Monotonic deadline of the inline handshake, or None outside it.
+        #: Every read of the handshake first shrinks the socket's timeout to
+        #: what is left of it (:meth:`arm_read`), so the bound is for the whole
+        #: handshake, not for each read.
+        self.handshake_deadline: Optional[float] = None
+        self.reader = runtime.FrameReader(sock, before_recv=self.arm_read)
         self.child_pid: Optional[int] = None
         self.client_fds: list[int] = []
+
+    def arm_read(self) -> None:
+        """Before a handshake read: time out when the whole handshake's budget does.
+
+        A per-read timeout let a peer that sent one byte just under the bound
+        hold the single-threaded loop for as long as it liked. A no-op once the
+        handshake is over (``handshake_deadline`` is None).
+        """
+        if self.handshake_deadline is None:
+            return
+        remaining = self.handshake_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("the handshake did not finish within its deadline")
+        self.sock.settimeout(remaining)
 
     def close(self) -> None:
         for fd in self.client_fds:
@@ -319,6 +377,14 @@ class ExpressDaemon:
             for failure in failures:
                 _log(f"warm import skipped: {failure}")
             _log("warm imports complete")
+            if _thread_count() != 1:
+                # Checked again at every scan request (_scan_refusal): this
+                # line is the one that names the cause, once, where it began.
+                _log(
+                    f"warm imports left {_thread_count()} threads running "
+                    "(a fork of a multi-threaded process is unsafe); scans are "
+                    "refused and run cold"
+                )
             while True:
                 for key, _ in self.selector.select(timeout=1.0):
                     key.data(key.fileobj)
@@ -348,7 +414,11 @@ class ExpressDaemon:
                 self._socket_inode
             ):
                 os.unlink(path)
-        except OSError:
+        except (OSError, runtime.ExpressUnavailable):
+            # ExpressUnavailable too: socket_path() re-checks the runtime
+            # directory, and a refusal there (a symlinked directory appeared,
+            # the path grew past the AF_UNIX cap) must not abort the shutdown
+            # that stops the running scans below.
             pass
         # The lock goes with the socket, right away: a concurrent autostart in
         # the grace window below must be able to take it and bind a fresh
@@ -371,8 +441,17 @@ class ExpressDaemon:
         # is told the scan is over -- and only those report the daemon's 143;
         # a child that exited on its own at any point, the grace's last
         # instant included, keeps its real code.
-        for pid in list(self.children):
+        #
+        # The groups to see through to a SIGKILL are every group this daemon
+        # has signalled, not only the leaders still unreaped: a leader that
+        # handled SIGTERM and exited inside the grace (or one a client's hangup
+        # SIGTERMed earlier, whose deadline is still pending) can leave a
+        # scanner subprocess that ignored it.
+        discarded = set(self._kill_deadlines)
+        termed = set(self.children)
+        for pid in termed:
             _signal_scan(pid, signal.SIGTERM)
+        termed |= discarded
         deadline = time.monotonic() + runtime.STOP_GRACE_SECONDS
         while self.children and time.monotonic() < deadline:
             self._reap()
@@ -385,8 +464,13 @@ class ExpressDaemon:
         # 143. Only the pids actually SIGKILLed below report the override.
         self._reap()
         killed = set(self.children)
-        for pid in killed:
-            _signal_scan(pid, signal.SIGKILL)
+        for pid in termed:
+            if pid in killed:
+                _signal_scan(pid, signal.SIGKILL)
+            else:
+                # Leader reaped: the group alone, no single-pid fallback for a
+                # pid that may be recycled (see _signal_group).
+                _signal_group(pid, signal.SIGKILL)
         self._reap(code_override=128 + int(signal.SIGTERM), override_pids=killed)
         for connection in list(self.children.values()):
             try:
@@ -403,25 +487,38 @@ class ExpressDaemon:
         _log("express daemon exiting")
 
     def _enforce_kill_deadlines(self) -> None:
-        """SIGKILL discarded scans that outlived their SIGTERM grace.
+        """SIGKILL discarded scan GROUPS that outlived their SIGTERM grace.
 
         Runs once per loop pass (the select tick bounds the lag at about a
-        second past the deadline). An entry whose pid was reaped meanwhile is
-        dropped; a survivor's whole group is killed and the SIGCHLD reap frees
-        its concurrency slot, so the daemon can still idle-retire.
+        second past the deadline). The deadline belongs to the process group
+        (its id is the scan child's pid), not to the leader: a leader that
+        handled SIGTERM and exited quickly can leave a scanner subprocess that
+        ignored it, so the entry survives the leader's reap (:meth:`_reap`
+        keeps it) and the escalation goes to the group. A group with no member
+        left is simply dropped; a leader still unreaped is signalled with the
+        single-pid fallback of :func:`_signal_scan`, a reaped one as a group
+        alone (:func:`_signal_group`), and the SIGCHLD reap frees the
+        concurrency slot so the daemon can still idle-retire.
         """
         if not self._kill_deadlines:
             return
         now = time.monotonic()
-        for pid, deadline in list(self._kill_deadlines.items()):
-            if pid not in self.children:
-                self._kill_deadlines.pop(pid, None)
+        for pgid, deadline in list(self._kill_deadlines.items()):
+            try:
+                os.killpg(pgid, 0)
+            except OSError:
+                # No member left (ESRCH), or a group that is not ours to
+                # signal: nothing survives to kill.
+                self._kill_deadlines.pop(pgid, None)
                 continue
             if now < deadline:
                 continue
-            _log(f"scan pid {pid} outlived its SIGTERM grace; sending SIGKILL")
-            _signal_scan(pid, signal.SIGKILL)
-            self._kill_deadlines.pop(pid, None)
+            _log(f"scan group {pgid} outlived its SIGTERM grace; sending SIGKILL")
+            if pgid in self.children:
+                _signal_scan(pgid, signal.SIGKILL)
+            else:
+                _signal_group(pgid, signal.SIGKILL)
+            self._kill_deadlines.pop(pgid, None)
 
     def _drain(self, fd: int) -> None:
         try:
@@ -449,12 +546,18 @@ class ExpressDaemon:
         self.last_activity = time.monotonic()
         sock.setblocking(True)
         # The handshake is read inline, so this bounds how long one stalled
-        # client can hold the single-threaded loop. A real client has already
-        # written its whole request by the time connect returns, and answers
-        # the ok with its go in one round trip, so the bound is generous for
-        # it and tight for a wedged one.
+        # client can hold the single-threaded loop -- for the WHOLE handshake
+        # (the request and the go together): the connection's deadline shrinks
+        # the socket's timeout before every read, so a client that dribbles
+        # bytes cannot extend it. A real client has already written its whole
+        # request by the time connect returns, and answers the ok with its go
+        # in one round trip, so the bound is generous for it and tight for a
+        # wedged one.
         sock.settimeout(INLINE_HANDSHAKE_TIMEOUT_SECONDS)
         connection = _Connection(sock)
+        connection.handshake_deadline = (
+            time.monotonic() + INLINE_HANDSHAKE_TIMEOUT_SECONDS
+        )
         try:
             self._handshake(connection)
         except Exception as exc:  # noqa: BLE001 - one bad client, not the daemon
@@ -464,6 +567,7 @@ class ExpressDaemon:
             _log(f"connection dropped during handshake: {type(exc).__name__}: {exc}")
             connection.close()
             return
+        connection.handshake_deadline = None
         if connection.child_pid is None and connection.sock.fileno() < 0:
             return  # the handshake closed it (status/stop/refusal)
         sock.settimeout(None)
@@ -480,6 +584,7 @@ class ExpressDaemon:
         request frame. Control ops (status, stop, ping) carry no descriptors;
         ``recv_fds`` simply returns none for them.
         """
+        connection.arm_read()
         data, fds, _, _ = socket.recv_fds(connection.sock, 1, 3)
         connection.client_fds = list(fds)
         if not data:
@@ -564,6 +669,25 @@ class ExpressDaemon:
             isinstance(k, str) and isinstance(v, str) for k, v in env.items()
         ):
             return ("env is not a string-to-string object", False)
+        threads = _thread_count()
+        if threads != 1:
+            # The design is a single-threaded daemon (see the module
+            # docstring): an import that started a thread (a warm module's
+            # background worker, say) makes every fork a fork of a
+            # multi-threaded process, where a lock held by another thread
+            # stays held forever in the child. Refused, not forked; the
+            # client runs the scan cold, which is always correct.
+            _log(
+                f"refusing to fork: the daemon runs {threads} threads "
+                f"({', '.join(sorted(t.name for t in threading.enumerate()))})"
+            )
+            return (
+                (
+                    f"the daemon is not single-threaded ({threads} threads); "
+                    "a fork would not be safe"
+                ),
+                False,
+            )
         if len(self.children) >= concurrency_cap():
             return (f"busy: {len(self.children)} scans already running", False)
         return None
@@ -625,6 +749,9 @@ class ExpressDaemon:
             pass
         self.scans_served += 1
         self.children[pid] = connection
+        # A kill deadline left by an earlier group of this number (the entry
+        # outlives its leader's reap) must never fire on this new scan.
+        self._kill_deadlines.pop(pid, None)
         connection.child_pid = pid
         # The parent's copies of the client's descriptors are the child's now.
         for fd in connection.client_fds:
@@ -934,7 +1061,10 @@ class ExpressDaemon:
             if pid == 0:
                 return
             connection = self.children.pop(pid, None)
-            self._kill_deadlines.pop(pid, None)
+            # The kill deadline is NOT dropped here: it belongs to the process
+            # GROUP, and the reaped leader can leave a scanner subprocess that
+            # ignored the SIGTERM. _enforce_kill_deadlines drops the entry when
+            # the group is empty or the kill has fired.
             self.last_activity = time.monotonic()
             if connection is None:
                 continue

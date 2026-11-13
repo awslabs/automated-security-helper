@@ -55,16 +55,38 @@ class TestIdleExit:
 
 
 class TestConcurrencyCap:
-    def test_the_cap_is_the_cpu_count_and_at_least_one(self):
-        assert concurrency_cap() == max(os.cpu_count() or 1, 1)
+    def test_the_cap_is_the_usable_cpu_count_and_at_least_one(self):
+        getter = getattr(os, "sched_getaffinity", None)
+        expected = len(getter(0)) if getter else max(os.cpu_count() or 1, 1)
+        assert concurrency_cap() == max(expected, 1)
         assert concurrency_cap() >= 1
+
+    def test_a_pinned_process_gets_the_pinned_count_not_the_machines(self, monkeypatch):
+        """taskset, a cpuset or a container's pinning lowers what can run at
+        once; the machine's CPU count would admit far more scans than that."""
+        monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {0, 1}, raising=False)
+        monkeypatch.setattr(os, "cpu_count", lambda: 64)
+        assert concurrency_cap() == 2
+
+    def test_without_affinity_the_cpu_count_stands(self, monkeypatch):
+        monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+        monkeypatch.setattr(os, "cpu_count", lambda: 6)
+        assert concurrency_cap() == 6
+
+    def test_an_unreadable_affinity_falls_back_to_the_cpu_count(self, monkeypatch):
+        def refused(pid):
+            raise OSError("not permitted")
+
+        monkeypatch.setattr(os, "sched_getaffinity", refused, raising=False)
+        monkeypatch.setattr(os, "cpu_count", lambda: 3)
+        assert concurrency_cap() == 3
 
 
 class TestBudgetConsistency:
     def test_the_two_sides_timeouts_nest(self):
         """A slow-but-healthy ok must never read as a dead daemon, and the
         daemon must never outwait a client that is still waiting for it. That
-        holds only while the budgets nest: the daemon's inline per-read stall
+        holds only while the budgets nest: the daemon's whole-handshake stall
         bound under the client's connect budget, and both far under the
         handshake budget that covers the warm-import wall (the one stretch a
         healthy daemon legitimately spends not answering)."""
@@ -83,10 +105,17 @@ class _Connection:
 
 
 @pytest.fixture
-def daemon():
-    """A ExpressDaemon that never binds: only its refusal policy is consulted."""
+def daemon(monkeypatch):
+    """A ExpressDaemon that never binds: only its refusal policy is consulted.
+
+    The thread count is pinned to one: the test process itself may run threads
+    (an xdist worker does), and the single-thread refusal has its own tests.
+    """
     if not runtime.express_supported():
         pytest.skip("express mode is unix-only")
+    from automated_security_helper.express import daemon as daemon_module
+
+    monkeypatch.setattr(daemon_module, "_thread_count", lambda: 1)
     built = ExpressDaemon(idle_timeout=60.0)
     try:
         yield built
@@ -158,6 +187,117 @@ class TestScanRefusals:
         assert reason.startswith("busy")
         assert stale is False
 
+    def test_a_multi_threaded_daemon_refuses_to_fork_and_says_so(
+        self, daemon, monkeypatch
+    ):
+        """The design is a single-threaded daemon: a warm import that started
+        a thread would make every fork a fork of a multi-threaded process.
+        Refused with a log line, never forked; the client runs the scan cold."""
+        from automated_security_helper.express import daemon as daemon_module
+
+        lines = []
+        monkeypatch.setattr(daemon_module, "_thread_count", lambda: 3)
+        monkeypatch.setattr(daemon_module, "_log", lines.append)
+        reason, stale = daemon._scan_refusal(_request(daemon), _Connection())
+        assert "single-threaded" in reason and "3 threads" in reason
+        assert stale is False, "a restart would not cure a thread a module starts"
+        assert any("refusing to fork" in line for line in lines), lines
+
+
+class _TickingClock:
+    """A monotonic clock that advances by a fixed step on every read."""
+
+    def __init__(self, step):
+        self.now = 0.0
+        self.step = step
+
+    def monotonic(self):
+        self.now += self.step
+        return self.now
+
+
+class _DribblingSock:
+    """A peer that returns one byte per recv and never finishes a frame."""
+
+    def __init__(self):
+        self.timeouts = []
+
+    def settimeout(self, value):
+        self.timeouts.append(value)
+
+    def recv(self, size):
+        return b"x"
+
+
+@needs_posix
+class TestWholeHandshakeDeadline:
+    """The inline handshake blocks the single-threaded loop, so its bound is a
+    deadline for the whole handshake: each read's timeout is shrunk to what
+    remains of it, and a peer that dribbles one byte at a time cannot restart
+    the clock with every read."""
+
+    def _connection(self, monkeypatch, sock, deadline, step):
+        import types
+
+        from automated_security_helper.express import daemon as daemon_module
+
+        # The daemon module's own clock, not the process-wide time.monotonic.
+        clock = _TickingClock(step)
+        monkeypatch.setattr(
+            daemon_module, "time", types.SimpleNamespace(monotonic=clock.monotonic)
+        )
+        connection = daemon_module._Connection(sock)
+        connection.handshake_deadline = deadline
+        return connection
+
+    def test_a_dribbling_peer_is_cut_off_at_the_deadline(self, monkeypatch):
+        sock = _DribblingSock()
+        connection = self._connection(monkeypatch, sock, deadline=1.0, step=0.3)
+        with pytest.raises(TimeoutError):
+            connection.reader.read_frame()
+        # Every read before the cut-off ran on a timeout that only shrank.
+        assert sock.timeouts == sorted(sock.timeouts, reverse=True)
+        assert sock.timeouts and max(sock.timeouts) <= 1.0
+
+    def test_each_read_gets_only_what_remains(self, monkeypatch):
+        sock = _DribblingSock()
+        connection = self._connection(monkeypatch, sock, deadline=10.0, step=1.0)
+        connection.arm_read()
+        connection.arm_read()
+        assert sock.timeouts == pytest.approx([9.0, 8.0])
+
+    def test_outside_the_handshake_nothing_is_armed(self, monkeypatch):
+        sock = _DribblingSock()
+        connection = self._connection(monkeypatch, sock, deadline=None, step=1.0)
+        connection.arm_read()
+        assert sock.timeouts == []
+
+    def test_the_accept_path_arms_the_deadline_and_clears_it(self, daemon, monkeypatch):
+        """_accept sets the deadline before the handshake reads and clears it
+        after, so the established connection's non-blocking reads are never
+        armed."""
+        import socket as socket_module
+
+        seen = {}
+        first, second = socket_module.socketpair()
+        try:
+
+            class _Listener:
+                def accept(self):
+                    return first, None
+
+            def fake_handshake(connection):
+                seen["deadline"] = connection.handshake_deadline
+                connection.close()
+
+            monkeypatch.setattr(daemon, "_handshake", fake_handshake)
+            monkeypatch.setattr(runtime, "peer_is_this_user", lambda _s: True)
+            daemon._accept(_Listener())
+            assert seen["deadline"] is not None
+        finally:
+            second.close()
+            first.close()
+
 
 class _OrderSock:
     """Records sendall payloads, for the acknowledgement-ordering pin."""
@@ -205,6 +345,9 @@ class TestAcknowledgementOrdering:
             return 54321  # the parent's view; no child exists in this test
 
         monkeypatch.setattr(os, "fork", fake_fork)
+        # Hermetic: the fake fork's pid is fake, so the real setpgid must not
+        # run against it -- pid 54321 could be a real process of this user.
+        monkeypatch.setattr(os, "setpgid", lambda *a: None)
         read_fd, write_fd = os.pipe()
         spare = os.dup(read_fd)
         connection = _Connection(fds=[read_fd, write_fd, spare])
@@ -314,51 +457,110 @@ class TestKillDeadlines:
         assert 4242 in daemon._kill_deadlines
         assert daemon._kill_deadlines[4242] > time_module.monotonic()
 
-    def test_a_survivor_past_the_deadline_is_sigkilled_and_the_entry_dropped(
-        self, daemon, monkeypatch
-    ):
+    @staticmethod
+    def _groups(monkeypatch, alive):
+        """Stand-ins for the group probe and the group signal: ``alive`` names
+        the group ids that still have a member; every signal is recorded."""
         import signal as signal_module
 
         from automated_security_helper.express import daemon as daemon_module
 
         signals = []
+
+        def killpg(pgid, signum):
+            if signum == 0:
+                if pgid not in alive:
+                    raise ProcessLookupError(pgid)
+                return
+            signals.append((pgid, signum))
+
+        monkeypatch.setattr(os, "killpg", killpg)
         monkeypatch.setattr(
-            daemon_module, "_signal_scan", lambda pid, sig: signals.append((pid, sig))
+            os, "kill", lambda pid, signum: pytest.fail("no single-pid kill expected")
         )
-        connection = _Connection(fds=[])
-        daemon.children[4242] = connection
+        return signals, int(signal_module.SIGKILL), daemon_module
+
+    def test_a_survivor_past_the_deadline_is_sigkilled_and_the_entry_dropped(
+        self, daemon, monkeypatch
+    ):
+        signals, sigkill, _ = self._groups(monkeypatch, alive={4242})
+        daemon.children[4242] = _Connection(fds=[])
         daemon._kill_deadlines[4242] = 0.0  # long past
         daemon._enforce_kill_deadlines()
-        assert signals == [(4242, int(signal_module.SIGKILL))]
+        assert signals == [(4242, sigkill)]
         assert 4242 not in daemon._kill_deadlines
 
-    def test_a_reaped_pid_is_dropped_without_a_signal(self, daemon, monkeypatch):
-        from automated_security_helper.express import daemon as daemon_module
-
-        monkeypatch.setattr(
-            daemon_module,
-            "_signal_scan",
-            lambda pid, sig: pytest.fail("a reaped pid must not be signalled"),
-        )
-        daemon._kill_deadlines[777] = 0.0  # pid no longer in children
+    def test_a_group_with_no_member_left_is_dropped_without_a_signal(
+        self, daemon, monkeypatch
+    ):
+        signals, _, _ = self._groups(monkeypatch, alive=set())
+        daemon._kill_deadlines[777] = 0.0
         daemon._enforce_kill_deadlines()
+        assert signals == []
         assert daemon._kill_deadlines == {}
 
     def test_a_deadline_still_in_the_future_waits(self, daemon, monkeypatch):
         import time as time_module
 
-        from automated_security_helper.express import daemon as daemon_module
-
-        monkeypatch.setattr(
-            daemon_module,
-            "_signal_scan",
-            lambda pid, sig: pytest.fail("the grace is not over yet"),
-        )
-        connection = _Connection(fds=[])
-        daemon.children[4242] = connection
+        signals, _, _ = self._groups(monkeypatch, alive={4242})
+        daemon.children[4242] = _Connection(fds=[])
         daemon._kill_deadlines[4242] = time_module.monotonic() + 60.0
         daemon._enforce_kill_deadlines()
+        assert signals == []
         assert 4242 in daemon._kill_deadlines
+
+    def test_the_deadline_outlives_the_leaders_reap_and_kills_the_group(
+        self, daemon, monkeypatch
+    ):
+        """The scan child handled the hangup's SIGTERM and exited at once; a
+        scanner subprocess in its group ignored it. The reap must keep the
+        entry, and the deadline then SIGKILLs the GROUP (no single-pid
+        fallback: the leader's pid number may be recycled)."""
+        signals, sigkill, daemon_module = self._groups(monkeypatch, alive={4242})
+        connection = _Connection(fds=[])
+
+        class _Sock:
+            def sendall(self, data):
+                pass
+
+            def fileno(self):
+                return 55
+
+            def close(self):
+                pass
+
+        connection.sock = _Sock()
+        connection.close = lambda: None
+        connection.child_pid = 4242
+        daemon.children[4242] = connection
+        daemon._kill_deadlines[4242] = 0.0
+        reapable = [(4242, 0)]
+        monkeypatch.setattr(
+            os, "waitpid", lambda *_: reapable.pop(0) if reapable else (0, 0)
+        )
+        daemon._reap()
+        assert 4242 not in daemon.children
+        assert 4242 in daemon._kill_deadlines, "the reap must keep the group's entry"
+        daemon._enforce_kill_deadlines()
+        assert signals == [(4242, sigkill)]
+        assert daemon._kill_deadlines == {}
+
+    def test_a_new_scan_with_a_recycled_number_clears_the_stale_entry(
+        self, daemon, monkeypatch
+    ):
+        """An old group's entry can outlive its leader's reap by a loop pass;
+        a fork that is handed the same number must not inherit its deadline."""
+        monkeypatch.setattr(os, "fork", lambda: 4242)
+        monkeypatch.setattr(os, "setpgid", lambda *a: None)
+        events: list = []
+        connection = _Connection(fds=[])
+        connection.child_pid = None
+        connection.sock = _OrderSock(events)
+        connection.reader = _ScriptedReader(events, {"op": "go"})
+        daemon._kill_deadlines[4242] = 0.0
+        daemon._start_scan(connection, _request(daemon))
+        assert daemon.children.get(4242) is connection
+        assert 4242 not in daemon._kill_deadlines
 
 
 @needs_posix
@@ -384,6 +586,22 @@ class TestShutdownExitCodes:
 
         def close(self) -> None:
             pass
+
+    @pytest.fixture(autouse=True)
+    def _hermetic_shutdown(self, monkeypatch, tmp_path):
+        """_shutdown re-reads the socket path, which would otherwise mkdir and
+        chmod the REAL runtime directory of whoever runs the tests (and raise
+        ExpressUnavailable out of a test on a host whose directory is refused);
+        the group signal stand-in keeps every fake pid away from a real killpg."""
+        from automated_security_helper.express import daemon as daemon_module
+
+        monkeypatch.setattr(runtime, "socket_path", lambda *a, **k: tmp_path / "x.sock")
+        self.group_signals = []
+        monkeypatch.setattr(
+            daemon_module,
+            "_signal_group",
+            lambda pgid, sig: self.group_signals.append((pgid, sig)),
+        )
 
     def test_a_natural_exit_at_the_deadline_keeps_its_code(self, daemon, monkeypatch):
         import signal as signal_module
@@ -420,10 +638,91 @@ class TestShutdownExitCodes:
 
         assert exited.sock.frames == [{"exit": 0}]
         assert sigkilled.sock.frames == [{"exit": 143}]
-        # The exited child was never SIGKILLed: the pre-escalation reap had
-        # already taken it out of children.
+        # The exited child was never SIGKILLed as a scan: the pre-escalation
+        # reap had already taken it out of children. Its GROUP is still swept
+        # (see the next tests), which signals no pid and reports no code.
         assert (100, int(signal_module.SIGKILL)) not in signals
         assert daemon.children == {}
+
+    def test_a_group_whose_leader_exited_in_the_grace_still_gets_the_sigkill(
+        self, daemon, monkeypatch
+    ):
+        """The scan child handled SIGTERM and exited inside the grace; a scanner
+        subprocess in its group ignored it. Only unreaped leaders used to be
+        SIGKILLed, so that subprocess outlived the daemon."""
+        import signal as signal_module
+
+        from automated_security_helper.express import daemon as daemon_module
+
+        connection = _Connection(fds=[])
+        connection.sock = self._FrameSock(94)
+        connection.close = lambda: None
+        connection.child_pid = None
+        daemon.children[400] = connection
+        reapable = []
+        signals = []
+
+        def record_signal(pid, sig):
+            signals.append((pid, sig))
+            if sig == int(signal_module.SIGTERM):
+                reapable.append((400, 0))  # exits on the SIGTERM, inside the grace
+
+        monkeypatch.setattr(daemon_module, "_signal_scan", record_signal)
+        monkeypatch.setattr(
+            os, "waitpid", lambda *_: reapable.pop(0) if reapable else (0, 0)
+        )
+        daemon._shutdown()
+        assert signals == [(400, int(signal_module.SIGTERM))]
+        assert self.group_signals == [(400, int(signal_module.SIGKILL))]
+        assert connection.sock.frames == [{"exit": 0}]
+
+    def test_a_pending_hangup_deadline_group_is_killed_at_shutdown(
+        self, daemon, monkeypatch
+    ):
+        """A group a client's hangup already SIGTERMed has its SIGKILL
+        deadline pending, with its leader reaped and no entry in children:
+        the shutdown must not leave it to a loop that is no longer running."""
+        import signal as signal_module
+
+        from automated_security_helper.express import daemon as daemon_module
+
+        monkeypatch.setattr(runtime, "STOP_GRACE_SECONDS", 0.0)
+        monkeypatch.setattr(
+            daemon_module,
+            "_signal_scan",
+            lambda pid, sig: pytest.fail("no unreaped child in this test"),
+        )
+        monkeypatch.setattr(os, "waitpid", lambda *_: (0, 0))
+        daemon._kill_deadlines[500] = 1e12
+        daemon._shutdown()
+        assert self.group_signals == [(500, int(signal_module.SIGKILL))]
+
+    def test_an_unusable_runtime_directory_does_not_abort_the_shutdown(
+        self, daemon, monkeypatch
+    ):
+        """socket_path() re-checks the runtime directory; a refusal there must
+        not stop the shutdown that SIGTERMs the running scans."""
+        import signal as signal_module
+
+        from automated_security_helper.express import daemon as daemon_module
+
+        def refused(*_a, **_k):
+            raise runtime.ExpressUnavailable("the directory became a symlink")
+
+        monkeypatch.setattr(runtime, "socket_path", refused)
+        monkeypatch.setattr(runtime, "STOP_GRACE_SECONDS", 0.0)
+        signals = []
+        monkeypatch.setattr(
+            daemon_module, "_signal_scan", lambda pid, sig: signals.append((pid, sig))
+        )
+        monkeypatch.setattr(os, "waitpid", lambda *_: (0, 0))
+        connection = _Connection(fds=[])
+        connection.sock = self._FrameSock(95)
+        connection.close = lambda: None
+        connection.child_pid = None
+        daemon.children[600] = connection
+        daemon._shutdown()
+        assert (600, int(signal_module.SIGTERM)) in signals
 
     def test_a_child_killed_by_a_signal_reports_128_plus_the_signal(
         self, daemon, monkeypatch
