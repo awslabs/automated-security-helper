@@ -61,25 +61,27 @@ environment variable), so a daemon you forget about costs memory only until then
 
 ## What a scan sends to the daemon {#protocol}
 
-The client hands the daemon the scan's command line, its working directory, and the
-environment variables ASH honours: every `ASH_*`, `GIT_*` (a commit hook's
-`GIT_INDEX_FILE` changes what the scan's git commands read), `AWS_*` (the AWS reporters)
-and `UV_*` variable; the documented inputs such as `OCI_RUNNER`, `CI` and the color
-controls; the proxy and TLS-trust variables, the `DOCKER_*` and podman `CONTAINER_*`
-connection variables, the
-scanner credential tokens and the `XDG_*` directories; and the execution basics `PATH`,
-`HOME`, `TMPDIR` and locale. The subset travels only inside the request, over the
-same-user socket, to the one forked child -- the daemon's own environment is scrubbed
-down to the execution basics when it autostarts, so nothing from the invocation that
-happened to start it becomes ambient state under later scans. The client also
-passes its stdin, stdout and stderr as file descriptors, so
-the forked scan writes to your terminal directly -- progress, colors and prompts behave as
-a cold run's, and nothing of the scan's output travels over the socket. Ctrl-C in the
-client is forwarded to the forked scan.
+The client hands the daemon the scan's command line, its working directory, and its
+whole environment, minus two names: `LD_PRELOAD` (in a cold run it has already shaped
+the running process; applied to the forked child it could only newly shape every
+scanner subprocess) and ASH's internal express child marker. The forked child's
+environment becomes exactly what the request carries, so a variable a scanner reads --
+whichever scanner, whatever the variable -- has the same value under express as in a
+cold run; an allowlist here was always one forgotten scanner variable away from "same
+command, different findings". The environment travels only inside the request, over
+the same-user socket, to the one forked child -- the daemon's own resident environment
+is scrubbed down to the execution basics when it starts, so nothing from the
+invocation that happened to start it becomes ambient state under later scans. The
+client also passes its stdin, stdout and stderr as file descriptors, so the forked
+scan writes to your terminal directly -- progress, colors and prompts behave as a cold
+run's, and nothing of the scan's output travels over the socket. Ctrl-C in the client
+is forwarded to the forked scan.
 
-A variable outside the honoured set is not sent and not applied: the forked scan runs
-with the daemon's value of it. If a scan depends on an environment variable ASH does not
-document, run it with `--no-express` (and consider filing an issue naming the variable).
+The handshake commits both sides exactly once: the daemon acknowledges a scan request
+it will run, the client answers that acknowledgement, and only then does the daemon
+fork -- so a client that gives up waiting (a daemon still warming its imports answers
+only when they finish, and the client's handshake budget covers that on every path)
+falls back to a cold run with certainty that no second scan runs behind it.
 
 ## Security model {#security}
 
@@ -147,10 +149,14 @@ commit, and its idle timer retires it after a quiet half hour.
 
 ## Troubleshooting {#troubleshoot}
 
-- `ash express status` says whether a daemon is running and what it has served.
+- `ash express status` says whether a daemon is running and what it has served -- and
+  reports separately, with a non-zero exit, a socket that something holds without
+  answering (a wedged daemon): find the holder with `fuser` or `lsof` on the socket,
+  stop it, or remove the socket file.
 - The daemon logs to `ash-<uid>-<key>.log` next to its socket; `ash express start
   --foreground` runs it attached to your terminal instead.
-- A scan that seems to ignore a changed environment variable: check the honoured set
-  above, and `--no-express` to compare against a cold run.
+- A scan that behaves differently under express than with `--no-express` is a bug to
+  report: the scan's environment, arguments and working directory travel with each
+  request precisely so the two cannot differ.
 - Scans still slow with the daemon running: the first request after `ash express start`
   may wait briefly while the warm imports finish; later ones do not.

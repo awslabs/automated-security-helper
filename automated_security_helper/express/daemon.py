@@ -49,6 +49,16 @@ from automated_security_helper.utils.process_env import (
 )
 from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
+#: How long one connection's inline handshake reads (the request, then the go
+#: that answers the ok) may stall the single-threaded accept loop. A live
+#: client has already written its request when connect returns and answers the
+#: ok in one round trip, so this is a wedged-client bound, not a budget a
+#: healthy handshake approaches -- and it must stay far under the client's own
+#: HANDSHAKE_TIMEOUT_SECONDS, so the daemon never waits out a client that is
+#: still legitimately waiting for it (the budget-consistency test pins the
+#: ordering).
+INLINE_HANDSHAKE_TIMEOUT_SECONDS = 2.0
+
 #: Modules imported once at daemon start. The point is the import cache the
 #: forked children inherit copy-on-write: the CLI (typer, rich, click and every
 #: command module), the scan orchestration, and the built-in plugin package
@@ -197,6 +207,11 @@ class ExpressDaemon:
         self.children: dict[int, _Connection] = {}
         self.scans_served = 0
         self.stopping = False
+        #: SIGKILL deadlines for scans a hangup already SIGTERMed: a scan (or
+        #: a scanner subprocess) that ignores SIGTERM would otherwise sit in
+        #: ``children`` forever, holding a concurrency slot and keeping
+        #: should_idle_exit False for the daemon's whole life.
+        self._kill_deadlines: dict[int, float] = {}
         self.listener: Optional[socket.socket] = None
         self._lock_fd: Optional[int] = None
         self._socket_inode: Optional[int] = None
@@ -308,6 +323,7 @@ class ExpressDaemon:
                 for key, _ in self.selector.select(timeout=1.0):
                     key.data(key.fileobj)
                 self._reap()
+                self._enforce_kill_deadlines()
                 if self.stopping:
                     break
                 if should_idle_exit(
@@ -334,11 +350,27 @@ class ExpressDaemon:
                 os.unlink(path)
         except OSError:
             pass
+        # The lock goes with the socket, right away: a concurrent autostart in
+        # the grace window below must be able to take it and bind a fresh
+        # socket, rather than read "another daemon owns this socket" about a
+        # file that is already gone. The inode check above keeps this daemon
+        # from ever unlinking that successor's socket. The cost, accepted: a
+        # successor taking the lock in that window can accept up to
+        # concurrency_cap() new scans while this daemon's children still run,
+        # so the machine can carry about twice the cap for STOP_GRACE_SECONDS
+        # -- the cap is per daemon, and the overlap is bounded by the grace.
+        if self._lock_fd is not None:
+            try:
+                os.close(self._lock_fd)
+            except OSError:
+                pass
+            self._lock_fd = None
         # Running scans are told to stop, by process group so their scanner
         # subprocesses go with them, and given a moment to report real exit
         # codes. A group that outlives the wait is SIGKILLed BEFORE its client
-        # is told 143: reported first, a survivor kept writing into a terminal
-        # whose owner had been told the scan was over.
+        # is told the scan is over -- and only those report the daemon's 143;
+        # a child that exited on its own at any point, the grace's last
+        # instant included, keeps its real code.
         for pid in list(self.children):
             _signal_scan(pid, signal.SIGTERM)
         deadline = time.monotonic() + runtime.STOP_GRACE_SECONDS
@@ -346,9 +378,16 @@ class ExpressDaemon:
             self._reap()
             if self.children:
                 time.sleep(0.05)
-        for pid in list(self.children):
-            _signal_scan(pid, signal.SIGKILL)
+        # One plain reap BEFORE any SIGKILL: the grace loop can end right
+        # after a child exited on its own (its deadline check runs before
+        # another reap would), and that child's REAL code -- 0, or 1 with
+        # findings, or its own SIGTERM handling -- must win over the uniform
+        # 143. Only the pids actually SIGKILLed below report the override.
         self._reap()
+        killed = set(self.children)
+        for pid in killed:
+            _signal_scan(pid, signal.SIGKILL)
+        self._reap(code_override=128 + int(signal.SIGTERM), override_pids=killed)
         for connection in list(self.children.values()):
             try:
                 runtime.send_frame(connection.sock, {"exit": 128 + int(signal.SIGTERM)})
@@ -361,12 +400,28 @@ class ExpressDaemon:
                 self.listener.close()
             except OSError:
                 pass
-        if self._lock_fd is not None:
-            try:
-                os.close(self._lock_fd)
-            except OSError:
-                pass
         _log("express daemon exiting")
+
+    def _enforce_kill_deadlines(self) -> None:
+        """SIGKILL discarded scans that outlived their SIGTERM grace.
+
+        Runs once per loop pass (the select tick bounds the lag at about a
+        second past the deadline). An entry whose pid was reaped meanwhile is
+        dropped; a survivor's whole group is killed and the SIGCHLD reap frees
+        its concurrency slot, so the daemon can still idle-retire.
+        """
+        if not self._kill_deadlines:
+            return
+        now = time.monotonic()
+        for pid, deadline in list(self._kill_deadlines.items()):
+            if pid not in self.children:
+                self._kill_deadlines.pop(pid, None)
+                continue
+            if now < deadline:
+                continue
+            _log(f"scan pid {pid} outlived its SIGTERM grace; sending SIGKILL")
+            _signal_scan(pid, signal.SIGKILL)
+            self._kill_deadlines.pop(pid, None)
 
     def _drain(self, fd: int) -> None:
         try:
@@ -395,9 +450,10 @@ class ExpressDaemon:
         sock.setblocking(True)
         # The handshake is read inline, so this bounds how long one stalled
         # client can hold the single-threaded loop. A real client has already
-        # written its whole request by the time connect returns, so the bound
-        # is generous for it and tight for a wedged one.
-        sock.settimeout(2.0)
+        # written its whole request by the time connect returns, and answers
+        # the ok with its go in one round trip, so the bound is generous for
+        # it and tight for a wedged one.
+        sock.settimeout(INLINE_HANDSHAKE_TIMEOUT_SECONDS)
         connection = _Connection(sock)
         try:
             self._handshake(connection)
@@ -516,16 +572,35 @@ class ExpressDaemon:
 
     def _start_scan(self, connection: _Connection, request: dict[str, Any]) -> None:
         self.last_activity = time.monotonic()
-        # The acknowledgement goes out BEFORE the fork, and the order is
-        # load-bearing: the client commits to the daemon the moment it reads
-        # ok, and falls back to a cold run on anything earlier -- so a scan
-        # must never be running before the ok is on the wire, or a client
-        # whose handshake timed out would run the same scan cold while the
-        # forked one wrote into its terminal (a double scan). After the ok
-        # there is no falling back on either side: a fork that fails reports
-        # itself as the scan's exit code, and a client that hangs up is read
-        # by _on_frames, which kills the child.
-        runtime.send_frame(connection.sock, {"ok": True})
+        # The ok-then-go choreography runs BEFORE the fork, and the order is
+        # load-bearing: the client commits to the daemon the moment it sends
+        # go (right after reading ok), and falls back to a cold run on
+        # anything earlier -- so a scan must never be running before the go
+        # has been READ here, or a client whose handshake timed out would run
+        # the same scan cold while the forked one wrote into its terminal (a
+        # double scan). The ok alone cannot carry that weight: an ok that
+        # lands in the client's socket buffer in the same instant its
+        # handshake timeout fires is delivered but never read, and an
+        # undeliverable ok (EPIPE: the client's `with` already closed the
+        # socket) covers only a client that was gone at the send. The go
+        # closes both windows -- a client that fell back never sends it, and
+        # this daemon forks nothing without it. The inline read runs under
+        # the accept-time socket timeout, so a client that dies between ok
+        # and go stalls the loop for that bound at most. After the go there
+        # is no falling back on either side: a fork that fails reports itself
+        # as the scan's exit code, and a client that hangs up is read by
+        # _on_frames, which kills the child.
+        try:
+            runtime.send_frame(connection.sock, {"ok": True})
+            go = connection.reader.read_frame()
+        except (OSError, runtime.ExpressProtocolError) as exc:
+            _log(f"client went away before the scan started ({exc}); not forking")
+            self._discard(connection, kill=False)
+            return
+        if not isinstance(go, dict) or go.get("op") != "go":
+            _log("client never sent go after the ok; not forking")
+            self._discard(connection, kill=False)
+            return
         try:
             pid = os.fork()
         except OSError as exc:
@@ -825,9 +900,28 @@ class ExpressDaemon:
         self.connections.pop(connection.sock.fileno(), None)
         if kill and connection.child_pid is not None:
             _signal_scan(connection.child_pid, signal.SIGTERM)
+            # The run loop SIGKILLs the group past this deadline: a scan that
+            # ignores SIGTERM must not hold its concurrency slot (and the
+            # daemon's idle exit) hostage forever.
+            self._kill_deadlines[connection.child_pid] = (
+                time.monotonic() + runtime.STOP_GRACE_SECONDS
+            )
         connection.close()
 
-    def _reap(self) -> None:
+    def _reap(
+        self,
+        code_override: Optional[int] = None,
+        override_pids: Optional[set[int]] = None,
+    ) -> None:
+        """Reap exited scans and report each exit code to its client.
+
+        *code_override* replaces the reported code for the pids in
+        *override_pids*: the shutdown's post-SIGKILL reap passes 143 with the
+        set it actually SIGKILLed, so a killed scan reports the one "ended by
+        the daemon's SIGTERM" code instead of a 137/143 mix for what was, to
+        the client, a single event -- while a child that exited on its own in
+        the same pass keeps its real code.
+        """
         while True:
             try:
                 pid, status = os.waitpid(-1, os.WNOHANG)
@@ -840,6 +934,7 @@ class ExpressDaemon:
             if pid == 0:
                 return
             connection = self.children.pop(pid, None)
+            self._kill_deadlines.pop(pid, None)
             self.last_activity = time.monotonic()
             if connection is None:
                 continue
@@ -851,10 +946,14 @@ class ExpressDaemon:
             if code < 0:
                 # Died of a signal: report as the shell would, 128 + signal.
                 code = 128 - code
+            if code_override is not None and (
+                override_pids is None or pid in override_pids
+            ):
+                code = code_override
             connection.child_pid = None
             try:
                 runtime.send_frame(connection.sock, {"exit": code})
-            except OSError:
+            except (OSError, runtime.ExpressProtocolError):
                 pass
             self._discard(connection, kill=False)
             _log(f"scan pid {pid} exited {code}")

@@ -43,7 +43,10 @@ from automated_security_helper.utils.process_env import snapshot_environ
 #: Bumped when a frame's shape changes incompatibly. The daemon refuses a
 #: request whose protocol differs, and the client reads that refusal as a stale
 #: daemon (fall back cold; restart it under --express).
-PROTOCOL_VERSION = 1
+#: 2: the client answers the daemon's scan ok with a ``{"op": "go"}`` frame,
+#: and the daemon forks only after reading it (the double-scan window's
+#: close; see _start_scan and _run_on_daemon).
+PROTOCOL_VERSION = 2
 
 #: A frame larger than this is a protocol error, not a request to honour: the
 #: legitimate frames are argv, cwd and a bounded environment subset, which fit
@@ -79,9 +82,10 @@ HANDSHAKE_TIMEOUT_SECONDS = 30.0
 #: How long the client gives a connect on an existing socket file. Short on
 #: purpose: an implicit scan meets this on every invocation while a socket
 #: file exists, so a wedged daemon may cost at most these seconds before the
-#: silent cold fallback. The post-autostart handshake, which legitimately
-#: waits out the warm imports, runs on HANDSHAKE_TIMEOUT_SECONDS instead
-#: (await_daemon re-times its socket after connecting).
+#: silent cold fallback. This times the CONNECT only: the handshake that
+#: follows legitimately waits out the warm imports on every path, so
+#: _run_on_daemon re-times the socket to HANDSHAKE_TIMEOUT_SECONDS before its
+#: first read.
 CONNECT_TIMEOUT_SECONDS = 5.0
 
 #: How long the daemon gives a running scan after SIGTERM before the SIGKILL
@@ -92,77 +96,24 @@ CONNECT_TIMEOUT_SECONDS = 5.0
 STOP_GRACE_SECONDS = 5.0
 STOP_WAIT_SECONDS = 10.0
 
-#: The exact environment variable names, beyond the ``ASH_`` prefix, that a
-#: scan's behaviour honours and the request therefore carries: the documented
-#: inputs (OCI_RUNNER and its wrapper refusal, CI detection, color and width
-#: controls, traceback rendering) -- see the CLI options that declare them as
-#: ``envvar`` and utils/log.py.
-HONORED_ENV_EXACT = frozenset(
+#: The names a scan request never carries. Everything else travels: a cold
+#: run sees the whole shell environment, and any allowlist here was one
+#: forgotten scanner variable away from "same command, different findings"
+#: (SEMGREP_*, PIP_*, NPM_CONFIG_*, KUBECONFIG, SSH_AUTH_SOCK, ... -- the list
+#: of things scanners read has no closed form). The request travels over the
+#: same-uid 0600 socket in the 0700 runtime directory, is applied to the one
+#: forked child, and never lands in the daemon's own resident environment, so
+#: a credential in it has the same reach it has in a cold run's process. The
+#: denied names: the express child marker (a client's stale copy must never
+#: stop the forked scan's own re-delegation guard from being set fresh), and
+#: LD_PRELOAD, which in a cold run has already shaped the running process and
+#: in the child could only newly shape every scanner subprocess.
+REQUEST_ENV_DENYLIST = frozenset(
     {
-        "OCI_RUNNER",
-        "OCI_RUNNER_WRAPPER",
-        "CI",
-        "NO_COLOR",
-        "FORCE_COLOR",
-        "PYTHON_COLORS",
-        "TERM",
-        "COLUMNS",
-        "LINES",
-        "TERMINAL_WIDTH",
-        "PYTHONIOENCODING",
-        # Traceback rendering's other inputs are ASH's own ASH_DEBUG_* names,
-        # which the ASH_ prefix of HONORED_ENV_PREFIXES already carries.
-        "TYPER_STANDARD_TRACEBACK",
-        "_TYPER_STANDARD_TRACEBACK",
-        # Network reachability and trust: a cold run's proxied downloads
-        # (content databases, npm-audit's registry asks) and TLS trust follow
-        # these, so a scan through the daemon must see the client's values.
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "ALL_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "no_proxy",
-        "all_proxy",
-        "REQUESTS_CA_BUNDLE",
-        "CURL_CA_BUNDLE",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "NODE_EXTRA_CA_CERTS",
-        # Container-mode scans resolve their runtime through these (podman's
-        # own connection variables beside docker's).
-        "DOCKER_HOST",
-        "DOCKER_CONFIG",
-        "DOCKER_CERT_PATH",
-        "DOCKER_TLS_VERIFY",
-        "DOCKER_CONTEXT",
-        "CONTAINER_HOST",
-        "CONTAINER_CONNECTION",
-        "CONTAINER_SSHKEY",
-        "OCI_RUNNER_EXTRA_ARGS",
-        # Scanner credentials a cold run would have had in its environment.
-        "SNYK_TOKEN",
-        "SEMGREP_APP_TOKEN",
-        "BC_API_KEY",
-        "GITHUB_TOKEN",
-        # Per-user directory conventions several scanners read.
-        "XDG_CACHE_HOME",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_STATE_HOME",
-        "XDG_RUNTIME_DIR",
+        "ASH_EXPRESS_CHILD",
+        "LD_PRELOAD",
     }
 )
-
-#: Environment-variable name prefixes carried whole in a scan request, beyond
-#: ``ASH_`` and ``GIT_`` (see :func:`is_honored_name`): AWS credentials and
-#: configuration (the AWS reporters and botocore read many ``AWS_*`` names),
-#: and uv's knobs (``ash dependencies install`` runs uv). Carried per request
-#: over the same-uid 0600 socket and applied to the one forked child, never
-#: into the daemon's own environment, so a credential here has the same reach
-#: it has in a cold run's process.
-HONORED_ENV_PREFIXES = ("ASH_", "GIT_", "AWS_", "UV_")
 
 #: Execution basics the forked child takes from the client rather than from the
 #: shell the daemon happened to be started in: scanner subprocesses are resolved
@@ -481,52 +432,37 @@ def idle_seconds(environ: Optional[Mapping[str, str]] = None) -> int:
     return value if value > 0 else DEFAULT_IDLE_SECONDS
 
 
-def honored_env(environ: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-    """The environment subset a scan request carries: every ``ASH_*`` and
-    ``GIT_*`` variable, the documented exact names, and the execution basics.
+def request_environment(
+    environ: Optional[Mapping[str, str]] = None,
+) -> dict[str, str]:
+    """The environment a scan request carries: the client's, in full, minus
+    :data:`REQUEST_ENV_DENYLIST`.
 
-    The whole client environment is deliberately not sent: the daemon's child
-    applies this subset over its own environment and removes honoured names the
-    request lacks (:func:`is_honored_name`), so a variable ASH never reads
-    cannot differ between an express run and a cold one in a way ASH would notice,
-    and the request stays small and reviewable.
+    The forked child's environment becomes exactly this (plus the child
+    marker), so a variable a scanner reads -- whichever scanner, whatever the
+    variable -- has the same value warm and cold. The earlier allowlist was
+    one forgotten name away from "same command, different findings", which is
+    the one thing express may never produce.
     """
     if environ is None:
         environ = snapshot_environ()
-    carried: dict[str, str] = {}
-    for name, value in environ.items():
-        if is_honored_name(name):
-            carried[name] = value
-    return carried
-
-
-def is_honored_name(name: str) -> bool:
-    """Whether *name* is in the request's environment subset.
-
-    The prefixes (:data:`HONORED_ENV_PREFIXES`) are carried whole. ``GIT_*``
-    because ASH's scan runs git in the scanned tree (the scan set,
-    ``--changed-files-only``) and git's own environment -- ``GIT_INDEX_FILE``
-    and ``GIT_DIR`` above all, which git sets for the hooks it invokes --
-    changes what those commands read: a pre-commit hook's scan through the
-    daemon has to see the same index a cold run in that hook sees. ``AWS_*``
-    and ``UV_*`` for the same reason, one reporter and one installer over.
-    """
-    return (
-        name.startswith(HONORED_ENV_PREFIXES)
-        or name in HONORED_ENV_EXACT
-        or name in EXECUTION_ENV_EXACT
-    )
+    return {
+        name: value
+        for name, value in environ.items()
+        if name not in REQUEST_ENV_DENYLIST
+    }
 
 
 def apply_request_env(
     request_env: dict[str, str], environ: MutableMapping[str, str]
 ) -> None:
-    """Make *environ*'s honoured subset equal *request_env*, leaving the rest.
+    """Make *environ* exactly *request_env*, except the express internals.
 
-    Run in the forked child before it drops into the CLI: honoured names the
-    request lacks are removed (a stale ``ASH_CONFIG`` in the daemon's own
-    environment must not reach a client that unset it), the request's pairs are
-    set, and nothing else is touched. :data:`CHILD_ENV` is never removed, so a
+    Run in the forked child before it drops into the CLI: every name the
+    request lacks is removed (a stale ``ASH_CONFIG`` in the daemon's own
+    environment must not reach a client that unset it; the daemon's residual
+    names must not reach a scan at all), the request's pairs are set, and
+    :data:`CHILD_ENV` is never removed or overwritten by a request, so a
     request cannot clear the one variable that stops re-delegation.
     """
     for name, value in request_env_overrides(request_env, environ).items():
@@ -543,15 +479,12 @@ def request_env_overrides(
     remove), the shape ``utils.process_env.apply_environ_overrides`` takes, for
     the forked child that applies it to the real environment under the lock."""
     overrides: dict[str, Optional[str]] = {
-        name: None
-        for name in current
-        if is_honored_name(name) and name not in request_env and name != CHILD_ENV
+        name: None for name in current if name not in request_env and name != CHILD_ENV
     }
     for name, value in request_env.items():
-        if name == CHILD_ENV:
+        if name == CHILD_ENV or name in REQUEST_ENV_DENYLIST:
             continue
-        if is_honored_name(name):
-            overrides[name] = value
+        overrides[name] = value
     return overrides
 
 
@@ -580,8 +513,10 @@ def scrubbed_daemon_environment(environ: Mapping[str, str]) -> dict[str, str]:
     scan's incidentals (``GIT_INDEX_FILE`` from a commit hook, an activated
     virtualenv's variables, cloud credentials in the shell) must not become
     ambient state every later scan's child inherits. Only the names in
-    :data:`DAEMON_ENV_KEPT` survive; everything a scan honours travels in that
-    scan's own request instead (:func:`honored_env`), applied per child.
+    :data:`DAEMON_ENV_KEPT` survive; the scan's environment travels in each
+    scan's own request instead (:func:`request_environment`), and the child's
+    environment becomes exactly that request's, so nothing kept here reaches
+    a scan either.
     """
     return {name: value for name, value in environ.items() if name in DAEMON_ENV_KEPT}
 

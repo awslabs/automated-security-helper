@@ -328,6 +328,38 @@ def _remove_if_dead(path: PathLike) -> None:
             pass
 
 
+def daemon_lock_is_held(path: PathLike) -> bool:
+    """Whether some process holds the daemon lock for the socket at *path*.
+
+    The daemon flocks ``<socket>.lock`` exclusively for its whole life, so an
+    untakeable lock proves a live holder even when the socket file itself is
+    gone -- a daemon wedged between taking the lock and binding, or one whose
+    socket was removed by hand. Read-only and best effort: the probe never
+    creates the lock file (no ``O_CREAT``), a missing file or platform reads
+    as "not held", and a momentarily taken probe lock is simply closed, which
+    is the shape :func:`_remove_if_dead` already uses against the same lock.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        return False
+    try:
+        fd = os.open(os.fspath(path) + ".lock", os.O_WRONLY)
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        return False
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 def _run_on_daemon(
     sock: socket.socket,
     argv: list[str],
@@ -340,12 +372,23 @@ def _run_on_daemon(
     Returns ``("exit", code)`` once the daemon ran the scan. Anything else
     means nothing ran and the caller may fall back: ``("stale", None)`` for a
     refusal a daemon restart cures (version, fingerprint, protocol), and
-    ``("fallback", None)`` for the rest (busy, a broken handshake). Once the
-    daemon has answered started, the scan is running against our own
-    stdin/stdout/stderr, so there is no falling back: a connection lost after
-    that point is reported and read as exit 1.
+    ``("fallback", None)`` for the rest (busy, a broken handshake). The commit
+    point is the go frame this client sends back on reading the daemon's ok:
+    the daemon forks nothing before reading it, so everything up to a failed
+    go send may fall back cold -- and once the go is on the wire the scan is
+    running against our own stdin/stdout/stderr, so there is no falling back:
+    a connection lost after that point is reported and read as exit 1.
     """
     with sock:
+        # The whole handshake runs on the handshake budget, whichever path
+        # produced the socket. _connect times its socket for the connect
+        # itself (CONNECT_TIMEOUT_SECONDS), but the ok can legitimately take
+        # far longer: the daemon answers its accept backlog only once its
+        # warm imports complete, so a timeout here must mean "fall back
+        # cold", never "a healthy daemon was slow". Without this, the
+        # implicit path read the ok on the connect budget while only the
+        # autostart path (await_daemon) had the handshake budget.
+        sock.settimeout(runtime.HANDSHAKE_TIMEOUT_SECONDS)
         request = {
             "op": "scan",
             "protocol": runtime.PROTOCOL_VERSION,
@@ -353,7 +396,7 @@ def _run_on_daemon(
             "fingerprint": runtime.runtime_fingerprint(),
             "argv": list(argv),
             "cwd": os.getcwd(),
-            "env": runtime.honored_env(dict(environ)),
+            "env": runtime.request_environment(dict(environ)),
             # Reserved: the resident daemon loads no repository config, so
             # invalidation is version/fingerprint-only and the forked child
             # re-reads the config itself. See the express how-to's design notes.
@@ -408,6 +451,12 @@ def _run_on_daemon(
             forwarded_signals.append(signal.SIGHUP)
         for signum in forwarded_signals:
             try:
+                if signal.getsignal(signum) is signal.SIG_IGN:
+                    # An inherited ignore (nohup's SIGHUP, a background job's
+                    # SIGINT) means a cold run would have survived this
+                    # signal; installing the forwarder here would turn it into
+                    # a kill the cold run never saw. Leave it ignored.
+                    continue
                 previous[signum] = signal.signal(signum, forward)
             except (OSError, ValueError):
                 pass
@@ -443,6 +492,25 @@ def _run_on_daemon(
             # settimeout, or in the read, and every one of them is the same
             # "end now with the signal's code", never an escaping traceback.
             try:
+                # The go frame is this client's commit, sent FIRST -- before
+                # the signal flush below, because the daemon's inline go read
+                # must meet the go, not a signal frame -- and only after it is
+                # on the wire does the daemon fork. It exists because the ok
+                # alone could not prove this client is still here: an ok
+                # landing in the socket buffer in the same instant the
+                # handshake timeout fired would leave the daemon scanning for
+                # a client already running cold (a double scan). A failed go
+                # send is therefore still a safe fallback: no complete go
+                # frame reached the wire, so nothing forks.
+                try:
+                    runtime.send_frame(sock, {"op": "go"})
+                except (OSError, runtime.ExpressProtocolError) as exc:
+                    interrupted = _signal_exit_code(state["pending"])
+                    if interrupted is not None:
+                        return ("exit", interrupted)
+                    if explicit:
+                        _note(f"ash express: handshake failed: {exc}")
+                    return ("fallback", None)
                 # The recorded signals are flushed by index -- a signal landing
                 # mid-flush is appended and picked up by the same loop -- and
                 # only then does the handler switch to writing frames itself,
@@ -650,6 +718,17 @@ def autostart(environ: Mapping[str, str]) -> bool:
             os._exit(code)
     os.close(ready_write)
     os.waitpid(middle, 0)
+    return _await_readiness(ready_read)
+
+
+def _await_readiness(ready_read: int) -> bool:
+    """Wait for the readiness byte on *ready_read*, then close it.
+
+    One byte means a daemon serves: ours (``\\x01``, bound and listening) or a
+    concurrent start's winner (``\\x02``, whose socket the loser found owned).
+    EOF with no byte means the launched daemon died before binding, and the
+    timeout means nothing answered within the start window.
+    """
     deadline = time.monotonic() + runtime.START_TIMEOUT_SECONDS
     became_ready = False
     try:
@@ -660,10 +739,6 @@ def autostart(environ: Mapping[str, str]) -> bool:
             readable, _, _ = select.select([ready_read], [], [], remaining)
             if not readable:
                 break
-            # One byte = a daemon is serving: ours ("\x01", bound and
-            # listening) or a concurrent autostart's winner ("\x02", whose
-            # socket the loser found owned). EOF with no byte = the daemon
-            # died before it could bind.
             became_ready = os.read(ready_read, 1) in (b"\x01", b"\x02")
             break
     except OSError:
@@ -674,3 +749,68 @@ def autostart(environ: Mapping[str, str]) -> bool:
         except OSError:
             pass
     return became_ready
+
+
+def spawn_daemon_process(environ: Mapping[str, str]) -> bool:
+    """Start the daemon in a fresh interpreter, detached; True once it serves.
+
+    This is the launch for a caller that is not thin any more: ``ash express
+    start`` reaches here after the whole CLI import, with rich, typer and the
+    logging stack initialized and main's signal handlers installed, and a fork
+    with no exec would carry that state (and any lock an import holds) into
+    the daemon. A new ``sys.executable`` begins in the one state the daemon's
+    own module expects. The implicit scan path keeps :func:`autostart`'s
+    double fork: that caller runs before the heavy import, single-threaded,
+    which is the state a bare fork is safe in.
+    """
+    import subprocess
+
+    idle = runtime.idle_seconds(dict(environ))
+    scrubbed = runtime.scrubbed_daemon_environment(dict(environ))
+    log_file = runtime.log_path()
+    runtime_dir = runtime.runtime_dir()
+    ready_read, ready_write = os.pipe()
+    os.set_inheritable(ready_write, True)
+    # The daemon's own stdout/stderr go to the express log file, as the
+    # autostart path arranges with its dup2s.
+    log = os.open(os.fspath(log_file), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        with open(os.devnull, "rb") as devnull:
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys\n"
+                        "from automated_security_helper.express.daemon import serve\n"
+                        "serve(idle_timeout=float(sys.argv[1]), "
+                        "ready_fd=int(sys.argv[2]))\n"
+                    ),
+                    str(float(idle)),
+                    str(ready_write),
+                ],
+                stdin=devnull,
+                stdout=log,
+                stderr=log,
+                cwd=os.fspath(runtime_dir),
+                env=scrubbed,
+                start_new_session=True,
+                close_fds=True,
+                pass_fds=(ready_write,),
+            )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        try:
+            os.close(ready_read)
+        except OSError:
+            pass
+        return False
+    finally:
+        try:
+            os.close(log)
+        except OSError:
+            pass
+        try:
+            os.close(ready_write)
+        except OSError:
+            pass
+    return _await_readiness(ready_read)

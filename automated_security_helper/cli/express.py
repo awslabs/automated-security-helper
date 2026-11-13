@@ -106,15 +106,19 @@ def start_daemon(
         echo("replacing a stale express daemon")
         client.stop_daemon(path)
     if idle_seconds is not None:
-        # The autostart and the foreground serve both read the environment's
-        # idle setting; the option is written there so one mechanism decides.
+        # The spawned daemon and the foreground serve both read the
+        # environment's idle setting; the option is written there so one
+        # mechanism decides.
         set_environ(runtime.IDLE_ENV, str(idle_seconds))
     if foreground:
         from automated_security_helper.express.daemon import serve
 
         serve(idle_timeout=runtime.idle_seconds())
         return
-    started = client.autostart(snapshot_environ())
+    # Never client.autostart here: this command runs after the whole CLI
+    # import, where a bare fork would carry rich, typer, logging and main's
+    # signal handlers into the daemon. A fresh interpreter starts it instead.
+    started = client.spawn_daemon_process(snapshot_environ())
     sock = client.await_daemon(path) if started else None
     if sock is None:
         echo(
@@ -137,6 +141,20 @@ def stop_daemon() -> None:
         raise _unavailable_exit(exc) from None
     answer = client.control_request(path, {"op": "stop"})
     if answer is None:
+        if os.path.exists(path) or client.daemon_lock_is_held(path):
+            # The socket file (or its daemon lock) is there and nothing
+            # answered: a wedged daemon (stuck imports, SIGSTOP) or a foreign
+            # holder. "No daemon" would be a lie a script acts on, and every
+            # implicit scan keeps paying the connect timeout against this
+            # socket until it is resolved.
+            echo(
+                f"something holds the socket at {path} (or its .lock) but did "
+                "not answer the stop; the process may be wedged. Find it "
+                "(fuser or lsof on the socket) and stop it, or remove the "
+                "socket file.",
+                err=True,
+            )
+            raise typer.Exit(1)
         echo("no express daemon is running")
         return
     if not answer.get("ok"):
@@ -198,6 +216,31 @@ def daemon_status(
         raise _unavailable_exit(exc) from None
     status = client.control_request(path, {"op": "status"})
     if status is None:
+        socket_exists = os.path.exists(path)
+        if socket_exists or client.daemon_lock_is_held(path):
+            # A socket file (or a held daemon lock) with no answer is not
+            # "not running": a wedged daemon or a foreign holder sits there,
+            # and every implicit scan pays the connect timeout against it.
+            if as_json:
+                echo(
+                    json.dumps(
+                        {
+                            "running": False,
+                            "answered": False,
+                            "socket_exists": socket_exists,
+                            "socket": os.fspath(path),
+                        }
+                    )
+                )
+            else:
+                echo(
+                    f"express daemon: something holds the socket at {path} "
+                    "(or its .lock) but did not answer; the process may be "
+                    "wedged. Find it (fuser or lsof on the socket) and stop "
+                    "it, or remove the socket file.",
+                    err=True,
+                )
+            raise typer.Exit(1)
         if as_json:
             echo(json.dumps({"running": False, "socket": os.fspath(path)}))
         else:

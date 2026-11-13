@@ -33,6 +33,7 @@ class _ScriptedDaemon:
         self.path = path
         self.answers = answers
         self.request = None
+        self.go_frame = None
         self.received_fds = []
         self.peer_uid = None
         self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -54,6 +55,15 @@ class _ScriptedDaemon:
             self.request = reader.read_frame()
             for frame in self.answers:
                 runtime.send_frame(conn, frame)
+                if (
+                    self.go_frame is None
+                    and self.request.get("op") == "scan"
+                    and frame.get("ok")
+                ):
+                    # Protocol 2: the real daemon forks only after reading the
+                    # client's go, so the script reads it where the daemon
+                    # would -- right after its scan ok.
+                    self.go_frame = reader.read_frame()
         finally:
             for fd in self.received_fds:
                 os.close(fd)
@@ -102,7 +112,7 @@ class TestTheWire:
         outcome = client._run_on_daemon(
             sock,
             ["scan", "--source-dir", "."],
-            {"ASH_MODE": "local", "UNRELATED": "dropped"},
+            {"ASH_MODE": "local", "UNRELATED": "carried", "LD_PRELOAD": "denied"},
             explicit=False,
         )
         daemon.thread.join(timeout=10)
@@ -114,13 +124,19 @@ class TestTheWire:
         assert daemon.request["cwd"] == os.getcwd()
         # Asserted by names and the one named value, never the mapping itself:
         # a failed assertion prints its operands (tests/utils/env_assertions.py).
+        # The request carries the client's whole environment minus the
+        # denylist: a name no allowlist would have listed travels too.
         carried_names = sorted(daemon.request["env"])
-        assert carried_names == ["ASH_MODE"]
+        assert carried_names == ["ASH_MODE", "UNRELATED"]
         carried_mode = daemon.request["env"].get("ASH_MODE")
         assert carried_mode == "local"
         assert daemon.request["version"] == runtime.ash_version()
         assert daemon.request["fingerprint"] == runtime.runtime_fingerprint()
         assert daemon.request["protocol"] == runtime.PROTOCOL_VERSION
+        # The client's commit: the go answered the ok before anything else,
+        # which is what lets the daemon fork nothing for a client that fell
+        # back cold on a handshake timeout.
+        assert daemon.go_frame == {"op": "go"}
 
     def test_a_stale_refusal_reads_as_stale(self, socket_dir):
         _ScriptedDaemon(
@@ -200,8 +216,10 @@ class TestTheWire:
                     reader = runtime.FrameReader(conn)
                     self.request = reader.read_frame()
                     runtime.send_frame(conn, {"ok": True, "pid": 4242})
-                    # Block as a real daemon does while the scan runs; the next
-                    # frame on this connection is the client's forwarded signal.
+                    # The go answers the ok first (protocol 2), then the
+                    # client blocks on the scan as a real daemon's client
+                    # does; the next frame is the forwarded signal.
+                    self.go_frame = reader.read_frame()
                     self.signal_frame = reader.read_frame()
                     runtime.send_frame(conn, {"exit": 143})
                 finally:

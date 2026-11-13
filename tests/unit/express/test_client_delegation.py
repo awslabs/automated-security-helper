@@ -277,67 +277,64 @@ class TestExpressFlagChoreography:
         assert recorder.calls == ["connect", "run", "stop", "autostart", "await", "run"]
 
 
-class TestHonoredEnv:
-    def test_the_subset_is_ash_git_the_exact_names_and_execution_basics(self):
+class TestRequestEnvironment:
+    """The request carries the client's WHOLE environment minus the denylist,
+    and the child's environment becomes exactly the request's. An allowlist
+    here was one forgotten scanner variable away from "same command, different
+    findings", which is the one thing express may never produce."""
+
+    def test_everything_travels_except_the_denylist(self):
         environ = {
             "ASH_CONFIG": "/cfg.yaml",
-            "ASH_ANYTHING_AT_ALL": "yes",
-            "OCI_RUNNER": "finch",
-            "PATH": "/usr/bin",
-            "HOME": "/u/user",
-            # git's own environment changes what the scan's git commands read;
-            # GIT_INDEX_FILE is what git exports to a commit hook, and a hook's
-            # scan through the daemon must see the same index a cold run sees.
             "GIT_INDEX_FILE": ".git/index.lock-side",
-            "GIT_DIR": ".git",
-            # A cold run's AWS reporters, proxied downloads, TLS trust, container
-            # connection and scanner credentials read these; through the daemon
-            # they travel in the request to the one forked child, so they must
-            # be in the subset or an express scan would differ with no flag.
             "AWS_PROFILE": "reporting",
-            "UV_INDEX_URL": "https://mirror.example/simple",
             "HTTPS_PROXY": "http://proxy.example:3128",
-            "no_proxy": "localhost",
-            "REQUESTS_CA_BUNDLE": "/etc/pki/bundle.pem",
-            "DOCKER_HOST": "unix:///run/podman.sock",
             "SEMGREP_APP_TOKEN": "token",
-            "XDG_CACHE_HOME": "/var/cache/me",
-            "SOME_RANDOM_VAR": "never-carried",
+            # The point of the denylist inversion: names no allowlist named.
+            "SEMGREP_RULES": "p/default",
+            "PIP_INDEX_URL": "https://mirror.example/simple",
+            "KUBECONFIG": "/u/user/.kube/config",
+            "SSH_AUTH_SOCK": "/run/agent.sock",
+            "SOME_RANDOM_VAR": "carried-too",
+            # The denied names.
             "LD_PRELOAD": "never-carried",
+            runtime.CHILD_ENV: "1",
         }
-        carried = runtime.honored_env(environ)
-        assert carried == {
-            "ASH_CONFIG": "/cfg.yaml",
-            "ASH_ANYTHING_AT_ALL": "yes",
-            "OCI_RUNNER": "finch",
-            "PATH": "/usr/bin",
-            "HOME": "/u/user",
-            "GIT_INDEX_FILE": ".git/index.lock-side",
-            "GIT_DIR": ".git",
-            "AWS_PROFILE": "reporting",
-            "UV_INDEX_URL": "https://mirror.example/simple",
-            "HTTPS_PROXY": "http://proxy.example:3128",
-            "no_proxy": "localhost",
-            "REQUESTS_CA_BUNDLE": "/etc/pki/bundle.pem",
-            "DOCKER_HOST": "unix:///run/podman.sock",
-            "SEMGREP_APP_TOKEN": "token",
-            "XDG_CACHE_HOME": "/var/cache/me",
-        }
+        carried = runtime.request_environment(environ)
+        carried_names = sorted(carried)
+        assert "SOME_RANDOM_VAR" in carried_names
+        assert "SEMGREP_RULES" in carried_names
+        assert "LD_PRELOAD" not in carried_names
+        assert runtime.CHILD_ENV not in carried_names
+        assert len(carried_names) == len(environ) - 2
+
+    def test_the_denylist_is_small_and_names_only_express_internals_and_preload(
+        self,
+    ):
+        assert runtime.REQUEST_ENV_DENYLIST == {runtime.CHILD_ENV, "LD_PRELOAD"}
+
+    def test_an_arbitrary_client_variable_reaches_the_child(self):
+        """The regression the inversion exists for: a variable no allowlist
+        ever named must reach the forked scan exactly as a cold run sees it."""
+        child_environ = {}
+        runtime.apply_request_env({"CHECKOV_ANSWER": "42"}, child_environ)
+        assert child_environ == {"CHECKOV_ANSWER": "42"}
 
     def test_a_proxy_variable_reaches_the_child_and_a_stale_one_is_removed(self):
         child_environ = {"HTTPS_PROXY": "http://old-proxy:1", "PATH": "/usr/bin"}
         runtime.apply_request_env(
-            {"HTTPS_PROXY": "http://proxy.example:3128"}, child_environ
+            {"HTTPS_PROXY": "http://proxy.example:3128", "PATH": "/usr/bin"},
+            child_environ,
         )
         assert child_environ["HTTPS_PROXY"] == "http://proxy.example:3128"
-        runtime.apply_request_env({}, child_environ)
+        runtime.apply_request_env({"PATH": "/usr/bin"}, child_environ)
         assert "HTTPS_PROXY" not in child_environ
 
-    def test_the_child_side_removes_stale_honored_names_and_keeps_the_rest(self):
+    def test_the_child_environment_becomes_exactly_the_requests(self):
         daemon_environ = {
-            "ASH_CONFIG": "/stale.yaml",  # honoured, absent from the request: removed
-            "ASH_MODE": "local",  # honoured, present in the request: replaced
-            "LD_LIBRARY_PATH": "/kept",  # not honoured: the daemon's own, kept
+            "ASH_CONFIG": "/stale.yaml",  # absent from the request: removed
+            "ASH_MODE": "local",  # present in the request: replaced
+            "LD_LIBRARY_PATH": "/daemon-own",  # the daemon's residue: removed too
             runtime.CHILD_ENV: "1",  # never removed, never overwritten
         }
         runtime.apply_request_env(
@@ -345,11 +342,10 @@ class TestHonoredEnv:
         )
         assert daemon_environ == {
             "ASH_MODE": "precommit",
-            "LD_LIBRARY_PATH": "/kept",
             runtime.CHILD_ENV: "1",
         }
 
-    def test_an_unhonored_request_key_is_ignored_by_the_child(self):
+    def test_a_denied_request_key_is_ignored_by_the_child(self):
         environ = {}
         runtime.apply_request_env({"LD_PRELOAD": "nope"}, environ)
         assert environ == {}
