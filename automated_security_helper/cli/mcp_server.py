@@ -1612,24 +1612,27 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                             with open(result_file, "r", encoding="utf-8") as f:  # noqa: ASYNC230
                                 result_data = json.load(f)
 
-                            scanner_results[scanner_name][target_type] = result_data
-
+                            # This file's counts are gathered apart and merged
+                            # once every one is a non-negative integer, and the
+                            # file's payload is recorded only then: a bad
+                            # count drops the file from the totals and from
+                            # `scanners` alike, so the two never disagree.
+                            contribution: Dict[str, int] = {}
                             if counts_from_files and isinstance(
                                 result_data.get("severity_counts"), dict
                             ):
-                                # This file's counts are gathered apart and
-                                # merged once every one is a number, so a bad
-                                # count leaves the totals as they were.
-                                contribution: Dict[str, int] = {}
                                 for severity, count in result_data[
                                     "severity_counts"
                                 ].items():
                                     # bool is an int; a count is not a flag.
-                                    if not isinstance(count, int) or isinstance(
-                                        count, bool
+                                    if (
+                                        not isinstance(count, int)
+                                        or isinstance(count, bool)
+                                        or count < 0
                                     ):
                                         raise ValueError(
-                                            "a severity count is not an integer"
+                                            "a severity count is not a "
+                                            "non-negative integer"
                                         )
                                     # A count under a key off the ladder is a
                                     # finding too: it goes to the catch-all
@@ -1642,8 +1645,9 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                                     contribution[bucket] = (
                                         contribution.get(bucket, 0) + count
                                     )
-                                for bucket, count in contribution.items():
-                                    severity_counts[bucket] += count
+                            scanner_results[scanner_name][target_type] = result_data
+                            for bucket, count in contribution.items():
+                                severity_counts[bucket] += count
                         except Exception as e:
                             await _tell_client(
                                 ctx,
@@ -3429,7 +3433,12 @@ async def _stop_on_signal(signals: Optional[Iterable[int]] = None) -> None:
                     timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
                     promptly=True,
                 )
-                await _wait_for_source_jobs(joiner, deadline)
+                if await _wait_for_source_jobs(joiner, deadline):
+                    logger.warning(
+                        "A source clone or delivery was still running when the "
+                        "server exited: the stdio session workspace may hold a "
+                        "partial tree"
+                    )
             exit_at_once(_STOP_SIGNALS[signum])
 
 

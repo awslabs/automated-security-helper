@@ -561,6 +561,8 @@ class TestGetScanProgress:
             # Listed first (sorted), with a good count before the bad one.
             ("bandit", {"critical": 5, "high": "many"}),
             ("checkov", {"critical": 2, "medium": 1}),
+            # A negative count is as bad as a non-numeric one.
+            ("semgrep", {"low": 4, "info": -3}),
         ):
             target = tmp_path / "scanners" / scanner / "source"
             target.mkdir(parents=True)
@@ -588,8 +590,16 @@ class TestGetScanProgress:
         assert result["severity_counts"]["critical"] == 2
         assert result["severity_counts"]["medium"] == 1
         assert result["severity_counts"]["high"] == 0
+        assert result["severity_counts"]["low"] == 0
         warned = [call.args[0] for call in mock_ctx.warning.await_args_list]
         assert any("bandit" in message for message in warned), warned
+        assert any("semgrep" in message for message in warned), warned
+        # The dropped files are dropped from the payloads too, so a client that
+        # sums them agrees with the totals; the good file's payload stays.
+        scanners = result["scanners"]
+        assert "source" not in scanners.get("bandit", {}), scanners
+        assert "source" not in scanners.get("semgrep", {}), scanners
+        assert "source" in scanners["checkov"], scanners
 
     @pytest.mark.asyncio
     async def test_progress_exception_handling(self, mock_ctx):

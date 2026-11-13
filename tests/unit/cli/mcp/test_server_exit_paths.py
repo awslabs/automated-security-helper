@@ -627,8 +627,9 @@ def test_a_signal_while_serving_stops_the_scans_promptly_then_exits(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("still_running", [False, True])
 def test_a_signal_while_serving_stops_the_source_jobs_before_it_exits(
-    monkeypatch, stops, recorded_group, stop_signals_put_back
+    monkeypatch, stops, recorded_group, stop_signals_put_back, still_running
 ):
     """exit_at_once removes the stdio session workspace, so a clone or delivery
     still writing into it would leave the next server a partial tree: the signal
@@ -643,8 +644,10 @@ def test_a_signal_while_serving_stops_the_source_jobs_before_it_exits(
 
     async def wait(given, deadline):
         events.append("wait" if given is joiner else "wait on another joiner")
-        return False
+        return still_running
 
+    warnings: List[str] = []
+    monkeypatch.setattr(mcp_server.logger, "warning", warnings.append)
     monkeypatch.setattr(mcp_server, "_begin_stopping_source_jobs", begin)
     monkeypatch.setattr(mcp_server, "_wait_for_source_jobs", wait)
     monkeypatch.setattr(
@@ -660,6 +663,9 @@ def test_a_signal_while_serving_stops_the_source_jobs_before_it_exits(
     asyncio.run(mcp_server._serve_stdio())
 
     assert events == ["begin", "wait", "exit"], events
+    # A job still running when the wait ends is said, as a possible partial tree.
+    partial = [w for w in warnings if "partial tree" in w]
+    assert bool(partial) is still_running, warnings
 
 
 @pytest.mark.unit
