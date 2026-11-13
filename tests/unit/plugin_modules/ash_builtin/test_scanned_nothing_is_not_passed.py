@@ -83,19 +83,14 @@ def _results_path(argv: list[str], output_flag: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(params=["semgrep", "opengrep"])
+@pytest.fixture(params=["opengrep"])
 def grep_scanner(request, tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    if request.param == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner as scanner_class,
-            SemgrepScannerConfig as config_class,
-        )
-    else:
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
-            OpengrepScanner as scanner_class,
-            OpengrepScannerConfig as config_class,
-        )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner as scanner_class,
+        OpengrepScannerConfig as config_class,
+    )
+
     source = _source(tmp_path, {"a.py": "x = 1\n", "b.py": "y = 2\n"})
     scanner = scanner_class(context=_context(source, tmp_path), config=config_class())
     scanner.dependencies_satisfied = True

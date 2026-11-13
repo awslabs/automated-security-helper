@@ -32,7 +32,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     bandit_scanner,
     cfn_lint_scanner,
     checkov_scanner,
-    semgrep_scanner,
     zizmor_scanner,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
@@ -49,11 +48,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
     ZizmorScanner,
@@ -146,18 +140,6 @@ def _cfn_lint(context, monkeypatch) -> CfnLintScanner:
     )
 
 
-def _semgrep(context, monkeypatch) -> SemgrepScanner:
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
-    monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
-    monkeypatch.setattr(
-        SemgrepScanner, "unsupported_platform_reason", lambda self: None
-    )
-    return SemgrepScanner(
-        context=context,
-        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
-    )
-
-
 def _zizmor(context, monkeypatch) -> ZizmorScanner:
     return ZizmorScanner(
         context=context,
@@ -223,18 +205,6 @@ ROWS = [
         id="cfn-lint-install-failed",
     ),
     pytest.param(
-        semgrep_scanner,
-        _semgrep,
-        SemgrepScanner,
-        _uv_absent,
-        "_validate_tool_dependencies",
-        "semgrep>=1.125.0,<2.0.0",
-        id="semgrep-uv-absent",
-    ),
-    # No semgrep install-failed row: after a failed install, semgrep's last resort
-    # looks the binary up on PATH itself and never asks the resolver (its own test
-    # file pins that), so the uv-absent row above is its one resolver call.
-    pytest.param(
         zizmor_scanner,
         _zizmor,
         ZizmorScanner,
@@ -295,50 +265,3 @@ def test_the_probe_argv_carries_the_pinned_spec(context, monkeypatch):
     argv = spawn.call_args.args[0]
     assert argv[:3] == [UV_PATH, "tool", "run"]
     assert argv[-4:] == ["--from", spec, "bandit", "--version"]
-
-
-@pytest.mark.parametrize("scanner_offline", [True, False], ids=["offline", "online"])
-def test_semgreps_own_offline_mode_reaches_the_real_resolvers_probe(
-    context, monkeypatch, scanner_offline
-):
-    """Through the real resolver, with ASH online: semgrep's check passes its own
-    offline mode as the resolver's ``offline`` keyword, and the spawned probe
-    carries it as ``--offline`` and ``UV_OFFLINE=1``; online, neither. Every other
-    semgrep test replaces the resolver with a ``**kwargs`` stub, so a keyword the
-    resolver does not accept would raise TypeError on every host where uv is not
-    available to the runner and no test would see it; this row calls the real
-    signature.
-
-    A pin on the check's call: the code already passes the keyword. On the code
-    before the check passed ``offline``, the resolver was asked without it, so the
-    probe of a scanner with ``options.offline: true`` ran online under ASH online.
-    """
-    monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    monkeypatch.delenv("UV_OFFLINE", raising=False)
-    spawn = MagicMock(return_value=subprocess.CompletedProcess([], 0, "1.180.0\n", ""))
-    monkeypatch.setattr(uv_tool_runner, "spawn_run", spawn)
-    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: UV_PATH)
-    monkeypatch.setattr(uv_tool_runner, "find_executable", lambda name: None)
-    scanner = _semgrep(context, monkeypatch)
-    # The scanner's own mode, as the mixin resolves it from options.offline; ASH's
-    # mode stays off (ASH_OFFLINE unset), so only the keyword can carry it.
-    monkeypatch.setattr(
-        SemgrepScanner, "_is_offline_mode", lambda self: scanner_offline
-    )
-    _uv_absent(monkeypatch, SemgrepScanner)
-    _reset_uv_tool_runner_caches()
-    try:
-        assert scanner._validate_tool_dependencies() is True
-    finally:
-        _reset_uv_tool_runner_caches()
-
-    spec = scanner._uv_from_spec()
-    assert spec is not None and spec.startswith("semgrep")
-    argv = spawn.call_args.args[0]
-    env = spawn.call_args.kwargs["env"]
-    assert argv[0] == UV_PATH
-    assert argv[-4:] == ["--from", spec, "semgrep", "--version"]
-    assert ("--offline" in argv) is scanner_offline, argv
-    uv_offline_set = env.get("UV_OFFLINE") == "1"
-    uv_names = sorted(key for key in env if key.startswith("UV_"))
-    assert uv_offline_set is scanner_offline, uv_names

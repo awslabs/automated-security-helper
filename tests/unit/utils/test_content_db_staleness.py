@@ -332,7 +332,6 @@ CASES = {
 CASE_TIERS = {
     "grype-db": pytest.mark.integration,
     "trivy-db": pytest.mark.integration,
-    "semgrep-offline-rules": pytest.mark.unit,
     "opengrep-offline-rules": pytest.mark.unit,
 }
 assert CASES.keys() == CASE_TIERS.keys(), (
@@ -528,9 +527,7 @@ class TestMeasurement:
         assert record.absent, record.error
 
     @pytest.mark.unit
-    @pytest.mark.parametrize(
-        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
-    )
+    @pytest.mark.parametrize("name", ["opengrep-offline-rules"])
     def test_a_ruleset_with_no_directory_configured_is_absent(self, name):
         record = staleness.measure(
             cdb.get(name), staleness.ProbeContext(env={}), cdb.STALENESS_WARN
@@ -538,9 +535,7 @@ class TestMeasurement:
         assert record.absent and "no offline rules cache directory" in record.error
 
     @pytest.mark.unit
-    @pytest.mark.parametrize(
-        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
-    )
+    @pytest.mark.parametrize("name", ["opengrep-offline-rules"])
     def test_a_ruleset_directory_without_rules_files_is_absent(self, tmp_path, name):
         cache = tmp_path / "rules"
         cache.mkdir()

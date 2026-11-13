@@ -55,7 +55,7 @@ import pytest
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.unit.test_base_image_override_reaches_every_build_entrypoint import (
-    _REQUIRES_BASH,
+    _REQUIRES_ASH_SCRIPT,
 )
 from tests.unit.test_build_date_reaches_every_build_entrypoint import (
     _PYTHON_RECORDER,
@@ -184,6 +184,21 @@ def _has_pair(words: List[str], first: str, second: str) -> bool:
     return any(words[i : i + 2] == [first, second] for i in range(len(words) - 1))
 
 
+def _ambient_ash_names() -> List[str]:
+    """The developer's variables the scan's options and config resolution read."""
+    return [
+        name
+        for name in os.environ
+        if name.startswith("ASH_") or name in ("OCI_RUNNER", "OCI_RUNNER_WRAPPER")
+    ]
+
+
+def _without_ash_environment(monkeypatch) -> None:
+    """Unset what the in-process paths read, as the subprocesses' allowlist does."""
+    for name in _ambient_ash_names():
+        monkeypatch.delenv(name)
+
+
 def _parse_inner(
     inner: List[str], tmp_path: Path
 ) -> Tuple[int, str, Optional[List[str]]]:
@@ -194,7 +209,20 @@ def _parse_inner(
     directories under *tmp_path*. The overrides are None when no scan was reached.
     A usage error exits ASH_EXIT_USAGE_ERROR (5) here as from the ``ash`` entry
     point: cli/main.py maps click's usage errors to it.
+
+    The parse runs under the same rule as every subprocess here, the developer's
+    ASH_* variables out of it: an exported ASH_CONFIG or ASH_MODE would otherwise
+    reach the options' ``envvar=`` and flip or mask what the words say.
     """
+    code, output, captured = _parse_inner_captured(inner, tmp_path)
+    overrides = captured.get("config_overrides")
+    return code, output, None if overrides is None else list(overrides)
+
+
+def _parse_inner_captured(
+    inner: List[str], tmp_path: Path
+) -> Tuple[int, str, Dict[str, object]]:
+    """``_parse_inner`` with everything the scan would have been called with."""
     from unittest import mock
 
     from typer.testing import CliRunner
@@ -210,13 +238,14 @@ def _parse_inner(
     with mock.patch.object(
         scan_module, "run_ash_scan", lambda **kwargs: captured.update(kwargs)
     ):
-        result = CliRunner().invoke(app, words, catch_exceptions=False)
-    overrides = captured.get("config_overrides")
-    return (
-        result.exit_code,
-        result.output,
-        None if overrides is None else list(overrides),
-    )
+        # env= with None unsets the variable for the call and restores it after.
+        result = CliRunner().invoke(
+            app,
+            words,
+            catch_exceptions=False,
+            env=dict.fromkeys(_ambient_ash_names()),
+        )
+    return result.exit_code, result.output, captured
 
 
 def _scan_overrides(inner: List[str], tmp_path: Path) -> List[str]:
@@ -227,6 +256,25 @@ def _scan_overrides(inner: List[str], tmp_path: Path) -> List[str]:
     code, output, overrides = _parse_inner(inner, tmp_path)
     assert code == 0 and overrides is not None, (inner, output)
     return overrides
+
+
+@pytest.mark.unit
+def test_an_exported_config_variable_does_not_reach_the_in_process_parse(
+    tmp_path, monkeypatch
+):
+    """The planted control for the isolation in ``_parse_inner``: with ``ASH_CONFIG``
+    and ``ASH_MODE`` exported, the parse still sees neither, and the same words
+    give the same call to the scan as with a clean environment."""
+    words = ["scan", "--sandbox", "off", "--source-dir", "/src"]
+    code, output, clean = _parse_inner_captured(words, tmp_path)
+    assert code == 0 and "config_overrides" in clean, output
+
+    monkeypatch.setenv("ASH_CONFIG", str(tmp_path / "planted-config.yaml"))
+    monkeypatch.setenv("ASH_MODE", "container")
+    code, output, planted = _parse_inner_captured(words, tmp_path)
+
+    assert code == 0, output
+    assert planted == clean, (planted, clean)
 
 
 #: A --cli-json-input document that asks for a sandbox, and has an override of its
@@ -313,7 +361,7 @@ def _assert_sandbox_off(run_argv: List[str], is_a_scan: bool) -> None:
 
 @pytest.mark.integration
 class TestTheBashEntrypoint:
-    pytestmark = _REQUIRES_BASH
+    pytestmark = _REQUIRES_ASH_SCRIPT
 
     @pytest.mark.parametrize("flags", _REFUSED, ids=" ".join)
     def test_refused_before_the_image_is_built(self, tmp_path, flags):
@@ -470,7 +518,7 @@ class TestTheBashEntrypoint:
 
     @pytest.mark.parametrize("command", [[], ["scan"]], ids=["no-command", "scan"])
     def test_a_repo_config_mode_resolves_off_through_resolve_config(
-        self, tmp_path, command
+        self, tmp_path, command, monkeypatch
     ):
         """The scan's own config resolution, over a repository's .ash/.ash.yaml.
 
@@ -494,6 +542,7 @@ class TestTheBashEntrypoint:
             'sandbox:\n  mode: "landlock"\n', encoding="utf-8"
         )
 
+        _without_ash_environment(monkeypatch)
         resolved = resolve_config(source_dir=repository, config_overrides=overrides)
         without_the_flag = resolve_config(source_dir=repository, config_overrides=[])
 
@@ -953,7 +1002,10 @@ def _invoke_ash(
             "    'RESULT returned'",
             "} catch {",
             "    'RESULT threw'",
-            "    'MESSAGE ' + $_.Exception.Message",
+            # One JSON line, so a message of several lines (or one whose later
+            # line begins CODE or RESULT) is read whole and cannot be mistaken
+            # for another field.
+            "    'MESSAGE ' + ($_.Exception.Message | ConvertTo-Json -Compress)",
             "}",
             "'CODE ' + $global:LASTEXITCODE",
         ]
@@ -977,7 +1029,7 @@ def _invoke_ash(
 
     return _Invocation(
         how=_field("RESULT"),
-        message=_field("MESSAGE") if _field("RESULT") == "threw" else "",
+        message=(json.loads(_field("MESSAGE")) if _field("RESULT") == "threw" else ""),
         code=_field("CODE"),
         calls=_calls(argv_log, guard_log),
         output=proc.stdout + proc.stderr,
@@ -1140,6 +1192,20 @@ class TestThePowerShellEntrypoint:
         assert result.code == "5", result.code
         assert chr(0x9B) not in result.message, repr(result.message)
         assert "\\x9B2J\\x9B31mRED" in result.message, repr(result.message)
+
+    def test_a_newline_in_the_value_cannot_forge_a_line(self, pwsh, tmp_path):
+        """The twin of the bash test: a backtick-n in the --sandbox value is a real
+        newline in PowerShell, and the refusal, read whole from its JSON line, never
+        has a line of its own that starts with the forged words."""
+        result = _invoke_ash(
+            pwsh, tmp_path, "--sandbox", '"x`nINFO: scan passed, 0 findings"'
+        )
+
+        assert result.how == "threw", (result.how, result.output)
+        assert result.code == "5", result.code
+        lines = result.output.splitlines() + result.message.splitlines()
+        assert not any(line.startswith("INFO:") for line in lines), lines
+        assert result.calls == [], result.calls
 
     @pytest.mark.parametrize("spelling", ["off", "OFF"])
     def test_off_builds_and_reaches_the_scan(self, pwsh, tmp_path, spelling):
@@ -2324,11 +2390,19 @@ class TestTheWrappersListsAreTheClis:
         return typer.main.get_command(app)
 
     @staticmethod
-    def _bash_list(name: str) -> set:
+    def _bash_list(name: str, expected: set) -> None:
+        """Assert the root bash script's list equals ``expected``.
+
+        The script was deleted by a533dd6531a (absorbed into the ash CLI), so on this
+        branch there is nothing to compare and only the PowerShell wrapper is checked.
+        If the script returns, the comparison runs again.
+        """
+        if not ASH_SCRIPT.is_file():
+            return
         script = ASH_SCRIPT.read_text(encoding="utf-8")
         found = re.findall(rf'^\s*{name}="([^"]*)"$', script, re.MULTILINE)
         assert len(found) == 1, (name, found)
-        return set(found[0].split())
+        assert set(found[0].split()) == expected
 
     @staticmethod
     def _ps1_list(name: str) -> set:
@@ -2340,7 +2414,7 @@ class TestTheWrappersListsAreTheClis:
     def test_the_commands_are_the_roots(self):
         commands = set(self._root().commands)
 
-        assert self._bash_list("ASH_SUBCOMMANDS") == commands
+        self._bash_list("ASH_SUBCOMMANDS", commands)
         assert self._ps1_list("ashSubcommands") == commands
 
     def test_the_options_that_take_a_value_are_the_roots(self):
@@ -2352,7 +2426,7 @@ class TestTheWrappersListsAreTheClis:
             for spelling in option.opts
         }
 
-        assert self._bash_list("ASH_ROOT_VALUE_OPTIONS") == takes_a_value
+        self._bash_list("ASH_ROOT_VALUE_OPTIONS", takes_a_value)
         assert self._ps1_list("ashRootValueOptions") == takes_a_value
         # The wrappers skip one word after each of them.
         assert all(option.nargs == 1 for option in options)
@@ -2365,7 +2439,7 @@ class TestTheWrappersListsAreTheClis:
             if "sandbox" in {param.name for param in command.params}
         }
 
-        assert self._bash_list("ASH_TAKES_SANDBOX") == takes_it
+        self._bash_list("ASH_TAKES_SANDBOX", takes_it)
         assert self._ps1_list("ashTakesSandbox") == takes_it
         # With no command named, ash scans, and takes --sandbox there too.
         assert "sandbox" in {param.name for param in root.params}
@@ -2398,9 +2472,7 @@ class TestTheWrappersListsAreTheClis:
             )
         }
 
-        assert (
-            self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS") == dash_o_is_the_commands
-        )
+        self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS", dash_o_is_the_commands)
         # The runner's side of the rule: scan's own -o is the runtime alias.
         scan_dash_o = [
             option

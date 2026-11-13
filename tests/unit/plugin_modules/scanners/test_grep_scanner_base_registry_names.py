@@ -24,10 +24,10 @@ from pathlib import Path
 
 import pytest
 
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScanner,
+    OpengrepScannerConfig,
+    OpengrepScannerConfigOptions,
 )
 
 pytestmark = pytest.mark.unit
@@ -39,11 +39,11 @@ def _configs(scanner) -> list[str]:
     return [arg.value for arg in scanner.args.extra_args if arg.key == "--config"]
 
 
-def _offline_scanner(test_plugin_context, config: str) -> SemgrepScanner:
-    return SemgrepScanner(
+def _offline_scanner(test_plugin_context, config: str) -> OpengrepScanner:
+    return OpengrepScanner(
         context=test_plugin_context,
-        config=SemgrepScannerConfig(
-            options=SemgrepScannerConfigOptions(offline=True, config=config)
+        config=OpengrepScannerConfig(
+            options=OpengrepScannerConfigOptions(offline=True, config=config)
         ),
     )
 
@@ -79,11 +79,11 @@ def test_a_registry_name_is_not_local_rules_even_when_a_path_of_that_name_exists
         (root / name).mkdir(parents=True, exist_ok=True)
         (root / name / "x.yaml").write_text(RULE, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
 
     scanner = _offline_scanner(test_plugin_context, name)
 
-    assert "SEMGREP_RULES_CACHE_DIR" in (scanner.dependency_unavailable_reason or "")
+    assert "OPENGREP_RULES_CACHE_DIR" in (scanner.dependency_unavailable_reason or "")
     # The planted directories by resolved path, as the scanner emits them: a bare
     # substring test would read "auto" inside the bundled rules' own path
     # (automated_security_helper/...).
@@ -98,7 +98,7 @@ def test_a_local_path_outside_the_tree_is_local_rules(
     path, is the operator's rules."""
     (tmp_path / "p" / "ci").mkdir(parents=True)
     (tmp_path / "p" / "ci" / "x.yaml").write_text(RULE, encoding="utf-8")
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
 
     scanner = _offline_scanner(test_plugin_context, str(tmp_path / "p" / "ci"))
 
@@ -126,14 +126,14 @@ def test_a_local_path_inside_the_scanned_tree_is_refused(
     (source_dir / "p" / "ci").mkdir(parents=True, exist_ok=True)
     (source_dir / "p" / "ci" / "x.yaml").write_text(RULE, encoding="utf-8")
     monkeypatch.chdir(source_dir)
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
 
     with caplog.at_level("WARNING"):
         scanner = _offline_scanner(test_plugin_context, "./p/ci")
 
     reason = scanner.dependency_unavailable_reason or ""
-    assert "scanners.semgrep.options.config" in reason, reason
-    assert "SEMGREP_RULES_CACHE_DIR" not in reason, reason
+    assert "scanners.opengrep.options.config" in reason, reason
+    assert "OPENGREP_RULES_CACHE_DIR" not in reason, reason
     assert scanner.validate_plugin_dependencies() is False
     assert not any(value.endswith("/p/ci") for value in _configs(scanner)), _configs(
         scanner
@@ -142,7 +142,7 @@ def test_a_local_path_inside_the_scanned_tree_is_refused(
     refusals = [
         message
         for message in messages
-        if message.startswith("Ignoring scanners.semgrep.options.config (")
+        if message.startswith("Ignoring scanners.opengrep.options.config (")
     ]
     reasons = [
         message for message in messages if "names rules ASH cannot pass" in message

@@ -15,7 +15,7 @@ have read and did not, because ASH runs both with ``--x-ignore-semgrepignore-fil
   resolution warnings; it used to be neither recorded nor logged without one.
 - A disabled scanner runs neither tool, so it records no note; it used to, because
   the arguments are built at construction for every registered scanner.
-- ``SemgrepScannerConfig.enabled`` defaults to False on Windows, where semgrep has no
+- ``OpengrepScannerConfig.enabled`` defaults to False on Windows, where semgrep has no
   build, so a scanner built with the default config records no note there. A test
   that wants the note says ``enabled=True`` itself.
 
@@ -36,10 +36,10 @@ from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     _semgrepignore_files,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScanner,
+    OpengrepScannerConfig,
+    OpengrepScannerConfigOptions,
 )
 
 pytestmark = pytest.mark.unit
@@ -50,8 +50,8 @@ def _no_tool_probe(monkeypatch):
     from tests.utils.tool_guard import stub_tool_probes
 
     stub_tool_probes(monkeypatch)
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
-    monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.setattr(OpengrepScanner, "_scanner_offline", lambda self: False)
 
 
 def _planted(*paths: Path):
@@ -120,12 +120,12 @@ def test_a_file_above_a_scanned_directory_outside_any_repository_is_not_noted(
         source_dir=source, output_dir=tmp_path / "out", config=config
     )
 
-    SemgrepScanner(
+    OpengrepScanner(
         context=context,
-        # Enabled on every platform: the default turns semgrep off on Windows, and a
+        # Enabled on every platform: the default turns opengrep off on Windows, and a
         # disabled scanner writes no note.
-        config=SemgrepScannerConfig(
-            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        config=OpengrepScannerConfig(
+            enabled=True, options=OpengrepScannerConfigOptions(offline=False)
         ),
     )
 
@@ -149,20 +149,20 @@ def test_the_note_is_logged_when_the_config_keeps_no_warnings_list(
     (source / ".semgrepignore").write_text("tests/\n", encoding="utf-8")
     test_plugin_context.config._resolution_warnings = None
     logged: list[tuple[int, str]] = []
-    original = SemgrepScanner._plugin_log
+    original = OpengrepScanner._plugin_log
 
     def recording_log(self, message, *args, **kwargs):
         logged.append((kwargs.get("level", logging.INFO), str(message)))
         return original(self, message, *args, **kwargs)
 
-    monkeypatch.setattr(SemgrepScanner, "_plugin_log", recording_log)
+    monkeypatch.setattr(OpengrepScanner, "_plugin_log", recording_log)
 
-    SemgrepScanner(
+    OpengrepScanner(
         context=test_plugin_context,
-        # Enabled on every platform: the default turns semgrep off on Windows, and a
+        # Enabled on every platform: the default turns opengrep off on Windows, and a
         # disabled scanner writes no note.
-        config=SemgrepScannerConfig(
-            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        config=OpengrepScannerConfig(
+            enabled=True, options=OpengrepScannerConfigOptions(offline=False)
         ),
     )
 
@@ -183,10 +183,10 @@ def test_a_disabled_scanner_records_no_note(test_plugin_context):
     (source / ".semgrepignore").write_text("tests/\n", encoding="utf-8")
     warnings = test_plugin_context.config._resolution_warnings
 
-    SemgrepScanner(
+    OpengrepScanner(
         context=test_plugin_context,
-        config=SemgrepScannerConfig(
-            enabled=False, options=SemgrepScannerConfigOptions(offline=False)
+        config=OpengrepScannerConfig(
+            enabled=False, options=OpengrepScannerConfigOptions(offline=False)
         ),
     )
 
@@ -200,12 +200,12 @@ def test_an_enabled_scanner_records_the_note(test_plugin_context):
     (source / ".semgrepignore").write_text("tests/\n", encoding="utf-8")
     warnings = test_plugin_context.config._resolution_warnings
 
-    SemgrepScanner(
+    OpengrepScanner(
         context=test_plugin_context,
-        # Enabled on every platform: the default turns semgrep off on Windows, and a
+        # Enabled on every platform: the default turns opengrep off on Windows, and a
         # disabled scanner writes no note.
-        config=SemgrepScannerConfig(
-            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        config=OpengrepScannerConfig(
+            enabled=True, options=OpengrepScannerConfigOptions(offline=False)
         ),
     )
 
@@ -228,12 +228,12 @@ def test_a_scanner_left_at_its_default_notes_the_file_only_where_it_is_enabled(
     source.mkdir(parents=True, exist_ok=True)
     (source / ".semgrepignore").write_text("tests/\n", encoding="utf-8")
     warnings = test_plugin_context.config._resolution_warnings
-    config = SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False))
+    config = OpengrepScannerConfig(options=OpengrepScannerConfigOptions(offline=False))
     # The default itself: if semgrep gains a Windows build and the default changes,
     # this is the line that fails, and the docstring above is updated with it.
     assert config.enabled is (platform.system().lower() != "windows")
 
-    SemgrepScanner(context=test_plugin_context, config=config)
+    OpengrepScanner(context=test_plugin_context, config=config)
 
     noted = [w for w in warnings if (source / ".semgrepignore").as_posix() in w]
     assert bool(noted) is config.enabled, (config.enabled, warnings)

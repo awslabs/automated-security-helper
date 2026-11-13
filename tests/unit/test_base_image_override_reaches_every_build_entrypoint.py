@@ -91,12 +91,15 @@ nerdctl, finch and podman have no binary on the machine that was measured on, so
 rest on the CI log and on their sources; only CI closes that.
 """
 
+import os
+import shutil
 from pathlib import Path
 
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+ASH_SCRIPT = REPO_ROOT / "ash"
 PS1 = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PY_BUILD = (
     REPO_ROOT / "automated_security_helper" / "interactions" / "run_ash_container.py"
@@ -108,6 +111,32 @@ OVERRIDE = "ASH_BASE_IMAGE_OVERRIDE"
 # A digest-pinned reference, because that is the shape the pre-pull exports: it verified the
 # digest before falling back, so it hands the build content rather than a name.
 PINNED_REF = "docker.io/library/python@sha256:" + "b" * 64
+
+# Shared skip guards for tests that run a bash script. Other test modules import both.
+_REQUIRES_BASH = [
+    # Windows users invoke ASH through utils/ash_helpers.ps1. It also cannot work there: on a
+    # GitHub Windows runner shutil.which("bash") finds C:\Windows\System32\bash.exe, the WSL
+    # launcher stub, which is on PATH whether or not a distribution is installed.
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="bash on Windows runners is the WSL stub",
+    ),
+    pytest.mark.skipif(
+        shutil.which("bash") is None, reason="the entrypoint under test is bash"
+    ),
+]
+
+# For the legs that drive the root ./ash script itself. That script was deleted when it was
+# absorbed into the Python CLI (commit a533dd6531a, "absorb the root bash entrypoint into the
+# ash CLI"), so on this branch those legs skip; they run again only if the script returns,
+# and test_the_root_bash_entrypoint_stays_absent then fails to say it needs a guard here.
+_REQUIRES_ASH_SCRIPT = [
+    *_REQUIRES_BASH,
+    pytest.mark.skipif(
+        not ASH_SCRIPT.is_file(),
+        reason="root ./ash script removed by a533dd6531a (absorbed into the ash CLI)",
+    ),
+]
 
 
 @pytest.mark.unit
