@@ -469,6 +469,25 @@ ASH_CONFIG_EXTENDS_MAX_FILES = 50
 # (see load_config_yaml in config/ash_config.py).
 ASH_CONFIG_MAX_FILE_BYTES = 1024 * 1024
 
+# The scanners `--mode precommit` always adds to the selection. A module constant
+# so that .pre-commit-hooks.yaml can be checked against it: the `ash` hook's
+# environment has to install whatever these need from Python (cdk-nag needs the
+# `cdk` extra), or every hook run ends with a MISSING scanner and exit 1.
+# tests/unit/test_pre_commit_hooks_manifest.py holds the two together.
+#
+# It lives here, not in interactions/run_ash_scan.py where the precommit fold
+# uses it, because the scan command's --mode help text names these scanners:
+# help text is evaluated when cli/scan.py is imported, which happens on every
+# `ash` invocation, and importing run_ash_scan there would pull the whole scan
+# engine into `ash --version`. run_ash_scan re-exports it for its callers.
+PRECOMMIT_MODE_SCANNERS: Tuple[str, ...] = (
+    "bandit",
+    "detect-secrets",
+    "checkov",
+    "cdk-nag",
+    "npm-audit",
+)
+
 # The environment variable names an ASH config file may interpolate.
 #
 # Why there is a bound at all

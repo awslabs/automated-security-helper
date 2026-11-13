@@ -61,6 +61,7 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_CODES,
     ASH_EXIT_USAGE_ERROR,
     ASH_WORK_DIR_NAME,
+    PRECOMMIT_MODE_SCANNERS,
     is_offline_mode,
 )
 from automated_security_helper.core.scanner_selection import SelectionOrigin
@@ -395,18 +396,11 @@ class ScanOptions(BaseModel):
 # not rank. tests/unit/cli/test_min_severity_is_validated.py holds the two together.
 _SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
 
-# The scanners `--mode precommit` always adds to the selection. A module constant
-# so that .pre-commit-hooks.yaml can be checked against it: the `ash` hook's
-# environment has to install whatever these need from Python (cdk-nag needs the
-# `cdk` extra), or every hook run ends with a MISSING scanner and exit 1.
-# tests/unit/test_pre_commit_hooks_manifest.py holds the two together.
-PRECOMMIT_MODE_SCANNERS: Tuple[str, ...] = (
-    "bandit",
-    "detect-secrets",
-    "checkov",
-    "cdk-nag",
-    "npm-audit",
-)
+# The scanners `--mode precommit` always adds to the selection now live in
+# core/constants.py (see the comment there for why: the scan command's help text
+# names them, and importing this module for a help string would pull the scan
+# engine into every `ash` startup). PRECOMMIT_MODE_SCANNERS is imported above
+# and stays importable from this module, where callers and tests found it.
 
 # ---------------------------------------------------------------------------
 # Scanner completeness
