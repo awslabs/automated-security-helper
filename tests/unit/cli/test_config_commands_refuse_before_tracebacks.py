@@ -374,8 +374,7 @@ def test_update_renders_keep_from_from_the_bytes_it_compared(config_file, monkey
     file is rewritten on disk right after the compared bytes are parsed (the
     first thing the command does once the comparison has passed), and the
     rewrite keeps a top-level key no configuration field owns (``$schema``)
-    from those bytes, not from the file as it is by then. A reader that fails
-    on every open is never reached either."""
+    from those bytes, not from the file as it is by then."""
     compared_key = "$schema: https://example.invalid/compared.json\n"
     config_file.write_text(compared_key + VALID_CONFIG, encoding="utf-8")
     real_parse = config_cli.parse_config_text
@@ -388,11 +387,7 @@ def test_update_renders_keep_from_from_the_bytes_it_compared(config_file, monkey
         )
         return parsed
 
-    def gone(*_args, **_kwargs):
-        raise OSError("the file went away")
-
     monkeypatch.setattr(config_cli, "parse_config_text", parse_then_swap)
-    monkeypatch.setattr(config_cli, "read_config_file", gone)
 
     result = _invoke(["update", str(config_file), "--set", "project_name=x"])
 
@@ -829,3 +824,72 @@ def test_the_wizard_finds_the_config_where_ash_source_dir_points(tmp_path, monke
     data = yaml.safe_load(config.read_text(encoding="utf-8"))
     assert data["project_name"] == "moved"
     assert not (cwd / ".ashrc.yaml").exists()
+
+
+@NOT_ON_WINDOWS
+def test_get_refuses_a_symlink_loop_positional_beside_a_different_config(tmp_path):
+    """`get loop.yaml --config other.yaml` compared the two with a bare
+    Path.resolve, which raises on a symbolic link loop: a traceback in place of
+    the two-files refusal."""
+    loop = tmp_path / "loop.yaml"
+    loop.symlink_to(loop)
+    other = tmp_path / "other.yaml"
+    other.write_text(VALID_CONFIG, encoding="utf-8")
+
+    result = _invoke(["get", str(loop), "--config", str(other)])
+
+    assert _no_traceback(result), repr(result.exception)
+    # click's own usage-error status: the `ash` entry point maps it to the
+    # documented usage exit (test_usage_errors_show_values_once).
+    assert result.exit_code == 2, result.output
+    assert "names two config files" in result.output, result.output
+
+
+def _edit_the_file_at_the_first_prompt(monkeypatch, edit) -> None:
+    """Run ``edit`` once, when the wizard first prompts, as an operator editing
+    the file in another window while the questions are answered."""
+    original_prompt = config_cli.prompt
+    state = {"done": False}
+
+    def prompt(*args, **kwargs):
+        if not state["done"]:
+            state["done"] = True
+            edit()
+        return original_prompt(*args, **kwargs)
+
+    monkeypatch.setattr(config_cli, "prompt", prompt)
+
+
+def test_the_wizard_refuses_a_file_edited_while_it_prompts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "cfg.yaml"
+    target.write_text(VALID_CONFIG, encoding="utf-8")
+    edited = "project_name: edited-elsewhere\nfail_on_findings: false\n"
+    script_wizard(monkeypatch, ["from-wizard", ""])
+    _edit_the_file_at_the_first_prompt(
+        monkeypatch, lambda: target.write_text(edited, encoding="utf-8")
+    )
+
+    result = _invoke(["wizard", "--config", str(target)])
+
+    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
+    assert _no_traceback(result), repr(result.exception)
+    assert "changed while the wizard was running" in result.output, result.output
+    assert target.read_text(encoding="utf-8") == edited
+
+
+def test_the_wizard_refuses_a_file_created_while_it_prompts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "new.yaml"
+    created = "project_name: created-elsewhere\n"
+    script_wizard(monkeypatch, ["from-wizard", ""])
+    _edit_the_file_at_the_first_prompt(
+        monkeypatch, lambda: target.write_text(created, encoding="utf-8")
+    )
+
+    result = _invoke(["wizard", "--config", str(target)])
+
+    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
+    assert _no_traceback(result), repr(result.exception)
+    assert "changed while the wizard was running" in result.output, result.output
+    assert target.read_text(encoding="utf-8") == created

@@ -68,7 +68,6 @@ from automated_security_helper.config.config_sources import (
     is_toml_file,
     parse_config_text,
     read_config_bytes,
-    read_config_file,
     refuse_unless_a_file,
     resolve_config_document,
     unparsed_config_reason,
@@ -349,6 +348,34 @@ def _refuse_missing_config(config_path: str | Path) -> NoReturn:
     # line of its own.
     secho(shown_on_one_line(message), fg=typer.colors.RED)
     raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
+
+
+def _refuse_a_file_changed_underneath(
+    config_path: Path, original_bytes: bytes | None
+) -> None:
+    """Exit 3 when the wizard's config file is no longer what it started from.
+
+    ``original_bytes`` is the file as the wizard read it, or None when there was
+    no file. The wizard prompts for minutes before it writes, so a file edited
+    meanwhile, or created where there was none, is refused rather than replaced
+    with answers given against the older text (``update`` does the same).
+    """
+    try:
+        if original_bytes is None:
+            changed = os.path.lexists(config_path)
+        else:
+            changed = read_config_bytes(config_path) != original_bytes
+    except (OSError, ASHConfigValidationError):
+        changed = True
+    if changed:
+        secho(
+            shown_on_one_line(
+                f"Not writing {config_path}: the file changed while the wizard "
+                "was running; run the wizard again."
+            ),
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
 
 
 def _refuse_unless_a_file(config_path: Path) -> None:
@@ -951,7 +978,9 @@ def _named_config(
         # click, whose ParameterSource is not click's.
         source = getattr(ctx.get_parameter_source("config"), "name", "")
         from_command_line = source == "COMMANDLINE"
-        if from_command_line and Path(positional).resolve() != Path(option).resolve():
+        # _same_file: resolve() raises on a symlink loop or a NUL, and a path
+        # that cannot be resolved is not the same file as the other one.
+        if from_command_line and not _same_file(Path(positional), Path(option)):
             # The paths as given, not by repr: the usage error's printer shows
             # them once, on one line.
             raise PathRefused(
@@ -2708,6 +2737,7 @@ def wizard(
         )
         raise typer.Exit(3)
     existing_data: Any = None
+    original_bytes: bytes | None = None
     if config_exists:
         console.print(
             Panel(
@@ -2723,8 +2753,16 @@ def wizard(
             )
         )
         try:
+            # One read feeds keep_from, as update's does; the load opens the
+            # file itself, so the bytes are compared again once it is done.
+            original_bytes = read_config_bytes(config_path)
             ash_config = AshConfig.from_file(config_path=config_path)
-            existing_data = read_config_file(config_path)
+            existing_data = parse_config_text(
+                config_path,
+                original_bytes.decode(
+                    "utf-8-sig" if is_json_file(config_path) else "utf-8"
+                ),
+            )
         except (
             ValidationError,
             ASHConfigValidationError,
@@ -2751,6 +2789,7 @@ def wizard(
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
+        _refuse_a_file_changed_underneath(config_path, original_bytes)
     else:
         console.print(
             Panel(
@@ -2909,6 +2948,9 @@ def wizard(
         comments.append(
             "# Reminder: export ASH_OFFLINE=YES before running ASH for offline mode"
         )
+    # The prompts took as long as the operator did: a file edited, or created
+    # where there was none, since the start is not written over.
+    _refuse_a_file_changed_underneath(config_path, original_bytes)
     # An unwritable target ended in a traceback after every prompt was answered;
     # update reports the same failure on one line.
     try:
