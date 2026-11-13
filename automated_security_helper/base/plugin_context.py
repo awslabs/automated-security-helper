@@ -202,10 +202,12 @@ class PluginContext(BaseModel):
         Field(
             description=(
                 "Under --mode precommit --staged, the staged files as POSIX paths "
-                "relative to source_dir: the scanner target set. None (the "
-                "default) means no staged scope; the whole tree is scanned. An "
-                "empty list means something was staged and none of it is inside "
-                "source_dir, so every scanner has nothing to scan."
+                "relative to source_dir: the scanner target set. Read from git "
+                "diff --cached, so a deletion is not listed (a deleted file "
+                "cannot be scanned) and a rename appears at its new path. None "
+                "(the default) means no staged scope; the whole tree is scanned. "
+                "An empty list means something was staged and none of it is "
+                "inside source_dir, so every scanner has nothing to scan."
             )
         ),
     ] = None
