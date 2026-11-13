@@ -41,6 +41,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "render_quick_create_links.py"
 DOC = REPO_ROOT / "deploy" / "quick-create-links.md"
