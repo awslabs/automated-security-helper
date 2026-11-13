@@ -281,6 +281,27 @@ def _verdict_store_dir() -> Optional[Path]:
         return None
 
 
+def _secure_store_open_supported() -> bool:
+    """Whether this platform has every primitive the store's checks rely on.
+
+    The store opens its directory with ``O_DIRECTORY | O_NOFOLLOW``, compares
+    the owner with ``geteuid``, tightens the mode with ``fchmod`` and reads and
+    writes records relative to the descriptor (``dir_fd``). Windows has none of
+    these: ``os.O_DIRECTORY`` does not exist there, so naming it raises
+    ``AttributeError``. Without them the open alone cannot prove that the path
+    is a real directory, not a symlink and ours, so the store is not used at
+    all (the callers probe as they would with no store) rather than opened
+    with weaker checks.
+    """
+    return (
+        hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "geteuid")
+        and hasattr(os, "fchmod")
+        and os.open in os.supports_dir_fd
+    )
+
+
 def _open_verdict_store(*, create: bool) -> Optional[int]:
     """The store directory's descriptor, or None when it cannot be used.
 
@@ -291,6 +312,8 @@ def _open_verdict_store(*, create: bool) -> Optional[int]:
     used, and one of ours laxer than 0700 is tightened. The caller closes the
     descriptor.
     """
+    if not _secure_store_open_supported():
+        return None
     directory = _verdict_store_dir()
     if directory is None:
         return None
