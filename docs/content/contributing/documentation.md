@@ -12,7 +12,7 @@ There are three layers:
   and compare it with the code: the CLI, the config models, the environment variables
   ASH reads, the navigation, and the link targets. They also check the docs URLs and
   paths that ASH's own source names. They run in about ten seconds.
-- The docs-example runner, in the `integration-test` job. It runs every runnable
+- The docs-example runner, in the `docs-examples` job. It runs every runnable
   shell and Python block, page by page, and fails when a block exits with the wrong
   code.
 - The site build, in the `build-docs` job. It runs `mkdocs build --strict` with link
