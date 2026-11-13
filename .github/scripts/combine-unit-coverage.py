@@ -3,8 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Combine the coverage data of one set of unit-test artifacts and apply the threshold.
 
-The unit tier runs in four shards per OS and Python version, so a set is four artifacts
-(``...-shard1of4`` to ``...-shard4of4``); a set of one (``...-shard1of1``) is still a
+The unit tier runs in shards per OS and Python version (six on Linux, eight on macOS
+and Windows), so a set is that pool's count of artifacts (``...-shard1of8`` to
+``...-shard8of8``); a set of one (``...-shard1of1``) is still a
 complete set, for a run of the tier that was not split. The check below is what makes the
 split safe: no single shard of a split run can meet the 80% total-coverage gate, so a
 missing shard is a failure, never a lower number. A run measures coverage, writes

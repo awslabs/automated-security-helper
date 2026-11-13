@@ -55,7 +55,7 @@ from tests.utils.env_assertions import (
     assertrepr_compare_order_problems,
     explain_environment_comparison,
 )
-from tests.utils.helpers import ASH_TEST_TEMP_ROOT, checkout_env
+from tests.utils.helpers import checkout_env, scratch_worker_root
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 
@@ -1865,11 +1865,10 @@ def _run_the_child(
     of every test that ran, and the child's exit code. The child's output is
     not given: the controls' failures hold its environment.
     *under_the_suites_conftest* runs it under the repository's own conftest
-    instead, report backstop included, from a directory of its own under
-    ASH_TEST_TEMP_ROOT."""
+    instead, report backstop included, from a directory of its own under this
+    worker's subtree of the scratch root (``scratch_worker_root``)."""
     if under_the_suites_conftest:
-        ASH_TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
-        holder = Path(tempfile.mkdtemp(prefix="shapes-", dir=ASH_TEST_TEMP_ROOT))
+        holder = Path(tempfile.mkdtemp(prefix="shapes-", dir=scratch_worker_root()))
         module = holder / "test_zz_shapes_probe.py"
         rootdir = REPOSITORY
         clear_options: Tuple[str, ...] = ("-o", "addopts=")

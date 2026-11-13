@@ -54,6 +54,39 @@ ASH_TEST_TEMP_ROOT = Path(__file__).parent.parent / "pytest-temp"
 #: The checkout these tests belong to.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+
+def scratch_worker_root() -> Path:
+    """This process's own subtree of the scratch root, keyed on the xdist worker.
+
+    Every allocation under ``ASH_TEST_TEMP_ROOT`` goes one level down, into a
+    directory named for the xdist worker (``PYTEST_XDIST_WORKER``, or
+    ``gw-main`` for a run without workers). Why: the root is shared by every
+    worker of a run, and a walk that lists it races the other workers'
+    teardowns -- ``iter_repo_files`` carries that scar for the suite's own
+    walks, but a CHILD pytest's collection walks the ancestors of the module
+    it is given and no guard here can reach it. One CI leg measured exactly
+    that: a child pytest of the redaction suite hit FileNotFoundError stat'ing
+    a sibling worker's vanishing scratch directory, and its two workers
+    collected different sets when another holder appeared between their walks.
+
+    The per-worker subtree removes the race by construction rather than by
+    tolerance. The root's entries are then only worker directories, created
+    here once and never removed while a run lives, so an enumeration of the
+    root meets no vanishing entry; and a worker's subtree is written and
+    cleaned only by the one test that worker is running at a time, so an
+    enumeration from inside that test cannot race a concurrent teardown
+    either. Other workers' subtrees still churn, but a child pytest's
+    collection never lists a directory it was not pointed into.
+
+    Exclusions are unaffected: everything is still under ASH_TEST_TEMP_ROOT,
+    and ``is_under_test_scratch`` and the repository walks exclude by that
+    prefix, not by depth.
+    """
+    root = ASH_TEST_TEMP_ROOT / os.environ.get("PYTEST_XDIST_WORKER", "gw-main")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 #: How long a test waits for a child process it starts before giving up on it.
 #:
 #: Every test that starts a real child (``subprocess.run``, ``Popen`` and its
@@ -399,8 +432,9 @@ def get_ash_temp_path():
     """
     import uuid
 
-    # Create a unique subdirectory for this test session
-    temp_dir = ASH_TEST_TEMP_ROOT / str(uuid.uuid4())
+    # A unique subdirectory for this test, under this worker's own subtree of
+    # the scratch root (scratch_worker_root says why the level exists).
+    temp_dir = scratch_worker_root() / str(uuid.uuid4())
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     return temp_dir
@@ -464,7 +498,10 @@ def run_a_child_pytest_under_this_suite(
     root conftest, and give the completed process.
 
     The module sits in a directory of its own (``mkdtemp``, *prefix*) under
-    ASH_TEST_TEMP_ROOT, so the suite's conftest governs the child and no two
+    this worker's subtree of ASH_TEST_TEMP_ROOT (``scratch_worker_root``: the
+    child's collection walks its module's ancestors, and the per-worker level
+    is what keeps another worker's teardown out of that walk), so the suite's
+    conftest governs the child and no two
     runs share a holder; the holder is removed whatever the child did. The
     child's environment is built here, not inherited: PATH, what Windows
     needs to start Python, HOME and the temp variables at *basetemp*, no
@@ -486,8 +523,7 @@ def run_a_child_pytest_under_this_suite(
     import sys
     import tempfile
 
-    ASH_TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
-    holder = Path(tempfile.mkdtemp(prefix=prefix, dir=ASH_TEST_TEMP_ROOT))
+    holder = Path(tempfile.mkdtemp(prefix=prefix, dir=scratch_worker_root()))
     module = holder / f"test_zz_{prefix.rstrip('-').replace('-', '_')}_probe.py"
     extras = {
         holder / relative: content for relative, content in (extra_files or {}).items()
