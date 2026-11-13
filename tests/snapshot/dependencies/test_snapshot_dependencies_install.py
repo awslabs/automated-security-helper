@@ -214,7 +214,7 @@ def test_dependencies_install_selected_tool(
                 "--tool",
                 "grype",
                 "--tool",
-                "semgrep",
+                "bandit",
             ]
         )
 

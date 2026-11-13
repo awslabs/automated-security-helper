@@ -1028,9 +1028,8 @@ class TestVerifyThirdParty:
     @staticmethod
     def _tree(tmp_path: Path):
         """A complete third-party tree, a PATH of fake executables, and the pins."""
-        # Keyed by pin, not by tool: semgrep's LICENSE and COPYRIGHT are
-        # byte-identical to opengrep's and share their digests, so two files
-        # sharing a pin must share bytes here too.
+        # Keyed by pin, not by tool: two files sharing a pin must share bytes
+        # here too (the retired semgrep entry's files shared opengrep's digests).
         payloads = {
             f.url: f"file pinned to {f.sha256}\n".encode()
             for entry in THIRD_PARTY_LICENSES.values()
@@ -1267,7 +1266,7 @@ class TestTheGuardsTheReviewFoundUntested:
 
 
 # ---------------------------------------------------------------------------
-# The Python tools: bandit, checkov and semgrep
+# The Python tools: bandit and checkov
 #
 # `ashx dependencies install` installs them with `uv tool install`, so there is no
 # release archive; the archive is the wheel, and what it shipped is in the installed
@@ -1316,14 +1315,38 @@ def _uv_tool_env(
     return dist_info
 
 
-def _semgrep():
-    """semgrep's entry, its installed version and its URL per file name.
+#: The live bandit entry's files/distribution lines, replaced by
+#: ``_pins_with_url_backed_bandit`` below. Asserted present by ``_pins_dir``, so
+#: a reshaped entry fails these tests with "the fixture is stale" rather than
+#: silently testing the unmodified table.
+_BANDIT_LIVE_FILES = 'files=(LicenseFile("LICENSE"),),\n        distribution="bandit",'
 
-    Looked up per test rather than at import, so a table without the entry fails
-    these tests one by one instead of failing the whole module's collection.
-    """
-    entry = THIRD_PARTY_LICENSES["semgrep"]
-    return entry, entry.version.lstrip("v"), {f.name: f.url for f in entry.files}
+#: Synthetic URLs for the URL-fallback scenario. The retired semgrep entry was
+#: the one live `distribution` entry whose files were URL-pinned (its wheel
+#: shipped no license file); the mechanism outlived it, so these tests stage a
+#: pins copy whose bandit entry takes that shape.
+_BANDIT_URL_FILES = {
+    "LICENSE": "https://example.invalid/bandit/LICENSE",
+    "COPYRIGHT": "https://example.invalid/bandit/COPYRIGHT",
+}
+
+
+def _pins_with_url_backed_bandit(tmp_path, payloads: dict) -> Path:
+    """A pins copy whose bandit entry is URL-pinned to ``payloads[name]``."""
+    file_lines = ",\n            ".join(
+        f'LicenseFile("{name}", url="{url}", sha256="{_sha(payloads[name])}")'
+        for name, url in _BANDIT_URL_FILES.items()
+    )
+    replacement = (
+        "files=(\n            "
+        + file_lines
+        + ',\n        ),\n        distribution="bandit",'
+    )
+    return _pins_dir(tmp_path, {_BANDIT_LIVE_FILES: replacement})
+
+
+def _bandit_version() -> str:
+    return THIRD_PARTY_LICENSES["bandit"].version.lstrip("v")
 
 
 class TestPythonToolLicenses:
@@ -1334,101 +1357,100 @@ class TestPythonToolLicenses:
         monkeypatch.setattr(installer, "uv_tool_dir", lambda: directory)
         return directory
 
-    def test_semgrep_falls_back_to_the_pinned_files_when_its_wheel_has_none(
+    def test_a_url_pinned_tool_falls_back_to_the_pinned_files_when_its_wheel_has_none(
         self, tmp_path, monkeypatch, tool_dir
     ):
-        """semgrep's real wheel: METADATA and RECORD, no license file at all."""
-        entry, version, urls = _semgrep()
-        _uv_tool_env(tool_dir, "semgrep", version, {})
-        payloads = {url: f"{name} text\n".encode() for name, url in urls.items()}
-        pins = _pins_dir(tmp_path, _url_file_overrides(payloads))
-        server = _Server(payloads)
+        """A wheel with METADATA and RECORD and no license file at all: the shape
+        the retired semgrep entry had, staged onto bandit's entry here."""
+        version = _bandit_version()
+        _uv_tool_env(tool_dir, "bandit", version, {})
+        payloads = {name: f"{name} text\n".encode() for name in _BANDIT_URL_FILES}
+        pins = _pins_with_url_backed_bandit(tmp_path, payloads)
+        server = _Server(
+            {url: payloads[name] for name, url in _BANDIT_URL_FILES.items()}
+        )
         monkeypatch.setattr(installer, "download", server)
 
-        installer.install_licenses_only("semgrep", pins, tmp_path / "tp")
+        installer.install_licenses_only("bandit", pins, tmp_path / "tp")
 
-        directory = tmp_path / "tp" / "semgrep"
+        directory = tmp_path / "tp" / "bandit"
         assert (directory / "LICENSE").read_bytes() == b"LICENSE text\n"
         assert (directory / "COPYRIGHT").read_bytes() == b"COPYRIGHT text\n"
-        assert sorted(server.calls) == sorted(urls.values())
+        assert sorted(server.calls) == sorted(_BANDIT_URL_FILES.values())
         source = (directory / "SOURCE").read_text()
+        entry = THIRD_PARTY_LICENSES["bandit"]
         for needle in (
             "Corresponding source",
-            "https://github.com/semgrep/semgrep",
+            entry.repository,
             f"tag:        {entry.version}",
             entry.commit,
-            f"PyPI semgrep=={version}",
+            f"PyPI bandit=={version}",
         ):
             assert needle in source, needle
 
     def test_a_fetched_license_that_misses_its_digest_is_refused(
         self, tmp_path, monkeypatch, tool_dir
     ):
-        """The pins are the real ones; the server sends other bytes."""
-        _, version, urls = _semgrep()
-        _uv_tool_env(tool_dir, "semgrep", version, {})
+        """The pins name one set of bytes; the server sends other bytes."""
+        version = _bandit_version()
+        _uv_tool_env(tool_dir, "bandit", version, {})
+        payloads = {name: f"{name} text\n".encode() for name in _BANDIT_URL_FILES}
+        pins = _pins_with_url_backed_bandit(tmp_path, payloads)
         monkeypatch.setattr(
             installer,
             "download",
-            _Server(dict.fromkeys(urls.values(), b"substituted\n")),
+            _Server(dict.fromkeys(_BANDIT_URL_FILES.values(), b"substituted\n")),
         )
 
         with pytest.raises(SystemExit) as raised:
-            installer.install_licenses_only(
-                "semgrep", _pins_dir(tmp_path), tmp_path / "tp"
-            )
+            installer.install_licenses_only("bandit", pins, tmp_path / "tp")
 
         assert raised.value.code == installer._EXIT_INTEGRITY
-        assert not (tmp_path / "tp" / "semgrep").exists()
+        assert not (tmp_path / "tp" / "bandit").exists()
 
     def test_dist_info_licenses_are_preferred_when_present(
         self, tmp_path, monkeypatch, tool_dir
     ):
         """A wheel that ships the file is read, not re-fetched; the pin still holds."""
-        _, version, urls = _semgrep()
-        shipped = {"LICENSE": b"LGPL text\n", "COPYRIGHT": b"Semgrep copyright\n"}
+        version = _bandit_version()
+        shipped = {"LICENSE": b"Apache text\n", "COPYRIGHT": b"Bandit copyright\n"}
         _uv_tool_env(
             tool_dir,
-            "semgrep",
+            "bandit",
             version,
             {f"licenses/{name}": payload for name, payload in shipped.items()},
         )
-        pins = _pins_dir(
-            tmp_path,
-            _url_file_overrides(
-                {urls[name]: payload for name, payload in shipped.items()}
-            ),
-        )
+        pins = _pins_with_url_backed_bandit(tmp_path, shipped)
         server = _Server({})
         monkeypatch.setattr(installer, "download", server)
 
-        installer.install_licenses_only("semgrep", pins, tmp_path / "tp")
+        installer.install_licenses_only("bandit", pins, tmp_path / "tp")
 
         assert server.calls == [], "the wheel shipped the files; nothing to fetch"
         for name, payload in shipped.items():
-            assert (tmp_path / "tp" / "semgrep" / name).read_bytes() == payload
+            assert (tmp_path / "tp" / "bandit" / name).read_bytes() == payload
 
     def test_a_dist_info_copy_that_misses_the_pin_is_refused(
         self, tmp_path, monkeypatch, tool_dir
     ):
         """Preferred is not unchecked: the image's bytes must not depend on which
         of the two places they came from."""
-        _, version, _ = _semgrep()
+        version = _bandit_version()
+        pinned = {name: f"{name} text\n".encode() for name in _BANDIT_URL_FILES}
         _uv_tool_env(
             tool_dir,
-            "semgrep",
+            "bandit",
             version,
             {"licenses/LICENSE": b"some other text\n", "COPYRIGHT": b"c\n"},
         )
+        pins = _pins_with_url_backed_bandit(tmp_path, pinned)
         monkeypatch.setattr(installer, "download", _Server({}))
 
         with pytest.raises(SystemExit) as raised:
-            installer.install_licenses_only(
-                "semgrep", _pins_dir(tmp_path), tmp_path / "tp"
-            )
+            installer.install_licenses_only("bandit", pins, tmp_path / "tp")
 
         assert raised.value.code == installer._EXIT_INTEGRITY
-        assert not (tmp_path / "tp" / "semgrep").exists()
+        assert not (tmp_path / "tp" / "bandit").exists()
 
     @pytest.mark.parametrize("tool", ["bandit", "checkov"])
     def test_a_wheel_license_is_copied_from_its_dist_info(
@@ -1484,15 +1506,15 @@ class TestPythonToolLicenses:
 
     def test_another_installed_version_is_refused(self, tmp_path, tool_dir):
         """What an unpinned `ashx dependencies install` would leave behind."""
-        _uv_tool_env(tool_dir, "semgrep", "1.0.0", {})
+        _uv_tool_env(tool_dir, "bandit", "1.0.0", {})
 
         with pytest.raises(SystemExit) as raised:
             installer.install_licenses_only(
-                "semgrep", _pins_dir(tmp_path), tmp_path / "tp"
+                "bandit", _pins_dir(tmp_path), tmp_path / "tp"
             )
 
         assert "--uv-tool-pins" in str(raised.value)
-        assert not (tmp_path / "tp" / "semgrep").exists()
+        assert not (tmp_path / "tp" / "bandit").exists()
 
     def test_a_tool_that_is_not_installed_is_refused(self, tmp_path, tool_dir):
         with pytest.raises(SystemExit) as raised:
@@ -1525,7 +1547,7 @@ class TestUvToolPins:
                     + entry.version.lstrip("v"),
                 ]
         assert argv == expected
-        assert {"bandit", "checkov", "semgrep"} <= {
+        assert {"bandit", "checkov"} <= {
             a.split(".")[1] for a in argv if a.startswith("scanners.")
         }
 
@@ -1540,7 +1562,7 @@ class TestUvToolPins:
 
         argv = installer.uv_tool_pins(_pins_dir(tmp_path))
         config = apply_config_overrides(AshConfig(), argv[1::2])
-        for tool in ("bandit", "checkov", "semgrep"):
+        for tool in ("bandit", "checkov"):
             version = THIRD_PARTY_LICENSES[tool].version.lstrip("v")
             assert getattr(config.scanners, tool).options.tool_version == (
                 f"=={version}"

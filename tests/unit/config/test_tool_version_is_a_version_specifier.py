@@ -92,11 +92,6 @@ _OPTION_CLASSES = [
     ),
     (
         "scanners",
-        "semgrep",
-        "automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScannerConfigOptions",
-    ),
-    (
-        "scanners",
         "ferret-scan",
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScannerConfigOptions",
     ),

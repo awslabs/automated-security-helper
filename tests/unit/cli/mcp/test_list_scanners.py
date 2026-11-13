@@ -18,7 +18,6 @@ KNOWN_SCANNERS = {
     "grype",
     "npm_audit",
     "opengrep",
-    "semgrep",
     "snyk_code",
     "syft",
     "trivy_repo",
@@ -38,10 +37,10 @@ VALID_OFFLINE_STRATEGIES = {s.value for s in OfflineStrategy}
 def scanners():
     """One real mcp_list_scanners() snapshot, shared by every test that reads it.
 
-    Module-scoped because the call is no longer cheap: it instantiates all 13
-    scanners and runs each dependency check, and checkov and semgrep together
-    account for about 6.6 of the 7.3 seconds -- they detect their versions during
-    construction, which is the same cost a real scan pays at startup.
+    Module-scoped because the call is no longer cheap: it instantiates every
+    scanner and runs each dependency check, and checkov and the uv-tool scanners
+    accounted for most of the measured 7.3 seconds -- they detect their versions
+    during construction, which is the same cost a real scan pays at startup.
 
     Calling it per test cost roughly 15 x 7.3s and took this file from a couple of
     seconds to 26. Sharing one snapshot loses nothing: every test below asserts
@@ -56,8 +55,8 @@ class TestListScannersSchema:
     def test_returns_list(self, scanners):
         assert isinstance(scanners, list)
 
-    def test_at_least_13_entries(self, scanners):
-        assert len(scanners) >= 13
+    def test_at_least_12_entries(self, scanners):
+        assert len(scanners) >= 12
 
     def test_each_entry_has_required_keys(self, scanners):
         for entry in scanners:
@@ -341,9 +340,9 @@ class TestMeasuredAgainstThisEnvironment:
     def test_not_every_scanner_reports_the_same_dependency_state(self, scanners):
         """The scanner set spans bundled Python deps and external binaries.
 
-        bandit, checkov, detect-secrets and semgrep ship with ASH; grype, syft and
+        bandit, checkov and detect-secrets ship with ASH; grype, syft and
         trivy are separate binaries that a plain checkout does not have. So a
-        uniform answer across all 13 means the field is not being measured -- which
+        uniform answer across all of them means the field is not being measured -- which
         is the exact shape of the original defect.
         """
         states = {e["dependencies_satisfied"] for e in scanners}

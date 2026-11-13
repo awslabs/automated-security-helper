@@ -19,7 +19,7 @@ outputs that draw a box around an absolute path.
 ``platform.system`` alone is not enough, because two scanner configs read it while
 their class body runs, at import:
 
-- ``SemgrepScannerConfig.enabled = platform.system().lower() != "windows"``
+- ``OpengrepScannerConfig.enabled = platform.system().lower() != "windows"``
 - ``OpengrepScannerConfig.enabled = platform.system().lower() != "windows"``
 
 pydantic copies those defaults into the core schema of every model that nests the
@@ -78,8 +78,8 @@ ALL_HOSTS = (
     UNKNOWN_HOST,
 )
 
-#: For surfaces that only differ between Windows and everything else (the semgrep and
-#: opengrep defaults above).
+#: For surfaces that only differ between Windows and everything else (the
+#: opengrep default above).
 CONFIG_HOSTS = (LINUX_AMD64, WINDOWS_AMD64)
 
 
@@ -88,11 +88,8 @@ def _windows_dependent_defaults():
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScannerConfig,
     )
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScannerConfig,
-    )
 
-    return ((SemgrepScannerConfig, "semgrep"), (OpengrepScannerConfig, "opengrep"))
+    return ((OpengrepScannerConfig, "opengrep"),)
 
 
 def _set_import_time_defaults(enabled: bool) -> None:

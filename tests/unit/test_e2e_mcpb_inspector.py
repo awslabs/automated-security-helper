@@ -48,7 +48,6 @@ SCANNERS = [
     "grype",
     "npm_audit",
     "opengrep",
-    "semgrep",
     "syft",
 ]
 

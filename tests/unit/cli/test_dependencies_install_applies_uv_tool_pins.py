@@ -1,6 +1,6 @@
 """The image's Python scanners are installed at exactly their license entries' versions.
 
-The Dockerfile pins bandit, checkov and semgrep by passing the output of
+The Dockerfile pins bandit and checkov by passing the output of
 ``install-pinned-tool --uv-tool-pins`` (``--config-overrides
 scanners.<tool>.options.tool_version===<version>``) to ``ashx dependencies install``.
 The overrides reached the resolved ``AshConfig``, but ``ashx dependencies install``
@@ -126,10 +126,10 @@ def recorded_install(tmp_path, monkeypatch):
 
 
 class TestTheOverridesReachTheInstallCommand:
-    def test_the_python_tools_are_bandit_checkov_and_semgrep(self):
+    def test_the_python_tools_are_bandit_and_checkov(self):
         # A guard on the fixture: if the table stops naming them, the tests below
         # would check nothing about the tools the image actually ships.
-        assert {"bandit", "checkov", "semgrep"} <= set(PYTHON_TOOLS)
+        assert {"bandit", "checkov"} <= set(PYTHON_TOOLS)
 
     def test_each_tool_is_installed_at_exactly_its_license_entry(
         self, recorded_install
@@ -202,11 +202,11 @@ class TestTheOverridesReachTheInstallCommand:
 
     def test_a_single_override_pins_only_its_tool(self, recorded_install):
         specs = recorded_install(
-            ["--config-overrides", "scanners.semgrep.options.tool_version===1.2.3"]
+            ["--config-overrides", "scanners.bandit.options.tool_version===1.2.3"]
         )
-        assert specs["semgrep"] == "semgrep==1.2.3"
-        assert not specs["bandit"].endswith(
-            "==" + THIRD_PARTY_LICENSES["bandit"].version.lstrip("v")
+        assert specs["bandit"] == "bandit==1.2.3"
+        assert not specs["checkov"].endswith(
+            "==" + THIRD_PARTY_LICENSES["checkov"].version.lstrip("v")
         )
 
 
@@ -221,7 +221,7 @@ class TestTheDockerfileInstallsOnlyThroughThePins:
             assert re.search(re.escape(DEPS_INSTALL) + r" [^;&|]*\$\{pins\}", run), run
 
     def test_no_other_step_installs_a_python_tool(self):
-        """A bare `uv tool install semgrep` or `pip install checkov` would float."""
+        """A bare `uv tool install bandit` or `pip install checkov` would float."""
         names = "|".join(
             re.escape(THIRD_PARTY_LICENSES[tool].distribution) for tool in PYTHON_TOOLS
         )

@@ -343,16 +343,17 @@ def _uv_tool_scanners() -> list:
 
 
 class TestThePythonTools:
-    """bandit, checkov and semgrep: installed by `uv tool install`, licensed from
+    """bandit and checkov: installed by `uv tool install`, licensed from
     their wheels, and pinned so the entry describes the release in the image."""
 
     def test_the_scanner_list_is_read_from_the_modules(self):
         """Negative control for the helper the next test depends on."""
-        assert {"bandit", "checkov", "semgrep"} <= set(_uv_tool_scanners())
+        assert {"bandit", "checkov"} <= set(_uv_tool_scanners())
 
     def test_every_uv_tool_scanner_has_a_license_entry(self):
-        """semgrep is LGPL and its wheel ships no license file, so without an entry
-        the image carried it with no license text and no pointer to its source."""
+        """The retired semgrep scanner was LGPL and its wheel shipped no license
+        file, so without an entry the image carried it with no license text and
+        no pointer to its source; the rule is kept for every uv-tool scanner."""
         missing = [
             tool
             for tool in _uv_tool_scanners()
@@ -364,13 +365,15 @@ class TestThePythonTools:
             "entry naming its distribution"
         )
 
-    def test_semgrep_is_copyleft_and_points_at_its_source_at_the_pinned_tag(self):
-        entry = THIRD_PARTY_LICENSES["semgrep"]
+    def test_opengrep_is_copyleft_and_points_at_its_source_at_the_pinned_tag(self):
+        """The copyleft contract, carried by opengrep since the semgrep entry
+        retired: a tool whose files are URL-pinned must point at its source."""
+        entry = THIRD_PARTY_LICENSES["opengrep"]
         assert entry.copyleft
-        assert entry.repository == "https://github.com/semgrep/semgrep"
+        assert entry.repository == "https://github.com/opengrep/opengrep"
         assert {f.name for f in entry.files} == {"LICENSE", "COPYRIGHT"}
         assert all(f.url and f.sha256 for f in entry.files), (
-            "semgrep's wheel ships no license file; both must be fetched, pinned"
+            "opengrep publishes a bare executable; both files must be fetched, pinned"
         )
         notice = entry.source_notice()
         assert "Corresponding source" in notice
@@ -399,7 +402,6 @@ class TestThePythonTools:
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             bandit_scanner,
             checkov_scanner,
-            semgrep_scanner,
         )
 
         scanner, config = {
@@ -410,10 +412,6 @@ class TestThePythonTools:
             "checkov": (
                 checkov_scanner.CheckovScanner,
                 checkov_scanner.CheckovScannerConfig,
-            ),
-            "semgrep": (
-                semgrep_scanner.SemgrepScanner,
-                semgrep_scanner.SemgrepScannerConfig,
             ),
         }[tool]
         default = scanner._get_tool_version_constraint(SimpleNamespace(config=config()))
@@ -444,9 +442,7 @@ class TestThePythonTools:
 
     def test_their_licenses_are_staged_between_install_and_verification(self):
         core = _core_stage(DOCKERFILE.read_text())
-        staged = core.index(
-            "install-pinned-tool --licenses-only bandit checkov semgrep"
-        )
+        staged = core.index("install-pinned-tool --licenses-only bandit checkov")
         assert core.index('ashx dependencies install --bin-path "${ASH_BIN_PATH}"') < (
             staged
         )

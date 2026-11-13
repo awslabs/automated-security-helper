@@ -411,28 +411,28 @@ def test_a_scanner_the_project_already_declares_is_not_policy_origin():
 
 def test_a_scanner_only_the_policy_names_is_policy_origin():
     resolved = policy_for_project(
-        _policy(additional_scanners=["semgrep"]),
+        _policy(additional_scanners=["opengrep"]),
         project_prefix="api",
         project_threshold="MEDIUM",
         project_scanners=("bandit",),
     )
-    assert resolved.policy_scanners == ("semgrep",)
+    assert resolved.policy_scanners == ("opengrep",)
 
 
 def test_policy_origin_scanners_do_not_gate_by_default():
     resolved = policy_for_project(
-        _policy(additional_scanners=["semgrep"]),
+        _policy(additional_scanners=["opengrep"]),
         project_prefix="api",
         project_threshold="MEDIUM",
         project_scanners=(),
     )
-    assert resolved.policy_scanners == ("semgrep",)
+    assert resolved.policy_scanners == ("opengrep",)
     assert resolved.policy_scanners_gate is False
 
 
 def test_policy_origin_scanners_gate_when_the_operator_opts_in():
     resolved = policy_for_project(
-        _policy(additional_scanners=["semgrep"], policy_scanners_gate=True),
+        _policy(additional_scanners=["opengrep"], policy_scanners_gate=True),
         project_prefix="api",
         project_threshold="MEDIUM",
         project_scanners=(),

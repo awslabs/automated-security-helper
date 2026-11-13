@@ -67,9 +67,7 @@ class TestTheRegistry:
             GRYPE.max_age
         )
 
-    @pytest.mark.parametrize(
-        "name", ["trivy-db", "semgrep-offline-rules", "opengrep-offline-rules"]
-    )
+    @pytest.mark.parametrize("name", ["trivy-db", "opengrep-offline-rules"])
     def test_databases_without_ci_guards_are_not_cacheable(self, name):
         """Each now declares a max age for the scan-time check, which is not a CI guard.
 
@@ -466,7 +464,7 @@ class TestTheCommandLineInProcess:
         assert capsys.readouterr().out.startswith("grype-db-v1-w86400-b")
 
     def test_cache_key_refuses_an_unbounded_database(self, capsys):
-        assert cdb.main(["cache-key", "semgrep-offline-rules"]) == 2
+        assert cdb.main(["cache-key", "opengrep-offline-rules"]) == 2
         assert "must not be cached" in capsys.readouterr().err
 
     def test_unknown_name(self, capsys):

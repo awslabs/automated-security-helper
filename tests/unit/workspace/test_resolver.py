@@ -166,13 +166,13 @@ def test_incompatible_scanner_pins_refuse_and_name_both_constraints(tmp_path):
     _project(
         tmp_path,
         "api",
-        "project_name: api\nscanners:\n  semgrep:\n"
+        "project_name: api\nscanners:\n  bandit:\n"
         '    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        "project_name: web\nscanners:\n  semgrep:\n"
+        "project_name: web\nscanners:\n  bandit:\n"
         '    options:\n      tool_version: ">=2.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
@@ -181,7 +181,7 @@ def test_incompatible_scanner_pins_refuse_and_name_both_constraints(tmp_path):
         resolve_workspace(workspace)
 
     message = str(excinfo.value)
-    assert "semgrep" in message
+    assert "bandit" in message
     assert "api" in message
     assert "web" in message
     assert ">=1.125.0,<2.0.0" in message
@@ -192,20 +192,20 @@ def test_compatible_but_different_pins_are_accepted_and_recorded(tmp_path):
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        'project_name: web\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.130.0"\n',
+        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.130.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
     plan = resolve_workspace(workspace)
 
     projects = _by_key(plan)
-    assert projects["api"].scanner_pins["semgrep"] == ">=1.125.0,<2.0.0"
-    assert projects["web"].scanner_pins["semgrep"] == ">=1.130.0"
+    assert projects["api"].scanner_pins["bandit"] == ">=1.125.0,<2.0.0"
+    assert projects["web"].scanner_pins["bandit"] == ">=1.130.0"
 
 
 def test_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
@@ -214,19 +214,19 @@ def test_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.125.0rc1"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.125.0rc1"\n',
     )
     _project(
         tmp_path,
         "web",
-        'project_name: web\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=2.0.0"\n',
+        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=2.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
         resolve_workspace(workspace)
 
-    assert "semgrep" in str(excinfo.value)
+    assert "bandit" in str(excinfo.value)
 
 
 def test_a_single_project_pin_is_never_a_conflict(tmp_path):
@@ -234,15 +234,15 @@ def test_a_single_project_pin_is_never_a_conflict(tmp_path):
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.125.0rc1"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.125.0rc1"\n',
     )
     _project(tmp_path, "web")
     workspace = _workspace(tmp_path, ["api", "web"])
 
     plan = resolve_workspace(workspace)
 
-    assert _by_key(plan)["api"].scanner_pins["semgrep"] == ">=1.125.0rc1"
-    assert "semgrep" not in _by_key(plan)["web"].scanner_pins
+    assert _by_key(plan)["api"].scanner_pins["bandit"] == ">=1.125.0rc1"
+    assert "bandit" not in _by_key(plan)["web"].scanner_pins
 
 
 def test_shared_default_pins_do_not_conflict(tmp_path):
@@ -262,13 +262,13 @@ def test_pins_from_a_skipped_project_are_not_compared(tmp_path):
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=2.0.0"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=2.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "absent"])
 
     plan = resolve_workspace(workspace, allow_missing_projects=True)
 
-    assert _by_key(plan)["api"].scanner_pins["semgrep"] == ">=2.0.0"
+    assert _by_key(plan)["api"].scanner_pins["bandit"] == ">=2.0.0"
 
 
 # ---------------------------------------------------------------------------

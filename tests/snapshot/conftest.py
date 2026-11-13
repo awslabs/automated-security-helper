@@ -351,7 +351,6 @@ def _merge_new_registrations(
 _PINNED_UV_TOOL_VERSIONS = {
     "bandit": "9.0.1",
     "checkov": "9.0.2",
-    "semgrep": "9.0.3",
 }
 _PINNED_UV_TOOL_VERSION_DEFAULT = "9.0.9"
 

@@ -267,19 +267,19 @@ def test_incompatible_scanner_pins_are_a_workspace_error(tmp_path, no_scan):
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        'project_name: web\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=2.0.0"\n',
+        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=2.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
     result = _invoke("--workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
-    assert "semgrep" in result.output
+    assert "bandit" in result.output
     assert not no_scan
 
 

@@ -9,7 +9,7 @@ Every scanner with an ``offline`` option used to default it to ``is_offline_mode
 evaluated when the options object was constructed. ``ScannerConfigSegment`` constructs
 its default scanner configs when ``automated_security_helper.config.ash_config`` is
 imported. In local mode ``ashx scan --offline`` sets ``ASH_OFFLINE`` after that import,
-so checkov, grype, npm-audit, opengrep, semgrep, syft and trivy-repo all kept
+so checkov, grype, npm-audit, opengrep, syft and trivy-repo all kept
 ``offline=False`` and went to the network during an ``--offline`` scan (a strace of
 checkov showed three connections to port 443).
 
@@ -42,11 +42,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScanner,
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
-)
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,
@@ -107,13 +102,6 @@ CASES = {
         "opengrep",
         _grep_cache_verdict("OPENGREP_RULES_CACHE_DIR"),
     ),
-    "semgrep": Case(
-        SemgrepScanner,
-        SemgrepScannerConfig,
-        SemgrepScannerConfigOptions,
-        "semgrep",
-        _grep_cache_verdict("SEMGREP_RULES_CACHE_DIR"),
-    ),
     "syft": Case(
         SyftScanner,
         SyftScannerConfig,
@@ -144,7 +132,6 @@ segment_params = pytest.mark.parametrize(
 def online(monkeypatch):
     """Start every test online, with no rule cache, whatever the host has exported."""
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
     monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
     return monkeypatch
 
@@ -232,25 +219,7 @@ def test_explicit_option_false_does_not_override_ash_offline(
 # cannot see them. Each gets its own test in the bug's order.
 
 
-def test_semgrep_offline_rules_reach_the_subprocess(
-    online, test_plugin_context, tmp_path
-):
-    """``SEMGREP_RULES`` points semgrep at the cache; it must follow --offline too."""
-    cache = tmp_path / "rules"
-    cache.mkdir()
-    (cache / "rule.yaml").write_text("rules: []\n", encoding="utf-8")
-    online.setenv("SEMGREP_RULES_CACHE_DIR", str(cache))
-    config = SemgrepScannerConfig()
-    _go_offline(online)
-
-    scanner = SemgrepScanner(context=test_plugin_context, config=config)
-
-    assert scanner.extra_subprocess_env() == {"SEMGREP_RULES": f"{cache}/*"}
-
-
-@pytest.mark.parametrize(
-    "case", [CASES["semgrep"], CASES["opengrep"]], ids=["semgrep", "opengrep"]
-)
+@pytest.mark.parametrize("case", [CASES["opengrep"]], ids=["opengrep"])
 def test_offline_rule_cache_is_held_to_its_staleness_bound(
     case, online, test_plugin_context
 ):
@@ -265,9 +234,7 @@ def test_offline_rule_cache_is_held_to_its_staleness_bound(
     ]
 
 
-@pytest.mark.parametrize(
-    "case", [CASES["semgrep"], CASES["opengrep"]], ids=["semgrep", "opengrep"]
-)
+@pytest.mark.parametrize("case", [CASES["opengrep"]], ids=["opengrep"])
 def test_online_rule_cache_is_not_a_content_database(case, online, test_plugin_context):
     """Control for the test above: online, the rules come from the registry."""
     scanner = case.scanner_cls(context=test_plugin_context, config=case.config_cls())

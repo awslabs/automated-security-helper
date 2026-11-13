@@ -49,9 +49,6 @@ from automated_security_helper.interactions.run_ash_scan import (
     _COMPLETE_SCANNER_STATUSES,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-    semgrep_scanner,
-)
 
 # tests/unit/core/phases/ -> four levels up is the repository root. Asserted rather than
 # trusted: an off-by-one here does not fail at import, it fails once per gate test with a
@@ -108,24 +105,10 @@ def test_the_base_class_declares_nothing_unsupported():
     assert ScannerPluginBase.unsupported_platform_reason(object()) is None
 
 
-@pytest.mark.parametrize("system", ["Windows", "windows", "WINDOWS"])
-def test_semgrep_declares_windows_unsupported(system, monkeypatch):
-    monkeypatch.setattr(semgrep_scanner.platform, "system", lambda: system)
-    reason = semgrep_scanner.SemgrepScanner.unsupported_platform_reason(object())
-    assert isinstance(reason, str) and reason, reason
-    assert "Windows" in reason
-
-
-@pytest.mark.parametrize("system", ["Linux", "Darwin"])
-def test_semgrep_declares_nothing_on_platforms_it_supports(system, monkeypatch):
-    """The other direction, and it is not symmetric with the test above.
-
-    A reason returned everywhere would make semgrep SKIPPED on Linux too -- which is
-    where it actually finds things, so the scan would go green having measured nothing.
-    That is worse than the bug being fixed.
-    """
-    monkeypatch.setattr(semgrep_scanner.platform, "system", lambda: system)
-    assert semgrep_scanner.SemgrepScanner.unsupported_platform_reason(object()) is None
+# The per-scanner declaration tests lived here while the semgrep scanner
+# shipped (it was the one builtin that publishes no Windows build and said so
+# through this hook). No current builtin declares a platform unsupported, so
+# the fabricated plugin below is what exercises the classification.
 
 
 # ---------------------------------------------------------------------------
