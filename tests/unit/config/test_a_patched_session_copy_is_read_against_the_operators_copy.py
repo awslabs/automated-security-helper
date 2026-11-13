@@ -22,6 +22,7 @@ here.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -136,3 +137,43 @@ def test_get_config_marks_the_reference_at_its_moved_entry(bound):
     assert marked, "get_config does not mark the reference at its moved entry"
     shows_the_value = CANARY in json.dumps(shown)
     assert not shows_the_value, "get_config shows the value the reference reads"
+
+
+def test_the_operators_copy_is_read_once_for_the_fill_and_the_trusted_base(
+    bound, monkeypatch
+):
+    """The references come from the trusted base's own read, not a second one.
+
+    Two reads of the operator's file could see two versions of it, and the
+    extra one skipped the run's caches.
+    """
+    from automated_security_helper.config import resolve_config as module
+
+    client, operator = bound
+    standalone_reads: list = []
+    loads: list = []
+    real_document = module.read_config_document
+    real_load = module._load_operator_config
+
+    def counting_document(path, *args, **kwargs):
+        standalone_reads.append(path)
+        return real_document(path, *args, **kwargs)
+
+    def counting_load(path, *args, **kwargs):
+        # Only resolve_config's own loads: the client policy's check of the
+        # overrides loads the operator's file for its own purpose.
+        if sys._getframe(1).f_code.co_name == "resolve_config":
+            loads.append(path)
+        return real_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(module, "read_config_document", counting_document)
+    monkeypatch.setattr(module, "_load_operator_config", counting_load)
+    entries = module.resolve_config(
+        client, trusted_config_path=operator
+    ).external_reports_to_include
+    assert entries == ["c.sarif", CANARY, "other.sarif"], "the fill is lost"
+    assert len(loads) == 1, (
+        f"resolve_config loaded the operator's copy {len(loads)} times"
+    )
+    reread = [path for path in standalone_reads if Path(path) == Path(operator)]
+    assert not reread, "the operator's copy was read a second time on its own"
