@@ -660,15 +660,28 @@ class _EvaluationWorker:
         """
         self.last_search_seconds = 0.0
         connection = self._started()
-        began = time.monotonic()
         try:
             connection.send((function, args))
-            # The search is timed from here: ``_started`` has waited for a
-            # worker that is running (its package import is behind it), and the
-            # request is pickled and written. Neither is regular-expression
-            # time, and a first search charged them failed a small
-            # scan_timeout on a pattern that finishes at once.
-            began = time.monotonic()
+        except OSError:
+            # The pipe itself failed under the write, so the worker cannot be
+            # reached (or trusted to be in step) and is replaced. Any other
+            # exception out of ``send`` is the request failing to pickle, which
+            # writes nothing (the request is pickled whole before a byte moves):
+            # it raises above as itself, with the worker idle and in step, as
+            # the class docstring promises.
+            self.close(graceful=False)
+            raise ScannerError(
+                f"The evaluation of a regular expression from {source} could "
+                "not be handed to its worker (the request pipe failed), so the "
+                "scan fails rather than guess at an answer."
+            ) from None
+        # The search is timed from here: ``_started`` has waited for a
+        # worker that is running (its package import is behind it), and the
+        # request is pickled and written. Neither is regular-expression
+        # time, and a first search charged them failed a small
+        # scan_timeout on a pattern that finishes at once.
+        began = time.monotonic()
+        try:
             if not connection.poll(wait):
                 raise EvaluationTimedOut(
                     f"A regular expression from {source} did not finish matching "

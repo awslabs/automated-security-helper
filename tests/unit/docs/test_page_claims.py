@@ -8195,20 +8195,11 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
         )
     else:
         assert happened == ["started", "INT"], happened
-    if window_not_entered:
-        # Downgrading to the single-press branch here would GREEN the cell
-        # without its contract: the second press was withheld exactly because
-        # the kill-at-once window was never entered, which is also the
-        # regression this cell exists to catch. Say so instead of passing.
-        pytest.skip(
-            "ASH never entered the kill-at-once window on this runner, so the "
-            "second console Ctrl-C was withheld and the two-press contract was "
-            "not exercised; the single-press cells cover what did run"
-        )
     last_sign_of_life = max(at for _, at in events)
     if interrupts_sent == 1:
-        # One press only: the documented single-press contract, that ASH stops the
-        # child after the wait (no ``deadline`` or ``orphaned``, checked above).
+        # One press only (the second withheld included): the documented
+        # single-press contract, that ASH stops the child after the wait (no
+        # ``deadline`` or ``orphaned``, checked above).
         got_it = next(at for event, at in events if event == "INT")
         assert last_sign_of_life - got_it < _INTERRUPT_GRACE_SECONDS + 30, (
             f"the stand-in ran {last_sign_of_life - got_it:.1f} s after the interrupt"
@@ -8220,6 +8211,17 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
         assert last_sign_of_life - sent[1] < _INTERRUPT_GRACE_SECONDS / 2, (
             f"the stand-in ran {last_sign_of_life - sent[1]:.1f} s after the second "
             f"SIGINT"
+        )
+    if window_not_entered:
+        # The single-press assertions above covered the press that was sent.
+        # Passing outright from here would GREEN the cell without its own
+        # contract: the second press was withheld exactly because the
+        # kill-at-once window was never entered on this runner. Say so.
+        pytest.skip(
+            "ASH never entered the kill-at-once window on this runner, so the "
+            "second console Ctrl-C was withheld and the two-press contract was "
+            "not exercised; the single-press contract above was asserted on "
+            "the press that was sent"
         )
 
 

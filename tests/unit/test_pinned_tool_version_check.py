@@ -1324,6 +1324,15 @@ class TestBundledLibrariesAreListedButNotLookedUp:
         assert [(r.status, r.latest) for r in results] == [("outdated", "9.9.9")]
 
     def test_pygit2_itself_is_still_checked(self, pins):
-        """The wheel that sets the bundled versions is an ordinary pin."""
+        """The shipped wheel that sets the bundled versions is checked, unlike
+        the libraries it bundles. pygit2 is pinned as the Dockerfile's
+        PYGIT2_VERSION argument, so it is looked up on GitHub, where the planted
+        wheel above (a uv-tool pin with a distribution) is looked up on PyPI:
+        both are ordinary, checked pins, each on its own index."""
         by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
+        assert "pygit2" in by_tool, (
+            "pygit2 is pinned (the Dockerfile's PYGIT2_VERSION and its license "
+            "entry), but the script reports no pin for it, so a bump of the "
+            "wheel and of everything it bundles would never be flagged"
+        )
         assert by_tool["pygit2"].ecosystem == checker.GITHUB

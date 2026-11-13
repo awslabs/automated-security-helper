@@ -517,8 +517,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 353
-      line_end: 464
+      line_start: 355
+      line_end: 466
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -541,8 +541,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 935
-      line_end: 979
+      line_start: 937
+      line_end: 981
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -1484,6 +1484,76 @@ global_settings:
       line_start: 417
       line_end: 417
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
+      line_start: 141
+      line_end: 141
+      reason: "'.git-credentials' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
+      line_start: 144
+      line_end: 144
+      reason: "'.env' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
+      line_start: 171
+      line_end: 171
+      reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
+      line_start: 582
+      line_end: 582
+      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
+      line_start: 584
+      line_end: 584
+      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 62
+      line_end: 62
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 304
+      line_end: 304
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 319
+      line_end: 319
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 359
+      line_end: 359
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 420
+      line_end: 420
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 436
+      line_end: 436
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 574
+      line_end: 574
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 1186
+      line_end: 1186
+      reason: "A refusal message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
+    - rule_id: threat-filesystem-read
+      path: scripts/generate_plugin_data_partial.py
+      line_start: 185
+      line_end: 185
+      reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
     # The approved-license entries above are keyed on rule ids of the form

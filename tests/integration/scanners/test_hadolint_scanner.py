@@ -26,6 +26,7 @@ import pytest
 
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = pytest.mark.integration
 
@@ -59,7 +60,9 @@ def _ash_scan(
         [
             sys.executable,
             "-c",
-            "from automated_security_helper.cli.entrypoint import main; main()",
+            importing_this_checkout(
+                "from automated_security_helper.cli.entrypoint import main; main()"
+            ),
             "scan",
             *(
                 [

@@ -222,9 +222,11 @@ def run_scan(
                 f"stopped with its scanners; log at {log}"
             ) from None
         except BaseException:
-            # The scan runs in its own session, so a Ctrl-C or a CI cancel that
-            # reaches this script never reaches the scan: stop the whole tree
-            # before leaving, or the scanners keep writing after the wait is gone.
+            # The scan runs in its own session, so a Ctrl-C (KeyboardInterrupt)
+            # or a CI cancel (SIGTERM, raised as SystemExit by _exit_on_sigterm,
+            # since its default handler would end this script without raising)
+            # never reaches the scan: stop the whole tree before leaving, or the
+            # scanners keep writing after the wait is gone.
             _stop_process_tree(process)
             raise
     print(f"  exit {returncode}; log at {log}", flush=True)
@@ -405,7 +407,21 @@ def summary_table(rows: List[dict], sandbox: str) -> str:
     return "\n".join(lines)
 
 
+def _exit_on_sigterm(signum: int, frame: object) -> None:
+    """Turn a CI cancel's SIGTERM into an exception the cleanup arms see.
+
+    SIGTERM's default handler ends the process without raising, so the
+    ``except BaseException`` arms around ``process.wait`` would never run and
+    the scan, in its own session, would keep writing after this script is
+    gone. Raised as SystemExit it unwinds through them, the trees are stopped
+    on the way out, and the exit code is the conventional 128+15.
+    """
+    raise SystemExit(143)
+
+
 def main() -> int:
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _exit_on_sigterm)
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--sandbox", default="bwrap")
     parser.add_argument(

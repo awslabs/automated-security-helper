@@ -836,10 +836,12 @@ def _hides(kind: Any, pattern: str, relative: str) -> bool:
 @pytest.mark.parametrize(
     ("pattern", "relative", "by_glob", "by_guarddog"),
     [
-        # The whole path, and a ``*`` that crosses a separator: both readings agree.
+        # The whole path, and a no-``/`` pattern read as a name at any depth:
+        # both readings agree.
         ("src/a.py", "src/a.py", True, True),
         ("*.py", "src/a.py", True, True),
-        ("docs/*.md", "docs/a/b.md", True, True),
+        # GuardDog's ``*`` crosses ``/``; the glob kind's stops at a component.
+        ("docs/*.md", "docs/a/b.md", False, True),
         # ``**`` stands for directories, from the start of the path.
         ("vendor/**", "vendor/lib/a.py", True, True),
         ("**/tests/**", "tests/test_a.py", True, True),
@@ -850,7 +852,8 @@ def _hides(kind: Any, pattern: str, relative: str) -> bool:
         ("src", "src/a.py", True, False),
         ("a/b", "a/b/c.py", True, False),
         ("a.py", "src/a.py", True, False),
-        ("vendor/**", "src/vendor/a.py", True, False),
+        # A ``/`` inside the pattern anchors it at the root for BOTH readings.
+        ("vendor/**", "src/vendor/a.py", False, False),
         ("**/tests", "src/tests/a.py", True, False),
         ("/vendor/**", "vendor/a.py", True, False),
     ],
@@ -864,7 +867,8 @@ def test_a_guarddog_entry_hides_only_the_files_guarddog_leaves_out(
     directory>, pattern)`` is true (``GuardDogScanner._candidate_files``). The
     kind calls the same function, so a finding is hidden exactly when GuardDog
     would not have been given its file. The glob kind is the control: it hides
-    the second group, which GuardDog keeps.
+    the directory-and-name rows, which GuardDog keeps, and its gitignore ``*``
+    stops at a ``/`` that GuardDog's crosses.
     """
     from automated_security_helper.utils.suppression_matcher import (
         file_path_matches,

@@ -1200,17 +1200,32 @@ def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     """A bundled library has no bump of its own: its version is its wheel's.
 
     The checker never reports one as outdated (it is held), so these steps are
-    reached only when a bump of the wheel changes what it bundles. They say which
-    entry follows the wheel rather than naming an upstream release to fetch.
+    reached only when a bump of the wheel changes what it bundles. They say
+    which values follow the wheel, each ``_THIRD_PARTY_HASHES`` entry by name,
+    rather than naming an upstream release to look up: the library's own
+    project is never fetched (no ``gh api`` here), since the wheel sets the
+    version.
     """
-    return [
+    steps = [
         (
-            f"{pin.tool} is bundled by {pin.project} and is not pinned on its own: after "
-            f"a {pin.project} bump, read the version of {pin.tool} the new wheel carries "
-            f'and set THIRD_PARTY_LICENSES["{pin.tool}"].version to it, with its commit '
-            "and license-file digests taken from that release"
+            f"{pin.tool} is bundled by {pin.project} and is not pinned on its own: "
+            f"after a bump of {pin.project}, read the version of {pin.tool} the new "
+            f'wheel carries and set THIRD_PARTY_LICENSES["{pin.tool}"].version to it'
         )
     ]
+    for key in getattr(pins, "_THIRD_PARTY_HASHES", {}):
+        if key == f"{pin.tool} commit" or key.startswith(f"{pin.tool}/"):
+            steps.append(
+                f'_THIRD_PARTY_HASHES["{key}"] -> the value for the release the '
+                "new wheel bundles"
+            )
+    entry = pins.THIRD_PARTY_LICENSES.get(pin.tool)
+    for f in entry.files if entry is not None else ():
+        if not f.url:
+            steps.append(
+                f"{f.name}: confirm the release the new wheel bundles still carries it"
+            )
+    return steps
 
 
 # One function per kind in PIN_KINDS; a test keeps the two in step.
@@ -1546,7 +1561,14 @@ def _quotes_blanked(text: str) -> str:
             before -= 1
         if before >= 0 and text[before] == "-":
             before -= 1
-        if before >= 1 and text[before - 1 : before + 1] == "<<":
+        # A marker's name follows exactly ``<<``; after ``<<<`` the quote is a
+        # here-STRING's text, which is blanked like any other string, or the
+        # ``<< b`` inside ``cat <<< "a << b"`` would read as opening a body.
+        if (
+            before >= 1
+            and text[before - 1 : before + 1] == "<<"
+            and (before < 2 or text[before - 2] != "<")
+        ):
             end = text.find(quote, i + 1)
             i = end + 1 if end != -1 else len(text)
             continue
@@ -1669,9 +1691,18 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
 
 
 def _follow_a_file(
-    pipelines: list[list[str]], files: set[str]
+    pipelines: list[list[str]], files: set[str], *, certain_only: bool = False
 ) -> tuple[bool, set[str]]:
     """Whether a command of the pipelines runs one of the files, by its name or path.
+
+    ``certain_only`` answers True only when the caller is clearly an interpreter:
+    the file as the command's program, a shell, ``.`` or ``source`` given its
+    name, a ``-c`` script naming it, or a shell piped a command that names it.
+    The fail-closed fallback below (any unlisted program that names the file)
+    then answers False: it exists so an unmodeled wrapper cannot hide a script,
+    but for a ``# apt-pin-check: skip`` body the question is the opposite, and a
+    command that merely touches the file (``sed -i``, ``gpg --dearmor``,
+    ``nginx -t -c``) must not read as running it.
 
     Also the names the files have at the end of the pipelines (the files' own names and
     any ``mv`` or ``cp`` gave them), for the instructions that come after: a file moved
@@ -1728,7 +1759,11 @@ def _follow_a_file(
                     tails = [w.strip("(){}").rsplit("/", 1)[-1] for w in words]
                     after_tee = words[tails.index("tee") + 1 :]
                     wanted |= _base_names(w for w in after_tee if not w.startswith("-"))
-            elif program not in _NEVER_RUNS_A_FILE and (named | piped) & wanted:
+            elif (
+                not certain_only
+                and program not in _NEVER_RUNS_A_FILE
+                and (named | piped) & wanted
+            ):
                 return True, wanted
             fed.extend(words)
     return False, wanted
@@ -1866,7 +1901,14 @@ def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
             )
             names = set(block.files)
             for when, at in callers:
-                runs, names = _follow_a_file(pipelines_of(at), names)
+                # A skipped body answers only to a caller that is clearly an
+                # interpreter: the fail-closed fallback would otherwise turn a
+                # command that merely touches the file (``sed -i`` of a motd)
+                # into a refusal, which is exactly what the skip comment exists
+                # to say does not happen.
+                runs, names = _follow_a_file(
+                    pipelines_of(at), names, certain_only=block.skipped
+                )
                 if runs:
                     if block.skipped:
                         # The skip comment says the body is not a script, and

@@ -88,6 +88,8 @@ _RULE_LINE_MARKERS = {
         "creds.env",  # a test writing a fake credentials file
         ".npmrc",  # a package manager's rc file, named in a docstring
         "container.env",  # the env file ASH writes for its own container run
+        ".env",  # a dotenv file's name in a scannable-names table or docs data
+        ".git-credentials",  # a credential file's name in a scannable-names table
     ),
     "threat-filesystem-destruction": ("rm -rf", "/home/"),
     "threat-process-download-exec": ("subprocess.run", "urlopen", "curl", "pip"),
