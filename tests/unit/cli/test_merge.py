@@ -25,6 +25,7 @@ difference by looking at the report, so the check is the only thing standing
 between a partial merge and a false clean bill of health.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -1077,6 +1078,9 @@ class TestResolveResultsFile:
 
         assert resolved == tmp_path / "artifact" / "a" / RESULTS_FILE_NAME
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
     def test_a_symlink_found_beneath_a_directory_is_not_followed(self, tmp_path):
         """A link to a file outside the tree was read; one to a procfs file could block.
 
@@ -1096,6 +1100,9 @@ class TestResolveResultsFile:
 
         assert resolve_results_file(outside) == outside
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
     @pytest.mark.parametrize(
         "link, points_at",
         [
@@ -1142,6 +1149,9 @@ class TestResolveResultsFile:
         # The file is there through the link, so the refusal says why it was passed.
         assert "symlinks beneath it are not followed" in str(excinfo.value)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
     def test_a_results_directory_named_through_a_link_is_followed(self, tmp_path):
         """The control: the --results value itself is the operator's, link or not."""
         real = tmp_path / "real"
@@ -1491,6 +1501,28 @@ class TestMergedReportId:
             shard.metadata.report_id for shard in shards
         }
 
+    @staticmethod
+    def _advancing_clock(monkeypatch):
+        """Replace the clock ``new_report_id`` reads with one that moves.
+
+        Each ``now()`` is a minute after the one before, so two id builds that
+        read the clock can never land in one second. A control the caller runs
+        through ``new_report_id`` itself shows the patch is the one in use."""
+        from datetime import datetime as real_datetime
+        from datetime import timedelta
+
+        from automated_security_helper.models import asharp_model
+
+        ticks = {"at": real_datetime(2031, 1, 1, 0, 0, 0)}
+
+        class AdvancingDatetime(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                ticks["at"] += timedelta(minutes=1)
+                return ticks["at"].replace(tzinfo=tz)
+
+        monkeypatch.setattr(asharp_model, "datetime", AdvancingDatetime)
+
     def test_shard_order_does_not_change_the_id(self):
         shards = build_shards(3)
 
@@ -1506,6 +1538,25 @@ class TestMergedReportId:
         second = merge_shard_results(as_loaded(shards))
 
         assert first.metadata.report_id == second.metadata.report_id
+
+    def test_the_id_does_not_come_from_the_clock(self, monkeypatch):
+        """The id is the shard ids' digest and the base shard's own start time
+        (``_union_report_id`` in cli/merge.py); the clock is read only when that
+        start is unparseable. Two merges of the same shards with a clock that
+        moves a minute between them, so a ``now()``-derived id would differ in
+        its seconds field, give the same id."""
+        shards = build_shards(3)
+        self._advancing_clock(monkeypatch)
+        from automated_security_helper.models.asharp_model import new_report_id
+
+        # The control: the patched clock is the one the id builder reads.
+        assert new_report_id() != new_report_id()
+
+        first = merge_shard_results(as_loaded(shards))
+        second = merge_shard_results(as_loaded(shards))
+
+        assert first.metadata.report_id == second.metadata.report_id
+        assert self.REPORT_ID.match(first.metadata.report_id)
 
     def test_another_sharded_scan_gets_another_id(self):
         one = merge_shard_results(as_loaded(build_shards(3)))
@@ -1687,7 +1738,7 @@ class TestMergeCli:
 
         result = self._invoke(args)
 
-        assert result.exit_code in (0, 2), result.output
+        assert result.exit_code == 2, result.output
         [section] = seen
         assert section["options"] == {}
         assert section["enabled"] is False
@@ -1824,7 +1875,7 @@ class TestMergeCli:
         ):
             result = CliRunner().invoke(app, ["merge", *args])
 
-        assert result.exit_code in (0, 2), result.output
+        assert result.exit_code == 2, result.output
         assert sent, result.output
         assert {f["ProductFields"]["ash/target"] for f in sent} == {"operator-scope"}
 
@@ -3437,24 +3488,29 @@ class TestPythonOnlyShardsNameTheFlagThatLeftScannersOut:
         with patch(
             "automated_security_helper.core.phases.scan_phase.ScannerExecutor"
         ) as executor:
-            for scanner_class in {ScannerPluginBase, *shipped}:
-                patch.object(
-                    scanner_class, "validate_plugin_dependencies", return_value=True
-                ).start()
             double = MagicMock()
             double.completed_scanners = []
             double.run_parallel.return_value = aggregated
             double.run_sequential.return_value = aggregated
             executor.return_value = double
-            try:
+            # The ExitStack stops exactly the patches started here; patch.stopall()
+            # would stop every started patch in the process, an autouse fixture's
+            # included, and this helper runs two or three times in one test.
+            with contextlib.ExitStack() as patches:
+                for scanner_class in {ScannerPluginBase, *shipped}:
+                    patches.enter_context(
+                        patch.object(
+                            scanner_class,
+                            "validate_plugin_dependencies",
+                            return_value=True,
+                        )
+                    )
                 results = phase._execute_phase(
                     aggregated_results=aggregated,
                     shard_index=index,
                     shard_count=count,
                     **phase_kwargs,
                 )
-            finally:
-                patch.stopall()
             queued = [name for name, _, _ in executor.call_args.kwargs["scanner_tasks"]]
         for name in queued:
             results.scanner_results[name] = ScannerTargetStatusInfo(
