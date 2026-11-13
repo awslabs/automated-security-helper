@@ -159,7 +159,7 @@ def refuse_selection_matching_no_scanner(
         origin: Who made the selection; the refusal names that caller's own
             input, the flag or the parameter.
     """
-    registered = sorted({name.lower().strip() for name in registered_names})
+    registered = sorted({_selection_key(name) for name in registered_names})
     if not requested or not registered:
         return
     if any(_selection_key(name) in registered for name in requested):
@@ -199,11 +199,11 @@ def unloaded_community_scanners(
         community_module_for,
     )
 
-    known = {str(name).lower().strip() for name in known_names}
+    known = {_selection_key(str(name)) for name in known_names}
     loaded = {str(getattr(cls, "__module__", "")) for cls in scanner_classes}
     unloaded: Dict[str, str] = {}
     for name in requested:
-        if name.lower().strip() in known:
+        if _selection_key(name) in known:
             continue
         module = community_module_for(name)
         if module and not any(
@@ -250,7 +250,7 @@ def community_scanner_refusal(
     scanner_classes = list(scanner_classes)
     if not requested or not scanner_classes:
         return ""
-    known = {str(name).lower().strip() for name in known_names}
+    known = {_selection_key(str(name)) for name in known_names}
     if any(_selection_key(name) in known for name in requested):
         return ""
     unloaded = unloaded_community_scanners(requested, known, scanner_classes)
@@ -289,7 +289,7 @@ def exclusions_matching_no_scanner(
             ``excluded_scanners``.
         registered_names: The registered scanners' selectable names.
     """
-    registered = {name.lower().strip() for name in registered_names}
+    registered = {_selection_key(name) for name in registered_names}
     if not registered:
         return []
     unmatched: Dict[str, str] = {}

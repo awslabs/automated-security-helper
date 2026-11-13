@@ -21,6 +21,7 @@ from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
+    _selection_key,
     community_scanner_refusal,
     exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
@@ -1332,11 +1333,11 @@ class ScanPhase(EnginePhase):
             # with spelling advice and turn the failure into a usage error.
             if enabled_scanners and scanner_instances:
                 registered_names = {
-                    _scanner_display_name(instance).lower().strip()
+                    _selection_key(_scanner_display_name(instance))
                     for instance in scanner_instances
                 }
                 known_names = registered_names | construction_failed
-                requested = [(name, name.lower().strip()) for name in enabled_scanners]
+                requested = [(name, _selection_key(name)) for name in enabled_scanners]
                 unresolved = [name for name, key in requested if key not in known_names]
                 # The module hint and the refusal text are the engine's too
                 # (core.scanner_selection): one text for the construction-time

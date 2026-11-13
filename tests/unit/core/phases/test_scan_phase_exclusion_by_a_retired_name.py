@@ -173,3 +173,26 @@ def _run(phase, aggregated, **kwargs):
         double.run_sequential.return_value = aggregated
         executor.return_value = double
         return phase._execute_phase(aggregated_results=aggregated, **kwargs)
+
+
+class TestASelectionByTheOldName:
+    def test_the_old_name_is_served_and_recorded_as_matched(self, tmp_path):
+        phase, aggregated = _phase(
+            tmp_path, [_plugin("Opengrep", "opengrep"), _plugin("Other", "other")]
+        )
+
+        result = _run(phase, aggregated, enabled_scanners=["semgrep"])
+
+        # Red before the names were resolved: ["semgrep"] was recorded as unmatched.
+        assert result.metadata.requested_scanners_not_run is None
+
+    def test_the_control_a_misspelled_name_is_still_recorded_as_unmatched(
+        self, tmp_path
+    ):
+        phase, aggregated = _phase(
+            tmp_path, [_plugin("Opengrep", "opengrep"), _plugin("Other", "other")]
+        )
+
+        result = _run(phase, aggregated, enabled_scanners=["semgrep", "nope"])
+
+        assert result.metadata.requested_scanners_not_run == ["nope"]

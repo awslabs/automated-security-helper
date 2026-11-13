@@ -63,9 +63,21 @@ def test_the_engine_accepts_a_selection_of_only_the_retired_name(tmp_path):
     context.source_dir = tmp_path
     context.output_dir = tmp_path / "out"
     context.work_dir = tmp_path / "work"
-    ScanExecutionEngine(
+    engine = ScanExecutionEngine(
         context=context,
         enabled_scanners=["semgrep"],
         excluded_scanners=[],
         asharp_model=MagicMock(),
     )
+
+    assert engine._init_enabled_scanners == ["semgrep"]
+    names = [
+        engine._selectable_scanner_name(cls)
+        for cls in engine.plugins.get("scanner", [])
+    ]
+    assert "opengrep" in names, names
+
+
+def test_a_registry_that_lists_the_old_name_matches_the_old_name():
+    refuse_selection_matching_no_scanner(["semgrep"], ["bandit", "Semgrep"], "cli")
+    assert exclusions_matching_no_scanner(["opengrep"], ["Semgrep"]) == []
