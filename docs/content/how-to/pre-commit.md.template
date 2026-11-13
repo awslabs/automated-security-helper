@@ -65,13 +65,21 @@ scanned and is not listed) and makes it the scan's target set:
 
 - bandit and checkov are handed the staged files instead of the tree; the scanners that
   pick their own files (detect-secrets, cdk-nag, npm-audit) read the same staged list.
+  For Terraform, checkov also reads a staged file's same-directory `.tf`/`.tfvars`
+  siblings, so `variables.tf` defaults, `locals` and module sources still resolve;
+  nothing recurses into subdirectories.
 - a scanner none of whose files are staged is skipped, with a log line saying so.
 - converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
   when nothing staged matches them.
 - suppressions and `ignore_paths` resolve against the same scan root as a whole-repository
   run, so a suppression that matches a finding in a full scan matches it here too.
 - findings in files that are not staged are out of scope by definition: the hook judges
-  the commit, not the repository. Keep a whole-repository scan in CI for the rest.
+  the commit, not the repository. The reports are filtered to the staged files, so even
+  what a tool read for context (the Terraform siblings above, or the large-commit
+  fallback below) never adds findings. Keep a whole-repository scan in CI for the rest.
+- a commit staging more files than one command line can carry (about 500) makes bandit
+  and checkov fall back to scanning the directory, with a log line: the reports still
+  hold staged-file findings only, and what degrades is the time win.
 - with nothing staged, the scan logs that and exits 0 without starting any scanner.
 
 What the tools read is the working-tree copy of each staged file. Under the

@@ -56,7 +56,10 @@
   commit with nothing staged exits 0 without starting a scanner. Suppressions and ignore
   paths resolve exactly as in a whole-repository scan, and the staged file targets are
   filtered through the run's scan set, so ignored or force-added files and staged
-  symlinks are not scanned. The tools read the working-tree copy of each staged file;
+  symlinks are not scanned. The reports are filtered to the staged files, so what a tool
+  reads for context (checkov's same-directory Terraform siblings; the directory fallback
+  past about 500 staged files, where one command line cannot carry the list) never adds
+  findings. The tools read the working-tree copy of each staged file;
   under the pre-commit framework the two are identical, because it stashes unstaged
   changes around the hooks. The `ash` and `ash-simple-scan`
   pre-commit hooks now pass `--staged`; on the plain CLI the flag is opt-in and any mode

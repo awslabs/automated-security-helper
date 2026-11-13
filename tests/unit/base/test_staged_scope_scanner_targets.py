@@ -160,6 +160,22 @@ class TestScanSetFiltering:
 
         assert [f.name for f in files] == ["app.py"]
 
+    def test_all_staged_matches_filtered_out_say_so_not_nothing_matches(
+        self, plugin_context
+    ):
+        """Distinct reasons: files that matched and were all left out by the
+        run's scan set must never pass as "no staged file matches", or a filter
+        defect (a spelling mismatch) could silently skip a scanner."""
+        (plugin_context.source_dir / ".gitignore").write_text("ignored.py\n")
+        plugin_context.staged_files = ["ignored.py"]
+        scanner = _scanner(plugin_context, patterns=("*.py",), style="positional")
+        target = _target_with(plugin_context, "ignored.py", "unrelated.md")
+
+        assert scanner.scan(target=target, target_type="source") is True
+        reason = scanner._nothing_scanned_reason or ""
+        assert "leaves every one of them out" in reason
+        assert "no staged file matches" not in reason
+
     def test_a_staged_symlink_is_not_a_target(self, plugin_context, tmp_path):
         outside = tmp_path / "outside.py"
         outside.write_text("x = 1\n")
@@ -232,45 +248,101 @@ class TestArgvBound:
         assert [f.name for f in recorded["staged"]] == ["a.py", "b.py"]
 
 
+def _checkov(plugin_context):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+        CheckovScanner,
+    )
+
+    return CheckovScanner(context=plugin_context)
+
+
 class TestCheckovStagedShape:
-    """checkov's staged shape: skip on a commit with nothing it reads, widen
-    Terraform files to their directories (sibling variables/locals context,
-    and suppression matching against whole-tree results), mix --directory and
-    --file on the argv."""
+    """checkov's staged shape: skip on a commit with nothing it reads, pull in
+    a staged Terraform file's SAME-DIRECTORY siblings as extra file targets
+    (variables/locals context), and never a directory target: --directory
+    recurses, so a staged root main.tf became a full-tree scan."""
 
     def test_a_readme_only_commit_has_nothing_for_checkov(self, plugin_context):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-            CheckovScanner,
-        )
-
         plugin_context.staged_files = ["README.md"]
-        scanner = CheckovScanner(context=plugin_context)
+        scanner = _checkov(plugin_context)
         target = plugin_context.source_dir
         (target / "README.md").write_text("docs\n")
 
         assert scanner._staged_scope_paths(target, "source") == []
 
-    def test_terraform_files_widen_to_their_directory(self, plugin_context):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-            CheckovScanner,
-        )
-
-        plugin_context.staged_files = ["modules/a.tf", "modules/b.tf", "cfn.yaml"]
-        scanner = CheckovScanner(context=plugin_context)
+    def test_a_staged_root_terraform_file_never_targets_the_whole_tree(
+        self, plugin_context
+    ):
+        plugin_context.staged_files = ["main.tf"]
+        scanner = _checkov(plugin_context)
         target = _target_with(
-            plugin_context, "modules/a.tf", "modules/b.tf", "cfn.yaml"
+            plugin_context, "main.tf", "variables.tf", "modules/deep.tf", "app.py"
         )
 
         staged = scanner._staged_scope_paths(target, "source")
-        assert staged == [target / "modules", target / "cfn.yaml"]
 
+        assert set(staged) == {target / "main.tf", target / "variables.tf"}
+        assert target not in staged, "--directory on the source root is a full tree"
+        assert target / "modules" / "deep.tf" not in staged, "nothing recurses"
         argv = scanner._staged_target_arguments(staged)
-        assert argv == [
-            "--directory",
-            (target / "modules").as_posix(),
-            "--file",
-            (target / "cfn.yaml").as_posix(),
-        ]
+        assert "--directory" not in argv
+        assert argv.count("--file") == len(staged)
+
+    def test_a_nested_terraform_file_pulls_its_own_dir_siblings_only(
+        self, plugin_context
+    ):
+        plugin_context.staged_files = ["infra/main.tf"]
+        scanner = _checkov(plugin_context)
+        target = _target_with(
+            plugin_context,
+            "infra/main.tf",
+            "infra/variables.tf",
+            "infra/modules/deep.tf",
+        )
+
+        staged = scanner._staged_scope_paths(target, "source")
+
+        assert set(staged) == {
+            target / "infra" / "main.tf",
+            target / "infra" / "variables.tf",
+        }
+
+    def test_overlapping_staged_entries_target_each_file_once(self, plugin_context):
+        plugin_context.staged_files = ["modules/a.tf", "modules/cfg.yaml"]
+        scanner = _checkov(plugin_context)
+        target = _target_with(
+            plugin_context, "modules/a.tf", "modules/b.tf", "modules/cfg.yaml"
+        )
+
+        staged = scanner._staged_scope_paths(target, "source")
+        argv = scanner._staged_target_arguments(staged)
+
+        assert len(staged) == len(set(staged)), "no file is targeted twice"
+        assert set(staged) == {
+            target / "modules" / "a.tf",
+            target / "modules" / "b.tf",
+            target / "modules" / "cfg.yaml",
+        }
+        assert argv.count((target / "modules" / "cfg.yaml").as_posix()) == 1
+
+    def test_terraform_detection_is_case_insensitive(self, plugin_context):
+        plugin_context.staged_files = ["Main.TF"]
+        scanner = _checkov(plugin_context)
+        target = _target_with(plugin_context, "Main.TF", "other.tf")
+
+        staged = scanner._staged_scope_paths(target, "source")
+
+        assert set(staged) == {target / "Main.TF", target / "other.tf"}
+
+    def test_an_ignored_sibling_is_not_brought_back_in(self, plugin_context):
+        (plugin_context.source_dir / ".gitignore").write_text("secret.tfvars\n")
+        plugin_context.staged_files = ["main.tf"]
+        scanner = _checkov(plugin_context)
+        target = _target_with(plugin_context, "main.tf", "secret.tfvars")
+
+        staged = scanner._staged_scope_paths(target, "source")
+
+        assert set(staged) == {target / "main.tf"}
 
 
 class TestShippedDeclarations:
@@ -300,4 +372,8 @@ class TestShippedDeclarations:
             assert expected in patterns
         assert CheckovScanner.staged_target_style == "per-file-flag"
         assert CheckovScanner.staged_target_flag == "--file"
-        assert CheckovScanner._STAGED_DIRECTORY_SUFFIXES == (".tf", ".tfvars")
+        assert CheckovScanner._STAGED_TERRAFORM_SUFFIXES == (
+            ".tf",
+            ".tfvars",
+            ".tf.json",
+        )

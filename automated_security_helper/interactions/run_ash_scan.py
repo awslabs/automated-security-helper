@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -6207,6 +6207,26 @@ def _refuse_an_unknown_severity_restriction(restriction: Optional[str]) -> None:
         )
 
 
+def _staged_findings_filter_set(source_dir: Path, staged_files: List[str]) -> Set[Path]:
+    """The staged files as resolved absolute paths, for the engine's filter.
+
+    The same shape ``_changed_file_set_for`` feeds ``restrict_to_changed_files``
+    (resolved paths, compared against the resolved SARIF locations), built from
+    the source-relative POSIX names the staged scope carries. An entry that
+    cannot be resolved (a symlink loop at its name) names no scannable file and
+    is left out; an empty list is a filter that matches nothing, which is the
+    honest answer when nothing staged is in scope.
+    """
+    resolved: Set[Path] = set()
+    for relative in staged_files:
+        candidate = Path(source_dir).joinpath(*PurePosixPath(relative).parts)
+        try:
+            resolved.add(candidate.resolve())
+        except OSError:
+            continue
+    return resolved
+
+
 def _run_local_mode(
     opts: ScanOptions, logger
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
@@ -6379,8 +6399,23 @@ def _run_local_mode(
             logger,
             values=config_environment_values(getattr(orchestrator, "config", None)),
         )
-        if _changed_file_set is not None:
-            orchestrator.restrict_to_changed_files(_changed_file_set)
+        _filter_file_set = _changed_file_set
+        if staged_files is not None:
+            # Defense in depth for --staged, through the same engine filter as
+            # --changed-files-only: whatever a tool read beyond the staged
+            # files (checkov's Terraform sibling context; a scanner that fell
+            # back to the directory target past the argv bound), the model
+            # keeps staged-file findings only, so every report, summary count
+            # and the exit code honor the scope. With --changed-files-only
+            # too, both scopes were asked for, so their intersection reports.
+            staged_set = _staged_findings_filter_set(opts.source_dir, staged_files)
+            _filter_file_set = (
+                staged_set
+                if _filter_file_set is None
+                else _filter_file_set & staged_set
+            )
+        if _filter_file_set is not None:
+            orchestrator.restrict_to_changed_files(_filter_file_set)
         orchestrator.add_metadata(
             # Recorded on every result set, so a reporter that reads "not
             # reported" as "fixed" (aws-security-hub can archive such findings)
@@ -7969,6 +8004,24 @@ def run_ash_scan(
             "staged is not supported in workspace mode: the staged scope "
             "is read for one source directory. Scan the project directly."
         )
+    if opts.staged_files is not None and not opts.staged:
+        # Without the scope the scan covers the whole tree and the list would
+        # be dropped without a word -- the exact silence the staged refusals
+        # exist to prevent.
+        raise ValueError(
+            "staged_files is read only with staged=True: without the staged "
+            "scope the scan covers the whole tree and the list would be "
+            "ignored. Pass staged=True, or drop staged_files."
+        )
+    if opts.staged_files is not None:
+        from automated_security_helper.utils.staged_files import (
+            validate_staged_entries,
+        )
+
+        # A caller's list is input like any other: an absolute path or a ..
+        # climbs out of the source directory, which the staged scope must
+        # never scan.
+        validate_staged_entries(opts.staged_files)
     for name, value, workspace_ok in (
         ("untrusted_config", opts.untrusted_config, False),
         # Workspace mode resolves each project's own config (the comment

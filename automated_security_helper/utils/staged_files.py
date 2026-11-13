@@ -80,6 +80,32 @@ def staged_files_for_source(source_dir: Path) -> Optional[List[str]]:
     return sorted(set(inside))
 
 
+def validate_staged_entries(entries: Sequence[str]) -> None:
+    """Refuse a ``staged_files`` list whose entries are not source-relative.
+
+    The contract is POSIX paths relative to the source directory, which is what
+    :func:`staged_files_for_source` produces. A caller-supplied entry that is
+    absolute (POSIX or a Windows drive), empty, climbs with ``..`` or carries a
+    backslash would name something outside the staged scope -- an absolute path
+    or a ``..`` reaches files the scope must never scan -- so it is refused
+    with the entry named, before any scan starts.
+    """
+    for entry in entries:
+        posix = PurePosixPath(entry)
+        if (
+            not entry
+            or posix.is_absolute()
+            or ".." in posix.parts
+            or "\\" in entry
+            or (len(entry) > 1 and entry[1] == ":" and entry[0].isalpha())
+        ):
+            raise ValueError(
+                "staged_files entries are POSIX paths relative to the source "
+                f"directory; {entry!r} is absolute, empty, climbs with '..', "
+                "or is not POSIX-spelled."
+            )
+
+
 def matching_staged_files(
     staged: Sequence[str], patterns: Optional[Sequence[str]]
 ) -> List[str]:

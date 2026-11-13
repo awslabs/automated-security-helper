@@ -505,6 +505,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: staged scope is active and ``staged_target_style`` is declared; consumed by
     #: ``_resolve_arguments`` in place of the directory target. Reset per scan().
     _staged_scan_files: Optional[List[Path]] = PrivateAttr(default=None)
+    #: Whether staged files matched this scanner and the run's scan set then left
+    #: every one of them out; the skip's reason says so instead of "no staged
+    #: file matches". Reset per scan().
+    _staged_all_filtered: bool = PrivateAttr(default=False)
     #: Files this scanner asked ASH to own (``_neutral_tool_file``), by path, with
     #: the text each holds. Written when the arguments are resolved.
     _neutral_files: Dict[str, str] = PrivateAttr(default_factory=dict)
@@ -962,7 +966,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 paths.append(candidate)
         if not paths:
             return paths
-        return self._staged_targets_in_scan_set(paths, root)
+        kept = self._staged_targets_in_scan_set(paths, root)
+        if not kept:
+            # Distinct from "no staged file matches": files DID match, and the
+            # run's scan set left every one out. scan() words the skip with
+            # this, so a filter defect could never hide behind the
+            # nothing-matches reason.
+            self._staged_all_filtered = True
+        return kept
 
     def _staged_targets_in_scan_set(
         self, candidates: List[Path], root: Path
@@ -980,11 +991,19 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         A scan set that cannot be read leaves the candidates as they are (the
         symlink cut above still applied): over-scanning is the safe failure, and
         the findings in an ignored file are still dropped by the SARIF step.
+
+        Membership compares ``Path.resolve()`` spellings on both sides, never
+        ``abspath``: the scan set's entries are the source directory as the
+        context spells it with each file's path below it, and the candidates are
+        the engine's target with the staged name below it, so under a symlinked
+        checkout path (the staged_files.py reader's own case) or another
+        spelling of one directory an unresolved compare dropped every candidate
+        and silently skipped the scanner.
         """
         from automated_security_helper.utils.scan_output_dirs import scan_set_of
 
         try:
-            allowed = {os.path.abspath(entry) for entry in scan_set_of(self.context)}
+            allowed = {Path(entry).resolve() for entry in scan_set_of(self.context)}
         except Exception as exc:  # noqa: BLE001 - the filter must not fail the scan
             ASH_LOGGER.warning(
                 f"Could not read the run's scan set to filter the staged file "
@@ -996,7 +1015,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         kept = [
             candidate
             for candidate in candidates
-            if os.path.abspath(candidate) in allowed
+            if Path(candidate).resolve() in allowed
         ]
         left_out = len(candidates) - len(kept)
         if left_out:
@@ -1944,6 +1963,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # Per target, like exit_code above: a converted scan must not run on the
         # source target's staged file list or carry its skip reason.
         self._staged_scan_files = None
+        self._staged_all_filtered = False
         self._nothing_scanned_reason = None
         staged_targets = self._staged_scope_paths(target, target_type)
         if staged_targets is not None:
@@ -1951,15 +1971,28 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # The same clean-skip shape as the empty target above: the tool
                 # is not started, and the row reads as "nothing to scan" with
                 # this reason rather than as a clean scan of the whole tree.
-                reason = (
-                    f"{self.__class__.__name__} was skipped under --staged: no "
-                    "staged file matches what it scans"
-                )
+                # Two distinct reasons, so a filter defect could never pass as
+                # "nothing matched": files that matched and were all left out
+                # by the run's scan set say so, at WARNING.
+                if self._staged_all_filtered:
+                    reason = (
+                        f"{self.__class__.__name__} was skipped under --staged: "
+                        "staged files match what it scans, and the run's scan "
+                        "set leaves every one of them out (ignored, excluded, "
+                        "or a link)"
+                    )
+                    level = logging.WARNING
+                else:
+                    reason = (
+                        f"{self.__class__.__name__} was skipped under --staged: "
+                        "no staged file matches what it scans"
+                    )
+                    level = logging.INFO
                 self._nothing_scanned_reason = reason
                 self._plugin_log(
                     f"{reason}. Not running the tool on {target_type}.",
                     target_type=target_type,
-                    level=logging.INFO,
+                    level=level,
                     append_to_stream="stderr",
                 )
                 self._post_scan(target=target, target_type=target_type)

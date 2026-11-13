@@ -587,41 +587,62 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     staged_target_style: ClassVar[Optional[str]] = "per-file-flag"
     staged_target_flag: ClassVar[str] = "--file"
 
-    #: The suffixes whose staged files are widened to their parent directory:
-    #: a Terraform file read alone loses the sibling variables.tf defaults,
-    #: locals and module sources, so a single-file scan changes findings and a
-    #: suppression written against a whole-tree result may stop matching.
-    _STAGED_DIRECTORY_SUFFIXES: ClassVar[Tuple[str, ...]] = (".tf", ".tfvars")
+    #: The name endings whose staged files pull in their SAME-DIRECTORY
+    #: Terraform siblings as extra ``--file`` entries: a Terraform file read
+    #: alone loses the sibling variables.tf defaults, locals and module sources,
+    #: so a single-file scan changes findings and a suppression written against
+    #: a whole-tree result may stop matching. Compared on the lowercased name,
+    #: as the staged pattern matching is (``Main.TF`` is Terraform to checkov).
+    #: Siblings only, never the directory itself: ``--directory`` walks
+    #: recursively, so a staged root main.tf became a full-tree scan and a
+    #: nested one scanned every subdirectory, which is the cost --staged exists
+    #: to avoid. A sibling's own findings are not the commit's: the engine
+    #: filters the results to the staged files before the reports.
+    _STAGED_TERRAFORM_SUFFIXES: ClassVar[Tuple[str, ...]] = (
+        ".tf",
+        ".tfvars",
+        ".tf.json",
+    )
+
+    def _is_staged_terraform(self, path: Path) -> bool:
+        return path.name.lower().endswith(self._STAGED_TERRAFORM_SUFFIXES)
 
     def _staged_scope_paths(self, target, target_type):
-        """The base selection, with staged Terraform files widened to their dirs.
+        """The base selection, plus the staged Terraform files' own-dir siblings.
 
-        After the base filtering (patterns, symlinks, the run's scan set), so a
-        directory is widened only for a Terraform file the scan set admits; the
-        widening itself brings the ignored siblings back into checkov's read,
-        which is what a directory scan of that module reads too, and the SARIF
-        step still drops the findings the ignore paths cover.
+        After the base filtering (patterns, symlinks, the run's scan set), so
+        siblings are added only for a Terraform file the scan set admits, and
+        the siblings themselves go through the same scan-set filter and symlink
+        cut, so an ignored or linked sibling is not brought back in. Every
+        target stays a file, so nothing recurses and two staged files in one
+        directory cannot make checkov parse a file twice.
         """
         staged = super()._staged_scope_paths(target, target_type)
         if not staged:
             return staged
-        widened: List[Path] = []
-        for path in staged:
-            if path.suffix in self._STAGED_DIRECTORY_SUFFIXES or path.name.endswith(
-                ".tf.json"
-            ):
-                path = path.parent
-            if path not in widened:
-                widened.append(path)
-        return widened
-
-    def _staged_target_arguments(self, staged_targets):
-        """``--directory`` for the widened Terraform dirs, ``--file`` for files."""
-        arguments: List[str] = []
-        for staged_target in staged_targets:
-            flag = "--directory" if Path(staged_target).is_dir() else "--file"
-            arguments.extend([flag, Path(staged_target).as_posix()])
-        return arguments
+        seen = set(staged)
+        sibling_candidates: List[Path] = []
+        for directory in sorted(
+            {p.parent for p in staged if self._is_staged_terraform(p)}
+        ):
+            try:
+                entries = sorted(directory.iterdir())
+            except OSError as error:
+                ASH_LOGGER.debug(
+                    f"Not reading {directory} for staged Terraform siblings: {error}"
+                )
+                continue
+            for sibling in entries:
+                if sibling in seen or sibling.is_symlink() or not sibling.is_file():
+                    continue
+                if self._is_staged_terraform(sibling):
+                    sibling_candidates.append(sibling)
+                    seen.add(sibling)
+        if not sibling_candidates:
+            return staged
+        return staged + self._staged_targets_in_scan_set(
+            sibling_candidates, Path(target)
+        )
 
     check_conf: str = "NOT_PROVIDED"
 

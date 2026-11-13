@@ -183,6 +183,28 @@ class TestAgainstRealGit:
 
 
 @pytest.mark.unit
+class TestEntryValidation:
+    def test_source_relative_posix_entries_pass(self):
+        from automated_security_helper.utils.staged_files import (
+            validate_staged_entries,
+        )
+
+        validate_staged_entries(["app.py", "pkg/mod.py", "a b/c.tf"])
+
+    @pytest.mark.parametrize(
+        "entry",
+        ["/abs.py", "../up.py", "pkg/../../up.py", "", "C:/x.py", "a\\b.py"],
+    )
+    def test_an_entry_that_could_leave_the_source_dir_is_refused(self, entry):
+        from automated_security_helper.utils.staged_files import (
+            validate_staged_entries,
+        )
+
+        with pytest.raises(ValueError, match="relative to the source directory"):
+            validate_staged_entries([entry])
+
+
+@pytest.mark.unit
 class TestMatching:
     def test_none_means_the_scanner_reads_any_file(self):
         staged = ["a.py", "b.md"]
