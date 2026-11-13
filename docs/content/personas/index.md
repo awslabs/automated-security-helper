@@ -17,6 +17,17 @@ configuration, with a reason and an expiration date, reviewed in the diff like
 any other change. What passes on a laptop is what passes in CI, and what an
 analyst aggregates is what the developer saw.
 
+The pressure behind that design is the pace of iteration, and it is reshaping
+tools well beyond security scanning. AWS CloudFormation and CDK
+[express mode](https://aws.amazon.com/about-aws/whats-new/2026/06/aws-cloudformation-cdk/)
+exists for the same reason, announced as reducing deployment time "for
+developers and AI agents building infrastructure": when the people and the
+agents iterate in seconds, a tool that waits in minutes falls out of the loop.
+A security gate lives under that pressure too. A check that keeps up gets kept
+on; one that does not gets routed around. That is why the developer page below
+is organized around the cost of each checkpoint, and why the reviewer and
+analyst pages lean on gates that hold without asking anyone to wait.
+
 Each page below starts from one role's day and shows the ASH setup that fits
 it, with the commands and configuration to copy.
 

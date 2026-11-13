@@ -84,8 +84,9 @@ rules the engine keeps in front of the agent. ASH's repository carries a
 worked example in that format,
 [`examples/aidlc-workflows/ash-scan`](https://github.com/awslabs/automated-security-helper/tree/main/examples/aidlc-workflows/ash-scan),
 which adds the two scans above and a rules file with ASH habits (read the exit
-code; suppress with a reason and an expiry instead of loosening the gate). Its
-README covers validating and building it with AI-DLC's own plugin tools.
+code; suppress with a reason and an expiry instead of loosening the gate).
+[Use ASH with AI-DLC workflows](../how-to/aidlc-workflows.md) walks through
+validating, building, and installing it with AI-DLC's own plugin tools.
 
 The division of labor is deliberate. AI-DLC decides when the agent must stop
 and show its work; ASH decides whether the code passes and keeps the record.

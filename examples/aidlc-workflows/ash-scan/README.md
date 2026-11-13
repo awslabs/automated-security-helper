@@ -56,5 +56,7 @@ steps of that release's core stages, and the target slugs `code-generation` and
 renumbers those steps, re-anchor the fragments; `aidlc plugin validate` and the
 composer's drop log name what no longer resolves.
 
+[Use ASH with AI-DLC workflows](../../../docs/content/how-to/aidlc-workflows.md)
+is the step-by-step guide from an empty project to this plugin active, and
 [ASH across the SDLC and AI-DLC](../../../docs/content/personas/sdlc-aidlc.md)
 explains where these checkpoints sit in the wider lifecycle.
