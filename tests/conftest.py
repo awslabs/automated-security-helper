@@ -2681,6 +2681,36 @@ def _isolated_container_state_dir(request, tmp_path_factory, _isolated_home):
         yield
 
 
+@pytest.fixture(autouse=True)
+def _isolated_tool_verdict_store(tmp_path_factory, _isolated_home):
+    """Persisted tool verdicts go to a directory of each test's own, never a HOME.
+
+    ``verify_pre_installed_tool`` persists a satisfied verdict under
+    ``$HOME/.ash/state/tool-verdicts`` by default and answers from it across
+    processes. ``_isolated_home`` keeps that default out of the developer's
+    home -- a suite faking ``_verify`` must never leave a made-up "satisfied"
+    record answering the developer's real runs, nor one test's record
+    answering another's -- but several suites also assert at teardown that
+    their test HOME holds no tool files, so the store is pointed outside every
+    home outright, per test, under the base temp directory (the counter for
+    the reason ``_isolated_home`` gives). A ``real_home`` test is covered by
+    the same arm. A test's own ``monkeypatch.setenv`` of the variable still
+    wins for that test.
+    """
+    from automated_security_helper.utils.pre_installed_tool import (
+        _VERDICT_STORE_DIR_ENV,
+    )
+
+    target = (
+        tmp_path_factory.getbasetemp()
+        / "tool-verdict-stores"
+        / str(next(_HOME_COUNTER))
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(_VERDICT_STORE_DIR_ENV, str(target))
+        yield
+
+
 def _on_path(directory: Path) -> bool:
     wanted = os.path.normcase(os.path.realpath(directory))
     return any(

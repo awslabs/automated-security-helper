@@ -977,6 +977,49 @@ _UV_PROBE_RETRY_SECONDS = 60.0
 #: timeout; between polls the wait costs nothing.
 _UV_PROBE_CANCEL_POLL_SECONDS = 0.2
 
+#: How long a memoized ``uv tool list`` answers (list_available_tools). The
+#: same bound, for the same reason, as pre_installed_tool._VERDICT_MEMO_SECONDS:
+#: one scan's repeated reads fall well inside it. The memo is also keyed on
+#: the tools DIRECTORY's identity (_uv_tools_dir_stamp), which changes on any
+#: install or uninstall whoever runs it, so the TTL is the backstop for a
+#: layout the stamp cannot read, not the primary invalidation. Installing
+#: through the runner forgets the memo at once besides.
+_TOOL_LIST_MEMO_SECONDS = 600.0
+
+
+def _uv_tools_dir_stamp() -> str:
+    """The uv tools directory and its mtime, as a memo-key fragment.
+
+    ``uv tool install`` and ``uv tool uninstall`` create or remove
+    ``<tools dir>/<tool>``, which moves the directory's mtime whoever runs
+    them -- another UVToolRunner instance, another process, a hand-run uv --
+    so a memoized listing keyed on this goes stale the moment the listing
+    would change. The directory is uv's documented resolution: ``UV_TOOL_DIR``,
+    else ``$XDG_DATA_HOME/uv/tools``, else ``~/.local/share/uv/tools``. A
+    layout this does not model (Windows' application directories, a future
+    uv) reads "absent" or a directory that never moves, and the memo then
+    degrades to its TTL -- never a wrong answer longer than that.
+    """
+    # No get() default: the docs table records UV_TOOL_DIR as read with none
+    # (the sandbox policy's read), and the docs-freshness check holds every
+    # read of a variable to its documented default.
+    named = (os.environ.get("UV_TOOL_DIR") or "").strip()
+    if named:
+        base = Path(os.path.expanduser(named))
+    else:
+        data = os.environ.get("XDG_DATA_HOME", "").strip()
+        root = Path(os.path.expanduser(data)) if data else None
+        if root is None:
+            try:
+                root = Path.home() / ".local" / "share"
+            except RuntimeError:
+                return "no-home"
+        base = root / "uv" / "tools"
+    try:
+        return f"{base}\x00{os.stat(base).st_mtime_ns}"
+    except OSError:
+        return f"{base}\x00absent"
+
 
 def _signal_name(number: int) -> str:
     """The signal's name when the platform knows it, else its number."""
@@ -1083,6 +1126,18 @@ class UVToolRunner:
         # starting its own hung probe. The memo is per instance, so the
         # lock is too; the keyed registry below serves the module caches.
         self._uv_probe_lock = threading.Lock()
+        # `uv tool list` output, memoized as (the uv that answered, the tools
+        # directory stamp it answered under, its tool names, the monotonic time
+        # it answered): every get_tool_installation_info read spawned a fresh
+        # listing, once per scanner per dependency check. Forgotten when the
+        # tools directory's stamp moves (any install or uninstall, whoever ran
+        # it: _uv_tools_dir_stamp), when an install lands through this
+        # instance, when the executable changes, and after
+        # _TOOL_LIST_MEMO_SECONDS (the backstop for a layout the stamp cannot
+        # read). The lock is held across the listing, as the probe lock is, so
+        # concurrent callers share one spawn.
+        self._tool_list_memo: Optional[Tuple[str, str, List[str], float]] = None
+        self._tool_list_lock = threading.Lock()
 
     @property
     def uv_executable(self) -> str:
@@ -1105,6 +1160,9 @@ class UVToolRunner:
             self._uv_probe_retry_windows.clear()
             self._uv_probe_window_warned.clear()
             self._uv_last_probe = None
+        # Keyed by executable, so the stale answer would miss anyway; forgotten
+        # here, as the probe memos are, to keep the state honest at once.
+        self.forget_tool_list()
 
     def unavailable_reason(self) -> str:
         """Why this thread's last availability check returned False, for a message.
@@ -1422,44 +1480,92 @@ class UVToolRunner:
             return False, remembered
         return None
 
+    def _tool_list_state(self) -> threading.Lock:
+        """The memo's lock, created for an instance made without ``__init__``.
+
+        The same defense ``_check_state`` gives ``_checks``: some tests build
+        the runner around ``__init__``, and the memo must then behave as an
+        empty one rather than raise.
+        """
+        lock = self.__dict__.get("_tool_list_lock")
+        if lock is None:
+            lock = self._tool_list_lock = threading.Lock()
+            self._tool_list_memo = None
+        return lock
+
+    def forget_tool_list(self) -> None:
+        """Forget the memoized ``uv tool list`` answer.
+
+        Called when the listing is known or likely to have changed: an install
+        through the runner, or a new uv executable. Tests that install a tool
+        behind the runner's back call it too.
+        """
+        with self._tool_list_state():
+            self._tool_list_memo = None
+
     def list_available_tools(self) -> List[str]:
-        """List all available UV tools."""
+        """List all available UV tools.
+
+        Memoized per process for ``_TOOL_LIST_MEMO_SECONDS``, per uv executable
+        and per tools-directory stamp (``_uv_tools_dir_stamp``, which moves on
+        any install or uninstall whoever runs it, another runner instance or a
+        hand-run uv included): every ``get_tool_installation_info`` read
+        spawned a fresh ``uv tool list``, once per scanner per dependency
+        check, for an answer that does not move inside a scan. The lock is
+        held across the listing, so concurrent callers share one spawn; a
+        failed listing is raised as before and memoizes nothing.
+        """
         if not self.is_uv_available():
             raise UVToolRunnerError(self.unavailable_reason())
 
-        try:
-            result = spawn_run(  # nosec B603 — list args, validated uv executable path
-                [self.uv_executable, "tool", "list"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
-                env=environ_for_parsed_output(),
-                encoding="utf-8",
-                errors="replace",
-            )
+        uv = self.uv_executable
+        stamp = _uv_tools_dir_stamp()
+        with self._tool_list_state():
+            memo = self.__dict__.get("_tool_list_memo")
+            if memo is not None:
+                answered_by, answered_under, tools, stored_at = memo
+                if (
+                    answered_by == uv
+                    and answered_under == stamp
+                    and time.monotonic() - stored_at <= _TOOL_LIST_MEMO_SECONDS
+                ):
+                    return list(tools)
+                self._tool_list_memo = None
 
-            tools = []
-            for line in result.stdout.strip().split("\n"):
-                if line.strip():
-                    tool_name = line.strip().split()[0]
-                    if tool_name == "-":
-                        tool_name = line.strip().split()[1]  # Add sub-commands too
-                    tools.append(tool_name)
+            try:
+                result = spawn_run(  # nosec B603 — list args, validated uv executable path
+                    [uv, "tool", "list"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=True,
+                    env=environ_for_parsed_output(),
+                    encoding="utf-8",
+                    errors="replace",
+                )
 
-            return tools
+                tools = []
+                for line in result.stdout.strip().split("\n"):
+                    if line.strip():
+                        tool_name = line.strip().split()[0]
+                        if tool_name == "-":
+                            tool_name = line.strip().split()[1]  # Add sub-commands too
+                        tools.append(tool_name)
 
-        except subprocess.CalledProcessError as e:
-            raise UVToolRunnerError(f"Failed to list UV tools: {e}")
-        except (subprocess.SubprocessError, OSError) as e:
-            # A listing that timed out or whose spawn failed is this method's
-            # failure like a non-zero exit, not an exception for its callers:
-            # is_tool_installed answers False on UVToolRunnerError, and the
-            # callers of install_tool_with_version and
-            # get_tool_installation_info expect a value, not a raise.
-            raise UVToolRunnerError(
-                f"Failed to list UV tools: {type(e).__name__}: {e}"
-            ) from e
+                self._tool_list_memo = (uv, stamp, list(tools), time.monotonic())
+                return tools
+
+            except subprocess.CalledProcessError as e:
+                raise UVToolRunnerError(f"Failed to list UV tools: {e}")
+            except (subprocess.SubprocessError, OSError) as e:
+                # A listing that timed out or whose spawn failed is this method's
+                # failure like a non-zero exit, not an exception for its callers:
+                # is_tool_installed answers False on UVToolRunnerError, and the
+                # callers of install_tool_with_version and
+                # get_tool_installation_info expect a value, not a raise.
+                raise UVToolRunnerError(
+                    f"Failed to list UV tools: {type(e).__name__}: {e}"
+                ) from e
 
     def is_tool_installed(self, tool_name: str) -> bool:
         """Check if a specific tool is installed via UV."""
@@ -2246,6 +2352,10 @@ class UVToolRunner:
                 # caller that probed before installing (converters re-read
                 # tool_version afterwards) would keep seeing the pre-install answer.
                 invalidate_tool_version_cache(tool_name)
+                # Installing also changes what `uv tool list` answers; without
+                # this, is_tool_installed kept the pre-install listing for the
+                # memo's lifetime.
+                self.forget_tool_list()
 
                 return True
             finally:

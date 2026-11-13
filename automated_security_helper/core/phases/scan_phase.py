@@ -1790,9 +1790,23 @@ class ScanPhase(EnginePhase):
                                 )
                                 if callable(resolve_version):
                                     resolve_version()
-                                plugin_instance.dependencies_satisfied = (
-                                    plugin_instance.validate_plugin_dependencies()
-                                )
+                                # Through the memoizing wrapper for a real
+                                # ScannerPluginBase, so the verdict -- and the
+                                # execution route it decided, a verified PATH
+                                # copy included -- is honored by the per-target
+                                # _pre_scan instead of re-probed in the worker,
+                                # inside the scanner's measured duration. By
+                                # isinstance, not getattr: a scanner plugin
+                                # need not inherit PluginBase, and a test
+                                # double's auto-created attribute would answer
+                                # a truthy Mock where the double's own
+                                # validate_plugin_dependencies says False.
+                                if isinstance(plugin_instance, ScannerPluginBase):
+                                    plugin_instance.dependencies_satisfied = plugin_instance.validate_plugin_dependencies_once()
+                                else:
+                                    plugin_instance.dependencies_satisfied = (
+                                        plugin_instance.validate_plugin_dependencies()
+                                    )
                         if (
                             not sandbox_refused
                             and not plugin_instance.dependencies_satisfied

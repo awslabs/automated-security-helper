@@ -701,6 +701,12 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         self.resolve_deferred_tool_version()
         if self.dependency_unavailable_reason:
             return False
+        # A copy on PATH an earlier validation of this instance verified and
+        # chose to run directly is honored while it still exists: re-running
+        # selection fell to the consolidated resolver below, whose answer
+        # flipped the scan back through uv (checkov's measured shape).
+        if self._honored_verified_pre_installed():
+            return True
         if not self._validate_uv_tool_availability():
             # The resolver probes under this scanner's own offline mode, as every
             # uv call of the mixin does: without it a scanner offline by its
