@@ -3,7 +3,7 @@
 WHAT IS UNDER TEST
 ------------------
 The MCP entrypoint as every committed template under ``deploy/cdk/templates/``
-writes it into its image, run for real with a stand-in ``ash`` and a stand-in
+writes it into its image, run for real with a stand-in ``ashx`` and a stand-in
 ``python3`` in place of the Secrets Manager read.
 
 A process's command line is readable by every user in the container, and from the
@@ -85,16 +85,21 @@ def entrypoint(request) -> str:
         buildspec, "build", f"{ENTRYPOINT_DESTINATION} <<'{DELIMITER}'"
     )
     body = heredoc_body(command, delimiter=DELIMITER)
-    assert "ash mcp" in body, f"{request.param}: not the MCP entrypoint"
+    # The entrypoint picks `ashx` (v4) or `ash` (v3 image) into $ASH_CLI, then runs it.
+    assert '"$ASH_CLI" mcp' in body, f"{request.param}: not the MCP entrypoint"
     return body
 
 
 def _run(
-    entrypoint: str, tmp_path: pathlib.Path, with_fd: bool, secret: str = SECRET
+    entrypoint: str,
+    tmp_path: pathlib.Path,
+    with_fd: bool,
+    secret: str = SECRET,
+    cli_name: str = "ashx",
 ) -> Tuple[int, List[str], Optional[bytes]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    ash = bin_dir / "ash"
+    ash = bin_dir / cli_name
     ash.write_text(STAND_IN_ASH, encoding="utf-8")
     ash.chmod(0o755)
     secret_file = tmp_path / "secret"
@@ -136,6 +141,16 @@ def test_the_secret_goes_on_a_descriptor_when_ash_takes_one(entrypoint, tmp_path
     assert not [arg for arg in argv if SECRET in arg], argv
     assert fd3 == SECRET.encode() + b"\n"
     assert _auth_value_from_bytes(fd3, "descriptor 3") == SECRET
+
+
+def test_a_v3_image_with_only_ash_still_gets_the_secret_on_a_descriptor(
+    entrypoint, tmp_path
+):
+    """A v3 image ships ``ash`` and no ``ashx``; the entrypoint falls back to it."""
+    _status, argv, fd3 = _run(entrypoint, tmp_path, with_fd=True, cli_name="ash")
+
+    assert "--auth-header-value-fd" in argv, argv
+    assert fd3 == SECRET.encode() + b"\n"
 
 
 def test_an_older_ash_still_gets_the_secret_on_argv(entrypoint, tmp_path):

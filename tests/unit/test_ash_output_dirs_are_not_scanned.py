@@ -317,7 +317,7 @@ def _semgrep_anchor(target: Path) -> Path:
 
 
 @pytest.mark.parametrize("in_git", [True, False])
-def test_semgrep_excludes_each_directory_anchored_where_semgrep_anchors(
+def test_opengrep_excludes_each_directory_anchored_where_opengrep_anchors(
     tree, in_git, tmp_path, monkeypatch
 ):
     """semgrep anchors a leading-slash --exclude at the git root, else the target.
@@ -328,9 +328,9 @@ def test_semgrep_excludes_each_directory_anchored_where_semgrep_anchors(
     directory, and the previous run's ``.ash/ash_output`` is scanned. semgrep does
     not read that variable (measured on 1.180.0), so it anchors at the nearest
     ``.git`` above the target, if any, else at the target (_semgrep_anchor)."""
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
-        SemgrepScannerConfig,
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
     )
     from automated_security_helper.utils.scan_output_dirs import (
         PatternSyntax,
@@ -354,8 +354,8 @@ def test_semgrep_excludes_each_directory_anchored_where_semgrep_anchors(
     )
     if in_git:
         assert prefix == "/repo", prefix
-    scanner = SemgrepScanner(
-        context=_context(source, output), config=SemgrepScannerConfig()
+    scanner = OpengrepScanner(
+        context=_context(source, output), config=OpengrepScannerConfig()
     )
     argv, _, _ = scanner._execute_scan(source, "source", [])
 
@@ -366,15 +366,15 @@ def test_semgrep_excludes_each_directory_anchored_where_semgrep_anchors(
         assert f"{prefix}/.ash/ash_output" not in excludes, excludes
 
 
-def test_the_semgrep_patterns_do_not_accumulate(tree):
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
-        SemgrepScannerConfig,
+def test_the_opengrep_patterns_do_not_accumulate(tree):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
     )
 
     source, output = tree
-    scanner = SemgrepScanner(
-        context=_context(source, output), config=SemgrepScannerConfig()
+    scanner = OpengrepScanner(
+        context=_context(source, output), config=OpengrepScannerConfig()
     )
     before = list(scanner.args.extra_args)
     first, _, _ = scanner._execute_scan(source, "source", [])

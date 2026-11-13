@@ -43,7 +43,17 @@ def test_an_override_that_asks_for_the_refusal_refuses_an_override_added_entry(
 
 
 @pytest.mark.parametrize("key", ["fail_on_unknown_keys", "fail-on-unknown-keys"])
-@pytest.mark.parametrize("value", ["false", "no", "0"])
+@pytest.mark.parametrize("value", ["1.0", '"true"', "'true'"])
+def test_a_float_or_quoted_value_is_refused_whichever_way_it_is_read(key, value):
+    """1.0 is a float once typed, and the model reads it as true: the load must
+    not take warn mode for it. A quoted word is not a bool to the model, so the
+    config is refused either way, never loaded with the flag silently off."""
+    with pytest.raises(ValueError):
+        build_config(_clean(), config_overrides=[f"{key}={value}", BAD_ENTRY])
+
+
+@pytest.mark.parametrize("key", ["fail_on_unknown_keys", "fail-on-unknown-keys"])
+@pytest.mark.parametrize("value", ["false", "no", "0", "0.0"])
 def test_an_override_that_does_not_ask_for_it_only_warns(key, value):
     config = build_config(_clean(), config_overrides=[f"{key}={value}", BAD_ENTRY])
     warned = [w for w in config._resolution_warnings if "expiraton" in w]

@@ -476,8 +476,9 @@ class TestFindingsOutrankAMissingTreeWithoutHidingIt:
 
         ``status`` is the bare rolled-up token, FAILED, and the display string with the
         qualifier is in ``detail``. No target counts are recorded, so the row is not a
-        partial-coverage claim by its counts; its ``reason`` is the token the writer
-        gives a status the per-scanner pass accepts (PASSED, FAILED, SKIPPED).
+        partial-coverage claim by its counts; its ``reason`` is
+        ``missing_dependencies``, since the scanner could not run on one tree for
+        lack of its dependencies.
         """
         from automated_security_helper.interactions.run_ash_scan import (
             scan_incompleteness,
@@ -494,7 +495,7 @@ class TestFindingsOutrankAMissingTreeWithoutHidingIt:
         assert row == {
             "scanner": "tool-a",
             "status": "FAILED",
-            "reason": "partial_coverage",
+            "reason": "missing_dependencies",
             "detail": "FAILED (MISSING on some files)",
         }, row
 

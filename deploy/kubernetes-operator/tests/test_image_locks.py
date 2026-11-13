@@ -3,7 +3,7 @@
 The e2e builds the images, and tests/e2e/test_e2e_image_locks.py shows a tampered hash
 stops the build. This file covers what a build cannot: that each requirement file still
 satisfies the project it locks, that bandit carries what ASH asks of it, that the ASH
-runtime export is real, and that no install in either Dockerfile bypasses the files.
+runtime export is real, and that no install in either Dockerfile skips the files.
 """
 
 from __future__ import annotations

@@ -601,36 +601,6 @@ def represent_tagged_reference(
     return dumper.represent_scalar("!ENV", str(value).removeprefix(EXPLICIT_ENV_TAG))
 
 
-class _QuotedStr(str):
-    """A string ``_rewrite_config_with_entry`` writes quoted, as ``_ConfigDumper``
-    would, among existing values it writes as they were."""
-
-    __slots__ = ()
-
-
-class _EntryRewriteDumper(yaml.SafeDumper):
-    pass
-
-
-_EntryRewriteDumper.add_representer(
-    _QuotedStr,
-    lambda dumper, value: dumper.represent_scalar(
-        "tag:yaml.org,2002:str", str(value), style="'"
-    ),
-)
-
-
-def _quote_references(value: Any) -> Any:
-    """``value`` with every string that reads as ``!ENV`` marked to be quoted."""
-    if isinstance(value, dict):
-        return {k: _quote_references(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_quote_references(v) for v in value]
-    if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
-        return _QuotedStr(value)
-    return value
-
-
 # Define BuildConfig class
 class BuildConfig(RedactedSection):
     """Configuration model for build-time settings."""
@@ -868,7 +838,9 @@ class _PluginConfigSegment(RedactedSection):
         # where it was merged in silently. A document load folds there and
         # never reaches this branch; it runs for a configuration built from a
         # dict directly.
-        declared = {info.alias or name for name, info in cls.model_fields.items()}
+        declared = {
+            field_info.alias or name for name, field_info in cls.model_fields.items()
+        }
         folded = {_folded_section_name(key): key for key in declared}
         for key in list(data):
             if not isinstance(key, str) or key in declared:
@@ -2981,7 +2953,9 @@ class AshConfig(RedactedSection):
         The direct dump is a JSON document for a ``.json`` path, as
         render_config_file writes one; a JSON path whose dump has to write
         references is refused. The whole text is built before the file is
-        opened, so a dump that fails leaves an existing file as it was.
+        opened, and it is then written to a staged file beside the target that
+        replaces it in one step, so a dump that fails, and a write cut short
+        (a full disk, a kill), leave an existing file as it was.
         """
         from automated_security_helper.config.config_sources import is_json_file
         from automated_security_helper.config.config_writer import (
@@ -3039,14 +3013,10 @@ class AshConfig(RedactedSection):
                     # cannot write.
                     data = without_env_scalars(data)
                 text = yaml.dump(data, Dumper=_ConfigDumper, indent=2)
-            with open(config_path, mode="w", encoding="utf-8") as f:
-                f.write(text)
+            _replace_with_staged(config_path, text)
             return
         render = render_config_file_as_written if as_written else render_config_file
-        config_path.write_text(
-            render(config_path, self, [SCHEMA_COMMENT]),
-            encoding="utf-8",
-        )
+        _replace_with_staged(config_path, render(config_path, self, [SCHEMA_COMMENT]))
 
     def __repr_args__(self):
         """The fields as pydantic's repr shows them, except that a config whose
@@ -3443,9 +3413,13 @@ def _same_suppression(existing: Any, suppression: AshSuppression) -> bool:
         existing_suppression = AshSuppression.model_validate(existing)
     except ValidationError:
         return False
+    # client_supplied is set by ASH, never written (the writer drops it and a
+    # value in a file is ignored), so it is no part of what the entry holds.
     return existing_suppression.model_dump(
-        mode="json", exclude_none=True
-    ) == suppression.model_dump(mode="json", exclude_none=True)
+        mode="json", exclude_none=True, exclude={"client_supplied"}
+    ) == suppression.model_dump(
+        mode="json", exclude_none=True, exclude={"client_supplied"}
+    )
 
 
 class _KeepsEnvReferences(_NoAliasSafeLoader):
@@ -4160,6 +4134,9 @@ def _write_checked(
             "the config is not writable, so the suppression is not saved",
             config_path,
         )
+    # Only now, with the containment checks passed: nothing is created through
+    # a link that leads outside the root.
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     # A new config is created as a plain create would make it; an existing
     # one's copy starts private and takes the earlier mode below. A directory
     # this process may not write refuses the staging, and the replace below
@@ -4284,6 +4261,55 @@ def _write_checked(
     _sync_directory(target.parent)
 
 
+def _replace_with_staged(config_path: Path, text: str) -> None:
+    """Write *text* as the whole of *config_path* through a staged file.
+
+    The text goes to a file beside the target, is synced, and replaces the
+    target in one os.replace, so a write cut short (a full disk, a kill)
+    leaves an existing file as it was, where a write on the file itself
+    would have truncated it. The staged file takes the earlier file's owner,
+    group and mode; a new file gets the mode a plain create gives it. A
+    symlinked config stays a link, with the new bytes in its target. A
+    failure at any step removes the staged file and raises the system's own
+    error; a config mounted as one file, whose entry cannot be replaced, is
+    refused in words that say so, with the file untouched."""
+    target = Path(os.path.realpath(config_path))
+    try:
+        earlier_status: Optional[os.stat_result] = target.stat()
+    except FileNotFoundError:
+        earlier_status = None
+    if earlier_status is not None and not os.access(target, os.W_OK):
+        raise PermissionError(errno.EACCES, "Permission denied", str(config_path))
+    descriptor, staged = _staged_beside(
+        target, 0o666 if earlier_status is None else 0o600
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            if earlier_status is not None:
+                kept_mode = _give_earlier_owner_and_mode(
+                    handle.fileno(), earlier_status
+                )
+            handle.write(text.encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if earlier_status is not None and not hasattr(os, "fchmod"):
+            os.chmod(staged, kept_mode)
+        try:
+            os.replace(staged, target)
+        except OSError as error:
+            if error.errno != errno.EBUSY:
+                raise
+            raise OSError(
+                errno.EBUSY,
+                f"{config_path} is mounted as a single file, so it cannot be "
+                "replaced; it is unchanged",
+            ) from None
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    _sync_directory(target.parent)
+
+
 def _decoded_for_save(config_path: Path, earlier: bytes) -> str:
     """The text of the file a save edits, or a refusal that leaves it untouched.
 
@@ -4355,7 +4381,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         not_a_file = str(e)
     if not_a_file is not None:
         raise _left_unchanged(not_a_file, config_path)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    # The directory is made in _write_checked, after its containment refusals:
+    # made here, a link pointing outside got directories created through it
+    # before the save refused.
     # The file's bytes as they are: what a failed write puts back, and where
     # its own line ending is read from. Read as the recheck before the replace
     # reads (read_config_bytes, so the same size bound): the two reads must

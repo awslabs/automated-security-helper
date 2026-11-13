@@ -627,8 +627,9 @@ def test_a_signal_while_serving_stops_the_scans_promptly_then_exits(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("still_running", [False, True])
 def test_a_signal_while_serving_stops_the_source_jobs_before_it_exits(
-    monkeypatch, stops, recorded_group, stop_signals_put_back
+    monkeypatch, stops, recorded_group, stop_signals_put_back, still_running
 ):
     """exit_at_once removes the stdio session workspace, so a clone or delivery
     still writing into it would leave the next server a partial tree: the signal
@@ -643,8 +644,10 @@ def test_a_signal_while_serving_stops_the_source_jobs_before_it_exits(
 
     async def wait(given, deadline):
         events.append("wait" if given is joiner else "wait on another joiner")
-        return False
+        return still_running
 
+    warnings: List[str] = []
+    monkeypatch.setattr(mcp_server.logger, "warning", warnings.append)
     monkeypatch.setattr(mcp_server, "_begin_stopping_source_jobs", begin)
     monkeypatch.setattr(mcp_server, "_wait_for_source_jobs", wait)
     monkeypatch.setattr(
@@ -660,6 +663,9 @@ def test_a_signal_while_serving_stops_the_source_jobs_before_it_exits(
     asyncio.run(mcp_server._serve_stdio())
 
     assert events == ["begin", "wait", "exit"], events
+    # A job still running when the wait ends is said, as a possible partial tree.
+    partial = [w for w in warnings if "partial tree" in w]
+    assert bool(partial) is still_running, warnings
 
 
 @pytest.mark.unit
@@ -903,6 +909,38 @@ def recording_pools(monkeypatch):
 async def _leave_the_stdio_lifespan() -> None:
     async with mcp_server._lifespan(mcp_server.mcp):
         pass
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("site", ["lifespan", "server exit"])
+def test_a_stop_that_raises_still_kills_the_groups_and_flushes_stdout(
+    monkeypatch, site
+):
+    """The shield stops a cancel, not an exception: the tools' groups are still
+    killed and stdout still flushed while fd 1 points at stderr."""
+    events: List[str] = []
+
+    async def stop_running_scans(reason, timeout, promptly=False):
+        raise RuntimeError("the registry failed")
+
+    monkeypatch.setattr(mcp_server, "stop_running_scans", stop_running_scans)
+    monkeypatch.setattr(mcp_server, "_serving_stdio", True)
+    monkeypatch.setattr(mcp_server, "_begin_stopping_source_jobs", lambda: object())
+    monkeypatch.setattr(
+        mcp_server, "kill_running_groups", lambda: events.append("kill")
+    )
+    monkeypatch.setattr(mcp_server, "_flush_stdout", lambda: events.append("flush"))
+
+    async def run() -> None:
+        if site == "lifespan":
+            await _leave_the_stdio_lifespan()
+        else:
+            await mcp_server.stop_scans_at_server_exit("test")
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(run())
+
+    assert events == ["kill", "flush"], events
 
 
 @pytest.mark.unit

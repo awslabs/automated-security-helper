@@ -92,7 +92,7 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
     # value is not asserted here -- this test is about argv -- but a stub that
     # refused the keyword would fail on the signature rather than on the property.
     def _fake_run(argv, cwd=None, env=None):
-        if list(argv) == ["ash", "scan", "--help"]:
+        if list(argv) == ["ashx", "scan", "--help"]:
             return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -147,7 +147,7 @@ def _capture_argv(gate, monkeypatch, tmp_path) -> list[list[str]]:
     captured: list[list[str]] = []
 
     def _fake_run(argv, cwd=None, env=None):
-        if list(argv) == ["ash", "scan", "--help"]:
+        if list(argv) == ["ashx", "scan", "--help"]:
             return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")

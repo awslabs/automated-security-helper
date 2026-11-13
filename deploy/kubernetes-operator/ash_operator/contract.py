@@ -92,7 +92,7 @@ def shell_arg(value: str) -> str:
     separator.
 
     That wrong belief is not harmless trivia -- it is the same misreading of ``sh -c``
-    positional parameters that produced an auth bypass in the MCP path, where
+    positional parameters that produced an inverted auth check in the MCP path, where
     ``${ASH_MCP_AUTH_HEADER_VALUE}`` was passed as an argv element on the assumption
     the shell would expand it. It does not, and ``ashx`` received the literal as the
     expected credential. So the rationale is corrected here rather than left to be
@@ -100,7 +100,7 @@ def shell_arg(value: str) -> str:
     a newline from corrupting the entrypoint's own log lines, it keeps the operator
     from constructing arguments no ASH invocation should receive, and it means a
     future change that *does* introduce a ``-c`` wrapper does not silently become
-    exploitable. Do not relax it on the grounds that nothing re-parses argv today.
+    unsafe. Do not relax it on the grounds that nothing re-parses argv today.
 
     Quoting instead of rejecting was considered and declined: a value needing quotes
     to be safe is a value an adopter did not mean to write, and accepting it quietly
@@ -386,7 +386,7 @@ def build_mcp_argv(
     if auth_header_name:
         argv += ["--auth-header-name", shell_arg(auth_header_name)]
         # --auth-header-value is deliberately absent. See the docstring: putting a
-        # placeholder here produced an auth bypass, because a positional parameter's
+        # placeholder here inverted the auth check, because a positional parameter's
         # value is never re-expanded. The entrypoint appends the flag and reads the
         # value from the environment.
     return argv

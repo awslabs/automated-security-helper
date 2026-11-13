@@ -2037,8 +2037,8 @@ global_settings:
         keep these findings actionable.
     - rule_id: HIPAA.Security-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1180
-      line_end: 1180
+      line_start: 1277
+      line_end: 1277
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -2061,8 +2061,8 @@ global_settings:
         this template holds.
     - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1180
-      line_end: 1180
+      line_start: 1277
+      line_end: 1277
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -2084,8 +2084,8 @@ global_settings:
         id, so leaving it out would keep these findings actionable.
     - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1180
-      line_end: 1180
+      line_start: 1277
+      line_end: 1277
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -2107,8 +2107,8 @@ global_settings:
         id, so leaving it out would keep these findings actionable.
     - rule_id: PCI.DSS.321-IAMNoInlinePolicy
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1180
-      line_end: 1180
+      line_start: 1277
+      line_end: 1277
       reason: >-
         LINE-PINNED to ScanFunctionRoleEc2Access99A7E33E, the line ASH reports for
         that resource (the first line naming its logical id, the function's
@@ -3179,8 +3179,8 @@ global_settings:
         KMS key-or-alias ARN pattern. See the block comment above.
     - rule_id: F3031
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      line_start: 1059
-      line_end: 1059
+      line_start: 1156
+      line_end: 1156
       reason: >-
         LINE-PINNED to ScanFunction322CD7EE, the line ASH reports for that resource
         (the first line naming its logical id), and listed before the file-level
