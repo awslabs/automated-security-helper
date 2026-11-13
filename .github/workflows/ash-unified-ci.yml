@@ -38,14 +38,16 @@ on:
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 25 cells + uvx x 5 OS = 105 legs in place of the 25 bundled cells (uvx ran on 3.12
-  # only) -- it would be ~934 against ~466, so running them as one leg per combination
-  # cuts a large share of what this deliberate duplication costs. Most of the 457 is the
+  # only), 80 more legs on each of the two runs -- it would be ~1084 against ~541, so
+  # running them as one leg per combination cuts a large share of what this deliberate
+  # duplication costs. Most of the 457 is the
   # unit-test and integration-test families, which are 360 legs since the suite was split
   # by tier and the slow pools took eight shards: the unit tier is 180 legs (2 Linux
   # images x 5 Python versions x 6 shards, plus 2 macOS images and 1 Windows image x 5 x
   # 8; the notes above unit-test-linux and on unit-test-windows), the integration
   # tier is 180 (the same split) and the e2e tier is 5 (one per runner label,
-  # Python 3.12 only, plus the two advisory e2e-express legs; see the notes on those jobs). The unit family was 200 legs when
+  # Python 3.12 only); the two advisory e2e-express legs are separate from that
+  # five (see the notes on those jobs). The unit family was 200 legs when
   # every OS and Python version ran eight shards of the whole suite, 25 when the tier
   # first ran unsharded and timed out at 30 minutes, 100 while it was cut into four
   # shards, 25 again once each leg's timeout was sized from the measured shard walls, 40
@@ -3082,16 +3084,16 @@ jobs:
   # 40, +60 on a push; on a pull request 3 Python versions x 4 = 12 legs in place of 3 for
   # each, +18) after the unsharded arm Linux and macOS legs of run 43285884861 became the
   # critical path of the workflow (the note above unit-test-linux): 291 on a push, 289 on
-  # a merge-queue run, and 136 on a pull request. Then run 43449176506 measured the
+  # a merge-queue run, and 136 on a pull request. Then the advisory e2e-express job was
+  # added, two legs on every event (+2): 293 on a push, 291 on a merge-queue run, and 138
+  # on a pull request. Then run 43449176506 measured the
   # pull-request wall at 38m33s, set by a macOS integration cell that waited 11.6 minutes
   # behind its own cap and by the scan matrix's three cap-waves, with the slow-OS shard
   # walls right behind both: the slow pools took eight shards and Linux six (unit and
   # integration, +160 on a push), the standalone integration-test job took four shards of
   # its own (+3) and its docs step became the docs-examples job (+1), and the tier and
-  # scan caps moved so a pull request starts everything in one wave: 455 on a push, 453
-  # on a merge-queue run, and 200 on a pull request. Then the advisory e2e-express job was
-  # added, two legs on every event (+2): 457 on a push, 455 on a merge-queue run, and 202
-  # on a pull request.
+  # scan caps moved so a pull request starts everything in one wave: 457 on a push, 455
+  # on a merge-queue run, and 202 on a pull request.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 365 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
