@@ -1474,6 +1474,13 @@ _NEVER_RUNS_A_FILE = frozenset(
         "touch file readlink realpath basename dirname sha256sum md5sum cmp diff dd"
     ).split()
 )
+# For a ``# apt-pin-check: skip`` body only: the commands beyond _NEVER_RUNS_A_FILE
+# that edit, sign or validate a file in place without running it (``sed -i`` of a
+# motd, ``gpg --dearmor`` of a key, ``nginx -t -c`` of a config). The fail-closed
+# fallback in ``_follow_a_file`` stays on for every other program, so a wrapper it
+# does not model (``timeout 300 sh x.sh``, ``xargs sh x.sh``) still counts as
+# running the file and the skip is refused rather than failing open.
+_ONLY_TOUCHES_A_FILE = frozenset({"sed", "gpg", "nginx"})
 # The commands that put a file under a second name or path, whose last word is the new
 # one: ``mv x.sh inst``, ``cp x.sh /usr/local/bin/inst``, ``ln -s x.sh inst``.
 _GIVES_A_FILE_ANOTHER_NAME = frozenset({"mv", "cp", "ln", "install"})
@@ -1695,14 +1702,13 @@ def _follow_a_file(
 ) -> tuple[bool, set[str]]:
     """Whether a command of the pipelines runs one of the files, by its name or path.
 
-    ``certain_only`` answers True only when the caller is clearly an interpreter:
-    the file as the command's program, a shell, ``.`` or ``source`` given its
-    name, a ``-c`` script naming it, or a shell piped a command that names it.
-    The fail-closed fallback below (any unlisted program that names the file)
-    then answers False: it exists so an unmodeled wrapper cannot hide a script,
-    but for a ``# apt-pin-check: skip`` body the question is the opposite, and a
-    command that merely touches the file (``sed -i``, ``gpg --dearmor``,
-    ``nginx -t -c``) must not read as running it.
+    ``certain_only`` (a ``# apt-pin-check: skip`` body) keeps the fail-closed
+    fallback below (any unlisted program that names the file runs it) and takes
+    out of it only ``_ONLY_TOUCHES_A_FILE``: a command that merely edits or
+    checks the file (``sed -i``, ``gpg --dearmor``, ``nginx -t -c``) must not
+    read as running it, but a wrapper this does not model (``timeout 300 sh
+    x.sh``, ``xargs sh x.sh``) still must, since a skipped body that is in fact
+    executed would otherwise ship its installs untraced.
 
     Also the names the files have at the end of the pipelines (the files' own names and
     any ``mv`` or ``cp`` gave them), for the instructions that come after: a file moved
@@ -1760,8 +1766,8 @@ def _follow_a_file(
                     after_tee = words[tails.index("tee") + 1 :]
                     wanted |= _base_names(w for w in after_tee if not w.startswith("-"))
             elif (
-                not certain_only
-                and program not in _NEVER_RUNS_A_FILE
+                program not in _NEVER_RUNS_A_FILE
+                and not (certain_only and program in _ONLY_TOUCHES_A_FILE)
                 and (named | piped) & wanted
             ):
                 return True, wanted
@@ -1901,11 +1907,11 @@ def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
             )
             names = set(block.files)
             for when, at in callers:
-                # A skipped body answers only to a caller that is clearly an
-                # interpreter: the fail-closed fallback would otherwise turn a
-                # command that merely touches the file (``sed -i`` of a motd)
-                # into a refusal, which is exactly what the skip comment exists
-                # to say does not happen.
+                # For a skipped body the commands that only touch the file
+                # (``sed -i`` of a motd) do not count as running it; every
+                # other command that names it still does, fail closed, so a
+                # wrapper this check does not model cannot hide that the body
+                # is executed.
                 runs, names = _follow_a_file(
                     pipelines_of(at), names, certain_only=block.skipped
                 )

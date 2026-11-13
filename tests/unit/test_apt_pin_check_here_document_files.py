@@ -1034,6 +1034,24 @@ class TestASkipCommentAboveARun:
         with pytest.raises(checker.PinEnumerationError, match="apt-pin-check: skip"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
+    @pytest.mark.parametrize(
+        "run_line",
+        [
+            "RUN timeout 300 sh /etc/motd\n",
+            "RUN xargs sh /etc/motd\n",
+        ],
+    )
+    def test_a_later_run_through_an_unmodeled_wrapper_refuses_the_skip(
+        self, tmp_path, run_line
+    ):
+        # Red before: the skip turned off the fail-closed fallback for the whole
+        # body, so a file run through a wrapper the check does not model was
+        # accepted and its installs would have shipped untraced. Only commands
+        # that merely touch the file (the sed case above) keep the skip.
+        body = "# apt-pin-check: skip\n" + self.MOTD + run_line
+        with pytest.raises(checker.PinEnumerationError, match="apt-pin-check: skip"):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
 
 class TestOnlyACopierMakesTheBodyAFile:
     """A body is a file's content only when a copying command is the one that reads it.

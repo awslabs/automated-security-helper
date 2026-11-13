@@ -88,8 +88,13 @@ _RULE_LINE_MARKERS = {
         "creds.env",  # a test writing a fake credentials file
         ".npmrc",  # a package manager's rc file, named in a docstring
         "container.env",  # the env file ASH writes for its own container run
-        ".env",  # a dotenv file's name in a scannable-names table or docs data
-        ".git-credentials",  # a credential file's name in a scannable-names table
+        # The dotfile names are matched as source text quotes them: a bare .env
+        # would be a substring of os.environ and self.environment, so a drifted
+        # pin on almost any environment-touching line would still read as fine.
+        "'.env'",  # a dotenv file's name in a scannable-names table or docs data
+        '".env"',
+        "'.git-credentials'",  # a credential file's name in a scannable-names table
+        '".git-credentials"',
     ),
     "threat-filesystem-destruction": ("rm -rf", "/home/"),
     "threat-process-download-exec": ("subprocess.run", "urlopen", "curl", "pip"),
@@ -143,6 +148,26 @@ def test_every_guarddog_pin_names_a_line_that_holds_the_flagged_text(
             f"{where}: the pinned line holds none of {markers}; it reads {line!r}. "
             "Re-measure the pin: the file moved under it."
         )
+
+
+def test_the_dotfile_markers_match_the_name_only_as_source_text_quotes_it() -> None:
+    """A threat-filesystem-read pin that drifts onto an environment read must fail.
+
+    The marker check is a substring test, and a bare ``.env`` marker is a
+    substring of ``os.environ``, ``.environment`` and ``self.env``, so with it a
+    drifted pin passed on almost any line touching the environment -- the
+    stale-pin failure this module exists to catch -- and the ``creds.env`` and
+    ``container.env`` markers were redundant. The quoted forms match the file's
+    name as a table or data entry quotes it, and nothing else.
+    """
+    markers = _RULE_LINE_MARKERS["threat-filesystem-read"]
+    drifted = "    value = os.environ.get(name)  # read the environment, not a file"
+    assert ".env" in drifted, "the control must carry the retired broad form"
+    assert not any(marker in drifted for marker in markers), (
+        "a drifted pin on an os.environ line must hold no marker"
+    )
+    for pinned in ('        ".env",', '        ".git-credentials",'):
+        assert any(marker in pinned for marker in markers), pinned
 
 
 def test_both_configs_carry_the_same_guarddog_suppressions() -> None:
