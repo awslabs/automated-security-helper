@@ -3,7 +3,7 @@
 #checkov:skip=CKV_DOCKER_8:Same as CKV_DOCKER_3 — root is intentional for scanner tool execution
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-slim-bookworm
 # Change this in the same commit as the tag above. Why, and how to get the value: below.
-ARG BASE_IMAGE_DIGEST=sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+ARG BASE_IMAGE_DIGEST=sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 # BASE_IMAGE_DIGEST
 #
@@ -26,7 +26,7 @@ ARG BASE_IMAGE_DIGEST=sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523eb
 #   docker image inspect --format '{{index .RepoDigests 0}}' public.ecr.aws/docker/library/python:<new tag>
 #
 # This is the multi-arch INDEX digest, not a per-platform manifest digest, which is why one
-# value covers amd64 and arm64. Measured 2026-09-29: public.ecr.aws and docker.io both report
+# value covers amd64 and arm64. Measured 2026-11-13: public.ecr.aws and docker.io both report
 # this digest for this tag, with mediaType application/vnd.oci.image.index.v1+json.
 #
 # It is deliberately NOT folded into BASE_IMAGE as `repo:tag@sha256:...`. That form would let
