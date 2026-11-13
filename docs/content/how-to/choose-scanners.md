@@ -126,8 +126,6 @@ The community scanner trivy-repo runs trivy as well. To keep one of each pair, t
 
 ```yaml
 scanners:
-  opengrep:
-    enabled: false
   trivy:
     enabled: false
   gitleaks:

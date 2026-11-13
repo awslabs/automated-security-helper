@@ -147,8 +147,8 @@ ruleset past its age bound, still exits 1. See [Set the gate](how-to/set-the-gat
 ASH runs scanners whose checks overlap and does not deduplicate their findings: grype and trivy both check dependencies, and detect-secrets
 and gitleaks both look for secrets. Each finding carries its scanner's own rule ID, so a
 suppression for one does not cover the other. To keep one of a pair, turn the other off
-by setting `scanners.opengrep.enabled` to `false` in the config or by passing
-`--exclude-scanners opengrep`. See
+by setting `scanners.gitleaks.enabled` to `false` in the config or by passing
+`--exclude-scanners gitleaks`. See
 [Choose scanners](how-to/choose-scanners.md).
 
 ## Does ASH work on Windows?

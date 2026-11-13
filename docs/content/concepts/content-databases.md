@@ -10,7 +10,7 @@ Some scanners compare your code against data they download: vulnerability adviso
 | `trivy-db` | trivy, trivy-repo | 24 hours | trivy's own rule for its official database: current until the next scheduled update, 24 hours after it was built | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
 | `opengrep-offline-rules` | opengrep, offline only | 30 days | ASH's choice | the time in `.ash-rules-fetched-at` in the rules cache, else the oldest rules file's modification time |
 
-The bounds are fixed: no config key, variable, or flag changes them. Online, opengrep downloads their ruleset at scan time, so there is no local copy to age. checkov, npm-audit, and syft are declared as having no content database: checkov's policies ship inside the checkov package ASH installs, npm-audit asks the npm registry at scan time and so does not run offline ([Run ASH offline](../how-to/run-offline.md#scanners)), and syft only catalogs packages. trivy's Java database is never downloaded (ASH tells trivy to skip it), and trivy's misconfiguration checks bundle is refreshed but not age-checked.
+The bounds are fixed: no config key, variable, or flag changes them. Online, opengrep downloads its ruleset at scan time, so there is no local copy to age. checkov, npm-audit, and syft are declared as having no content database: checkov's policies ship inside the checkov package ASH installs, npm-audit asks the npm registry at scan time and so does not run offline ([Run ASH offline](../how-to/run-offline.md#scanners)), and syft only catalogs packages. trivy's Java database is never downloaded (ASH tells trivy to skip it), and trivy's misconfiguration checks bundle is refreshed but not age-checked.
 
 ## Why a stale database fails the scan
 
