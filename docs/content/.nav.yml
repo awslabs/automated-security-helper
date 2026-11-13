@@ -1,5 +1,11 @@
 nav:
   - Home: index.md
+  - Who uses ASH:
+      - Personas: personas/index.md
+      - ASH for developers: personas/developer.md
+      - ASH for security reviewers: personas/security-reviewer.md
+      - ASH for security analysts: personas/security-analyst.md
+      - ASH across the SDLC and AI-DLC: personas/sdlc-aidlc.md
   - Getting started:
       - Choose a path: getting-started/index.md
       - Scan on your machine: getting-started/local.md
