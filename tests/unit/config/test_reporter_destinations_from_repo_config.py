@@ -28,7 +28,10 @@ from automated_security_helper.config.reporter_trust import (
 )
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.utils.log import ASH_LOGGER
-from tests.utils.helpers import mark_git_checkout
+from tests.unit.config._client_policy_helpers import (
+    narrow_client_rules as _narrow_client_rules,
+)
+from tests.utils.helpers import importing_this_checkout, mark_git_checkout
 
 #: Values that read like what a repository would write, for some options, each of
 #: the type its options model validates and none of them a default. Every other
@@ -232,7 +235,7 @@ def test_a_repository_config_repeating_the_operators_bedrock_content_applies(
 
 
 #: The AWS reporters whose options model has retry options, and those options.
-_RETRYING = ("bedrock-summary-reporter", "cloudwatch-logs", "s3")
+_RETRYING = ("aws-security-hub", "bedrock-summary-reporter", "cloudwatch-logs", "s3")
 _RETRY_OPTIONS = ("max_retries", "base_delay", "max_delay")
 _RETRY_CASES = [(r, n) for r in _RETRYING for n in _RETRY_OPTIONS]
 
@@ -695,9 +698,11 @@ def test_an_operator_off_written_another_way_still_counts(tmp_path, trusted_valu
 def defaults_off(monkeypatch):
     """Each off-host reporter off by its own default.
 
-    Stands in for a release whose reporter models default ``enabled`` to false.
-    ``test_each_off_host_reporters_enabled_default_is_listed`` holds the table
-    equal to the models, so such a release changes both.
+    ``REPORTER_ENABLED_DEFAULTS`` reads false for all four at this release, so
+    the fixture changes nothing today; it pins the table at false so the checks
+    below stay about the fallback to the trusted base, not about a default, if a
+    release turns one on. ``test_each_off_host_reporters_enabled_default_is_listed``
+    holds the table equal to the models, so such a release changes both.
     """
     for reporter in REPORTER_ENABLED_DEFAULTS:
         monkeypatch.setitem(REPORTER_ENABLED_DEFAULTS, reporter, False)
@@ -724,10 +729,11 @@ def test_off_by_default_an_in_tree_config_cannot_enable_it(
 def test_off_by_default_a_delivered_config_cannot_enable_it(
     tmp_path, ash_log, defaults_off, reporter
 ):
-    """Refused under the default denied_paths, and under a policy that lists
-    nothing of its own as well: a reporter that sends findings off the host is
-    denied whole whatever the list (ALWAYS_DENIED_PATHS). The confinement on its
-    own is covered by the in-tree route above."""
+    """Refused under the default denied_paths, and under a policy whose own list
+    names only ``/fail_on_findings`` (``_client_policy_helpers``) as well: a
+    reporter that sends findings off the host is denied whole whatever the list
+    (ALWAYS_DENIED_PATHS). The confinement on its own is covered by the in-tree
+    route above."""
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
     upload = _write_config(
@@ -759,29 +765,6 @@ _OPTIONS_ONLY: Dict[str, dict] = {
     "aws-security-hub": {"options": {}},
     "cloudwatch-logs": {"options": {}},
 }
-
-
-def _narrow_client_rules():
-    """A client policy that lists none of the reporter fields itself. The
-    sections of the reporters that send findings off the host are still denied
-    whole (ALWAYS_DENIED_PATHS)."""
-    from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.config.client_config_policy import rules_from
-
-    return rules_from(
-        AshConfig.model_validate(
-            {
-                "global_settings": {
-                    "mcp": {
-                        "runtime_overrides": {
-                            "denied_paths": ["/fail_on_findings"],
-                            "replace_default_denied_paths": True,
-                        }
-                    }
-                }
-            }
-        )
-    )
 
 
 @pytest.mark.unit
@@ -881,7 +864,7 @@ def test_off_by_their_models_default_the_loaded_reporters_stay_off(tmp_path):
         [
             sys.executable,
             "-c",
-            _ENGINE_WITH_DEFAULTS_OFF,
+            importing_this_checkout(_ENGINE_WITH_DEFAULTS_OFF),
             str(source),
             json.dumps(names),
         ],
@@ -1075,11 +1058,9 @@ _REVIEWED_SECTION_FIELDS = {"name", "enabled", "options", "extension"}
 #: the model on another branch, and listing them first keeps a repository's or a
 #: client's config from setting them in between. When the model gains one, the
 #: tests below fail until it is removed from here and added to the reporter's
-#: ``destination_options``.
-_LISTED_BEFORE_DEFINED = {
-    ("aws-security-hub", "archive_resolved_findings"),
-    ("aws-security-hub", "findings_scope"),
-}
+#: ``destination_options``. Empty now: the Security Hub reporter's model defines
+#: ``archive_resolved_findings`` and ``findings_scope`` and declares both.
+_LISTED_BEFORE_DEFINED: set = set()
 
 #: Options whose names look like a destination but are not one.
 _REVIEWED_NOT_DESTINATIONS = {
@@ -1100,7 +1081,7 @@ _DESTINATION_LIKE = re.compile(
 @pytest.fixture(scope="module")
 def reporter_fields(tmp_path_factory):
     result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
-        [sys.executable, "-c", _DUMP_REPORTER_FIELDS],
+        [sys.executable, "-c", importing_this_checkout(_DUMP_REPORTER_FIELDS)],
         cwd=tmp_path_factory.mktemp("fields"),
         capture_output=True,
         text=True,
@@ -1332,7 +1313,7 @@ def test_the_field_walker_sees_unions_nested_models_and_aliases(tmp_path):
         "print(json.dumps(found))\n"
     )
     result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
-        [sys.executable, "-c", probe],
+        [sys.executable, "-c", importing_this_checkout(probe)],
         cwd=tmp_path,
         capture_output=True,
         text=True,

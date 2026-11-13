@@ -1,4 +1,57 @@
 {
+  "$defs": {
+    "SuppressionScope": {
+      "additionalProperties": false,
+      "description": "What a suppression is scoped to beyond path, lines and package fields.\n\nThe universal keys (``resource_id``, ``resource_type``) are evaluated by\nASH's own matcher against the resource identity a finding carries, whatever\nengine produced it. ``engines`` carries per-engine blocks, keyed by scanner\nname, whose contents are opaque to ASH's core and owned by the named\nscanner plugin (the way a k8s object carries per-controller blocks under\none metadata envelope).",
+      "properties": {
+        "resource_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about the resource with this identity, as the producing engine reports it (for cdk-nag, the CDK construct path). Literal match first, then glob; case-sensitive. Findings that carry no resource identity never match.",
+          "title": "Resource Id"
+        },
+        "resource_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about resources of this type (e.g. 'AWS::IAM::Policy'). Literal match first, then glob; case-insensitive. Findings that carry no resource type never match.",
+          "title": "Resource Type"
+        },
+        "engines": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin.",
+          "title": "Engines"
+        }
+      },
+      "title": "SuppressionScope",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "description": "Represents a finding suppression rule.",
   "properties": {
@@ -12,7 +65,7 @@
       "title": "Reason",
       "type": "string"
     },
-    "expiration": {
+    "expires": {
       "anyOf": [
         {
           "type": "string"
@@ -22,8 +75,8 @@
         }
       ],
       "default": null,
-      "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
-      "title": "Expiration"
+      "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+      "title": "Expires"
     },
     "client_supplied": {
       "default": false,
@@ -121,6 +174,44 @@
       "default": null,
       "description": "(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.",
       "title": "Symbol"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SuppressionScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Scope the suppression to a resource identity, a resource type, or named engines' findings; see SuppressionScope. Omit it to keep today's matching. An empty scope is refused: match-all is the absence of the field."
+    },
+    "resource_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error.",
+      "title": "Resource Id"
+    },
+    "expiration": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
+      "title": "Expiration"
     }
   },
   "required": [

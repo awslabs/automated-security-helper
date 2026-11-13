@@ -51,28 +51,32 @@ pytestmark = [
 #: shorter than the minute it sleeps: a stand-in nothing killed is still running.
 WAIT_SECONDS = 20.0
 
-#: Ignores SIGTERM, writes its pid to $STAND_IN_PID_FILE and sleeps a minute.
+#: Ignores SIGTERM, writes its pid to the file named in its own text, sleeps a minute.
 STAND_IN = """\
 #!{python}
 import os, pathlib, signal, time
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
-pathlib.Path(os.environ["STAND_IN_PID_FILE"]).write_text(str(os.getpid()))
+pathlib.Path({pid_file!r}).write_text(str(os.getpid()))
 time.sleep(60)
 """
 
 
 @pytest.fixture
 def stand_in(tmp_path, monkeypatch) -> Path:
-    """A bin directory first on PATH, whose tools are the stand-in; its pid file."""
+    """A bin directory first on PATH, whose tools are the stand-in; its pid file.
+
+    The git delivery's environment allowlist deliberately drops extra variables,
+    so the stand-in carries its pid file path in its own text, not in the env.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    pid_file = tmp_path / "stand-in.pid"
+    text = STAND_IN.format(python=sys.executable, pid_file=str(pid_file))
     for name in ("jupyter-nbconvert", "git"):
         tool = bin_dir / name
-        tool.write_text(STAND_IN.format(python=sys.executable), encoding="utf-8")
+        tool.write_text(text, encoding="utf-8")
         tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
-    pid_file = tmp_path / "stand-in.pid"
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setenv("STAND_IN_PID_FILE", str(pid_file))
     return pid_file
 
 

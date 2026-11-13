@@ -401,7 +401,9 @@ class TestScanProgress:
         assert scan.total_findings == 3
         assert scan.severity_counts["high"] == 1
         assert scan.severity_counts["low"] == 1
-        assert scan.total_scanners == 2
+        # One scanner, two targets: the scanner counts once, as it does in the
+        # aggregated results file that replaces these entries.
+        assert scan.total_scanners == 1
 
     def test_update_totals_resets_and_recalculates(self):
         """update_totals recomputes from scratch each time."""
@@ -554,13 +556,18 @@ class TestFindScannerResultFiles:
         assert "README.md" not in result
 
     def test_ignores_scanners_without_result_file(self, temp_output_dir):
-        """Scanner directory without ASH.ScanResults.json is found but empty."""
+        """A scanner directory with no ASH.ScanResults.json is not listed.
+
+        Listed with an empty target map, as it used to be, the scanner counted
+        as completed (get_completed_scanners reads the keys) the moment its
+        directory existed, before it had written any result.
+        """
         scanners_dir = temp_output_dir / "scanners"
         (scanners_dir / "empty_scanner" / "source").mkdir(parents=True)
 
         result = find_scanner_result_files(temp_output_dir)
-        assert "empty_scanner" in result
-        assert result["empty_scanner"] == {}
+        assert "empty_scanner" not in result
+        assert get_completed_scanners(temp_output_dir) == set()
 
 
 # ---------------------------------------------------------------------------
@@ -971,21 +978,25 @@ class TestExtractScanSummary:
         assert summary["scanners_completed"] == ["bandit", "trivy"]
 
     def test_has_critical_and_high_flags(self):
-        """has_critical and has_high check uppercase keys in severity_counts.
+        """has_critical and has_high read the lowercase buckets the counts use.
 
-        Note: extract_findings_summary returns lowercase keys, so these flags
-        are always False in the current implementation (case mismatch bug in source).
-        This test documents the actual behavior.
+        extract_findings_summary keys its counts by SEVERITY_BUCKETS, which are
+        lowercase; the flags used to look up uppercase keys and so were always
+        False, a critical finding included. This test used to pin that.
         """
         results = {
             "findings": [{"severity": "CRITICAL", "scanner": "s1"}],
             "scanners_completed": [],
         }
         summary = extract_scan_summary(results)
-        # The source code checks uppercase keys but severity_counts has lowercase
-        # keys, so these are always False. Test documents actual behavior.
-        assert summary["has_critical"] is False
+        assert summary["has_critical"] is True
         assert summary["has_high"] is False
+
+        summary = extract_scan_summary(
+            {"findings": [{"severity": "high", "scanner": "s1"}]}
+        )
+        assert summary["has_critical"] is False
+        assert summary["has_high"] is True
 
     def test_empty_findings(self):
         """Handles empty findings list."""

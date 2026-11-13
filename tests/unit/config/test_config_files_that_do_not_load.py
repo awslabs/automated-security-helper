@@ -61,7 +61,15 @@ class TestOtherConfigInputs:
             target.mkdir()
         monkeypatch.setenv("ASH_CONFIG", str(target))
 
-        with pytest.raises(ASHConfigSourceError, match="ash.yaml"):
+        # A directory is refused in ASH_CONFIG's own words ("ASH_CONFIG names it,
+        # and it is not a file", default_config.refuse_unless_ash_config_names_a_file,
+        # pinned by test_an_ash_config_naming_a_directory_is_refused_in_its_words),
+        # as an ASHConfigValidationError; a missing file or a link to nothing is
+        # the narrower ASHConfigSourceError. Both are validation errors.
+        expected = (
+            ASHConfigValidationError if names == "a-directory" else ASHConfigSourceError
+        )
+        with pytest.raises(expected, match="ash.yaml"):
             get_default_config()
 
     @pytest.mark.parametrize("empty", ["", "   "])
@@ -100,7 +108,7 @@ class TestOtherConfigInputs:
         operator = tmp_path / "operator.yaml"
         operator.write_text("sandbox: [unclosed\n", encoding="utf-8")
 
-        with pytest.raises(ASHConfigSourceError, match="could not parse"):
+        with pytest.raises(ASHConfigSourceError, match="could not be parsed"):
             resolve_config(source_dir=source, trusted_config_path=operator)
 
     def test_an_ash_config_variable_naming_a_schema_invalid_file_is_a_config_error(
@@ -334,9 +342,12 @@ class TestAConfigLinkedToAPseudoFile:
             resolve_config(config_path=link, source_dir=tmp_path)
 
         message = str(excinfo.value)
-        assert message.startswith(f"could not parse {link.as_posix()}: "), message
-        assert "unacceptable character #x0000" in message
-        assert f'in "{link}", position' in message
+        # The refusal names the file and gives the parser's type alone
+        # (unparsed_config_reason): nothing the parser said is repeated,
+        # because a parser's message can quote the file's content.
+        assert message.startswith(f"{link.as_posix()} could not be parsed ("), message
+        assert "unacceptable character" not in message, message
+        assert f'in "{link}"' not in message, message
         assert self.MARKER not in message
 
     def test_get_config_raw_refuses_it_before_the_read(self, tmp_path, monkeypatch):

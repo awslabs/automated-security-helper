@@ -111,7 +111,7 @@ def _a_delivered_tree(tmp_path: Path) -> Path:
 def _a_clone_that_works(clones: List[List[str]]) -> Any:
     """A ``_run_git`` double; ``clones`` collects each clone command it is given."""
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if "clone" in cmd:
             clones.append(list(cmd))
             target = Path(cmd[-1])

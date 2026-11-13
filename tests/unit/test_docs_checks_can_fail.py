@@ -24,11 +24,14 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.utils.helpers import checkout_env, importing_this_checkout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKS_PATH = REPO_ROOT / "scripts" / "docs_checks.py"
@@ -295,8 +298,8 @@ ash --source-dir . --output-dir out --scanners detect-secrets --offline
 ash scan --offline \\
   --log-level INFO
 ash config init --force && ash report --format text | tee report.txt
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 ash --mode local
-uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 --version
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --mode local
+uvx git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 --version
 docker run --rm -v "$(pwd):/src" ghcr.io/example/ash:latest ash --source-dir /src
 ASH_LOG=1 sudo -E ash -vd --version
 result=$(ash report --format text)
@@ -328,7 +331,7 @@ jobs:
 {FENCE}yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.8.0
     hooks:
       - id: ash-simple-scan
 {FENCE}
@@ -2413,7 +2416,7 @@ Options, under `scanners.bandit.options`:
 | `ignore_nosec` | boolean | `false` | x |
 | `excluded_paths` | list | `[]` | x |
 | `severity_threshold` | string | `null` | x |
-| `tool_version` | string | `">=1.7.0,<2.0.0"` | x |
+| `tool_version` | string | `">=1.7.8,<2.0.0"` | x |
 | `scan_timeout` | number | `1800` | x |
 
 <!-- doctest: options of=global_settings -->
@@ -3418,15 +3421,17 @@ def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
         capture_output=True,
         text=True,
         check=False,
+        env=checkout_env(),
     )
-    # The package a fresh interpreter imports, which is what the gate process sees; in
-    # this process the current directory may come first on the import path.
+    # The package a fresh interpreter imports, which is what the gate process sees
+    # (both are pointed at this checkout); in this process the current directory may
+    # come first on the import path.
     probe = subprocess.run(
         [
             sys.executable,
             "-I",
             "-c",
-            (
+            importing_this_checkout(
                 "import importlib.util, pathlib; s = importlib.util.find_spec("
                 "'automated_security_helper'); print(pathlib.Path("
                 "next(iter(s.submodule_search_locations))).resolve())"
@@ -3447,7 +3452,14 @@ def test_the_gate_checks_the_docs_root_it_is_given(tmp_path):
         line for line in lines if line.startswith("        - the check did not run: ")
     ]
     assert not_run, result.stdout
-    assert all("docs/content/reference/" in line for line in not_run), not_run
+    # The error text quotes the path as the OS spells it: on Windows with
+    # backslashes, doubled by the repr of the message, so a run of them is a separator.
+    # The freshness gate also checks the committed generated partial, which lives
+    # outside content/reference.
+    admitted = ("docs/content/reference/", "docs/overrides/partials/generated/")
+    assert all(
+        any(path in re.sub(r"\\+", "/", line) for path in admitted) for line in not_run
+    ), not_run
     assert result.returncode == 2
 
 

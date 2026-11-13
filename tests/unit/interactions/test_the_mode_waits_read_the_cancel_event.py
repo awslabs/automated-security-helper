@@ -18,6 +18,7 @@ return the child's own result, including outside any cancel scope, where
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - the children are this test's own interpreter
 import sys
 import threading
@@ -34,7 +35,21 @@ from automated_security_helper.core.cancellation import (
 from automated_security_helper.interactions.run_ash_container import run_cmd_direct
 from automated_security_helper.interactions.run_ash_nix import _enter_shell
 from automated_security_helper.utils import subprocess_utils
-from tests.utils.processes import process_running
+from tests.utils.processes import process_running as _posix_process_running
+
+
+def process_running(process: "subprocess.Popen") -> bool:
+    """Whether *process* still runs, read from the OS where the cell can.
+
+    POSIX reads the OS first (/proc, signal 0, ps), because poll() answers from
+    Popen's bookkeeping, which a stop path under test could have written without
+    stopping anything. Windows has no signal 0 and no zombies: poll() there asks
+    the process handle (GetExitCodeProcess), which is the OS's own answer.
+    """
+    if sys.platform == "win32":
+        return process.poll() is None
+    return _posix_process_running(process.pid)
+
 
 #: Long enough that "the wait returned early" is unambiguous, short enough
 #: that the pre-fix red -- the wait sitting the child out -- stays bounded.
@@ -52,6 +67,24 @@ _SLEEPING_CHILD = [
 ]
 
 _QUICK_CHILD = [sys.executable, "-c", "raise SystemExit(0)"]
+
+
+def _no_inherited_env() -> dict[str, str]:
+    """The nothing-inherited child environment, spelled so Windows can run it.
+
+    ``env={}`` means "the child inherits nothing", but on Windows a Python
+    child given a completely empty environment cannot initialize on every
+    interpreter these tests run under: it dies at hash-randomization init
+    (``Fatal Python error: _Py_HashRandomization_Init``) or the spawn itself
+    is refused (``OSError: [Errno 22] The parameter is incorrect``), so the
+    tests' return-code and raise expectations would rest on a child that
+    never started. ``SystemRoot`` alone is measured sufficient for the child
+    to initialize, so on nt the environment carries just that one inherited
+    variable; everywhere else it stays empty.
+    """
+    if os.name == "nt":
+        return {"SystemRoot": os.environ["SystemRoot"]}
+    return {}
 
 
 def _cancelled_event() -> CancelEvent:
@@ -138,7 +171,7 @@ class TestContainerRuntimeWait:
         # written without stopping anything, while /proc cannot be told a
         # running process is gone. A child the arm killed but has not yet
         # reaped is a zombie, which process_running counts as stopped.
-        still_running_after_the_raise = process_running(child.pid)
+        still_running_after_the_raise = process_running(child)
         code_after_the_raise = child.poll()
         if still_running_after_the_raise or code_after_the_raise is None:
             child.kill()
@@ -173,7 +206,7 @@ class TestNixShellWait:
         started = time.monotonic()
         with cancel_scope(_cancelled_event()):
             with pytest.raises(ScanCancelled):
-                _enter_shell(list(_SLEEPING_CHILD), env={})
+                _enter_shell(list(_SLEEPING_CHILD), env=_no_inherited_env())
         assert time.monotonic() - started < _STOPPED_WITHIN_SECONDS
 
     @pytest.mark.integration
@@ -201,7 +234,7 @@ class TestNixShellWait:
         with cancel_scope(event):
             _set_once_the_child_started(event, marker)
             with pytest.raises(ScanCancelled):
-                _enter_shell(_child_that_reports_start(marker), env={})
+                _enter_shell(_child_that_reports_start(marker), env=_no_inherited_env())
         assert marker.exists()
         (shell,) = spawned
         # Read before the cleanup below, asserted after it: killing the
@@ -210,7 +243,7 @@ class TestNixShellWait:
         # bookkeeping read is writable by the very path under test and a
         # killed-but-unreaped shell is a zombie process_running counts as
         # stopped.
-        still_running_after_the_raise = process_running(shell.pid)
+        still_running_after_the_raise = process_running(shell)
         code_after_the_raise = shell.poll()
         if still_running_after_the_raise or code_after_the_raise is None:
             shell.kill()
@@ -230,12 +263,12 @@ class TestNixShellWait:
     @pytest.mark.integration
     def test_with_no_cancel_asked_for_the_wait_returns_the_shells_result(self):
         with cancel_scope(CancelEvent()):
-            result = _enter_shell(list(_QUICK_CHILD), env={})
+            result = _enter_shell(list(_QUICK_CHILD), env=_no_inherited_env())
         assert result.returncode == 0
 
     @pytest.mark.integration
     def test_outside_any_scope_the_wait_returns_the_shells_result(self):
-        result = _enter_shell(list(_QUICK_CHILD), env={})
+        result = _enter_shell(list(_QUICK_CHILD), env=_no_inherited_env())
         assert result.returncode == 0
 
 
@@ -278,7 +311,7 @@ class TestACancelledScanSpawnsNoChild:
         monkeypatch.setattr(nix_launcher.subprocess, "Popen", _record_spawn)
         with cancel_scope(_cancelled_event()):
             with pytest.raises(ScanCancelled):
-                _enter_shell(list(_SLEEPING_CHILD), env={})
+                _enter_shell(list(_SLEEPING_CHILD), env=_no_inherited_env())
         assert spawned == []
 
 
@@ -441,7 +474,7 @@ class TestTheCancelArmSaysTheChildHasNoInterrupt:
 
         with cancel_scope(event):
             with pytest.raises(ScanCancelled):
-                _enter_shell(["nix", "develop"], env={})
+                _enter_shell(["nix", "develop"], env=_no_inherited_env())
 
         ((process, args, kwargs),) = stops
         assert process is shell
@@ -526,6 +559,6 @@ class TestTheLaunchersRecordTheirChildForTheDieNowKill:
         self._recorded_while_running_and_after(
             tmp_path,
             monkeypatch,
-            lambda cmd: _enter_shell(cmd, env={}),
+            lambda cmd: _enter_shell(cmd, env=_no_inherited_env()),
             _patch,
         )

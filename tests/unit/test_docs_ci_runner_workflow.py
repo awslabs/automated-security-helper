@@ -1522,7 +1522,8 @@ def test_each_check_runs_exactly_its_command_and_its_status_is_the_step_s():
         assert lines == expected, f"step {name!r} runs something else: {lines}"
     pytest_env = {"WHEEL": "${{ steps.wheel.outputs.path }}"}
     for name in ("Run the pages' pipelines", "Check that the pipelines can fail"):
-        assert steps[name].get("env") == pytest_env, name
+        step_env_is_expected = steps[name].get("env") == pytest_env
+        assert step_env_is_expected, name
 
 
 #: The recorder writes the events, the stop step ends it, the allowlist reads what it
@@ -1611,9 +1612,8 @@ def test_each_leg_times_out_its_steps_before_its_job():
     skips; a step that runs out fails, and the upload still runs."""
     _job_id, job = _leg_job()
     assert job.get("timeout-minutes") == "${{ matrix.timeout }}"
-    assert (job.get("env") or {}).get(
-        "LAUNCH_TIMEOUT"
-    ) == "${{ matrix.launch_timeout }}"
+    launch_timeout = (job.get("env") or {}).get("LAUNCH_TIMEOUT")
+    assert launch_timeout == "${{ matrix.launch_timeout }}"
     steps = {step.get("name"): step for step in _steps(job)}
     for name, key in TIMED_STEPS.items():
         assert steps[name].get("timeout-minutes") == "${{ matrix." + key + " }}", name
@@ -1907,21 +1907,22 @@ def test_no_variable_reaches_a_step_but_the_leg_s_own():
     cannot see: each is pinned to a commit, and its inputs are pinned whole by the tests
     of the checkout, setup-uv and the upload."""
     workflow = _workflow()
-    assert "env" not in workflow, f"workflow-level env: {workflow.get('env')}"
+    assert "env" not in workflow, "the workflow sets a workflow-level env"
     leg_job_id, _leg = _leg_job()
     for job_id, job in _jobs().items():
         expected = LEG_ENV if job_id == leg_job_id else None
-        assert job.get("env") == expected, f"job {job_id}'s env: {job.get('env')}"
+        job_env_is_expected = job.get("env") == expected
+        assert job_env_is_expected, f"job {job_id}'s env is not the expected one"
         steps = {step.get("name"): step for step in _steps(job)}
         for name in CHECK_STEPS:
             if name in steps:
-                assert "env" not in steps[name], (
-                    f"{name} sets env: {steps[name]['env']}"
-                )
+                assert "env" not in steps[name], f"{name} sets an env"
         for index, step in enumerate(_steps(job)):
             expected = PYTEST_ENV if step.get("name") in PYTEST_STEPS else None
-            assert step.get("env") == expected, (
-                f"job {job_id} step {index} ({step.get('name')})'s env: {step.get('env')}"
+            step_env_is_expected = step.get("env") == expected
+            assert step_env_is_expected, (
+                f"job {job_id} step {index} ({step.get('name')})'s env "
+                "is not the expected one"
             )
     setters = [
         (job_id, index, step.get("name"))
@@ -2021,7 +2022,7 @@ def test_pytest_ini_is_what_the_ci_runs_read_and_each_of_its_settings_is_decided
         ]
         assert between, module
         found = [
-            str((directory / config).relative_to(REPO_ROOT))
+            (directory / config).relative_to(REPO_ROOT).as_posix()
             for directory in between
             for config in PYTEST_CONFIG_NAMES
             if (directory / config).exists()
@@ -2032,7 +2033,9 @@ def test_pytest_ini_is_what_the_ci_runs_read_and_each_of_its_settings_is_decided
             f"{name}: pytest reads {first[:1]} at the repository's root, not pytest.ini"
         )
         conftests = sorted(
-            str((directory / "conftest.py").relative_to(REPO_ROOT))
+            # as_posix, so the compare measures the file set and not the
+            # platform's separator against CONFTESTS' forward-slash spellings.
+            (directory / "conftest.py").relative_to(REPO_ROOT).as_posix()
             for directory in (REPO_ROOT, *between)
             if (directory / "conftest.py").exists()
         )

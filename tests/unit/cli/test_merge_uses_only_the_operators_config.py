@@ -41,6 +41,7 @@ from typing import Dict, List, Optional
 import pytest
 
 from tests.unit.cli.test_merge import build_shards, write_shards
+from tests.utils.helpers import importing_this_checkout
 from tests.utils.isolated_tool_env import (
     install_refusing_installers,
     isolated_tool_env,
@@ -172,7 +173,7 @@ class _Child:
             "watch": str(watch) if watch else None,
         }
         completed = subprocess.run(
-            [sys.executable, "-c", _CHILD, json.dumps(spec)],
+            [sys.executable, "-c", importing_this_checkout(_CHILD), json.dumps(spec)],
             cwd=self.workdir,
             env={**self.env(), **(extra_env or {})},
             capture_output=True,

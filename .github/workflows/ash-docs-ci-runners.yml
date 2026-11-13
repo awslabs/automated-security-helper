@@ -265,7 +265,7 @@ jobs:
 
       - name: Install uv
         if: ${{ !env.ACT && (github.event_name == 'pull_request' || inputs.legs == 'all' || inputs.legs == matrix.runner) }}
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -418,10 +418,14 @@ jobs:
             __wcs_interrupted="$2"
           }
           __wcs_exec() {
+            # The background launch leaves SIGINT and SIGQUIT ignored in the child (bash 3.2 on macOS), and an ignored signal survives exec, so the command is started with both at their default.
             if command -v setsid >/dev/null 2>&1; then
+              if command -v perl >/dev/null 2>&1; then
+                exec setsid -w perl -e '$SIG{INT} = "DEFAULT"; $SIG{QUIT} = "DEFAULT"; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+              fi
               exec setsid -w "$@"
             fi
-            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; $SIG{INT} = "DEFAULT"; $SIG{QUIT} = "DEFAULT"; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
           }
           with_commands_stopped() {
             if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then

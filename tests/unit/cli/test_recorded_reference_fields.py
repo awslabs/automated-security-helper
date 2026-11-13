@@ -237,7 +237,10 @@ def test_an_outer_scan_reads_the_record_with_its_own_value(tmp_path, monkeypatch
         with patch.object(module, "run_ash_container", side_effect=inner):
             results = _run_container_mode(opts, MagicMock())
     else:
-        with patch.object(module, "run_ash_nix", side_effect=inner):
+        with (
+            patch.object(module, "run_ash_nix", side_effect=inner),
+            patch.object(module, "nix_preflight", lambda: None),
+        ):
             results = _run_nix_mode(opts, MagicMock())
 
     assert results.ash_config.global_settings.severity_threshold == "LOW"
@@ -263,7 +266,10 @@ def test_an_outer_scan_records_its_own_value_as_the_reference(
 
     runner = _run_container_mode if mode == "container" else _run_nix_mode
     target = "run_ash_container" if mode == "container" else "run_ash_nix"
-    with patch.object(module, target, side_effect=inner):
+    with (
+        patch.object(module, target, side_effect=inner),
+        patch.object(module, "nix_preflight", lambda: None),
+    ):
         results = runner(opts, MagicMock())
 
     # The control: the run uses the operator's value.

@@ -42,12 +42,39 @@ from typing import (
     Tuple,
 )
 
-from pydantic import BaseModel, ValidationInfo
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationInfo
 
 #: Validation-context key. Bound to a list, it makes the checks that honor it
 #: record a note there and keep the data rather than refuse it. Passed only by
 #: ``AshAggregatedResults.validate_ash_config``.
 TOLERATE_STORED_CONFIG = "tolerate_stored_config"
+
+#: Validation-context key for the warn-then-refuse rollout. Bound to a list, it
+#: makes :func:`refuse_unknown_keys` record the refusal's own message there as a
+#: warning and keep the data, instead of raising, for ENTRY models only (the
+#: suppression and ignore-path family, which allow extras and mark themselves
+#: ``has_unknown_keys`` so an entry that kept a key never applies). Passed by
+#: ``build_config`` (config/resolve_config.py) unless ``fail_on_unknown_keys``
+#: is set: the warn is the 3.x default, the refusal returns as the default at
+#: v4. Plugin options and every other model that refuses unknown keys are not
+#: covered: they cannot mark themselves inert, so a kept key there would be
+#: silently unread, the original defect class.
+WARN_UNKNOWN_KEYS = "warn_unknown_keys"
+
+#: What the warn-mode warning appends to the refusal's message, so the operator
+#: knows the entry is disabled rather than partially applied, and how to get
+#: the error now.
+WARN_UNKNOWN_KEYS_TAIL = (
+    " The entry is kept but applies to nothing until the key is fixed. Set "
+    "fail_on_unknown_keys: true to make this an error."
+)
+
+#: Accepted keys that are deprecated alias spellings. They still load (the
+#: refusal check honors them), but a "did you mean" and the "Accepted keys"
+#: listing leave them out: a typo's correction must not point at a spelling
+#: that is removed in ASH v4 ("expiration" is the alias of "expires").
+DEPRECATED_KEYS: FrozenSet[str] = frozenset({"expiration"})
+
 
 #: What a kept unknown key records under TOLERATE_STORED_CONFIG, once per key.
 #: Not the key: a stored key is the results file's data, so the results loader
@@ -111,16 +138,73 @@ def tolerated_notes(info: Optional[ValidationInfo]) -> Optional[List[str]]:
     return notes if isinstance(notes, list) else None
 
 
+def warned_notes(info: Optional[ValidationInfo]) -> Optional[List[str]]:
+    """The list to record a warning in, when validation is under warn mode."""
+    if info is None or not info.context:
+        return None
+    notes = info.context.get(WARN_UNKNOWN_KEYS)
+    return notes if isinstance(notes, list) else None
+
+
+def _warnable_entry_model(model_cls: type[BaseModel]) -> bool:
+    """Whether warn mode may keep ``model_cls``'s unknown keys instead of raising.
+
+    Only an entry model can be warned about safely: one that allows extras (so
+    the key is kept, and ``has_unknown_keys`` marks the entry as one that never
+    applies) and that names itself as an entry kind (the suppression and
+    ignore-path family). A plugin options model fails both: a kept option would
+    be silently unread, which is the defect the refusal exists for.
+    """
+    return (
+        getattr(model_cls, "ENTRY_KIND", None) is not None
+        and model_cls.model_config.get("extra") == "allow"
+    )
+
+
 def known_keys(model_cls: type[BaseModel]) -> Set[str]:
-    """Every key ``model_cls`` accepts: field names and their aliases."""
+    """Every key ``model_cls`` accepts: field names and their aliases.
+
+    A validation alias can be one name, an ``AliasChoices`` of several, or an
+    ``AliasPath`` into a nested value; pydantic accepts a key by each choice and
+    by a path's first segment, so each of those is a key here too, and
+    ``refuse_unknown_keys`` does not refuse a key the model would take.
+
+    A field's own name is a key only when pydantic reads it: always for a field
+    with no alias, and for an aliased field only when the model validates by
+    name too (``populate_by_name`` or ``validate_by_name``) or not by alias at
+    all. Counted whatever the model did, a key written by field name for an
+    alias-only field passed this check and was kept as an extra the model never
+    read, where a misspelled alias is refused with its "did you mean".
+    """
+    config = model_cls.model_config
+    by_name = bool(
+        config.get("validate_by_name", config.get("populate_by_name", False))
+    )
+    by_alias = config.get("validate_by_alias", True)
     keys: Set[str] = set()
     for name, field in model_cls.model_fields.items():
-        keys.add(name)
+        aliased = field.alias is not None or field.validation_alias is not None
+        if not aliased or by_name or not by_alias:
+            keys.add(name)
         if field.alias:
             keys.add(field.alias)
-        if isinstance(field.validation_alias, str):
-            keys.add(field.validation_alias)
+        keys.update(_alias_keys(field.validation_alias))
     return keys
+
+
+def _alias_keys(alias: Any) -> Set[str]:
+    """The top-level keys a field's validation alias accepts."""
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasChoices):
+        keys: Set[str] = set()
+        for choice in alias.choices:
+            keys.update(_alias_keys(choice))
+        return keys
+    if isinstance(alias, AliasPath):
+        first = alias.path[0] if alias.path else None
+        return {first} if isinstance(first, str) else set()
+    return set()
 
 
 def _folded(key: str) -> str:
@@ -153,6 +237,43 @@ def closest_key(key: str, known: Iterable[str]) -> Optional[str]:
     return None
 
 
+#: Tier-0 placement map, consulted before edit-distance: a known misplacement
+#: gets a shaped suggestion naming where the key belongs, not merely the
+#: nearest spelling. Each hint carries the entry-kind words it applies to
+#: (substrings of the ``where`` wording): the spellings here are suppression
+#: vocabulary, and an ignore path has no ``resource_id`` and no ``scope``, so
+#: advice pointing at either must not fire there (following it would only
+#: produce another unknown-key error). The table is STATIC by design: these
+#: warnings are produced at config load, which precedes plugin imports, so a
+#: registration API could never reach them (and a hint registered between the
+#: load and an override rebuild made one entry warn twice, with two wordings).
+_PLACEMENT_HINTS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+    "resource": ("did you mean 'resource_id'?", ("suppression",)),
+    # cdk-nag's block keys, seeded statically rather than registered when the
+    # scanner module loads: unknown-key warnings are produced at config load,
+    # which PRECEDES plugin imports, so an import-time registration reached
+    # only configs that happened to load after the scanner module did (and
+    # the wording could drift between a load and a later rebuild).
+    "applies_to": ("move it under scope.engines.cdk-nag", ("suppression",)),
+    "resource_path": ("move it under scope.engines.cdk-nag", ("suppression",)),
+}
+
+
+def _placement_hint(key: str, where: str) -> Optional[str]:
+    """The placement suggestion for ``key``, for the hint's own entry kinds.
+
+    A plugin option of the same name, and an entry kind the hint does not
+    name, keep their ordinary did-you-mean.
+    """
+    hint = _PLACEMENT_HINTS.get(key)
+    if hint is None:
+        return None
+    suggestion, kinds = hint
+    if any(kind in where for kind in kinds):
+        return suggestion
+    return None
+
+
 def unknown_keys_message(
     unknown: Iterable[str], known: Iterable[str], where: str
 ) -> str:
@@ -160,10 +281,11 @@ def unknown_keys_message(
     known = sorted(known)
     named = []
     for key in unknown:
-        suggestion = closest_key(key, known)
-        named.append(
-            f"'{key}'" + (f" (did you mean '{suggestion}'?)" if suggestion else "")
-        )
+        suggestion = _placement_hint(key, where)
+        if suggestion is None:
+            match = closest_key(key, known)
+            suggestion = f"did you mean '{match}'?" if match else None
+        named.append(f"'{key}'" + (f" ({suggestion})" if suggestion else ""))
     noun = "key" if len(named) == 1 else "keys"
     # Only a plugin's options can declare nothing: every entry kind has keys.
     accepted = (
@@ -265,8 +387,23 @@ def refuse_unknown_keys(
     unknown = [key for key in data if isinstance(key, str) and key not in known]
     if not unknown:
         return data
+    # The message's suggestions and its "Accepted keys" listing steer to the
+    # canonical spellings only; a deprecated alias (DEPRECATED_KEYS) still
+    # loads, which the acceptance check above already covered.
+    suggestible = [key for key in known if key not in DEPRECATED_KEYS]
     notes = tolerated_notes(info)
     if notes is not None:
         notes.extend(UNKNOWN_KEY_NOTE for _ in unknown)
         return data
-    raise ValueError(unknown_keys_message(unknown, known, where))
+    warnings = warned_notes(info)
+    if warnings is not None and _warnable_entry_model(model_cls):
+        # The warn-then-refuse rollout (fail_on_unknown_keys, off by default on
+        # 3.x): the refusal's own message, as a warning, and the data kept. The
+        # model keeps the keys as extras, which marks the entry as one that
+        # never applies (IgnorePathWithReason.has_unknown_keys), the same
+        # fail-closed direction the stored-config tolerance takes.
+        warnings.append(
+            unknown_keys_message(unknown, suggestible, where) + WARN_UNKNOWN_KEYS_TAIL
+        )
+        return data
+    raise ValueError(unknown_keys_message(unknown, suggestible, where))

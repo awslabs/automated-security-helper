@@ -78,7 +78,7 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, List, Optional
+from typing import Any, Iterator, List, Optional, Tuple, cast
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -156,10 +156,15 @@ def _inside_tree(path: Path, scan_root: Optional[Path]) -> bool:
     return scan_root is not None and in_scanned_tree(path, scan_root)
 
 
-def _changeable_by_others(path: Path) -> Optional[str]:
-    """Why another local account could change what ``path`` names, or None.
+def _changeable_by_others(resolved: Path) -> Optional[str]:
+    """Why another local account could change what ``resolved`` names, or None.
 
-    Every directory from ``path`` up to ``/``, on its resolved path, is checked. One
+    ``resolved`` is a path the caller already resolved (``os.path.realpath``) and
+    will use as it is: the check does not resolve it again, so what it walks is
+    what the caller goes on to use, and a link re-pointed between a second
+    resolution and the use cannot send the use somewhere the check never saw.
+
+    Every directory from ``resolved`` up to ``/`` is checked. One
     that another account owns (root aside), or that its group or everyone can write
     without the sticky bit, lets someone else rename an entry in it, and so put a
     directory of their own where ASH made one, after the ``mkdtemp`` and before the
@@ -170,7 +175,6 @@ def _changeable_by_others(path: Path) -> Optional[str]:
     if not hasattr(os, "geteuid"):
         return None
     me = os.geteuid()
-    resolved = Path(os.path.realpath(path))
     for directory in (resolved, *resolved.parents):
         try:
             st = os.stat(directory)
@@ -187,11 +191,19 @@ def _changeable_by_others(path: Path) -> Optional[str]:
     return None
 
 
-def _make(parent: Path) -> Optional[Path]:
+def _make(parent: Path) -> Tuple[Optional[Path], Optional[str]]:
+    """A new 0700 directory under ``parent``, or the reason none could be made.
+
+    The reason is kept, not dropped: a full disk, a read-only file system or a
+    permission error on a candidate used to leave the warning and the final
+    error naming only the privacy reasons of the other candidates, so the
+    operator was told to fix TMPDIR's permissions when the cause was elsewhere.
+    """
     try:
-        return Path(tempfile.mkdtemp(prefix=TOOL_CONFIG_DIR_PREFIX, dir=parent))
-    except OSError:
-        return None
+        return Path(tempfile.mkdtemp(prefix=TOOL_CONFIG_DIR_PREFIX, dir=parent)), None
+    except OSError as e:
+        detail = e.strerror or str(e)
+        return None, f"{parent.as_posix()}: a directory could not be made ({detail})"
 
 
 def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Path:
@@ -200,7 +212,9 @@ def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Pat
     Outside the scanned tree where possible: the temporary directory, then the
     output directory. Then, with a warning, inside it: the same two in that order.
     A candidate that another account could change (:func:`_changeable_by_others`)
-    is never used, and with no other candidate nothing is written.
+    is never used, and with no other candidate nothing is written. Every
+    candidate passed over is named with its reason in the warning or the error,
+    one that does not exist yet and one no directory could be made in included.
     """
     candidates: List[Path] = []
     passed_over: List[str] = []
@@ -209,27 +223,43 @@ def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Pat
     except OSError as e:
         # tempfile raises FileNotFoundError when no candidate it tries is usable.
         passed_over.append(f"the temporary directory: {e}")
-    if output_dir is not None and output_dir.is_dir():
-        candidates.append(output_dir)
+    if output_dir is not None:
+        if output_dir.is_dir():
+            candidates.append(output_dir)
+        else:
+            passed_over.append(f"{output_dir.as_posix()}: is not a directory yet")
     private: List[Path] = []
     for parent in candidates:
-        reason = _changeable_by_others(parent)
+        # Resolved once. The check walks this path and the directory is made and
+        # written under this same path, so a symbolic link in the path as given
+        # (TMPDIR, or the output directory) is never resolved a second time, by
+        # a path the check did not see.
+        resolved = Path(os.path.realpath(parent))
+        reason = _changeable_by_others(resolved)
         if reason is None:
-            private.append(parent)
+            private.append(resolved)
         else:
             passed_over.append(f"{parent.as_posix()}: {reason}")
+    inside: List[Path] = []
     for parent in private:
         if _inside_tree(parent, scan_root):
             passed_over.append(f"{parent.as_posix()}: inside the scanned tree")
+            inside.append(parent)
             continue
-        made = _make(parent)
+        made, reason = _make(parent)
         if made is None:
+            passed_over.append(cast(str, reason))
             continue
         if not _inside_tree(made, scan_root):
             return made
         os.rmdir(made)
-    for parent in private:
-        made = _make(parent)
+        passed_over.append(f"{made.as_posix()}: inside the scanned tree")
+        inside.append(parent)
+    # Only the candidates that ARE inside the tree are tried here: one outside
+    # it that no directory could be made in has its reason recorded above, and
+    # a directory made in it would not be "inside the scanned tree".
+    for parent in inside:
+        made, reason = _make(parent)
         if made is not None:
             ASH_LOGGER.warning(
                 f"The config files ASH writes for the scanner's tool are in "
@@ -237,6 +267,7 @@ def _new_directory(scan_root: Optional[Path], output_dir: Optional[Path]) -> Pat
                 f"directory outside it is available ({'; '.join(passed_over)})."
             )
             return made
+        passed_over.append(cast(str, reason))
     raise OSError(
         "No private directory for the config files ASH writes for the scanner's "
         f"tool ({'; '.join(passed_over)}). Set TMPDIR to a directory only this "

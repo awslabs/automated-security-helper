@@ -608,7 +608,7 @@ def test_a_discovery_failure_is_logged_by_its_type_alone(tmp_path, monkeypatch):
 
     canary = "sandbox-canary-91c4e7"
 
-    def _refuse(source_dir):
+    def _refuse(source_dir, **_kwargs):
         raise ValueError(f"quoted: {canary}")
 
     monkeypatch.setattr(config_sources, "discover_config_source", _refuse)

@@ -19,6 +19,7 @@ from automated_security_helper.config.runtime_patch import (
     check_runtime_ops,
     json_patch_between,
 )
+from tests.utils.helpers import importing_this_checkout
 
 
 def _base_config() -> AshConfig:
@@ -1821,7 +1822,7 @@ class TestGlobDenialsNameKnownPlugins:
             "                          ('converters', 'converter'))}))\n"
         )
         result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
-            [sys.executable, "-c", code],
+            [sys.executable, "-c", importing_this_checkout(code)],
             cwd=tmp_path,
             capture_output=True,
             text=True,
@@ -1855,7 +1856,7 @@ class TestGlobDenialsNameKnownPlugins:
             "print('unchanged')\n"
         )
         result = subprocess.run(  # nosec B603 - fixed argv: this interpreter, literal probe
-            [sys.executable, "-c", code],
+            [sys.executable, "-c", importing_this_checkout(code)],
             cwd=tmp_path,
             capture_output=True,
             text=True,

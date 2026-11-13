@@ -933,7 +933,8 @@ def _children_of_the_worker(tasks: Path = _TASKS) -> list[int] | None:
     pids: list[int] = []
     listed = False
     try:
-        for thread in tasks.iterdir():
+        # A directory read has no defined order; walk the threads by tid.
+        for thread in sorted(tasks.iterdir(), key=lambda p: (len(p.name), p.name)):
             try:
                 text = (thread / "children").read_text()
             except FileNotFoundError:
@@ -1318,8 +1319,22 @@ _WRITES = {
     "chown": lambda out, tmp: os.chown(out / "victim.txt", os.getuid(), os.getgid()),
     "mkfifo": lambda out, tmp: os.mkfifo(out / "fifo"),
     "mknod": lambda out, tmp: os.mknod(out / "node"),
-    "setxattr": lambda out, tmp: os.setxattr(out / "victim.txt", "user.char", b"1"),
-    "removexattr": lambda out, tmp: os.removexattr(out / "victim.txt", "user.char"),
+    # CPython provides the xattr calls on Linux (and FreeBSD) only; elsewhere the
+    # cell would raise AttributeError before any harness guard could refuse.
+    "setxattr": pytest.param(
+        lambda out, tmp: os.setxattr(out / "victim.txt", "user.char", b"1"),
+        marks=pytest.mark.skipif(
+            not hasattr(os, "setxattr"),
+            reason="CPython has no os.setxattr on this platform",
+        ),
+    ),
+    "removexattr": pytest.param(
+        lambda out, tmp: os.removexattr(out / "victim.txt", "user.char"),
+        marks=pytest.mark.skipif(
+            not hasattr(os, "removexattr"),
+            reason="CPython has no os.removexattr on this platform",
+        ),
+    ),
     "copytree": lambda out, tmp: shutil.copytree(_tree(tmp), out / "tree"),
     "copystat": lambda out, tmp: shutil.copystat(_touch(tmp / "t"), out / "victim.txt"),
     "make-archive": lambda out, tmp: shutil.make_archive(
@@ -1458,7 +1473,10 @@ def test_metadata_changes_through_a_descriptor_are_checked(char, outside, tmp_pa
             with pytest.raises(LaunchViolation, match="outside the test's directory"):
                 change(out_fd)
             change(in_fd)
-        os.fchmod(read_end, 0o600)  # a pipe names no file
+        if sys.platform != "darwin":
+            # A pipe names no file. macOS refuses fchmod on a pipe with EINVAL in the
+            # kernel, whatever the harness does, so there is no call to observe there.
+            os.fchmod(read_end, 0o600)
     finally:
         for fd in (out_fd, in_fd, read_end, write_end):
             os.close(fd)
@@ -1712,6 +1730,16 @@ def _argv_files(char, *argv, cwd=None) -> dict:
     return char.launches[-1].files
 
 
+def _link_key(link) -> str:
+    """The capture key the harness gives a link named in argv.
+
+    The harness resolves the tmp prefix (macOS's /var -> /private/var) and leaves the
+    last part as written, so the link stays a link; ``os.path.realpath`` on the link
+    itself would follow it to its target."""
+    parent, name = os.path.split(str(link))
+    return os.path.join(os.path.realpath(parent), name)
+
+
 def test_an_argv_path_with_dots_that_lands_outside_the_test_is_not_captured(
     char, outside
 ):
@@ -1728,8 +1756,9 @@ def test_an_argv_path_through_a_symlinked_directory_leading_outside_is_not_captu
 ):
     (char.work / "dir-link").symlink_to(outside / "victim-dir")
     assert _argv_files(char, char.work / "dir-link" / "f") == {}
+    # Captures key a link on its own path with only the tmp prefix resolved.
     assert _argv_files(char, char.work / "dir-link") == {
-        str(char.work / "dir-link"): {"symlink": str(outside / "victim-dir")}
+        _link_key(char.work / "dir-link"): {"symlink": str(outside / "victim-dir")}
     }
 
 
@@ -1740,7 +1769,8 @@ def test_a_symlink_in_argv_is_recorded_as_a_symlink_and_not_read_through(
     link = char.work / "link"
     target = outside / "victim.txt" if kind == "host-file" else char.work / "missing"
     link.symlink_to(target)
-    assert _argv_files(char, link) == {str(link): {"symlink": str(target)}}
+    # Captures key a link on its own path with only the tmp prefix resolved.
+    assert _argv_files(char, link) == {_link_key(link): {"symlink": str(target)}}
 
 
 def test_a_directory_in_argv_records_its_symlinks_as_symlinks(char, outside):
@@ -1750,17 +1780,19 @@ def test_a_directory_in_argv_records_its_symlinks_as_symlinks(char, outside):
     (handed / "link").symlink_to(outside / "victim.txt")
     (handed / "dangling").symlink_to(char.work / "missing")
     (handed / "dir-link").symlink_to(outside / "victim-dir")
-    listing = _argv_files(char, handed)[str(handed)]["dir"]
+    # Neither is a link: only the tmp prefix (macOS /var -> /private/var) differs.
+    real = Path(os.path.realpath(handed))
+    listing = _argv_files(char, handed)[str(real)]["dir"]
     assert sorted(listing) == [
-        str(handed / "dangling"),
-        str(handed / "dir-link"),
-        str(handed / "link"),
-        str(handed / "own.txt"),
+        str(real / "dangling"),
+        str(real / "dir-link"),
+        str(real / "link"),
+        str(real / "own.txt"),
     ]
-    assert listing[str(handed / "link")] == {"symlink": str(outside / "victim.txt")}
-    assert listing[str(handed / "dangling")] == {"symlink": str(char.work / "missing")}
-    assert listing[str(handed / "dir-link")] == {"symlink": str(outside / "victim-dir")}
-    assert listing[str(handed / "own.txt")].value == {"text": ["own\n"]}
+    assert listing[str(real / "link")] == {"symlink": str(outside / "victim.txt")}
+    assert listing[str(real / "dangling")] == {"symlink": str(char.work / "missing")}
+    assert listing[str(real / "dir-link")] == {"symlink": str(outside / "victim-dir")}
+    assert listing[str(real / "own.txt")].value == {"text": ["own\n"]}
 
 
 def test_an_argv_path_through_a_link_into_a_host_directory_probes_no_host_path(char):
@@ -1773,7 +1805,8 @@ def test_an_argv_path_through_a_link_into_a_host_directory_probes_no_host_path(c
     link = char.work / "bin-link"
     link.symlink_to(host)
     assert _argv_files(char, link / "git") == {}
-    assert _argv_files(char, link) == {str(link): {"symlink": host}}
+    # Captures key a link on its own path with only the tmp prefix resolved.
+    assert _argv_files(char, link) == {_link_key(link): {"symlink": host}}
     assert char.take_violations() == []
 
 
@@ -1792,16 +1825,21 @@ def test_a_source_file_that_was_changed_is_captured_under_its_resolved_name(char
     (char.src / "app.py").write_text("y\n", encoding="utf-8")
     direct = _argv_files(char, char.src / "app.py")
     relative = _argv_files(char, "../src/app.py", cwd=char.work)
-    assert list(direct) == list(relative) == [str(char.src / "app.py")]
-    assert relative[str(char.src / "app.py")].value == {"text": ["y\n"]}
+    # Captures are keyed on os.path.realpath, so a symlinked tmp root (macOS's
+    # /var -> /private/var) must not split the expectation from the capture.
+    expected = os.path.realpath(char.src / "app.py")
+    assert list(direct) == list(relative) == [expected]
+    assert relative[expected].value == {"text": ["y\n"]}
 
 
 def test_a_file_the_test_made_inside_its_tree_is_captured_as_before(char):
     made = char.work / "made.txt"
     made.write_text("made\n", encoding="utf-8")
     files = _argv_files(char, made, f"--out={made}")
-    assert list(files) == [str(made)]
-    assert files[str(made)].value == {"text": ["made\n"]}
+    # Neither is a link: only the tmp prefix (macOS /var -> /private/var) differs.
+    key = os.path.realpath(made)
+    assert list(files) == [key]
+    assert files[key].value == {"text": ["made\n"]}
 
 
 def test_dots_after_a_link_in_argv_name_the_parent_of_the_links_target(char):
@@ -1813,8 +1851,9 @@ def test_dots_after_a_link_in_argv_name_the_parent_of_the_links_target(char):
     (char.work / "x").write_text("work\n", encoding="utf-8")
     (char.work / "deep" / "x").write_text("deep\n", encoding="utf-8")
     files = _argv_files(char, char.work / "link" / ".." / "x")
-    assert list(files) == [str(char.work / "deep" / "x")]
-    assert files[str(char.work / "deep" / "x")].value == {"text": ["deep\n"]}
+    expected = os.path.realpath(char.work / "deep" / "x")
+    assert list(files) == [expected]
+    assert files[expected].value == {"text": ["deep\n"]}
 
 
 def test_dots_after_a_link_that_leads_outside_are_not_judged_as_the_text_reads(
@@ -1839,8 +1878,9 @@ def test_dots_after_a_plain_directory_in_argv_are_captured_under_the_resolved_na
     (char.work / "sub").mkdir()
     (char.work / "x").write_text("work\n", encoding="utf-8")
     files = _argv_files(char, char.work / "sub" / ".." / "x")
-    assert list(files) == [str(char.work / "x")]
-    assert files[str(char.work / "x")].value == {"text": ["work\n"]}
+    expected = os.path.realpath(char.work / "x")
+    assert list(files) == [expected]
+    assert files[expected].value == {"text": ["work\n"]}
 
 
 # -- every audit entry --------------------------------------------------------------
@@ -1987,9 +2027,15 @@ def test_stdlib_network_clients_are_refused(char):
     assert char.take_violations()
 
 
-def test_third_party_http_clients_are_refused(char):
+def test_third_party_http_clients_are_refused(char, monkeypatch):
     # Imported at collection, so urllib3's IPv6 probe ran there: what is refused
     # here is the request.
+    # botocore asks urllib whether to bypass a proxy for the endpoint when the client
+    # is made. With no proxy variable set, Python 3.10 on macOS reads the system
+    # proxy settings and resolves the endpoint's name, a lookup this test would
+    # refuse before it reaches the request. An exemption list for the endpoint keeps
+    # that question in the environment, where it makes no lookup.
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
     with pytest.raises(LaunchViolation):
         urllib3.PoolManager(retries=False).request(
             "GET", "http://127.0.0.1:9/", timeout=2
@@ -2392,6 +2438,42 @@ def test_a_text_default_of_a_module_imported_during_a_test_keeps_nothing_of_it(
                 "    return bin_path\n",
                 module.__dict__,
             )
+            option = inspect.signature(module.command).parameters["bin_path"].default
+            assert option.default == str(harness.ash_bin_default)
+        option = inspect.signature(module.command).parameters["bin_path"].default
+        assert option.default == str(_harness.REAL_ASH_BIN_PATH)
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_a_default_behind_functools_wraps_keeps_nothing_of_the_test(
+    char_factory, tmp_path
+):
+    """A command wrapped with ``functools.wraps`` has no defaults of its own; the
+    option default sits on the function it wraps, which ``inspect.signature`` (and
+    Typer) read through ``__wrapped__``. It is the harness home's text inside the
+    test and the product's text again after it."""
+    name = "automated_security_helper._char_wrapped_default_probe"
+    module = types.ModuleType(name)
+    harness = char_factory(tmp_path / "wrapped-leak")
+    try:
+        with harness.active():
+            sys.modules[name] = module
+            exec(
+                "import functools\n"
+                "import typer\n"
+                "from automated_security_helper.core.constants import ASH_BIN_PATH\n"
+                "def wrapping(command):\n"
+                "    @functools.wraps(command)\n"
+                "    def run(*args, **kwargs):\n"
+                "        return command(*args, **kwargs)\n"
+                "    return run\n"
+                "@wrapping\n"
+                "def command(bin_path=typer.Option(str(ASH_BIN_PATH))):\n"
+                "    return bin_path\n",
+                module.__dict__,
+            )
+            assert module.command.__defaults__ is None
             option = inspect.signature(module.command).parameters["bin_path"].default
             assert option.default == str(harness.ash_bin_default)
         option = inspect.signature(module.command).parameters["bin_path"].default

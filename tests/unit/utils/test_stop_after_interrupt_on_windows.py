@@ -11,9 +11,13 @@ one that had not, and terminated it at once, which cut short the runtime's own
 handling: with `docker run --rm` attached, that can leave the container running
 after ASH exits.
 
-On Windows the grace is waited out in slices: Popen.wait there is one
-WaitForSingleObject, which a Ctrl-C does not end, so a second Ctrl-C would have
-landed only after the whole grace.
+On Windows the grace is waited out in slices of a poll and a sleep: Popen.wait
+there is one WaitForSingleObject, which a Ctrl-C does not end, so a second
+Ctrl-C would have landed only after the whole grace. It is not Popen.wait with
+a slice timeout either: a Ctrl-C inside that call runs CPython's own wait for
+the child with a time that is negative once the slice's window is spent, which
+Windows reads as an enormous wait. The tests here pin that the grace path
+makes no timed Popen.wait.
 
 Real Windows does not run here, and act does not run windows-latest. These tests
 stand in for the platform and the console; the windows-latest CI leg is the real
@@ -36,20 +40,26 @@ from automated_security_helper.utils.subprocess_utils import (
     INTERRUPT_WAIT_SLICE_SECONDS,
     stop_after_interrupt,
 )
-from tests.utils.windows_console import WindowsOs, as_windows
+from tests.utils.windows_console import WindowsOs, as_windows, with_a_slice_clock
 
 #: How many slices the grace is waited out in on Windows.
 _SLICES = round(INTERRUPT_GRACE_SECONDS / INTERRUPT_WAIT_SLICE_SECONDS)
 
-#: One slice's wait.
-_SLICE = ("wait", INTERRUPT_WAIT_SLICE_SECONDS)
+#: One slice's sleep.
+_SLICE = INTERRUPT_WAIT_SLICE_SECONDS
+
+#: The reap after a kill: bounded (_REAP_SECONDS), never an unbounded wait, so
+#: a child SIGKILL does not end (uninterruptible sleep) cannot hang ASH.
+_REAP = ("wait", subprocess_utils._REAP_SECONDS)
 
 
 class _Child:
     """The members stop_after_interrupt uses, recorded. Anything else raises.
 
-    *waits* is what each timed wait does in turn: return, or raise what it holds.
-    Past the end of it, a child that is *still_running* times out every timed wait.
+    The child ends *exits_after* seconds into the (fake) clock and, with
+    *still_running*, never ends. It exists as far as ``poll`` says, and every
+    ``wait`` is recorded: the Windows tests pin that the grace path polls and
+    sleeps instead of making a timed ``wait`` (see the module docstring).
     """
 
     #: Above the kernel's pid space, as the mirror cells' stand-ins are, so
@@ -58,9 +68,9 @@ class _Child:
     #: already ended there, which only drops a record these cells never make.
     pid = 2**30 + 41
 
-    def __init__(self, *, waits=(), still_running=False):
-        self._waits = list(waits)
-        self._still_running = still_running
+    def __init__(self, *, clock=None, exits_after=0.0, still_running=False):
+        self._clock = clock
+        self._exits_after = None if still_running else exits_after
         self.calls = []
         #: Read, never written, by the die-now observation: None, as for a
         #: child not yet reaped.
@@ -79,26 +89,30 @@ class _Child:
         self.returncode = -9
 
     def poll(self):
-        # The die-now observation's fallback on a build without os.waitid
-        # (Windows, macOS) reads the exit through poll.
+        # The grace wait's poll, and the die-now observation's fallback on a
+        # build without os.waitid (Windows, macOS): the exit, once it is due.
+        if (
+            self.returncode is None
+            and self._exits_after is not None
+            and (
+                self._clock is None
+                or self._clock.now - self._clock.start >= self._exits_after
+            )
+        ):
+            self.returncode = 0
         return self.returncode
 
     def wait(self, timeout=None):
         self.calls.append(("wait", timeout))
-        if timeout is None:
-            return 0
-        if self._waits:
-            outcome = self._waits.pop(0)
-            if isinstance(outcome, BaseException):
-                raise outcome
-            return 0
-        if self._still_running:
-            raise subprocess.TimeoutExpired("runtime", timeout)
         return 0
 
 
-def _timed_out():
-    return subprocess.TimeoutExpired("runtime", INTERRUPT_WAIT_SLICE_SECONDS)
+@pytest.fixture
+def clock(monkeypatch):
+    """The sliced waits' clock and sleep, driven by the test."""
+    fake = with_a_slice_clock(monkeypatch)
+    fake.start = fake.now
+    return fake
 
 
 @pytest.mark.unit
@@ -117,36 +131,72 @@ class TestWithAConsole:
     def windows_with_a_console(self, monkeypatch):
         as_windows(monkeypatch, console=True)
 
-    def test_a_runtime_that_stops_within_the_grace_is_left_to_stop(self):
-        child = _Child()
+    def test_a_runtime_that_stops_within_the_grace_is_left_to_stop(self, clock):
+        child = _Child(clock=clock)
 
         stop_after_interrupt(child)
 
-        assert child.calls == [_SLICE]
+        assert child.calls == []
+        assert clock.sleeps == []
 
-    def test_a_runtime_that_stops_late_in_the_grace_is_still_left_to_stop(self):
-        child = _Child(waits=[_timed_out()] * (_SLICES - 1))
+    def test_a_runtime_that_stops_late_in_the_grace_is_still_left_to_stop(self, clock):
+        child = _Child(clock=clock, exits_after=(_SLICES - 1) * _SLICE)
 
         stop_after_interrupt(child)
 
-        assert child.calls == [_SLICE] * _SLICES
+        assert child.calls == []
+        assert clock.sleeps == [_SLICE] * (_SLICES - 1)
 
-    def test_a_runtime_still_running_after_the_grace_is_killed(self):
+    def test_a_runtime_still_running_after_the_grace_is_killed(self, clock):
         """Not terminated first: terminate() before the grace is the defect."""
-        child = _Child(still_running=True)
+        child = _Child(clock=clock, still_running=True)
 
         stop_after_interrupt(child)
 
-        assert child.calls == [_SLICE] * _SLICES + [("kill",), ("wait", None)]
+        assert clock.sleeps == [_SLICE] * _SLICES
+        assert child.calls == [("kill",), _REAP]
 
-    def test_a_second_ctrl_c_while_waiting_kills_at_once(self):
+    def test_a_second_ctrl_c_while_waiting_kills_at_once(self, clock):
         """It lands between two slices, not after the whole grace."""
-        child = _Child(waits=[_timed_out(), KeyboardInterrupt()])
+        clock.interrupt_on = 2
+        child = _Child(clock=clock, still_running=True)
 
         with pytest.raises(KeyboardInterrupt):
             stop_after_interrupt(child)
 
-        assert child.calls == [_SLICE, _SLICE, ("kill",), ("wait", None)]
+        assert clock.sleeps == [_SLICE, _SLICE]
+        assert child.calls == [("kill",), _REAP]
+
+    def test_the_grace_path_never_calls_a_timed_popen_wait(self, clock):
+        """Popen.wait(timeout=...) has its own Ctrl-C handler, which waits a
+        negative time once the window is spent: not on this path."""
+        child = _Child(clock=clock, still_running=True)
+
+        stop_after_interrupt(child)
+
+        waits = [call for call in child.calls if call[0] == "wait"]
+        assert waits == [_REAP], waits
+
+    def test_a_ctrl_c_during_the_sleep_reaches_the_caller(self, clock):
+        """_wait_out lets the KeyboardInterrupt the sleep raises go up."""
+        clock.interrupt_on = 1
+        child = _Child(clock=clock, still_running=True)
+
+        with pytest.raises(KeyboardInterrupt):
+            subprocess_utils._wait_out(child, INTERRUPT_GRACE_SECONDS)
+
+        assert clock.sleeps == [_SLICE]
+        assert child.calls == []
+
+    def test_a_runtime_that_outlives_the_grace_raises_timeout_expired(self, clock):
+        child = _Child(clock=clock, still_running=True)
+
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            subprocess_utils._wait_out(child, INTERRUPT_GRACE_SECONDS)
+
+        assert raised.value.timeout == INTERRUPT_GRACE_SECONDS
+        assert clock.sleeps == [_SLICE] * _SLICES
+        assert child.calls == []
 
 
 @pytest.mark.unit
@@ -160,21 +210,21 @@ class TestWithoutAConsole:
     def windows_without_a_console(self, monkeypatch):
         as_windows(monkeypatch, console=False)
 
-    def test_the_runtime_is_terminated(self):
-        child = _Child()
+    def test_the_runtime_is_terminated(self, clock):
+        child = _Child(clock=clock)
 
         stop_after_interrupt(child)
 
-        assert child.calls == [("terminate",), _SLICE]
+        assert child.calls == [("terminate",)]
+        assert clock.sleeps == []
 
-    def test_a_runtime_that_outlives_it_is_killed(self):
-        child = _Child(still_running=True)
+    def test_a_runtime_that_outlives_it_is_killed(self, clock):
+        child = _Child(clock=clock, still_running=True)
 
         stop_after_interrupt(child)
 
-        assert child.calls == (
-            [("terminate",)] + [_SLICE] * _SLICES + [("kill",), ("wait", None)]
-        )
+        assert clock.sleeps == [_SLICE] * _SLICES
+        assert child.calls == [("terminate",), ("kill",), _REAP]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the POSIX wait")
@@ -193,6 +243,14 @@ class TestOnPosixTheWaitIsOne:
     def test_one_wait_for_the_whole_grace(self, monkeypatch):
         monkeypatch.setattr(
             subprocess_utils, "_child_got_the_terminals_interrupt", lambda: True
+        )
+        # The die-now observation reads a stand-in pid as already ended
+        # through os.waitid (OSError on a pid past the kernel's space), but
+        # CPython on macOS has no os.waitid and the fallback polls, which
+        # this stand-in answers as still running; the observation is stood in
+        # as already-ended so every POSIX build measures the one reaping wait.
+        monkeypatch.setattr(
+            subprocess_utils, "discard_tool_pid_once_exited", lambda _process: True
         )
         child = _Child()
 
@@ -266,7 +324,7 @@ class TestTheConsoleCheck:
 
         stop_after_interrupt(child)
 
-        assert child.calls == [("terminate",), _SLICE]
+        assert child.calls == [("terminate",)]
 
 
 class _OsWithoutWaitid:

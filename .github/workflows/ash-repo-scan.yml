@@ -48,6 +48,12 @@ jobs:
       # No security-events here. The called workflow drops it, so granting it here
       # never reached the upload step; the sarif job below holds it instead.
     with:
+      # The scan and its reporting job run on the arm64 hosted image. On ubuntu-latest
+      # the scan queued 22.8 minutes and the reporting job another 12.2 in run
+      # 43285884861, for under seven minutes of work; the arm queue on the same run was
+      # under a minute, and the Unified CI scan matrix already runs its arm legs green.
+      # The job names, and so the required check name, do not change.
+      runner: ubuntu-24.04-arm
       # This job is the required check `ash / SAST, SCA, and IaC Scan`, so the ASH
       # that judges a pull request is never the one the pull request changes.
       #
@@ -144,6 +150,8 @@ jobs:
     with:
       # The exact artifact the scan job uploaded, in whichever attempt it ran.
       artifact-id: ${{ needs.ash.outputs.artifact-id }}
+      # The runner the scan used (5.5 minutes of queue for 0.4 of work on ubuntu-latest).
+      runner: ubuntu-24.04-arm
 
   # WHY THIS JOB EXISTS
   #
@@ -242,10 +250,14 @@ jobs:
             __wcs_interrupted="$2"
           }
           __wcs_exec() {
+            # The background launch leaves SIGINT and SIGQUIT ignored in the child (bash 3.2 on macOS), and an ignored signal survives exec, so the command is started with both at their default.
             if command -v setsid >/dev/null 2>&1; then
+              if command -v perl >/dev/null 2>&1; then
+                exec setsid -w perl -e '$SIG{INT} = "DEFAULT"; $SIG{QUIT} = "DEFAULT"; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+              fi
               exec setsid -w "$@"
             fi
-            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; $SIG{INT} = "DEFAULT"; $SIG{QUIT} = "DEFAULT"; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
           }
           with_commands_stopped() {
             if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
@@ -310,7 +322,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       # No uv cache: this job adds no cache other than the grype database it exists for.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 

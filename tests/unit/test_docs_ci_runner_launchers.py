@@ -48,10 +48,12 @@ import re
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 import yaml
+
+from tests.utils.helpers import checkout_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
@@ -1245,13 +1247,21 @@ def test_local_execute_mounts_the_wheel_and_the_reports_and_pins_the_build_agent
 # The CodeBuild agent
 # ---------------------------------------------------------------------------
 
+#: Where the CodeBuild leg's files stand, as its script sees them. The leg runs on a
+#: Linux runner, so these are POSIX paths, built as PurePosixPath to be the same on a
+#: Windows host. A path from tmp_path is not one there (a drive letter, backslashes):
+#: the script would misread it, so the first path checked, the script's, would be
+#: refused and named whichever path a test had put a character in.
+CODEBUILD_ROOT = PurePosixPath("/work/codebuild")
+
 
 @pytest.mark.unit
-def test_the_codebuild_agent_runs_under_script_with_the_pinned_images(tmp_path):
-    out = tmp_path / "out"
-    script = tmp_path / "bin" / "codebuild_build.sh"
+def test_the_codebuild_agent_runs_under_script_with_the_pinned_images():
+    out = CODEBUILD_ROOT / "out"
+    script = CODEBUILD_ROOT / "bin" / "codebuild_build.sh"
+    project = CODEBUILD_ROOT / "project"
     argv = _api("run_codebuild_agent", "codebuild_argv")(
-        MANIFEST, script=script, source=tmp_path / "project", out_dir=out
+        MANIFEST, script=script, source=project, out_dir=out
     )
     assert argv[:4] == ["script", "-q", "-e", "-c"] and argv[5:] == ["/dev/null"]
     inner = shlex.split(argv[4])
@@ -1260,10 +1270,10 @@ def test_the_codebuild_agent_runs_under_script_with_the_pinned_images(tmp_path):
         assert flag not in inner, f"codebuild_build.sh is never given {flag}"
     assert _value(inner, "-i") == [BUILD_IMAGE]
     assert _value(inner, "-l") == [AGENT_IMAGE]
-    assert _value(inner, "-s") == [str(tmp_path / "project")]
+    assert _value(inner, "-s") == [str(project)]
     for flag in ("-a", "-r"):
         (value,) = _value(inner, flag)
-        assert Path(value).is_relative_to(out), (flag, value)
+        assert PurePosixPath(value).is_relative_to(out), (flag, value)
     assert _value(inner, "-a") != _value(inner, "-r")
     assert inner == [
         str(script),
@@ -1274,9 +1284,22 @@ def test_the_codebuild_agent_runs_under_script_with_the_pinned_images(tmp_path):
         "-r",
         str(out / "codebuild-reports"),
         "-s",
-        str(tmp_path / "project"),
+        str(project),
         "-l",
         AGENT_IMAGE,
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", [PurePosixPath, PureWindowsPath])
+def test_the_codebuild_directories_keep_the_kind_of_path_they_are_given(kind):
+    """Path(out_dir) would turn a PurePosixPath into the host's kind, which on Windows
+    is backslashes and a drive, a path the script misreads."""
+    directories = _api("run_codebuild_agent", "codebuild_dirs")(kind("/work/out"))
+    assert [type(each) for each in directories] == [kind, kind]
+    assert [each.name for each in directories] == [
+        "codebuild-artifacts",
+        "codebuild-reports",
     ]
 
 
@@ -1284,24 +1307,40 @@ def test_the_codebuild_agent_runs_under_script_with_the_pinned_images(tmp_path):
 @pytest.mark.parametrize("character", [" ", "'", '"', "$", "`", "\\", ";", "\n"])
 @pytest.mark.parametrize("where", ["script", "source", "out_dir"])
 def test_the_codebuild_agent_is_given_only_paths_its_script_cannot_misread(
-    tmp_path, character, where
+    character, where
 ):
     """codebuild_build.sh builds its docker command line as a string and runs it with
     eval, so a quote, a dollar sign, a backtick or a blank in a path would be read
     again inside the script. Paths are refused unless they hold only letters, digits
-    and ``._/-``."""
+    and ``._/-``. The other two paths are fine, so the error names the planted one."""
     paths = {
-        "script": tmp_path / "bin" / "codebuild_build.sh",
-        "source": tmp_path / "project",
-        "out_dir": tmp_path / "out",
+        "script": CODEBUILD_ROOT / "bin" / "codebuild_build.sh",
+        "source": CODEBUILD_ROOT / "project",
+        "out_dir": CODEBUILD_ROOT / "out",
     }
-    paths[where] = tmp_path / f"a{character}b" / paths[where].name
+    paths[where] = CODEBUILD_ROOT / f"a{character}b" / paths[where].name
     with pytest.raises(ValueError, match=where):
         _api("run_codebuild_agent", "codebuild_argv")(MANIFEST, **paths)
 
 
 @pytest.mark.unit
-def test_the_codebuild_agent_is_given_only_digest_references(tmp_path):
+@pytest.mark.parametrize("where", ["script", "source", "out_dir"])
+def test_the_codebuild_agent_is_never_given_a_path_of_windows_kind(where):
+    """A drive letter and backslashes would be read again by the script's eval, so a
+    path of Windows' kind is refused, not rewritten into a POSIX one: the agent does
+    not run on Windows, and no spelling of such a path names a file on its runner."""
+    paths = {
+        "script": CODEBUILD_ROOT / "bin" / "codebuild_build.sh",
+        "source": CODEBUILD_ROOT / "project",
+        "out_dir": CODEBUILD_ROOT / "out",
+    }
+    paths[where] = PureWindowsPath("C:/work/codebuild") / paths[where].name
+    with pytest.raises(ValueError, match=where):
+        _api("run_codebuild_agent", "codebuild_argv")(MANIFEST, **paths)
+
+
+@pytest.mark.unit
+def test_the_codebuild_agent_is_given_only_digest_references():
     manifest = {
         **MANIFEST,
         "images": {
@@ -1309,12 +1348,12 @@ def test_the_codebuild_agent_is_given_only_digest_references(tmp_path):
             "codebuild-standard-5": {"ref": "x@sha256:" + "1" * 64 + "; touch y"},
         },
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="plain digest reference"):
         _api("run_codebuild_agent", "codebuild_argv")(
             manifest,
-            script=tmp_path / "s.sh",
-            source=tmp_path / "p",
-            out_dir=tmp_path / "o",
+            script=CODEBUILD_ROOT / "s.sh",
+            source=CODEBUILD_ROOT / "p",
+            out_dir=CODEBUILD_ROOT / "o",
         )
 
 
@@ -1629,7 +1668,8 @@ def test_each_launcher_starts_its_runner_with_env_i(tmp_path, launcher):
     assert kwargs.get("cwd") == tmp_path
     assert kwargs.get("stdin") == subprocess.DEVNULL
     assert kwargs.get("stdout") not in (None, sys.stdout), "output goes to the log"
-    assert kwargs.get("env") == {"PATH": _api("env", "SYSTEM_PATH")}, (
+    env_is_system_path_only = kwargs.get("env") == {"PATH": _api("env", "SYSTEM_PATH")}
+    assert env_is_system_path_only, (
         "env itself is found on the system PATH, never on the test process's own"
     )
     assert kwargs.get("timeout") is None
@@ -1827,7 +1867,7 @@ def _collect(path: Path, *flags: str) -> subprocess.CompletedProcess:
         text=True,
         timeout=300,
         check=False,
-        env=_not_a_hosted_runner(),
+        env=checkout_env(_not_a_hosted_runner()),
     )
 
 

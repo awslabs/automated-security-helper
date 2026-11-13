@@ -315,8 +315,18 @@ def _plan(root: Path) -> WorkspacePlan:
 @pytest.mark.parametrize(
     "mode, plan, expected, absent",
     [
-        (RunMode.container, False, "second ASH", None),
-        (RunMode.nix, False, "second ASH", None),
+        (
+            RunMode.container,
+            False,
+            "the ASH that mode runs reads the config without it",
+            None,
+        ),
+        (
+            RunMode.nix,
+            False,
+            "the ASH that mode runs reads the config without it",
+            None,
+        ),
         (RunMode.local, True, "workspace", "the ASH that mode runs"),
     ],
     ids=["container", "nix", "local-workspace"],

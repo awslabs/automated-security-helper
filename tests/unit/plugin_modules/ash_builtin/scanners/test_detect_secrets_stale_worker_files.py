@@ -26,6 +26,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.exceptions import ScannerError
 
 pytestmark = pytest.mark.unit
 
@@ -257,13 +258,16 @@ def test_the_request_file_is_written_owner_only(tmp_path, monkeypatch):
     work_dir = tmp_path / "worker-dir"
     work_dir.mkdir()
 
-    scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[str(ctx.source_dir / "package-lock.json")],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=60,
-    )
+    # A worker that timed out fails the scan (ScannerError), not a None return;
+    # the mode is read while the worker would have run.
+    with pytest.raises(ScannerError, match="timed out"):
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[str(ctx.source_dir / "package-lock.json")],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=60,
+        )
 
     assert seen_modes, "the worker command named no request file"
     assert seen_modes == [0o600], [oct(m) for m in seen_modes]
@@ -506,7 +510,8 @@ def test_a_work_directory_swapped_for_a_link_keeps_the_finally_inside(
         subprocess_utils, "run_command_with_output_handling", _swap_then_time_out
     )
 
-    assert _call_worker(scanner, ctx, work_dir) is None
+    with pytest.raises(ScannerError, match="timed out"):
+        _call_worker(scanner, ctx, work_dir)
     assert [decoy.exists() for decoy in decoys] == [True, True], (
         "the worker's finally deleted files outside the work directory"
     )
@@ -545,7 +550,8 @@ def test_the_request_file_is_owner_only_when_the_tighten_is_refused(
         subprocess_utils, "run_command_with_output_handling", _record_mode
     )
 
-    assert _call_worker(scanner, ctx, work_dir) is None
+    with pytest.raises(ScannerError, match="timed out"):
+        _call_worker(scanner, ctx, work_dir)
     assert seen_modes == [0o600], [oct(m) for m in seen_modes]
 
 
@@ -804,13 +810,13 @@ def test_a_refused_fchmod_does_not_fail_the_scan(tmp_path, monkeypatch):
     work_dir = tmp_path / "worker-dir"
     work_dir.mkdir()
 
-    # Must not raise: the timed-out return is the scan's answer, and the
-    # refused tighten is a DEBUG line.
-    out = scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[str(ctx.source_dir / "package-lock.json")],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=60,
-    )
-    assert out is None
+    # The only error is the timeout's ScannerError: the refused tighten is a
+    # DEBUG line and raises nothing of its own (an OSError would not match).
+    with pytest.raises(ScannerError, match="timed out"):
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[str(ctx.source_dir / "package-lock.json")],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=60,
+        )

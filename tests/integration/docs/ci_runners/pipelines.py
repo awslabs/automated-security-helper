@@ -50,6 +50,7 @@ only the build record is copied out; every kept ``.ash/ash_output`` is copied as
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import json
@@ -59,7 +60,7 @@ import re
 import shutil
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 
 import yaml
@@ -308,8 +309,11 @@ class Options:
 
     @classmethod
     def from_config(cls, config) -> Options:
-        names = ("bin", "wheel", "out")
-        values = {n: config.getoption(f"--ci-runner-{n}") for n in names}
+        values = {
+            "bin": config.getoption("--ci-runner-bin"),
+            "wheel": config.getoption("--ci-runner-wheel"),
+            "out": config.getoption("--ci-runner-out"),
+        }
         missing = [f"--ci-runner-{n}" for n, v in values.items() if not v]
         if missing:
             raise HarnessError(f"the CI-runner tests need {', '.join(missing)}")
@@ -655,6 +659,12 @@ class Launched:
     timed_out: str | None = None
     #: The id of the image the run built for the block, when it built one.
     image_id: str | None = None
+    #: The container starts and image pulls and tags the run recorded (a docker events
+    #: JSON-lines file), and the nanosecond from which they count.
+    image_events: Path | None = None
+    image_events_since_ns: int = 0
+    #: The id ``docker image inspect`` gave the built image's tag right after the run.
+    image_inspected: str | None = None
 
     def text(self) -> str:
         try:
@@ -729,7 +739,8 @@ def _launch_act(prepared: Prepared, session: Session) -> Launched:
             timeout=session.options.launch_timeout,
         )
     )
-    reports.keep_tree(project / ".ash" / "ash_output", out / "ash_output")
+    # Nothing is copied from the project's .ash/ash_output: act's host executor does
+    # not write there, and the run is judged from the artifact store under out.
     return Launched(log=log, code=code, timed_out=timed_out)
 
 
@@ -799,20 +810,38 @@ def _launch_gitlab(prepared: Prepared, session: Session) -> Launched:
     )
     _record(out, "gitlab-ci-local", argv)
     log = out / "gitlab-ci-local.log"
-    code, timed_out = _timed(
-        lambda: run_gitlab_ci_local.run_gitlab_ci_local(
-            argv,
-            runner_bin=program.parent,
-            cwd=project,
-            home=Path(fixture.home),
-            tool_cache=session.tool_cache,
-            outer=os.environ,
-            log=log,
-            timeout=session.options.launch_timeout,
+    events = out / "docker-identity-events.jsonl"
+    since_ns = 0
+    inspected = None
+    with contextlib.ExitStack() as stack:
+        if image_id:
+            since_ns = stack.enter_context(
+                run_gitlab_ci_local.record_identity_events(events, home=out)
+            )
+        code, timed_out = _timed(
+            lambda: run_gitlab_ci_local.run_gitlab_ci_local(
+                argv,
+                runner_bin=program.parent,
+                cwd=project,
+                home=Path(fixture.home),
+                tool_cache=session.tool_cache,
+                outer=os.environ,
+                log=log,
+                timeout=session.options.launch_timeout,
+            )
         )
-    )
+        if image_id:
+            inspected = run_gitlab_ci_local.inspect_image_id(BUILT_IMAGE, home=out)
     reports.keep_tree(project / ".gitlab-ci-local" / "artifacts", out / "artifacts")
-    return Launched(log=log, code=code, timed_out=timed_out, image_id=image_id)
+    return Launched(
+        log=log,
+        code=code,
+        timed_out=timed_out,
+        image_id=image_id,
+        image_events=events if image_id else None,
+        image_events_since_ns=since_ns,
+        image_inspected=inspected,
+    )
 
 
 def keep_jenkins_build(jenkins_home: Path, out: Path) -> None:
@@ -994,11 +1023,18 @@ def _launch_circleci(prepared: Prepared, session: Session) -> Launched:
 # ---------------------------------------------------------------------------
 
 
-def _wheel_seen_as(prepared: Prepared) -> PurePosixPath:
-    """The wheel's path as the installer in the pipeline sees it."""
+def _wheel_seen_as(prepared: Prepared) -> PurePath:
+    """The wheel's path as the installer in the pipeline sees it.
+
+    A runner that mounts the wheel's directory shows the installer a POSIX path inside
+    its container. Every other runner installs from the host's own path, the one the
+    rewrite put in the install URL (rewrite.install_spec), so it is returned as the
+    path of the host's kind it is: ``as_posix()`` of a Windows drive path is not an
+    absolute POSIX path, and a path that is not absolute has no file URI.
+    """
     if prepared.run.runner in ("gitlab-ci-local", "circleci"):
         return WHEEL_MOUNT / prepared.under_test.wheel.name
-    return PurePosixPath(prepared.under_test.wheel.as_posix())
+    return prepared.under_test.wheel
 
 
 def wheel_hash_problems(prepared: Prepared) -> list[str]:
@@ -1418,7 +1454,7 @@ def stub_problems(prepared: Prepared) -> list[str]:
 
 
 def _act_problems(prepared, launched, log, expected) -> list[str]:
-    project, out = prepared.project, prepared.out
+    out = prepared.out
     workflow = reports.load_workflow(prepared.rewritten)
     called = {
         name: reports.load_workflow(text) for name, text in prepared.called.items()
@@ -1454,14 +1490,34 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
             source="merge" if merge else "scan",
             actionable=sum(expected.values()),
         )
+    # The names are read with each call's inputs resolved; a name the harness still
+    # cannot read before the run is named, never looked up as literal text.
+    names = reports.uploaded_artifact_names(workflow, called, plan)
+    problems += [
+        f"the artifact name {name!r} is an expression the harness cannot read before "
+        "the run"
+        for name in names
+        if "${{" in name
+    ]
     problems += reports.artifact_problems(
-        out / "artifacts", reports.uploaded_artifact_names([workflow, *called.values()])
+        out / "artifacts", [name for name in names if "${{" not in name]
     )
-    output = project / ".ash" / "ash_output"
+    # act's host executor runs the job in a directory it removes at the job's end and
+    # never writes the project's .ash/ash_output, so the artifact the job uploaded is
+    # the only copy of ASH's output: it is unpacked under out/ash_output, with each
+    # file's own mtime, and the checks below read it there.
+    judged, selection = reports.results_to_judge(
+        reports.results_from_artifact_store(out / "artifacts")
+    )
+    problems += selection
+    output = out / "ash_output"
+    if judged is not None:
+        output, unpacked = reports.unpack_artifact(judged, output)
+        problems += unpacked
+        problems += reports.findings_problems(
+            reports.aggregated_results_at(output / reports.AGGREGATED), expected
+        )
     aggregated = output / reports.AGGREGATED
-    problems += reports.findings_problems(
-        reports.aggregated_results_at(aggregated), expected
-    )
     started = None
     if merge:
         job, step = merge
@@ -1470,10 +1526,10 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
             problems.append(f"act's log has no start of step {step!r} of job {job}")
         else:
             problems += verdict.written_after_problems(aggregated, started=started)
-    if (
-        "upload-sarif" in prepared.rewritten
-        or "upload-ash-sarif.yml" in prepared.rewritten
-    ):
+    # An upload is expected from the jobs the plan expects to run: a block whose SARIF
+    # job calls upload-ash-sarif.yml behind an ``if`` act cannot satisfy, or whose scan
+    # call turns collect-sarif-report off, uploads nothing under act.
+    if reports.sarif_upload_expected(plan, prepared.run.event, workflow):
         sarif = output / "reports" / "ash.ghas.sarif"
         uploads = [path for path, _ in _stub_records(prepared, "upload-sarif")]
         if not uploads:
@@ -1488,12 +1544,17 @@ def _act_problems(prepared, launched, log, expected) -> list[str]:
             for upload in uploads:
                 problems += verdict.stub_sarif_problems(sarif, upload)
     problems += stub_problems(prepared)
+    workflows = [workflow, *called.values()]
     try:
-        wrapped = reports.wrapped_job_steps([workflow, *called.values()])
+        wrapped = reports.wrapped_job_steps(workflows)
     except ValueError as error:
         problems.append(str(error))
         wrapped = []
-    problems += verdict.resume_token_problems(log, wrapped)
+    # A wrapped step whose ``if`` reads false or unknown before the run is checked in
+    # the runs it had, and may have none; one whose ``if`` reads true must have run.
+    problems += verdict.resume_token_problems(
+        log, wrapped, optional=reports.conditional_steps(workflow, called)
+    )
     return problems
 
 
@@ -1590,16 +1651,88 @@ def built_image_problems(prepared: Prepared, launched: Launched) -> list[str]:
                 "image the job ran is unknown"
             )
         ]
-    log = launched.text()
-    short = image_id.removeprefix("sha256:")[:12]
-    if image_id not in log and not (len(short) == 12 and short in log):
-        return [
-            (
-                f"the log does not show the job running {image_id}, the image this "
-                "run built"
-            )
-        ]
-    return []
+    return image_identity_problems(
+        image_id=image_id,
+        tag=BUILT_IMAGE,
+        inspected=launched.image_inspected,
+        events=_read_text(launched.image_events),
+        since_ns=launched.image_events_since_ns,
+    )
+
+
+def _read_text(path: Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _event_ns(event: Mapping[str, Any]) -> int:
+    nano = event.get("timeNano")
+    if isinstance(nano, int):
+        return nano
+    seconds = event.get("time")
+    return seconds * 1_000_000_000 if isinstance(seconds, int) else 0
+
+
+def image_identity_problems(
+    *, image_id: str, tag: str, inspected: str | None, events: str, since_ns: int
+) -> list[str]:
+    """Whether the job ran ``image_id``, the id ``docker build --iidfile`` gave the
+    image the run built and tagged ``tag``.
+
+    gitlab-ci-local prints only the tag of the image a job runs ("starting <tag>"),
+    and removes its job containers when the job ends (cleanupResources, ``docker rm
+    -vf``, src/job.ts of 4.76.1), so neither the log nor a container left behind can
+    show the id. The proof is a chain that ends in the id, from three records:
+
+    (a) a container started with image ``tag``: the docker events recording, made from
+        before gitlab-ci-local starts until after it ends, holds a container ``start``
+        whose ``image`` attribute is ``tag``;
+    (b) ``tag`` is ``image_id``: ``docker image inspect tag`` read right after the
+        run gave exactly ``image_id``;
+    (c) ``tag`` did not move meanwhile: the recording holds no ``pull``, ``tag`` or
+        ``untag`` of ``tag``. The harness owns the only build, and it ran before the
+        recording started, so a different image under ``tag`` needs one of those.
+
+    A job on an older image under the same tag fails (b); one that pulled or re-tagged
+    fails (c); no start from ``tag`` fails (a).
+    """
+    starts = 0
+    moved: list[str] = []
+    for line in events.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or _event_ns(event) < since_ns:
+            continue
+        actor = event.get("Actor") or {}
+        attributes = actor.get("Attributes") or {}
+        kind, action = event.get("Type"), event.get("Action")
+        if kind == "container" and action == "start":
+            starts += attributes.get("image") == tag
+        elif kind == "image" and action in ("pull", "tag", "untag"):
+            if tag in (actor.get("ID"), attributes.get("name")):
+                moved.append(str(action))
+    problems = []
+    if not starts:
+        problems.append(f"no container started from {tag} while the job ran")
+    if inspected != image_id:
+        problems.append(
+            f"{tag} is {inspected or 'not readable'} after the run, not {image_id}"
+        )
+    if moved:
+        problems.append(f"{tag} was moved during the run ({', '.join(moved)})")
+    if not problems:
+        return []
+    return [
+        f"the job was not shown to run {image_id}, the image this run built: "
+        + "; ".join(problems)
+        + " (docker events and docker image inspect)"
+    ]
 
 
 def _gitlab_problems(prepared, launched, log, expected) -> list[str]:

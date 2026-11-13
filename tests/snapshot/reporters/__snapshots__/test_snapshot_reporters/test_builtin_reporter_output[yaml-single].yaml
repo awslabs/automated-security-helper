@@ -153,6 +153,7 @@ ash_config:
   external_reports_to_include: []
   fail_on_findings: true
   fail_on_incomplete_scanners: true
+  fail_on_unknown_keys: false
   global_settings:
     ignore_paths: []
     mcp:
@@ -273,7 +274,7 @@ ash_config:
     severity_threshold: MEDIUM
     suppressions:
     - client_supplied: false
-      expiration: null
+      expires: null
       line_end: 5
       line_start: 5
       package_name: null
@@ -281,10 +282,12 @@ ash_config:
       package_version: null
       path: app/app.py
       reason: Fixture placeholder credential, not a real secret
+      resource_id: null
       rule_id: SECRET-SECRET-KEYWORD
+      scope: null
       symbol: null
     - client_supplied: false
-      expiration: '2099-12-31'
+      expires: '2099-12-31'
       line_end: null
       line_start: null
       package_name: null
@@ -292,7 +295,9 @@ ash_config:
       package_version: null
       path: infra/main.tf
       reason: Stale suppression for a check that no longer exists
+      resource_id: null
       rule_id: CKV_AWS_999
+      scope: null
       symbol: null
   honor_ignore_files: true
   mcp-resource-management:
@@ -339,6 +344,7 @@ ash_config:
       extension: ghas.sarif
       name: github-ghas
       options:
+        emit_automation_details: false
         exclude_suppressed: true
     gitlab-cyclonedx:
       enabled: true
@@ -416,6 +422,20 @@ ash_config:
       options: {}
   sandbox:
     env_scanners: []
+    environment:
+    - ALL_PROXY
+    - HTTPS_PROXY
+    - HTTP_PROXY
+    - NO_PROXY
+    - all_proxy
+    - http_proxy
+    - https_proxy
+    - no_proxy
+    - SSL_CERT_FILE
+    - REQUESTS_CA_BUNDLE
+    - CURL_CA_BUNDLE
+    - NODE_EXTRA_CA_CERTS
+    - SSL_CERT_DIR
     extra_read_paths: []
     mode: 'off'
     network_scanners: null
@@ -444,7 +464,7 @@ ash_config:
         offline: false
         scan_timeout: 1800
         severity_threshold: null
-        tool_version: '>=1.7.0,<2.0.0'
+        tool_version: '>=1.7.8,<2.0.0'
     cdk-nag:
       enabled: true
       name: cdk-nag
@@ -565,7 +585,7 @@ ash_config:
         severity: []
         severity_threshold: null
         sha256: {}
-        version: v1.30.2
+        version: v1.33.1
     semgrep:
       enabled: true
       name: semgrep
@@ -645,7 +665,14 @@ cyclonedx:
     hashes: null
     licenses:
     - license:
+        acknowledgement: null
+        bom-ref: null
         id: Apache-2.0
+        licensing: null
+        name: null
+        properties: null
+        text: null
+        url: null
     manufacturer: null
     mime-type: null
     modelCard: null
@@ -661,7 +688,7 @@ cyclonedx:
     publisher: null
     purl: pkg:pypi/requests@2.19.1
     releaseNotes: null
-    scope: required
+    scope: null
     signature: null
     supplier: null
     swhid: null
@@ -696,7 +723,7 @@ cyclonedx:
     publisher: null
     purl: pkg:docker/python@3.12-slim
     releaseNotes: null
-    scope: required
+    scope: null
     signature: null
     supplier: null
     swhid: null
@@ -738,7 +765,7 @@ cyclonedx:
       publisher: null
       purl: null
       releaseNotes: null
-      scope: required
+      scope: null
       signature: null
       supplier: null
       swhid: null
@@ -780,7 +807,7 @@ cyclonedx:
         publisher: null
         purl: null
         releaseNotes: null
-        scope: required
+        scope: null
         signature: null
         supplier: null
         swhid: null
@@ -807,6 +834,7 @@ metadata:
   plugin_load_errors: {}
   project_name: ASH
   report_id: ASH-20260115120000-000000000001
+  requested_scanners_not_run: null
   shard: null
   summary_stats:
     actionable: 6
@@ -856,6 +884,7 @@ sarif:
     originalUriBaseIds: null
     policies: []
     properties:
+      ash_occurrence_context_version: 1
       tags: []
     redactionTokens: []
     results:
@@ -916,6 +945,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: bandit
+          message:
+            state: resolved
+            text: subprocess call with shell=True identified, security issue.
+          resolved_rule:
+            id: B602
+          rule_index: 0
+          version: 1
         issue_confidence: HIGH
         issue_severity: HIGH
         scanner_details:
@@ -994,6 +1033,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: bandit
+          message:
+            state: resolved
+            text: 'Possible hardcoded password: ''hu**********************t'''
+          resolved_rule:
+            id: B105
+          rule_index: 1
+          version: 1
         issue_confidence: MEDIUM
         issue_severity: LOW
         scanner_details:
@@ -1072,6 +1121,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: S3 Bucket has an ACL defined which allows public READ access.
+          resolved_rule:
+            id: CKV_AWS_20
+          rule_index: 0
+          version: 1
         issue_severity: HIGH
         scanner_details:
           tool_invocation:
@@ -1149,6 +1208,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure the S3 bucket has access logging enabled
+          resolved_rule:
+            id: CKV_AWS_18
+          rule_index: 1
+          version: 1
         issue_severity: MEDIUM
         scanner_details:
           tool_invocation:
@@ -1226,6 +1295,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure the last USER is not root
+          resolved_rule:
+            id: CKV_DOCKER_8
+          rule_index: 2
+          version: 1
         issue_severity: MEDIUM
         scanner_details:
           tool_invocation:
@@ -1303,6 +1382,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure that HEALTHCHECK instructions have been added to container
+              images
+          resolved_rule:
+            id: CKV_DOCKER_2
+          rule_index: 3
+          version: 1
         issue_severity: LOW
         scanner_details:
           tool_invocation:
@@ -1381,6 +1471,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: semgrep
+          message:
+            state: resolved
+            text: The last user in the container is 'root'. Switch back to an unprivileged
+              user.
+          resolved_rule:
+            id: dockerfile.security.last-user-is-root.last-user-is-root
+          rule_index: 0
+          version: 1
         issue_severity: LOW
         scanner_details:
           tool_invocation:
@@ -1458,6 +1559,16 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: semgrep
+          message:
+            state: resolved
+            text: Command string built with an f-string; prefer an argument list.
+          resolved_rule:
+            id: python.lang.best-practice.unpinned-shell-command
+          rule_index: 1
+          version: 1
         issue_severity: INFO
         scanner_details:
           tool_invocation:
@@ -1535,6 +1646,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: detect-secrets
+          message:
+            state: resolved
+            text: Secret of type Secret Keyword detected in file app/app.py at line
+              5
+          resolved_rule:
+            id: SECRET-SECRET-KEYWORD
+          rule_index: 0
+          version: 1
         issue_severity: HIGH
         scanner_details:
           tool_invocation:
@@ -1562,7 +1684,9 @@ sarif:
           secret'
         kind: inSource
         location: null
-        properties: null
+        properties:
+          ashApplied: true
+          tags: []
         state: null
       taxa: []
       webRequest: null
@@ -1621,6 +1745,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: grype
+          message:
+            state: resolved
+            text: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was
+              found at requirements.txt
+          resolved_rule:
+            id: CVE-2018-18074-requests
+          rule_index: 0
+          version: 1
         issue_severity: CRITICAL
         scanner_details:
           tool_invocation:
@@ -1699,6 +1834,17 @@ sarif:
       occurrenceCount: null
       partialFingerprints: null
       properties:
+        ash_occurrence_context:
+          component:
+            name: grype
+          message:
+            state: resolved
+            text: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was
+              found at requirements.txt
+          resolved_rule:
+            id: CVE-2023-32681-requests
+          rule_index: 1
+          version: 1
         issue_severity: MEDIUM
         scanner_details:
           tool_invocation:
@@ -2222,7 +2368,7 @@ scanner_results:
   cdk-nag:
     actionable_finding_count: 0
     dependencies_satisfied: true
-    duration: 0.0
+    duration: null
     excluded: true
     exit_code: null
     finding_count: 0
@@ -2312,7 +2458,7 @@ scanner_results:
   npm-audit:
     actionable_finding_count: 0
     dependencies_satisfied: false
-    duration: 0.0
+    duration: null
     excluded: false
     exit_code: null
     finding_count: 0

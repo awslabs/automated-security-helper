@@ -20,6 +20,7 @@ Control characters are built with chr() here, so this file holds none itself.
 
 import contextlib
 import logging
+import os
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -32,6 +33,7 @@ pytestmark = pytest.mark.unit
 
 ESC = chr(0x1B)
 BACKSLASH = chr(0x5C)
+ZERO_WIDTH_SPACE = chr(0x200B)
 
 #: ash.log's format, as get_logger sets it.
 _ASH_LOG_FORMAT = "%(asctime)s\t%(levelname)s\t%(filename)s:%(lineno)d\t%(message)s "
@@ -63,12 +65,21 @@ def _shown_twice(text: str) -> str:
 def test_the_file_is_named_as_given(name):
     error = FileNotFoundError(2, "No such file or directory", name)
 
-    assert error_text(error) == f"[Errno 2] No such file or directory: '{name}'"
+    # The name's bytes as given, between the quote characters repr puts around
+    # it: double quotes around a name holding an apostrophe, single otherwise.
+    quote = repr(name)[0]
+    assert error_text(error) == (
+        f"[Errno 2] No such file or directory: {quote}{name}{quote}"
+    )
 
 
 def test_both_files_of_a_rename_are_named_as_given():
     source, target = "/out/a" + ESC, "/out/b" + BACKSLASH + "c"
-    error = FileExistsError(17, "File exists", source, None, target)
+    # The second name is set as the attribute, not as the fourth argument:
+    # that position is the Windows error number, and giving it (even None)
+    # makes Windows word the error "[WinError None]" in place of "[Errno 17]".
+    error = FileExistsError(17, "File exists", source)
+    error.filename2 = target
 
     assert error_text(error) == f"[Errno 17] File exists: '{source}' -> '{target}'"
 
@@ -131,6 +142,7 @@ def test_an_unexpected_os_error_is_logged_naming_its_file_as_given():
     from unittest.mock import MagicMock
 
     from automated_security_helper.utils.error_text import log_unexpected_error
+    from automated_security_helper.utils.log import NO_MARKUP
 
     name = "/out/a" + ESC + "b"
     error = PermissionError(13, "Permission denied", name)
@@ -138,9 +150,15 @@ def test_an_unexpected_os_error_is_logged_naming_its_file_as_given():
 
     log_unexpected_error(logger, error)
 
+    # An OSError that names a file by repr is logged pre-rendered, its traceback
+    # text on the lines after the message, never with exc_info: the handler's
+    # formatter would render the name by repr again and double its backslash.
     (message,), kwargs = logger.error.call_args
-    assert message == f"[Errno 13] Permission denied: '{name}'"
-    assert kwargs["exc_info"] is error
+    first, traceback_line = message.split("\n", 1)
+    assert first == f"[Errno 13] Permission denied: '{name}'"
+    assert traceback_line == f"PermissionError: [Errno 13] Permission denied: '{name}'"
+    assert "exc_info" not in kwargs
+    assert kwargs["extra"] == NO_MARKUP
 
 
 def test_a_traceback_names_its_file_as_given():
@@ -197,7 +215,15 @@ def test_a_reporter_that_cannot_write_its_file_names_it_once(tmp_path):
 
     # "[/x]" holds a slash, so this is "out[" with "x][bold]..." inside it.
     # A lone ESC: a complete code in a name is stripped in every print.
-    output_dir = tmp_path / ("out[/x][bold]" + ESC + "x")
+    # Windows cannot hold a control character (U+0000 to U+001F) in a path, and a
+    # path of only printable ASCII is returned by shown_not_obeyed as it is, so
+    # shown once and shown twice would be the same text and the assertions below
+    # could not tell them apart. NTFS does hold a zero-width space (U+200B, a
+    # format character, category Cf), which terminal_text writes as an escape
+    # and which, shown again, has that escape's backslash doubled: the same
+    # once-versus-twice difference the ESC gives elsewhere.
+    unprintable = ZERO_WIDTH_SPACE if os.name == "nt" else ESC
+    output_dir = tmp_path / ("out[/x][bold]" + unprintable + "x")
     blocked = output_dir / "reports" / "ash.stub.json"
 
     class _StubConfig(ReporterPluginConfigBase):
@@ -247,6 +273,9 @@ def test_a_reporter_that_cannot_write_its_file_names_it_once(tmp_path):
 
     written = log.read_bytes().decode("utf-8")
     once, twice = f"'{_shown(str(blocked))}'", f"'{_shown_twice(str(blocked))}'"
+    # The assertions below separate the two only if showing really changes the
+    # path on this platform (the ESC, or on Windows the zero-width space).
+    assert once != str(blocked) and once != twice, ascii((once, twice))
     assert "Error in reporter" in written, written
     assert once in written and twice not in written, ascii(written)
     failed = [Text.from_markup(d).plain for d in descriptions if "Failed" in d]

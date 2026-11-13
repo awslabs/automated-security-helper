@@ -16,9 +16,9 @@ import pytest
 
 import automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter as bsr_module
 
-#: Each character the escaper backslash-escapes: Markdown reads every one as syntax.
 pytestmark = pytest.mark.unit
 
+#: Each character the escaper backslash-escapes: Markdown reads every one as syntax.
 MARKDOWN_SYNTAX = "\\`*_[]{}#|~"
 
 

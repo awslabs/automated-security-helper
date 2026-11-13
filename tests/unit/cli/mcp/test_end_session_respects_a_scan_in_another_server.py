@@ -36,7 +36,11 @@ from automated_security_helper.cli.mcp import (
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.log import ASH_LOGGER
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
+from tests.utils.helpers import (
+    CHILD_TIMEOUT_SECONDS,
+    KillAfter,
+    importing_this_checkout,
+)
 
 _HOLDER = """
 import sys
@@ -84,7 +88,7 @@ def _sandbox(root: Path, session_id: str) -> Path:
 def _scan_in_another_process(root: Path, session_id: str):
     env = dict(os.environ, ASH_MCP_WORKSPACE_ROOT=str(root))
     child = subprocess.Popen(
-        [sys.executable, "-c", _HOLDER, session_id],
+        [sys.executable, "-c", importing_this_checkout(_HOLDER), session_id],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -188,7 +192,7 @@ def test_a_presence_guard_that_cannot_be_taken_clears_the_memory_and_warns(
     registry = sessions.get_default_registry()
     registry.session_for("unreadable")
 
-    def refused(_root):
+    def refused(_root, **_kwargs):
         raise PermissionError(errno.EACCES, "Permission denied")
 
     try:
@@ -237,7 +241,7 @@ def test_forgetting_a_session_drops_its_delivered_source_record(
     registry.session_for("unreadable")
     assert source_delivery.delivered_session_count() == 1
 
-    def refused(_root):
+    def refused(_root, **_kwargs):
         raise PermissionError("the presence registry cannot be opened")
 
     # Permanent: the sweep below hits the same refusal.
@@ -287,11 +291,15 @@ def registry_calls(monkeypatch) -> List[str]:
 def _refuse_the_presence_guard(
     monkeypatch, error: Optional[OSError] = None
 ) -> List[Path]:
-    """Make every ``_scan_presence_guard`` call raise; the list records each attempt."""
+    """Make every ``_scan_presence_guard`` call raise; the list records each attempt.
+
+    The double takes the guard's keyword arguments too (the sweep asks for the
+    lock with a bounded ``wait``), so a call of either shape reaches the raise.
+    """
     attempts: List[Path] = []
     raised = error or PermissionError(errno.EACCES, "Permission denied")
 
-    def refused(guard_root):
+    def refused(guard_root, **_kwargs):
         attempts.append(guard_root)
         raise raised
 
@@ -526,8 +534,13 @@ def test_an_error_with_no_errno_is_described_by_its_type() -> None:
 def test_an_error_that_names_a_file_is_described_with_it() -> None:
     error = OSError(errno.ESTALE, "FAKE stale file handle", "FAKE-registry-dir")
 
+    # The expected name is built as _describe_os_error builds it:
+    # errno.errorcode maps a NUMBER to one name per platform, so the literal
+    # "ESTALE" does not hold where another name shares the number.
+    name = errno.errorcode.get(errno.ESTALE, "unnamed")
+
     assert sessions._describe_os_error(error) == (
-        f"errno {errno.ESTALE} ESTALE: FAKE stale file handle: FAKE-registry-dir"
+        f"errno {errno.ESTALE} {name}: FAKE stale file handle: FAKE-registry-dir"
     )
 
 
@@ -543,18 +556,19 @@ def test_an_error_that_names_two_files_is_described_with_both() -> None:
 
 
 @pytest.mark.unit
-def test_ending_the_default_session_does_not_open_the_scan_presence_registry(
-    root,
-) -> None:
-    """The reserved ``__default__`` never has a presence entry, so there is
-    nothing for the guard to protect and no lock file to create."""
+def test_ending_the_default_session_reads_the_scan_presence_registry(root) -> None:
+    """Every stdio server of one user shares ``__default__``, so a scan of it in
+    a sibling server holds a presence entry like a replica's scan of a session,
+    and ending it reads the registry as for any session. With no scan held, the
+    workspace goes and no entry of its own is left behind."""
     default = mark_session_workspace(root / profile_registry.DEFAULT_SESSION_ID)
     (default / "source").mkdir()
 
     assert sessions.end_session(profile_registry.DEFAULT_SESSION_ID) is True
 
     assert not default.exists()
-    assert not (root / sessions.SCAN_PRESENCE_DIR).exists()
+    holder = root / sessions.SCAN_PRESENCE_DIR / profile_registry.DEFAULT_SESSION_ID
+    assert not holder.exists()
 
 
 @pytest.mark.unit
@@ -563,7 +577,7 @@ def test_a_guard_that_cannot_be_taken_does_not_strand_the_default_workspace(
 ) -> None:
     default = mark_session_workspace(root / profile_registry.DEFAULT_SESSION_ID)
 
-    def refused(_root):
+    def refused(_root, **_kwargs):
         raise PermissionError("the presence registry cannot be opened")
 
     monkeypatch.setattr(sessions, "_scan_presence_guard", refused)

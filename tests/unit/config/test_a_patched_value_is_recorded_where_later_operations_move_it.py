@@ -115,7 +115,7 @@ def _sinks(config_file: Path, tmp_path: Path) -> dict:
     profile = tmp_path / "session" / "profile.yaml"
     profile.parent.mkdir(exist_ok=True)
     config.save(profile, as_written=True)
-    written = yaml.load(profile.read_text(encoding="utf-8"), Loader=_Loader)
+    written = yaml.load(profile.read_text(encoding="utf-8"), Loader=_Loader)  # nosec B506 - _Loader subclasses SafeLoader; the input is this test's own file
     return {
         "record": record["ash_config"],
         "sent": sent,

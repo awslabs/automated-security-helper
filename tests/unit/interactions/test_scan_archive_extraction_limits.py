@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.archive_builders import TEBIBYTE, tar_bytes, zip_bytes
+from tests.utils.helpers import module_from_this_checkout
 
 pytestmark = pytest.mark.integration
 
@@ -97,14 +98,14 @@ def scan(tmp_path_factory):
     # Keep the child off the network and away from the caller's terminal settings.
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
     # A fixed argv run by the test's own interpreter. `-I` keeps the child's imports
-    # to that interpreter's site-packages, which is the ASH under test when the suite
-    # runs from an installed checkout, as CI does.
+    # to that interpreter's site-packages and off PYTHONPATH, so the module runs
+    # through code that puts this checkout first.
     completed = subprocess.run(
         [
             sys.executable,
             "-I",
-            "-m",
-            "automated_security_helper.cli.main",
+            "-c",
+            module_from_this_checkout("automated_security_helper.cli.main"),
             "scan",
             "--source-dir",
             str(tree),

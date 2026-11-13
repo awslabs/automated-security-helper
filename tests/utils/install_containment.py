@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import stat
 from pathlib import Path
-from typing import Callable, Iterator, List
+from typing import Any, Callable, Iterator, List
 
 UV_STAND_IN = r"""#!/bin/sh
 printf '%s\n' "uv $*" >> "$ASH_TEST_STAND_IN_LOG"
@@ -119,6 +119,20 @@ class InstallSandbox:
         #: function's inputs (``own_environment_dirs``) uses this to show the
         #: plant is findable before checking the sandbox hides it.
         self.real_path_independent_dirs: Callable[[], List[Path]] = list
+        #: The patch ``sandbox_env`` set the sandbox up with. A test that changes
+        #: what the sandbox already patched does it through this one, so the undo
+        #: runs newest first and ends on the function the sandbox found; a second
+        #: ``monkeypatch`` undone after it would put the sandbox's own stand-in
+        #: (``list``) back for good.
+        self.patch: Any = None
+
+    def plant_machine_dirs(self, directories: List[Path]) -> None:
+        """Make ASH's own environment hold ``directories``, as a machine's would."""
+        from automated_security_helper.utils import subprocess_utils
+
+        self.patch.setattr(
+            subprocess_utils, "own_environment_dirs", lambda: list(directories)
+        )
 
     def calls(self) -> List[str]:
         if not self.log.exists():
@@ -153,6 +167,7 @@ def sandbox_env(tmp_path, monkeypatch) -> Iterator[InstallSandbox]:
     from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
     box = InstallSandbox(tmp_path)
+    box.patch = monkeypatch
     box.guards.mkdir()
     for name in ("home", "config", "cache", "data", "uv-tools", "uv-cache", "bin"):
         (tmp_path / name).mkdir()

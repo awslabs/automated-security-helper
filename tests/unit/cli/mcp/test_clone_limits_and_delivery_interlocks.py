@@ -77,6 +77,14 @@ def fake_git(workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
             f"#!{sys.executable}\n" + textwrap.dedent(_FAKE_GIT.format(count=count))
         )
         script.chmod(0o755)
+        if os.name == "nt":
+            # Windows does not run a shebang script, and the lookup tries git.exe in
+            # every PATH directory before git.cmd in this one, so it would find the
+            # real git. A .cmd wrapper named by absolute path is what the delivery
+            # runs as is (_git_executable).
+            wrapper = bin_dir / "git.cmd"
+            wrapper.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+            monkeypatch.setattr(sd, "_GIT_ARGV", (str(wrapper),))
         monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
         clear_find_executable_cache()
 
@@ -112,6 +120,44 @@ def test_a_clone_past_the_entry_cap_is_refused(
     assert result.get("success") is False, result
     assert result.get("error_type") == "clone_too_large", result
     assert not (workspace / SESSION / "source").exists()
+
+
+# ---------------------------------------------------------------------------
+# S1b: the byte cap engages on the delivery path itself.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_the_byte_cap_engages_on_the_delivery_path(
+    fake_git, workspace, monkeypatch
+) -> None:
+    """Regression: the delivery's own git calls run under the size cap.
+
+    Before the commit under test, ``_run_git_step`` did not forward
+    ``grows_in`` and the clone/fetch/checkout call sites did not pass it, so
+    ``_refuse_oversized`` never ran on a delivery: on that code this test
+    fails, because the delivery below succeeds instead of refusing.
+    """
+
+    monkeypatch.setattr(sd, "MAX_CLONE_BYTES", 1)
+    fake_git(count=10)
+
+    result = mcp_set_source_git(url=URL, session_id=SESSION)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "clone_too_large", result
+    assert not (workspace / SESSION / "source").exists()
+
+
+@pytest.mark.integration
+def test_the_default_cap_delivers_the_same_tiny_repo(fake_git, monkeypatch) -> None:
+    """Control: under the default caps the same tiny repository delivers."""
+
+    fake_git(count=10)
+
+    result = mcp_set_source_git(url=URL, session_id=SESSION)
+
+    assert result.get("success") is True, result
 
 
 # ---------------------------------------------------------------------------
@@ -191,10 +237,14 @@ def test_an_unreadable_tree_is_reported_by_its_own_error_type(
     real = os.scandir
 
     def deny_the_clone_target(path: Any = ".") -> Any:
-        # A descriptor (shutil.rmtree's own scan) is passed through.
-        if isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(
-            os.sep + "source"
-        ):
+        # A descriptor (shutil.rmtree's own scan) is passed through. The
+        # directory the size check watches is the delivery's own staging
+        # sibling (``_STAGING_DIR_PREFIX`` plus a unique suffix), so the
+        # denial matches that prefix; a name match on ``source`` would never
+        # touch the watched path.
+        if isinstance(path, (str, os.PathLike)) and os.path.basename(
+            os.fspath(path)
+        ).startswith(sd._STAGING_DIR_PREFIX):
             raise PermissionError(13, "Permission denied", os.fspath(path))
         return real(path)
 
@@ -521,6 +571,26 @@ def test_a_subtree_the_live_poll_cannot_read_stops_the_command(
     )
     pid = int(pidfile.read_text())
     for _ in range(200):
+        if os.name == "nt":
+            # os.kill(pid, 0) is no liveness probe on Windows: it terminates a
+            # live process with exit code 0, and raises OSError (WinError 87)
+            # for one that is already gone. Ask for the exit code instead; 259
+            # is STILL_ACTIVE.
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                break
+            try:
+                status = ctypes.c_ulong()
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(status))
+            finally:
+                kernel32.CloseHandle(handle)
+            if status.value != 259:
+                break
+            time.sleep(0.05)
+            continue
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
@@ -793,6 +863,10 @@ def _zip_with(name: str) -> bytes:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows does not rename over a file that is open",
+)
 def test_a_finalize_extracts_the_bytes_it_hashed_when_the_path_is_renamed_over(
     workspace, tmp_path: Path, monkeypatch
 ) -> None:
@@ -881,7 +955,9 @@ def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> 
 @pytest.mark.unit
 def test_a_clear_and_a_write_still_refuse_each_other(workspace) -> None:
     with sd._no_scan_running(SESSION):
-        with pytest.raises(sessions.SessionChangeInProgressError):
+        # One error with one retry rule for both holds (the sweep and a change that
+        # removes the workspace): writing_session_state raises the base class.
+        with pytest.raises(sessions.SessionWorkspaceBusyError):
             with sessions.writing_session_state(SESSION):
                 pass
 

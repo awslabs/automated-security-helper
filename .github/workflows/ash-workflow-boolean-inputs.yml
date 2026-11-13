@@ -71,7 +71,8 @@ concurrency:
 jobs:
   workflow-boolean-inputs:
     name: Assert no boolean workflow input is treated as a string
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 13s on 4-vCPU ubuntu-latest (run 41724959844) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       contents: read

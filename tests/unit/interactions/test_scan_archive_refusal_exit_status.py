@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.archive_builders import TEBIBYTE, tar_bytes, zip_bytes
+from tests.utils.helpers import module_from_this_checkout
 
 pytestmark = pytest.mark.integration
 
@@ -51,8 +52,8 @@ def _scan(base: Path, archives: dict[str, bytes]) -> tuple[int, str, Path]:
         [
             sys.executable,
             "-I",
-            "-m",
-            "automated_security_helper.cli.main",
+            "-c",
+            module_from_this_checkout("automated_security_helper.cli.main"),
             "scan",
             "--source-dir",
             str(tree),
@@ -248,12 +249,18 @@ def test_a_corrupt_archive_is_a_failed_input_that_fails_the_scan(corrupt):
     results = json.loads((output / "ash_aggregated_results.json").read_text())
     row = results["converter_results"]["archive"]
     assert sorted(item["path"] for item in row.get("failed_inputs") or []) == [
-        "clash.zip",
         "crc.zip",
         "cut.tar",
     ]
-    for leftover in ("ok.py", "ok_tar.py", "a.py"):
+    # clash.zip is not a failed input: the converter refuses a member written over
+    # a directory alone (archive_converter's _MEMBER_OVER_A_DIRECTORY), so the
+    # directory's own member is extracted and scanned.
+    for leftover in ("ok.py",):
         assert not list((output / "converted").rglob(leftover)), (
             f"partial output left: {leftover}"
         )
-    assert "could not convert 3 inputs:" in out
+    # cut.tar is extracted in part by design: the listing ends without an
+    # end-of-archive block, the extracted member stays and is scanned, and the archive
+    # is a failed input (archive_converter._record_extracted_in_part keeps the member).
+    assert list((output / "converted").rglob("ok_tar.py"))
+    assert "could not convert 2 inputs:" in out

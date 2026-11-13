@@ -37,12 +37,19 @@ would close the first, but it maps the user to root inside the namespace, which
 changes what the commands under test do, starts with loopback down, and needs the
 AppArmor user-namespace restriction lifted on Ubuntu 24.04 runners. Run the examples
 where a doc's commands are trusted, as CI does.
+
+Where it runs: POSIX hosts, and the docs job runs it on Linux. A shell block is run by
+``bash`` (``sh`` for an ``sh`` block) and hands its session to the next block through
+``env -0`` and ``pwd``. A block that runs past its timeout is ended with ``os.killpg``,
+which Windows lacks, and a session's PATH ends in the POSIX directories of SYSTEM_PATH.
+The docs job has no Windows runner (scripts/docs_checks.py, WINDOWS_SHELLS), so the
+tests of this runner skip on Windows instead of running against a session built for
+POSIX.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import shutil
 import signal
@@ -53,6 +60,8 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from tests.utils.runner_state import developer_environment_record
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_TAIL_LINES = 25
@@ -103,7 +112,9 @@ class BlockResult:
             return True
         if self.expected == "nonzero":
             # 126 and 127: the command could not run at all, which is a broken
-            # example, not the failure the block is meant to show.
+            # example, not the failure the block is meant to show. macOS
+            # /bin/bash 3.2 exits 1 for a non-executable file, so there the
+            # guard is weaker by the shell, not by this runner.
             return self.exit_code not in (0, *COULD_NOT_RUN)
         return self.exit_code == int(self.expected)
 
@@ -172,33 +183,40 @@ SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 
 
 #: The variables tests/conftest.py moves into a private directory for the whole pytest
-#: run, and records (those that were set) as JSON in ASH_TEST_PRE_SESSION_HOME.
+#: run, or removes for it, and records (those that were set) as JSON in
+#: ASH_TEST_DEVELOPER_HOME. The record also holds the other uv directory variables;
+#: only the two that name uv's tool bin directory are restored here, because those
+#: are the ones _uv_tool_bin_dir and the ``uv tool dir --bin`` child read.
 _MOVED_BY_THE_TEST_SESSION = (
     "HOME",
     "USERPROFILE",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_STATE_HOME",
+    "UV_TOOL_BIN_DIR",
+    "XDG_BIN_HOME",
 )
 
 
 def invoking_user_environment() -> dict[str, str]:
-    """This process's environment, with the home variables the test session moved put back.
+    """This process's environment, with the variables the test session moved put back.
 
     tests/conftest.py points HOME, USERPROFILE and three XDG directories at a private
     directory before collection, so Path.home() here is that directory, which holds
-    no tool. ``ash dependencies install`` ran as the invoking user, outside the test
-    session, and put its tools under that user's home. The values the session replaced
-    are in ASH_TEST_PRE_SESSION_HOME, and a variable that was unset is absent from it.
-    Without the record (this module run outside that conftest) nothing was moved and
-    the environment is returned as it is.
+    no tool. It also removes uv's directory variables for the whole session. ``ash
+    dependencies install`` ran as the invoking user, outside the test session, and put
+    its tools under that user's home, or under the directory the user's
+    UV_TOOL_BIN_DIR or XDG_BIN_HOME names. The values the session replaced or removed
+    are the ``env`` part of the JSON in ASH_TEST_DEVELOPER_HOME (read by
+    developer_environment_record), and a variable that was unset is absent from it.
+    A variable absent from the record is removed from the copy, which is also what
+    the session did, so a value the process holds now is not trusted. Without the
+    record (this module run outside that conftest) nothing was moved and the
+    environment is returned as it is.
     """
     env = dict(os.environ)
-    try:
-        recorded = json.loads(os.environ.get("ASH_TEST_PRE_SESSION_HOME") or "{}")
-    except ValueError:
-        recorded = {}
-    if isinstance(recorded, dict) and recorded:
+    recorded = developer_environment_record()
+    if recorded:
         for name in _MOVED_BY_THE_TEST_SESSION:
             value = recorded.get(name)
             if value:
@@ -206,6 +224,28 @@ def invoking_user_environment() -> dict[str, str]:
             else:
                 env.pop(name, None)
     return env
+
+
+def _uv_tool_bin_dir(user_env: dict[str, str], home: Path) -> Path:
+    """uv's tool bin directory for ``user_env``, resolved the way ``uv tool dir --bin``
+    resolves it: UV_TOOL_BIN_DIR, else XDG_BIN_HOME, else ``home``/.local/bin.
+
+    Read from the environment, not from uv, so the directory is known where the
+    pytest process cannot run uv at all: a runner that installs the tools with a uv
+    on its own PATH and then runs pytest from a virtual environment that has no uv
+    beside its interpreter and no uv on the process's PATH.
+    """
+    for name in ("UV_TOOL_BIN_DIR", "XDG_BIN_HOME"):
+        value = user_env.get(name)
+        if value:
+            return Path(value)
+    return home / ".local" / "bin"
+
+
+def _uv_executable() -> str | None:
+    """uv beside this interpreter, else uv on PATH; None when neither is there."""
+    beside = shutil.which("uv", path=str(Path(sys.executable).parent))
+    return beside or shutil.which("uv")
 
 
 def ash_tool_dirs() -> list[Path]:
@@ -220,13 +260,18 @@ def ash_tool_dirs() -> list[Path]:
     finds any tool on PATH. "The invoking user's" means the home the user had before
     the test session moved it (invoking_user_environment): in the pytest process
     Path.home() is the session's private home, where nothing is installed.
+
+    uv's directory is resolved from that environment first (_uv_tool_bin_dir), so it
+    is found with no uv reachable from this process; when uv is reachable it is also
+    asked, as a further source, since a uv configured through its own settings files
+    can answer another directory. Duplicates are dropped, in first-seen order.
     """
     user_env = invoking_user_environment()
     from_env = user_env.get("ASH_BIN_PATH")
     home = Path(user_env["HOME"]) if user_env.get("HOME") else Path.home()
     dirs = [Path(from_env) if from_env else home / ".ash" / "bin"]
-    uv = Path(sys.executable).parent / "uv"
-    uv_path = str(uv) if uv.is_file() else shutil.which("uv")
+    dirs.append(_uv_tool_bin_dir(user_env, home))
+    uv_path = _uv_executable()
     if uv_path:
         try:
             answer = subprocess.run(
@@ -357,11 +402,21 @@ def page_sessions(page) -> list[tuple[int, str, object]]:
     return sessions
 
 
-def _refusing_port() -> socket.socket:
-    """A bound, never-listening socket: connections to its port are refused at once."""
+def _refusing_port() -> tuple[socket.socket, int]:
+    """A socket and a loopback port on which connections are refused at once.
+
+    On Linux a bound, never-listening socket answers a connection with a reset, and
+    holding it keeps the port from being handed to another process. On macOS a
+    connection to such a socket is not answered and the client waits out its timeout
+    (a 30 s urlopen timed out instead of being refused), so there the socket is
+    closed once the port is read: a port nothing holds is refused by every OS.
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
-    return sock
+    port = sock.getsockname()[1]
+    if sys.platform != "linux":
+        sock.close()
+    return sock, port
 
 
 @dataclass
@@ -432,8 +487,8 @@ class PageRunner:
             target.parent.mkdir(parents=True, exist_ok=True)
             if path.name != ".keep":
                 shutil.copy2(path, target)
-        port = _refusing_port()
-        env = self._base_env(root, port.getsockname()[1])
+        port, port_number = _refusing_port()
+        env = self._base_env(root, port_number)
         for args in (
             ["init", "-q", "-b", "main"],
             ["add", "-A"],
@@ -568,6 +623,15 @@ class PageRunner:
             state = session.root / "state.env"
             cwd_file = session.root / "state.cwd"
             interpreter = "sh" if block.lang == "sh" else "bash"
+            if os.name == "nt":
+                # A bare "bash" given to CreateProcess is the WSL launcher in the
+                # system directory ("Windows Subsystem for Linux has no installed
+                # distributions"). Use the bash that ships with Git for Windows.
+                from tests.utils.github_actions import git_for_windows_bash
+
+                git_bash = git_for_windows_bash()
+                if git_bash:
+                    interpreter = git_bash
             code, output, timed_out = self._run_process(
                 [interpreter, str(script), str(state), str(cwd_file)],
                 session.cwd,

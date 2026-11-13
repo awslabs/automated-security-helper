@@ -466,8 +466,10 @@ class TestArchiveMembers:
     def test_members_without_a_scannable_extension_are_left_out_silently(
         self, tree, test_plugin_context, monkeypatch, ash_warnings
     ):
-        """Only a member that would otherwise have been extracted is reported."""
-        link = tarfile.TarInfo("README")
+        """Only a member that would otherwise have been extracted is reported. The
+        link is named as an image no scanner reads: a README is scanned by the
+        secret scanners and is extracted, so a link by that name is refused aloud."""
+        link = tarfile.TarInfo("logo.png")
         link.type = tarfile.SYMTYPE
         link.linkname = "/etc/hostname"
         archive = self._tar_with(tree / "a.tar", link)
@@ -542,12 +544,30 @@ def jupyter(request, test_plugin_context, monkeypatch, tmp_path):
             "subprocess",
             types.SimpleNamespace(
                 run=run,
+                # The launch passes stdin=subprocess.DEVNULL (jupyter_converter.py);
+                # a stand-in without it raised AttributeError, which the converter
+                # reports as "conversion raised AttributeError" for every input.
+                DEVNULL=subprocess.DEVNULL,
+                PIPE=subprocess.PIPE,
                 CompletedProcess=subprocess.CompletedProcess,
                 CalledProcessError=subprocess.CalledProcessError,
                 TimeoutExpired=subprocess.TimeoutExpired,
             ),
         )
         monkeypatch.setattr(jupyter_converter_module, "spawn_run", run)
+        monkeypatch.setattr(jupyter_converter_module, "run_ended_with_the_server", run)
+        # The tool-availability pre-check (_verified_direct_nbconvert, through
+        # verify_pre_installed_tool) would probe the planted file as a real
+        # nbconvert and refuse the whole run before the stubbed launch is
+        # reached; these cells are about the launch, so the pre-check is
+        # satisfied with the planted copy.
+        monkeypatch.setattr(
+            type(converter),
+            "_verified_direct_nbconvert",
+            lambda self, executable=None: jupyter_converter_module._FoundNbconvert(
+                str(installed), None, None, "7.16"
+            ),
+        )
     return converter, calls
 
 

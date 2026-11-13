@@ -17,6 +17,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
     skipped_projects,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.terminal_text import commands_broken
 
 #: The workspace-mode column header. First rather than appended, because a
 #: spreadsheet consumer sorts and filters on the leftmost columns and the project
@@ -41,6 +42,42 @@ SKIPPED_PROJECT_ROW_TYPE = "skipped-project"
 #: one, and prefixing it makes the value self-describing rather than a plausible
 #: finding identifier. Deterministic, so the same skip on a re-run is the same row.
 SKIPPED_PROJECT_ID_PREFIX = "ash-workspace-skipped-project:"
+
+#: The characters a spreadsheet reads as the start of a formula, or as a
+#: field-splitting control, when a CSV cell begins with one.
+_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def spreadsheet_safe(value: Any) -> Any:
+    """*value* with a leading formula character neutralized by a quote prefix,
+    and each CI command form in it broken.
+
+    Every text cell of this report is repository- or scanner-derived: a code
+    snippet, a finding's message, a file path, a rule title. Written verbatim, a
+    cell beginning with ``=``, ``+``, ``-`` or ``@`` is evaluated as a formula by
+    the spreadsheet the format targets (CSV injection), so a snippet such as
+    ``=HYPERLINK(...)`` in a scanned file ran in the reviewer's sheet. A single
+    quote in front makes the cell text in every spreadsheet and leaves a
+    programmatic consumer one leading character to strip. Only strings are
+    touched; a number stays a number.
+
+    A field holding a line break is written by ``csv`` as a quoted field that
+    spans physical lines, each line of the file after the first starting with the
+    text after the break. Printed to a CI log, a line starting with ``::`` is a
+    GitHub Actions workflow command and a ``##name[`` form anywhere is an Azure
+    Pipelines or TeamCity one, so a snippet such as ``x\\n::add-mask::...`` in a
+    scanned file was a command in the log. The YAML report writes such a value
+    on one line (utils/report_yaml.py); CSV has no escape for a line break, so
+    the forms themselves are broken the way the console shows them
+    (``utils.terminal_text.commands_broken``: ``\\x3a`` for the first colon of a
+    line-start ``::``, ``\\x23`` for the first "#" of a ``##name[``). A field
+    without such a form is written as it was.
+    """
+    if isinstance(value, str):
+        value = commands_broken(value)
+        if value.startswith(_FORMULA_LEADS):
+            return "'" + value
+    return value
 
 
 class CSVReporterConfigOptions(ReporterOptionsBase):
@@ -92,24 +129,36 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         """
         Get mappings from SARIF fields to CSV column headers.
 
+        The headers are ``FlatVulnerability``'s field names, which is what both
+        forms of the report emit (see ``_header``). The mapping once named
+        title-case headers ("Rule ID", "File Path") that no row of the CSV has
+        carried since the header was derived from the model, so a consumer
+        reading the mapping to find a column found none.
+
         Returns:
             Dict[str, str]: Dictionary mapping SARIF field paths to CSV column headers
         """
         return {
-            "runs[].results[].ruleId": "Rule ID",
-            "runs[].results[].message.text": "Description",
-            "runs[].results[].level": "Severity",
-            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "File Path",
-            "runs[].results[].locations[].physicalLocation.region.startLine": "Line Start",
-            "runs[].results[].locations[].physicalLocation.region.endLine": "Line End",
-            "runs[].tool.driver.name": "Scanner",
+            "runs[].results[].ruleId": "rule_id",
+            "runs[].results[].message.text": "description",
+            "runs[].results[].level": "severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "file_path",
+            "runs[].results[].locations[].physicalLocation.region.startLine": "line_start",
+            "runs[].results[].locations[].physicalLocation.region.endLine": "line_end",
+            "runs[].tool.driver.name": "scanner",
         }
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model as CSV string."""
 
         output = StringIO()
-        writer = csv.writer(output)
+        # "\n", not csv's default "\r\n". The text is written to ash.csv through a
+        # text-mode handle (utils/atomic_write.py), which translates "\n" into the
+        # platform's line ending; the default terminator therefore reached a
+        # Windows file as "\r\r\n", a blank line after every row to a spreadsheet.
+        # With "\n" the file ends its rows in "\r\n" on Windows and "\n" elsewhere,
+        # which every CSV reader accepts.
+        writer = csv.writer(output, lineterminator="\n")
 
         # Whether to emit the project column at all. Read off the workspace block
         # rather than off the findings: a workspace whose projects all came back
@@ -166,7 +215,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
                 # scan whose findings predate it -- would otherwise raise a
                 # KeyError and lose the whole report rather than one cell.
                 value = vuln.get(field)
-                row.append(value if value is not None else "")
+                row.append(spreadsheet_safe(value) if value is not None else "")
             writer.writerow(row)
 
         for entry in skipped:
@@ -228,7 +277,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
             "title": f"Project '{entry.project}' was not scanned",
             "description": skipped_project_detail(entry),
         }
-        return [values.get(field, "") for field in fields]
+        return [spreadsheet_safe(values.get(field, "")) for field in fields]
 
     @staticmethod
     def _header(is_workspace: bool) -> list[str]:

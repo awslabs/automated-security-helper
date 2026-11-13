@@ -5,10 +5,10 @@
 
 The real CLI runs in-process. Only the lookup of the ``nix`` executable and the one
 call that would enter the shell (``run_ash_nix._enter_shell``) are replaced, so the flake reference
-ASH resolves, the command it builds from the caller's argv, the messages and the
-exit code are ASH's own. The fake records the command, which is part of each
-snapshot: it is what an operator sees with ``--debug``, and a flag lost on the way
-into the shell would show up there.
+ASH resolves, the command it builds from the scan's own options, the messages and
+the exit code are ASH's own. The fake records the command, which is part of each
+snapshot: it is what an operator sees with ``--debug``, and an option lost on the
+way into the shell would show up there.
 """
 
 from __future__ import annotations
@@ -108,8 +108,9 @@ def nix_shell(monkeypatch) -> FakeNixShell:
 def scan(run_cli, monkeypatch):
     """Run ``ash <args>`` with ``sys.argv`` set as a real ``ash`` process would have it.
 
-    Nix mode forwards the caller's argv into the shell verbatim, so in-process it
-    would otherwise forward pytest's.
+    The scan entry point builds the inner command from the call's own options, not
+    from this process's argv; ``sys.argv`` is still set as ``ash`` would have it so
+    that anything the CLI reads from it in-process reads the scan's, not pytest's.
     """
 
     def _scan(args):
@@ -248,10 +249,17 @@ def test_unparseable_results_are_not_quoted(scan, nix_shell, results_json, reaso
     assert "\x1b[31m" not in shown and "\n::" not in shown, repr(shown)
 
 
-@_POSIX_TEXT
-def test_equals_form_of_mode_is_rewritten(scan, snapshot, nix_shell):
-    # `--mode=nix` is one token; the inner invocation must still get --mode=local,
-    # or it would try to enter the shell again.
+def test_the_hosts_equals_form_of_mode_is_not_forwarded(scan, nix_shell):
+    """`--mode=nix` is one token on the host's command line. The inner command is
+    built from the scan's own options, so that spelling is not forwarded, and the
+    inner scan gets the local mode once, or it would try to enter the shell
+    again."""
     args = ["scan", "--mode=nix", *SCAN[3:]]
     nix_shell.returncode = 1
-    assert _seen(scan(args), nix_shell) == snapshot
+
+    scan(args)
+
+    (command,) = nix_shell.commands
+    assert not [token for token in command if token.startswith("--mode=")], command
+    assert command.count("--mode") == 1, command
+    assert command[command.index("--mode") + 1] == "local", command

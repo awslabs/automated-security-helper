@@ -261,7 +261,9 @@ def test_mcp_source_delivery_gives_git_an_empty_stdin(tmp_path, tools):
             session_id="stdin-session",
             workspace_root=tmp_path / "workspace",
         )
-    assert _reads(record) == ["b''"]
+    # The clone, then the rev-parse that refuses a clone which produced no
+    # commit (this fake's does): each git the delivery starts reads nothing.
+    assert _reads(record) == ["b''", "b''"]
 
 
 @pytest.mark.integration

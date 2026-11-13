@@ -15,6 +15,7 @@ when it runs.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import subprocess
 from pathlib import Path
@@ -35,9 +36,17 @@ def planted() -> str:
 @pytest.fixture
 def true_program(tmp_path: Path) -> str:
     """A program that exits 0, written under the test's own directory, which
-    the real-program guard admits (tests/utils/no_real_programs.py)."""
-    program = tmp_path / "true"
-    program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    the real-program guard admits (tests/utils/no_real_programs.py).
+
+    On Windows a ``#!/bin/sh`` script is not a valid Win32 application
+    (CreateProcess dies with WinError 193 before the logging under test is
+    judged), so the planted program is a ``.bat`` there."""
+    if os.name == "nt":
+        program = tmp_path / "true.bat"
+        program.write_text("@exit /b 0\r\n", encoding="utf-8")
+    else:
+        program = tmp_path / "true"
+        program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     program.chmod(0o755)
     return str(program)
 

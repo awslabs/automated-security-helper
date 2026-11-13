@@ -128,7 +128,7 @@ jobs:
       # model workflow_dispatch as a release trigger, so it would not report a cache
       # added here; ash-repo-docs.yml's deploy job has none for the same reason.
       - name: Install uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -363,8 +363,13 @@ jobs:
           BRANCH="release/v${NEW_VERSION}"
           git checkout -b "$BRANCH"
           git add -A
+          # The regenerated JSON schemas are golden files for the snapshot-trailers
+          # job, which requires a Snapshot-Update trailer on the commit that changes
+          # them. Every bump changes AshAggregatedResults.json, because it carries the
+          # package version as a default, so the trailer belongs on this commit.
           git commit -m "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
-                     -m "Triggered-by: @${ACTOR} via workflow_dispatch"
+                     -m "Triggered-by: @${ACTOR} via workflow_dispatch" \
+                     --trailer "Snapshot-Update: the release bump regenerates the version string in the aggregated results schema"
           git push -u origin "$BRANCH"
 
           BODY="Automated release PR. Merging this will trigger tag creation and GitHub Release publishing."

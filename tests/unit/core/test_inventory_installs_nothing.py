@@ -66,8 +66,36 @@ UV_TOOL_NAMES = ["bandit", "checkov", "semgrep"]
 
 
 @pytest.fixture
-def sandbox(tmp_path, monkeypatch) -> InstallSandbox:
-    yield from sandbox_env(tmp_path, monkeypatch)
+def sandbox(tmp_path) -> InstallSandbox:
+    """The containment, with its own MonkeyPatch rather than the shared fixture.
+
+    The shared ``monkeypatch`` is already live before this fixture runs: the unit
+    conftest's autouse tool guard requests it, so its undo is the last teardown
+    of every test here, after ``_the_sandbox_reaches_nothing_real`` has read the
+    environment. A context of this fixture's own is undone when this fixture is,
+    which is before that check, so the check reads the environment the test
+    leaves behind.
+    """
+    with pytest.MonkeyPatch.context() as sandbox_patch:
+        yield from sandbox_env(tmp_path, sandbox_patch)
+
+
+@pytest.fixture(autouse=True)
+def _the_sandbox_reaches_nothing_real():
+    """The stand-ins' environment never leaked out of the test that just ran.
+
+    Function-scoped and autouse, so it is set up before ``sandbox`` and torn
+    down after it: ``sandbox`` has undone its own MonkeyPatch by then, and a
+    variable still present was set past the sandbox, by the test itself. The
+    leak is reported against the test that caused it, with every test of the
+    module on whatever worker or shard collected it and in whatever order the
+    tests ran; a module-scoped teardown would name only whichever test happened
+    to run last.
+    """
+    yield
+    assert "ASH_TEST_STAND_IN_LOG" not in environ_names(), (
+        "a sandbox user left ASH_TEST_STAND_IN_LOG in the environment"
+    )
 
 
 def _by_name(entries: List[Dict]) -> Dict[str, Dict]:
@@ -140,13 +168,17 @@ def test_list_scanners_installs_nothing(sandbox, monkeypatch):
     assert sorted(_by_name(entries)) == UV_TOOL_NAMES
 
 
+@pytest.mark.asyncio
 @pytest.mark.integration
-def test_the_list_scanners_tool_installs_nothing(sandbox, monkeypatch):
+async def test_the_list_scanners_tool_installs_nothing(sandbox, monkeypatch):
+    """The server's tool runs the same inventory off the event loop, so the
+    call is awaited: a coroutine left unawaited would read as entries that
+    could not be iterated, never as the sandbox's record."""
     from automated_security_helper.cli import mcp_server, mcp_tools
 
     monkeypatch.setattr(mcp_tools, "_loaded_scanner_classes", lambda: list(UV_TOOLS))
 
-    entries = mcp_server.list_scanners()
+    entries = await mcp_server.list_scanners()
 
     assert sandbox.installs() == [], sandbox.calls()
     assert sorted(e["name"] for e in entries) == UV_TOOL_NAMES
@@ -304,9 +336,7 @@ async def test_a_machines_fixed_dir_uv_does_not_defeat_without_uv(
 
     machine_dir = tmp_path_factory.mktemp("machine-fixed-bin")
     _write_executable(machine_dir / "uv", UV_STAND_IN)
-    from automated_security_helper.utils import subprocess_utils
-
-    monkeypatch.setattr(subprocess_utils, "own_environment_dirs", lambda: [machine_dir])
+    sandbox.plant_machine_dirs([machine_dir])
     sandbox.remove_uv()
     monkeypatch.setattr(mcp_tools, "_builtin_scanner_classes", lambda: list(UV_TOOLS))
 
@@ -337,7 +367,7 @@ def test_a_planted_fixed_dir_uv_is_findable_and_then_hidden(
         machine_dir / "uv",
         '#!/bin/sh\necho "the planted uv must never run" >&2\nexit 97\n',
     )
-    monkeypatch.setattr(subprocess_utils, "own_environment_dirs", lambda: [machine_dir])
+    sandbox.plant_machine_dirs([machine_dir])
     sandbox.remove_uv()
 
     with monkeypatch.context() as bypass:
@@ -375,9 +405,3 @@ def test_an_installed_tool_is_satisfied_and_installs_nothing(sandbox, monkeypatc
     assert entry["dependencies_satisfied"] is True, (entry, sandbox.calls())
     assert entry["installs_on_first_scan"] is False, entry
     assert sandbox.installs() == [], sandbox.calls()
-
-
-@pytest.mark.unit
-def test_the_sandbox_reaches_nothing_real():
-    """The stand-ins' environment never leaked out of a test."""
-    assert "ASH_TEST_STAND_IN_LOG" not in environ_names()

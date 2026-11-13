@@ -48,14 +48,16 @@ from automated_security_helper.config.ash_config import AshConfig
 
 SESSION = "client-1"
 
-#: On Windows an MCP scan refuses any linked config source before it opens it
-#: (``config_sources._permitted``: resolving a link there can open a connection
-#: to the host a UNC target names), so a test that needs the link followed to
-#: the host file cannot reach what it asserts. The refusal itself is pinned by
-#: ``test_on_windows_a_linked_config_is_refused_even_in_an_allowed_root`` below.
+#: On Windows an MCP scan refuses a linked config source whose chain leads to a
+#: network share before it opens it (``config_sources._permitted``: resolving a
+#: link there can open a connection to the host a UNC target names), and judges
+#: a link that leads to a local file as the file it names, as on POSIX. These
+#: tests have not been measured on a Windows host with links, so they stay skipped
+#: there; the Windows rule itself is pinned by
+#: ``tests/unit/config/test_config_sources_windows_link_chain.py``.
 follows_a_link = pytest.mark.skipif(
     sys.platform == "win32",
-    reason="an MCP scan refuses a linked config source on Windows before reading it",
+    reason="not yet measured on a Windows host with links (see config_sources._permitted)",
 )
 
 DENIED = "project_name: linked\nfail_on_findings: false\n"
@@ -299,28 +301,6 @@ def test_a_linked_config_widening_the_sandbox_is_refused(_server) -> None:
 
     assert isinstance(outcome, ASHConfigFieldDeniedError), outcome
     assert "sandbox.extra_read_paths" in str(outcome)
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="the Windows rule for links")
-@pytest.mark.usefixtures("host_set_aside")
-@pytest.mark.integration
-def test_on_windows_a_linked_config_is_refused_even_in_an_allowed_root(
-    _server,
-) -> None:
-    """What the skipped follow-the-link tests above cannot show on Windows.
-
-    The host directory is set aside, so on a POSIX host the scan reads the link
-    (``test_a_linked_config_setting_a_denied_field_is_refused``). On Windows the
-    link itself is the reason for the refusal, whatever it points at.
-    """
-    source = _linked_tree(_server, DENIED)
-
-    result = _start_scan(source)
-
-    assert result.get("success") is False, result
-    assert result.get("error_type") == "config_input_not_permitted", result
-    # Refused unread: the denied field in the file is not what the answer names.
-    assert "fail_on_findings" not in repr(result)
 
 
 @pytest.mark.unit

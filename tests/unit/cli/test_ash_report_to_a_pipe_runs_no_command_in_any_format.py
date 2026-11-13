@@ -81,6 +81,10 @@ LINE_FEED_ESCAPED = (*JSON_FORMATS, "yaml")
 #: shown_not_obeyed), so their own text already holds no line-start command and
 #: no "##name[" form for the stream to break.
 SHOWN = ("markdown", "html", "text")
+#: The formats whose reporter itself writes a name with its command forms broken
+#: (csv_reporter and yaml_reporter: ``\x3a`` for a line start's colon, ``\x23`` for
+#: a ``##name[`` form's first "#"), so even the file holds no command form.
+BROKEN_BY_THE_REPORTER = ("csv", "yaml")
 
 
 def _finding(path: str) -> Result:
@@ -205,17 +209,28 @@ def test_a_report_to_a_regular_file_is_the_report_phases_bytes(
 
     monkeypatch.setattr(report_module, "_write_report", recording)
     path = tmp_path / "stdout"
-    with open(path, "w", encoding="utf-8") as stdout:
+    # newline="" keeps the capture untranslated, as write_text_atomically writes
+    # its side, so the byte compare below measures the report content and not the
+    # platform's newline translation.
+    with open(path, "w", encoding="utf-8", newline="") as stdout:
         _report(stdout, results_dir_with_hash_names, report_format, monkeypatch)
 
+    # The report phase's file is written as given (write_text_atomically does no
+    # newline translation); a stdout redirected to a file gets each bare line feed
+    # as os.linesep, and a CRLF the report holds as it is (_write_report_data).
     expected = tmp_path / "written-report"
     write_text_atomically(expected, written[0])
-    assert path.read_bytes() == expected.read_bytes()
-    raw = path.read_text(encoding="utf-8")
+    assert path.read_bytes() == re.sub(
+        rb"(?<!\r)\n", os.linesep.encode(), expected.read_bytes()
+    )
+    # Decoded from the bytes: Path.read_text takes no newline argument before
+    # Python 3.13, and the bytes keep every line ending untranslated.
+    raw = path.read_bytes().decode("utf-8")
     assert "::add-mask::" in raw
-    if report_format in SHOWN:
-        # A human report shows each name: no command on a line of its own, and
-        # every "##name[" form broken, as the reporter wrote it.
+    if report_format in SHOWN or report_format in BROKEN_BY_THE_REPORTER:
+        # A human report shows each name, and the CSV and YAML reporters write it
+        # with its command forms already broken: no command on a line of its own,
+        # and every "##name[" form broken, as the reporter wrote it.
         assert not _commands_in(raw), _commands_in(raw)
         assert not _hash_commands_in(raw), _hash_commands_in(raw)
         return

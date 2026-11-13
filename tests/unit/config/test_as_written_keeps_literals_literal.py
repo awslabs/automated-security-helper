@@ -56,6 +56,15 @@ def environment(tmp_path, monkeypatch):
 def _materialized(tmp_path: Path, literal: str, patched: str | None) -> Path:
     """The session config select_profile wrote for the profile holding
     ``literal``, with ``project_name`` patched to ``patched`` if given."""
+    return _materialized_with_base(tmp_path, literal, patched)[0]
+
+
+def _materialized_with_base(
+    tmp_path: Path, literal: str, patched: str | None
+) -> tuple[Path, Path | None]:
+    """The session config as :func:`_materialized` gives it, and the operator's
+    copy of the profile it was built from (the trusted base a scan resolves a
+    client-patched copy against), None for a session no client patched."""
     from automated_security_helper.cli.mcp import profile_registry
     from automated_security_helper.cli.mcp_tools import mcp_select_profile
 
@@ -74,7 +83,11 @@ def _materialized(tmp_path: Path, literal: str, patched: str | None) -> Path:
         )
         result = mcp_select_profile("op", patch_ops=ops, session_id="session-a")
         assert result["success"] is True, result.get("error")
-        return Path(profile_registry.resolve_session_config_path("session-a"))
+        trusted = profile_registry.resolve_session_trusted_config_path("session-a")
+        return (
+            Path(profile_registry.resolve_session_config_path("session-a")),
+            Path(trusted) if trusted else None,
+        )
     finally:
         profile_registry.clear_profile_registry()
         profile_registry.clear_all_session_state()
@@ -109,11 +122,21 @@ def test_a_literal_reads_back_as_the_same_literal(environment, literal, patched)
 def test_the_profile_s_references_read_the_environment(environment, literal, patched):
     """The control: the locations the profile read from the environment are
     still written as references, and read the value again."""
-    path = _materialized(environment, literal, patched)
+    path, operator_copy = _materialized_with_base(environment, literal, patched)
     text = path.read_text(encoding="utf-8")
     written = CANARY not in text
     assert written, "the materialized file holds the value"
-    options = _reloaded(path).reporters.model_dump(by_alias=True)["gitlab-cyclonedx"][
+    # A scan resolves the copy a client patched against the operator's copy of
+    # the profile, which fills the references the client's copy holds as text
+    # (is_client_copy_of, resolve_config).
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    reloaded = (
+        resolve_config(path, trusted_config_path=operator_copy)
+        if patched is not None
+        else _reloaded(path)
+    )
+    options = reloaded.reporters.model_dump(by_alias=True)["gitlab-cyclonedx"][
         "options"
     ]
     read = (

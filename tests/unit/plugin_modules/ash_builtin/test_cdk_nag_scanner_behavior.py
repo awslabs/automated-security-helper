@@ -22,6 +22,7 @@ builds them, because the rule-synthesis code reads
 
 import json
 import logging
+import os
 from pathlib import Path
 from unittest.mock import create_autospec, patch
 
@@ -40,6 +41,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     CdkNagScannerConfigOptions,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    Kind,
     Level,
     Message,
     Message1,
@@ -47,7 +49,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 from automated_security_helper.utils import cdk_nag_wrapper as wrapper_module
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
+from automated_security_helper.utils.error_text import config_environment_values
 
 pytestmark = pytest.mark.unit
 
@@ -233,20 +237,21 @@ def test_empty_target_returns_the_placeholder_report(
     assert any("empty or doesn't exist" in err for err in scanner.errors)
 
 
-def test_placeholder_report_command_line_is_a_copy_paste_artifact(
+def test_placeholder_report_records_this_scanners_own_invocation(
     scanner, cdk_available, wrapper_double
 ):
-    """The skeleton invocation claims 'npm audit --json'.
+    """The skeleton invocation names ``ash --scanner cdk-nag``, as the final report does.
 
-    That string is wrong for this scanner -- it was copied from
-    npm_audit_scanner -- and it is what callers see on the empty-target and
-    no-templates paths, because those return the skeleton rather than the
-    rebuilt report. Pinned so that correcting it is a deliberate change with a
-    test to update, not a silent shift in emitted reports.
+    It used to claim ``npm audit --json``, a line copied from npm_audit_scanner, and
+    that is what callers saw on the empty-target and no-templates paths, because those
+    return the skeleton rather than the rebuilt report.
     """
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    assert report.runs[0].invocations[0].commandLine == "npm audit --json"
+    invocation = report.runs[0].invocations[0]
+    assert invocation.commandLine == "ash"
+    assert "npm" not in invocation.commandLine
+    assert list(invocation.arguments)[:3] == ["--scanner", "cdk-nag", "--source-dir"]
 
 
 def test_unsatisfied_dependencies_return_false(
@@ -764,19 +769,20 @@ def test_tool_type_tag_renders_the_enum_member_not_its_value(
     )
 
 
-@pytest.mark.parametrize(
-    "rule_level, expected_anchor",
-    [("Error", "#errors"), ("Warning", "#warnings")],
-)
-def test_help_uri_anchor_is_derived_from_the_rule_level(
+@pytest.mark.parametrize("rule_level", ["Error", "Warning"])
+def test_help_uri_is_the_rules_document_whatever_the_rule_level(
     scanner,
     cdk_available,
     wrapper_double,
     template_in_work_dir,
     rule_level,
-    expected_anchor,
 ):
-    """The RULES.md anchor is the lowercased, pluralized rule level."""
+    """The helpUri is cdk-nag's RULES.md with no fragment.
+
+    The ``#errors`` and ``#warnings`` anchors this test used to expect name the
+    tables of ONE pack; a rule of another pack, or of another level, was sent to a
+    table that does not list it. The document itself lists every pack's rules.
+    """
     wrapper_double.return_value = CdkNagWrapperResponse(
         results={"AwsSolutions": [nag_result(rule_level=rule_level)]}
     )
@@ -784,13 +790,15 @@ def test_help_uri_anchor_is_derived_from_the_rule_level(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     rule = report.runs[0].tool.driver.rules[0]
-    assert str(rule.helpUri).endswith(expected_anchor), (
-        f"rule_level {rule_level!r} should give anchor {expected_anchor}; "
+    assert (
+        str(rule.helpUri) == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
+    ), (
+        f"rule_level {rule_level!r} should point at the rules document; "
         f"got {rule.helpUri}"
     )
 
 
-def test_missing_rule_level_falls_back_to_a_generic_anchor(
+def test_missing_rule_level_still_points_at_the_rules_document(
     scanner, cdk_available, wrapper_double, template_in_work_dir
 ):
     """A finding with no rule_level still produces a usable helpUri."""
@@ -807,7 +815,7 @@ def test_missing_rule_level_falls_back_to_a_generic_anchor(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     rule = report.runs[0].tool.driver.rules[0]
-    assert str(rule.helpUri).endswith("#rules")
+    assert str(rule.helpUri) == "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
     assert rule.properties.model_extra["rule_level"] == "unknown"
     assert rule.properties.model_extra["rule_info"] == "unknown"
 
@@ -902,6 +910,38 @@ def test_source_target_type_scans_the_source_tree(
     )
 
 
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_a_hard_linked_template_reaches_the_wrapper(
+    scanner, cdk_available, wrapper_double, tmp_path
+):
+    """The pre-check asks under the rule the template read applies.
+
+    It asked under the stricter default, which refuses a file with a second hard
+    link, so a hard-linked template was skipped before it was counted: no finding,
+    no failed target, and a repository that hard-links its templates read as
+    clean. A hard link to a regular file is the tree's own bytes under a second
+    name, so the pre-check admits it, as the template read does.
+    """
+    elsewhere = tmp_path / "elsewhere" / "bucket.yaml"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(CFN_TEMPLATE, encoding="utf-8")
+    linked = scanner.context.work_dir / "bucket.yaml"
+    try:
+        os.link(elsewhere, linked)
+    except OSError as exc:  # pragma: no cover - filesystem without hard links
+        pytest.skip(f"cannot create a hard link here: {exc}")
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result()]}
+    )
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    scanned = [call.kwargs["template_path"] for call in wrapper_double.call_args_list]
+    assert scanned == [linked], f"the hard-linked template was skipped: {scanned}"
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
+    assert [r.ruleId for r in report.runs[0].results] == ["AwsSolutions-S1"]
+
+
 # ---------------------------------------------------------------------------
 # The --ignore-suppressions gate on in-template suppressions
 # ---------------------------------------------------------------------------
@@ -980,3 +1020,918 @@ def test_a_context_missing_the_flag_fails_the_target_rather_than_honoring_suppre
         f"the error has to name the attribute; got {scanner.errors}"
     )
     wrapper_double.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The dependency warning names what was measured
+# ---------------------------------------------------------------------------
+
+
+def test_a_wrapper_import_failure_with_every_distribution_installed_names_the_error(
+    scanner, monkeypatch, caplog
+):
+    """The probe found every distribution; the wrapper still did not import.
+
+    At the base the warning listed all three distributions as unavailable and offered to
+    reinstall them, and the exception that actually failed was discarded.
+    """
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "_CDK_WRAPPER_IMPORT_ERROR",
+        "ModuleNotFoundError: No module named 'cfn_tools'",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    warned = " ".join(caplog.messages)
+    assert "cfn_tools" in warned, warned
+    assert "aws-cdk-lib unavailable" not in warned, warned
+    assert "ash dependencies install" not in warned, warned
+    assert "cfn_tools" in scanner.missing_dependency_reason()
+
+
+def test_a_wrapper_import_failure_points_at_a_reinstall_of_ash(
+    scanner, monkeypatch, caplog
+):
+    """With every CDK distribution present, the fault is in ASH's own modules, so the
+    remedy names a reinstall of ASH; the CDK install hint is withheld. Before this read
+    the remedy only said the import error was the fault to fix, which told the operator
+    nothing to do next."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "_CDK_WRAPPER_IMPORT_ERROR",
+        "ModuleNotFoundError: No module named 'cfn_tools'",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    warned = " ".join(caplog.messages)
+    assert "reinstall ASH" in warned, warned
+    assert "ash dependencies install" not in warned, warned
+    assert cdk_nag_scanner._install_would_help() is False
+
+
+def test_a_missing_distribution_still_gets_the_install_hint(
+    scanner, monkeypatch, caplog
+):
+    """The negative control: with a distribution missing, the hint is the remedy."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", ["aws-cdk-lib"])
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_WRAPPER_IMPORT_ERROR", None)
+
+    with caplog.at_level(logging.WARNING):
+        assert scanner.validate_plugin_dependencies() is False
+
+    warned = " ".join(caplog.messages)
+    assert "aws-cdk-lib unavailable" in warned, warned
+    assert "ash dependencies install --tool cdk-nag" in warned, warned
+
+
+def test_the_wrapper_import_error_is_recorded_as_its_class_and_module_not_its_text():
+    """What ``_cdk_unusable_detail`` shows the operator is the class and the module
+    that could not be loaded. The exception's own text carries the absolute path of
+    the module it was reading, and that text used to be recorded as is and reach the
+    warning, ``dependency_unavailable_reason`` and ``missing_dependency_reason``
+    unredacted, where every other failure text this scanner records is redacted."""
+    install_path = (
+        "/home/someone/.venv/lib/python3.12/site-packages/cfn_tools/__init__.py"
+    )
+    error = ImportError(
+        f"cannot import name 'dump_yaml' from 'cfn_tools' ({install_path})",
+        name="cfn_tools",
+    )
+
+    summary = cdk_nag_scanner._import_error_summary(error)
+
+    assert summary == "ImportError: cfn_tools"
+    assert install_path not in summary
+    assert cdk_nag_scanner._import_error_summary(
+        ModuleNotFoundError("No module named 'cfn_tools'", name="cfn_tools")
+    ) == ("ModuleNotFoundError: cfn_tools")
+    # A failure with no module name is named by its class alone, never by a text
+    # that may hold a path.
+    assert cdk_nag_scanner._import_error_summary(RuntimeError(install_path)) == (
+        "RuntimeError"
+    )
+
+
+def test_the_installer_stays_quiet_when_the_wrapper_itself_did_not_import(
+    scanner, monkeypatch
+):
+    """Every distribution is present and the wrapper did not import: the dependency
+    check says installing the CDK packages again would change nothing
+    (``_install_would_help``), so ``ash dependencies install --tool cdk-nag`` must not
+    run that install. It used to: the install command gated on the presence flag alone,
+    ran the install the check had just called useless, exited 0, and cdk-nag stayed
+    MISSING."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner, "_CDK_WRAPPER_IMPORT_ERROR", "ModuleNotFoundError: cfn_tools"
+    )
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    assert cdk_nag_scanner._install_would_help() is False
+
+    commands = scanner.get_installation_commands("linux", "x86_64")
+
+    assert [command for command in commands if "pip" in command] == [], commands
+
+
+def test_the_installer_is_armed_by_a_missing_distribution_with_the_same_gate(
+    scanner, monkeypatch
+):
+    """The control for the test above: with a distribution missing the install is the
+    remedy, and the command is emitted. The command builder is stubbed, as the options
+    file's install tests stub it: the real one probes the running interpreter for pip
+    or uv and raises where it finds neither, which is a fact about the test host, not
+    about the gate under test (it read red on a venue whose interpreter had neither)."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", ["aws-cdk-lib"])
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_WRAPPER_IMPORT_ERROR", None)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    from automated_security_helper.utils import python_installer
+
+    # The scanner imports the builder inside the method, so the stub goes on the
+    # installer module, where the options file's install tests put theirs.
+    monkeypatch.setattr(
+        python_installer,
+        "python_package_install_command",
+        lambda requirements: ["<installer>", "install", *requirements],
+    )
+
+    commands = scanner.get_installation_commands("linux", "x86_64")
+
+    installs = [
+        command for command in commands if command[:2] == ["<installer>", "install"]
+    ]
+    assert len(installs) == 1, commands
+    assert any("cdk-nag" in requirement for requirement in installs[0][2:]), installs
+
+
+# ---------------------------------------------------------------------------
+# Rule-scoped text stays rule-scoped: the run-level notification and the foreign
+# plugin's descriptor
+# ---------------------------------------------------------------------------
+
+
+def _unevaluated(rule_id: str, rule_info: str, pack: str = "AwsSolutions") -> Result:
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    return Result(
+        ruleId=rule_id,
+        kind=Kind.notApplicable,
+        level=Level.none,
+        message=Message(root=Message1(text=f"not evaluated: {rule_info}")),
+        properties=PropertyBag(
+            cdk_nag_finding={
+                "pack": pack,
+                "rule_id": rule_id,
+                "compliance": NOT_EVALUATED,
+                "rule_level": "Error",
+                "rule_info": rule_info,
+            },
+            tags=["aws", "cdk", "cdk-nag", pack, rule_id],
+        ),
+    )
+
+
+def test_the_unevaluated_rule_notification_carries_no_templates_exception_text():
+    """One notification per rule; the exception text differs per template.
+
+    At the base the first template's exception text (which interpolates that template's
+    parameter) was embedded in the run-level, rule-deduplicated notification.
+    """
+    first = 'Rule threw an error during validation. non-primitive value "{"Ref":"VolumeEncrypted"}"'
+    second = 'Rule threw an error during validation. non-primitive value "{"Ref":"OtherParam"}"'
+
+    notifications = cdk_nag_scanner._unevaluated_rule_notifications(
+        [
+            _unevaluated("AwsSolutions-EC26", first),
+            _unevaluated("AwsSolutions-EC26", second),
+        ]
+    )
+
+    assert len(notifications) == 1
+    text = notifications[0].message.root.text
+    # The pack is named as the pack, in its own clause: every cdk-nag rule id starts
+    # with its pack name, so `"AwsSolutions" in text` could never fail beside the id.
+    assert "Rule AwsSolutions-EC26 from pack 'AwsSolutions' could not be evaluated" in (
+        text
+    ), text
+    assert "VolumeEncrypted" not in text, text
+    assert "OtherParam" not in text, text
+    assert "could not be evaluated" in text
+
+
+def test_a_foreign_plugins_rule_descriptor_does_not_take_one_occurrences_description():
+    """``CloudFormation Validate`` writes a description per occurrence that names the
+    resource it found. At the base that occurrence became the rule's definition."""
+    occurrence = (
+        "Resource 'MyKeyAlias' has an invalid KMS key identifier 'placeholder-key-id'"
+    )
+
+    descriptor = cdk_nag_scanner._reporting_descriptor_for(
+        nag_result(rule_id="F3017", text=occurrence, pack="CloudFormation Validate"),
+        tool_name="cdk-nag",
+        tool_type="IAC",
+    )
+
+    assert "MyKeyAlias" not in descriptor.shortDescription.text, descriptor
+    assert "F3017" in descriptor.shortDescription.text
+    assert "CloudFormation Validate" in descriptor.shortDescription.text
+    assert descriptor.fullDescription.text == descriptor.shortDescription.text
+    assert (
+        descriptor.properties.model_extra["rule_info"]
+        == descriptor.shortDescription.text
+    )
+
+
+def test_a_cdk_nag_rules_descriptor_keeps_the_rules_own_description():
+    """The negative control: a pack's own rule has a static description, and keeps it."""
+    description = "The S3 Bucket has server access logs disabled."
+
+    descriptor = cdk_nag_scanner._reporting_descriptor_for(
+        nag_result(rule_id="AwsSolutions-S1", text=description, pack="AwsSolutions"),
+        tool_name="cdk-nag",
+        tool_type="IAC",
+    )
+
+    assert descriptor.shortDescription.text == description
+
+
+# ---------------------------------------------------------------------------
+# A parse exception from the worker is a parse failure only when the file does not parse
+# ---------------------------------------------------------------------------
+
+
+def test_a_yaml_error_from_the_worker_on_a_template_that_parses_is_a_failed_target(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """The exception's class alone does not say the template failed to parse.
+
+    At the base any YAMLError out of the worker took the not-parseable skip: the attempt
+    was un-counted and a real template whose evaluation raised elsewhere read as SKIPPED.
+    """
+    from yaml import YAMLError
+
+    wrapper_double.side_effect = YAMLError("snippet dump failed")
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
+    assert any(
+        "bucket.yaml" in error and "parses" in error for error in scanner.errors
+    ), scanner.errors
+
+
+def test_a_yaml_error_on_a_file_that_does_not_parse_is_still_the_not_parseable_skip(
+    scanner, cdk_available, wrapper_double
+):
+    """The negative control: a file no parser reads stays an un-counted skip. The
+    wrapper is asserted called, so a candidate dropped before the wrapper (which would
+    leave both counters at 0 too) cannot pass for the branch this controls."""
+    from yaml import YAMLError
+
+    (scanner.context.work_dir / "broken.yaml").write_text(
+        "Resources: [unclosed\n", encoding="utf-8"
+    )
+    wrapper_double.side_effect = YAMLError("while parsing a flow sequence")
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    wrapper_double.assert_called_once()
+    assert scanner.targets_attempted == 0
+    assert scanner.targets_failed == 0
+
+
+def test_a_worker_yaml_error_counts_only_the_files_that_hold_a_template(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """A YAMLError raised elsewhere in the worker reaches the scanner for every file
+    the child was given. A package.json parses, so the local parse says nothing is
+    wrong with it, and it used to be counted as a failed template beside the real
+    one ("the template parses, but the worker raised ..."), grading the scan ERROR
+    for a file that holds no template. Like the two other failure arms, the arm now
+    takes back the attempt of a file that holds no template and counts the template."""
+    from yaml import YAMLError
+
+    (scanner.context.work_dir / "package.json").write_text(
+        '{"name": "x", "version": "1.0.0"}\n', encoding="utf-8"
+    )
+    wrapper_double.side_effect = YAMLError("snippet dump failed")
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1, scanner.targets_attempted
+    assert scanner.targets_failed == 1, scanner.targets_failed
+    assert not any("package.json" in error for error in scanner.errors), scanner.errors
+    assert any("bucket.yaml" in error for error in scanner.errors), scanner.errors
+
+
+# ---------------------------------------------------------------------------
+# The SARIF file is UTF-8, as ASH reads it back
+# ---------------------------------------------------------------------------
+
+
+def test_the_sarif_file_is_written_as_utf8(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    """At the base the file was opened with ``encoding=None``, the locale's."""
+    seen = {}
+    real_open_for_write = cdk_nag_scanner.open_for_write
+
+    def recording(path, *args, **kwargs):
+        if Path(path).name == "ash-cdk-nag.sarif":
+            seen["encoding"] = kwargs.get("encoding", "<default>")
+        return real_open_for_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(cdk_nag_scanner, "open_for_write", recording)
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result(text="Bucket name: café ☃")]}
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert seen["encoding"] == "utf-8", seen
+    out_path = Path(scanner.results_dir) / "converted" / "ash-cdk-nag.sarif"
+    assert "☃" in out_path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# A worker child that died or could not be stopped is recorded on the plugin
+# ---------------------------------------------------------------------------
+
+
+def _batch_double(monkeypatch, failed_child_responses, could_not_stop_response):
+    """Stand in for the worker batch: the children never run here (the wrapper is a
+    double), so the batch's record of them is given."""
+    import contextlib
+
+    class _FakeBatch:
+        def __init__(self):
+            self.failed_child_responses = list(failed_child_responses)
+            self.could_not_stop_response = could_not_stop_response
+
+    @contextlib.contextmanager
+    def fake_batch(*args, **kwargs):
+        yield _FakeBatch()
+
+    monkeypatch.setattr(cdk_nag_scanner, "cdk_nag_worker_batch", fake_batch)
+
+
+def test_a_worker_child_ash_could_not_stop_is_recorded_on_the_plugin(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    """At the base the could-not-stop ending reached the results as per-template text
+    only, so the run-level could-not-stop gate never fired for cdk-nag."""
+    response = {
+        "returncode": None,
+        "timed_out": True,
+        "could_not_stop": True,
+        "could_not_stop_pid": 4242,
+        "error": "the cdk-nag worker timed out; ASH could not stop it",
+    }
+    _batch_double(monkeypatch, [response], response)
+    wrapper_double.side_effect = RuntimeError(
+        "the cdk-nag worker timed out after 5 seconds; ASH could not stop it and it "
+        "may still be running."
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    # The recorded state carries the response's own reason, not only a flag.
+    assert scanner.scan_could_not_stop == response["error"], scanner.scan_could_not_stop
+    assert scanner.targets_failed == 1
+
+
+def test_a_worker_child_that_died_leaves_its_exit_code_on_the_plugin(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    _batch_double(monkeypatch, [{"returncode": 139, "stderr": ""}], None)
+    wrapper_double.side_effect = RuntimeError(
+        "the cdk-nag worker process exited 139 before answering: no stderr"
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.exit_code == 139, scanner.exit_code
+    assert scanner.scan_could_not_stop is None
+
+
+def test_the_batchs_records_are_read_directly_so_a_renamed_field_cannot_pass_in_silence(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, monkeypatch
+):
+    """A batch without the two record fields is a contract break, not an empty record.
+
+    A ``getattr`` default here would read a renamed ``could_not_stop_response`` as
+    "nothing to record" and switch the run-level could-not-stop gate off without a
+    word; the direct read raises instead, out of ``scan()``, which is where a broken
+    seam between two modules of this package belongs: a per-template record (the shape
+    the scanner's ``ignore_suppressions`` read takes for a config value) would grade the
+    scan as if the records had been read. Either field may be the one read first; the
+    match admits both. Before this read the two fields were read through defaults to
+    suit a test double that yielded None."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def batch_without_the_records(*args, **kwargs):
+        yield object()
+
+    monkeypatch.setattr(
+        cdk_nag_scanner, "cdk_nag_worker_batch", batch_without_the_records
+    )
+    wrapper_double.return_value = CdkNagWrapperResponse(results={}, failure=None)
+
+    with pytest.raises(
+        AttributeError, match="failed_child_responses|could_not_stop_response"
+    ):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+
+# ---------------------------------------------------------------------------
+# A partial failure keeps the findings of the packs that ran
+# ---------------------------------------------------------------------------
+
+
+def test_findings_from_the_packs_that_ran_reach_the_report_when_another_pack_failed(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """One requested pack found a violation; another threw. The template counts as
+    failed (the second pack's rules were never evaluated) AND the finding is reported.
+    Before this read the failure branch left the loop before the findings were added, so
+    a violating template read as empty, and the log said it was not evaluated at all."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result(rule_id="AwsSolutions-S1")]},
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "HIPAA.Security)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["AwsSolutions-S1"], (
+        "the AwsSolutions finding is a fact about the template and must be reported"
+    )
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 1
+    assert any("HIPAA.Security" in error for error in scanner.errors), scanner.errors
+    assert any(
+        "not evaluate every requested pack" in r.message for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any(
+        r.message.startswith("cdk-nag did not evaluate ")
+        and "every requested" not in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    # The run summary agrees with the report: it names the partly evaluated template,
+    # and does not say that no rules were evaluated while the finding sits in the SARIF.
+    assert any(
+        "did not evaluate every requested pack on 1 of 1 template(s)" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("No rules were evaluated" in r.message for r in caplog.records), [
+        r.message for r in caplog.records
+    ]
+
+
+def test_a_template_no_rule_evaluated_still_reads_as_failed_on_all_in_the_summary(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """The control: a failure that comes with no findings keeps the old summary."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={},
+        failure="cdk-nag produced no validation report. No rules were evaluated.",
+    )
+
+    with caplog.at_level(logging.ERROR):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 0
+    assert any(
+        "failed on all 1 template(s)" in r.message
+        and "No rules were evaluated" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("every requested pack on" in r.message for r in caplog.records)
+
+
+def test_a_pack_that_ran_clean_beside_one_that_threw_is_a_partly_evaluated_target(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """AwsSolutions evaluated the template and found nothing; HIPAA threw. Partial
+    evaluation used to be decided by whether a finding was kept, so this template was
+    logged as not evaluated at all and the summary said no rules were evaluated of it,
+    the false statement the partly-evaluated path exists to avoid. The wrapper's mapping
+    holds an entry for each pack that evaluated the template, so an entry decides it."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": []},
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "HIPAA.Security)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == []
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 1
+    assert any(
+        "did not evaluate every requested pack against" in r.message
+        and "1 pack(s) evaluated it" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert any(
+        "did not evaluate every requested pack on 1 of 1 template(s)" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("No rules were evaluated" in r.message for r in caplog.records), [
+        r.message for r in caplog.records
+    ]
+
+
+def test_cdk_own_validation_plugins_entry_does_not_make_a_target_partly_evaluated(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """CDK's own CloudFormation Validate plugin writes an entry into every report. On a
+    template where every requested pack threw, that entry was the only one in the
+    mapping, so the target read partly evaluated ("1 pack(s) evaluated it") and the
+    summary no longer said that no rules were evaluated, which was the true statement.
+    The entry is CDK's, never a requested pack's, and does not count."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"CloudFormation Validate": []},
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "AwsSolutions)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 0
+    # The per-template line is the not-evaluated one ("cdk-nag did not evaluate
+    # <file>: <reason>"), not the partly-evaluated one ("... did not evaluate every
+    # requested pack against <file>"). The wrapper's reason, quoted after the colon,
+    # itself says "not every requested pack evaluated this template", so the
+    # distinction is read on the line's own head, not on the words anywhere in it.
+    assert any(
+        r.message.startswith("cdk-nag did not evaluate ")
+        and "did not evaluate every requested pack against" not in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert any(
+        "failed on all 1 template(s)" in r.message
+        and "No rules were evaluated" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+    assert not any("every requested pack on" in r.message for r in caplog.records)
+
+
+def test_a_template_only_cdks_own_plugin_evaluated_keeps_its_findings_and_says_so(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """Every requested pack threw, but CDK's own CloudFormation Validate plugin
+    evaluated the template and reported a finding. The finding is a fact about the
+    template and sits in the report, so the run summary may not say that no rules were
+    evaluated beside it. The summary names the true state instead: no requested pack
+    was evaluated, only CDK's own plugin ran. The control above holds the same state
+    with no finding, where "No rules were evaluated" stays the true statement.
+
+    The fixture's failure text names a pack inside the quoted payload, so the summary
+    is told apart on the head of the record, never on words the payload can carry."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={
+            wrapper_module.CDK_OWN_PLUGIN_NAME: [
+                nag_result(
+                    rule_id="CloudFormation-Validate-1",
+                    pack=wrapper_module.CDK_OWN_PLUGIN_NAME,
+                )
+            ]
+        },
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "AwsSolutions)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["CloudFormation-Validate-1"]
+    assert scanner.targets_failed == 1
+    assert scanner.targets_partly_evaluated == 0
+    messages = [r.message for r in caplog.records]
+    assert any(
+        message.startswith("cdk-nag did not evaluate ")
+        and "1 finding(s) from CDK's own validation plugin are kept" in message
+        for message in messages
+    ), messages
+    assert any(
+        message.startswith("cdk-nag evaluated no requested pack on 1 of 1 template(s)")
+        for message in messages
+    ), messages
+    assert not any(message.startswith("cdk-nag failed on ") for message in messages), (
+        messages
+    )
+    assert not any("No rules were evaluated" in message for message in messages), (
+        messages
+    )
+
+
+def test_the_partly_evaluated_line_does_not_credit_requested_packs_with_cdks_findings(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """One requested pack evaluated the template and reported one finding, another
+    threw, and CDK's own plugin reported two. The line counts the finding the requested
+    pack made as "their" findings and names CDK's two apart; it used to count all three
+    as the requested packs', which read as a pack having found what only CDK's plugin
+    found. All three findings reach the report.
+
+    The failure text in the fixture names a pack inside the quoted payload, so the
+    counts are read from the head of the record, ahead of the colon that starts it."""
+    own_name = wrapper_module.CDK_OWN_PLUGIN_NAME
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={
+            "HIPAA.Security": [
+                nag_result(rule_id="HIPAA.Security-S1", pack="HIPAA.Security")
+            ],
+            own_name: [
+                nag_result(rule_id="CloudFormation-Validate-1", pack=own_name),
+                nag_result(rule_id="CloudFormation-Validate-2", pack=own_name),
+            ],
+        },
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "AwsSolutions)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert sorted(r.ruleId for r in report.runs[0].results) == [
+        "CloudFormation-Validate-1",
+        "CloudFormation-Validate-2",
+        "HIPAA.Security-S1",
+    ]
+    assert scanner.targets_partly_evaluated == 1
+    heads = [r.message.split("): ", 1)[0] for r in caplog.records]
+    counts = (
+        "(1 pack(s) evaluated it; their 1 finding(s) are kept; 2 finding(s) from "
+        "CDK's own validation plugin are kept as well"
+    )
+    assert any(
+        head.startswith("cdk-nag did not evaluate every requested pack against ")
+        and counts in head
+        for head in heads
+    ), heads
+
+
+def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_import_failure(
+    scanner, monkeypatch
+):
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_MISSING_DISTRIBUTIONS", [])
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "_CDK_WRAPPER_IMPORT_ERROR",
+        "ModuleNotFoundError: No module named 'cfn_tools'",
+    )
+    scanner.dependency_unavailable_reason = None
+
+    reason = scanner.missing_dependency_reason()
+
+    assert "cfn_tools" in reason
+    assert "ash dependencies install" not in reason, reason
+
+
+# ---------------------------------------------------------------------------
+# Environment reads the redaction has to know about
+# ---------------------------------------------------------------------------
+
+
+def test_the_path_jsii_node_names_is_among_the_values_to_redact(
+    scanner, monkeypatch, tmp_path
+):
+    """The scanner reads JSII_NODE itself, outside the configuration, and the wrapper
+    hands that path to the worker; a child that cannot start the node it names can echo
+    the path in the text the scanner records. The scanner's own lines are redacted with
+    what _environment_values() gives, so the path has to be one of those values, and
+    whether it names a file is not the redaction's question."""
+    named = tmp_path / "opt" / "node"
+    monkeypatch.setenv("JSII_NODE", str(named))
+
+    assert str(named) in scanner._environment_values()
+    assert str(named) in scanner._values_to_redact()
+
+
+def test_an_unset_jsii_node_adds_nothing_to_the_values_to_redact(scanner, monkeypatch):
+    monkeypatch.delenv("JSII_NODE", raising=False)
+
+    assert scanner._environment_values() == config_environment_values(
+        scanner.context.config
+    )
+    assert "" not in scanner._environment_values()
+
+
+@pytest.mark.parametrize("bare_name", ["node", "nodejs", "node22"])
+def test_a_bare_command_name_in_jsii_node_is_not_a_value_to_redact(
+    scanner, monkeypatch, bare_name
+):
+    """A JSII_NODE that names a command looked up on PATH, not a location, is left out.
+
+    The redaction matches a value of four to seven word characters as a whole word
+    wherever it stands, so carrying ``node`` would blank the ordinary word in this
+    scanner's own remedy ("put `node` on PATH") and in every child line that says it.
+    A bare command name is not the operator's filesystem layout; only a value that
+    holds a path separator is.
+    """
+    monkeypatch.setenv("JSII_NODE", bare_name)
+
+    assert bare_name not in scanner._environment_values()
+    assert scanner._environment_values() == config_environment_values(
+        scanner.context.config
+    )
+
+
+def test_a_relative_jsii_node_path_is_still_a_value_to_redact(scanner, monkeypatch):
+    monkeypatch.setenv("JSII_NODE", "tools/bin/node")
+
+    assert "tools/bin/node" in scanner._environment_values()
+
+
+# ---------------------------------------------------------------------------
+# The dependency check and a bare JSII_NODE name
+# ---------------------------------------------------------------------------
+
+
+def _node_only_from_path(found_by_name):
+    """A find_executable stand-in that answers from the given names and nothing else."""
+
+    def find(name):
+        return found_by_name.get(name)
+
+    return find
+
+
+def test_a_bare_jsii_node_name_is_looked_up_on_path_not_in_the_working_directory(
+    scanner, monkeypatch, tmp_path
+):
+    """jsii hands JSII_NODE to Popen, which resolves a bare name on PATH; the check used
+    to read it as a path relative to the working directory, so JSII_NODE=nodejs with no
+    file of that name under the working directory, and no ``node`` on PATH, was graded
+    MISSING for the node jsii would have run."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", True)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "find_executable",
+        _node_only_from_path({"nodejs": "/opt/elsewhere/bin/nodejs"}),
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    assert cdk_nag_scanner._node_named_by_jsii_node() == "/opt/elsewhere/bin/nodejs"
+    assert scanner.validate_plugin_dependencies() is True
+    assert scanner.dependency_unavailable_reason is None
+
+
+def test_a_stray_file_named_like_a_bare_jsii_node_in_the_working_directory_is_not_it(
+    scanner, monkeypatch, tmp_path
+):
+    """The other direction of the same read: JSII_NODE=node and a file named ``node``
+    in the scanned repository (the working directory) used to pass the check, for a
+    node jsii would never start, because a bare name resolves on PATH, never here."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", True)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    monkeypatch.setattr(cdk_nag_scanner, "find_executable", _node_only_from_path({}))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    monkeypatch.setenv("JSII_NODE", "node")
+
+    assert cdk_nag_scanner._node_named_by_jsii_node() is None
+    assert scanner.validate_plugin_dependencies() is False
+    assert "JSII_NODE" in (scanner.dependency_unavailable_reason or "")
+
+
+def test_a_jsii_node_that_names_a_location_is_still_asked_of_the_filesystem(
+    scanner, monkeypatch, tmp_path
+):
+    """The control: a value with a path separator is a location, found or not on the
+    filesystem, and PATH is not consulted for it."""
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", True)
+    monkeypatch.setattr(cdk_nag_scanner, "_unsatisfied_cdk_requirements", list)
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "find_executable",
+        _node_only_from_path({"node": "/usr/bin/node", "missing": "/usr/bin/missing"}),
+    )
+    named = tmp_path / "elsewhere" / "node"
+    named.parent.mkdir()
+    named.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setenv("JSII_NODE", str(named))
+    assert cdk_nag_scanner._node_named_by_jsii_node() == str(named)
+
+    monkeypatch.setenv("JSII_NODE", str(tmp_path / "missing" / "node"))
+    assert cdk_nag_scanner._node_named_by_jsii_node() is None
+
+
+# ---------------------------------------------------------------------------
+# The module as a script reads the missing-dependency reason through the one reader
+# ---------------------------------------------------------------------------
+
+
+def test_the_script_quotes_the_reason_through_the_one_reader(
+    scanner, caplog, monkeypatch
+):
+    """The script block used to call ``scanner.missing_dependency_reason()`` itself,
+    a second reader of the hook beside ``plugin_missing_dependency_reason`` (the
+    one-reader guard under tests/unit/base names every such read). It asks the
+    reader, so whatever the reader makes of the hook's answer is what the script's
+    error line quotes."""
+    asked = []
+
+    def reader(plugin_instance, values=(), **kwargs):
+        asked.append(plugin_instance)
+        return "the reader's text"
+
+    monkeypatch.setattr(cdk_nag_scanner, "plugin_missing_dependency_reason", reader)
+    with caplog.at_level(logging.ERROR, logger="ash"):
+        with pytest.raises(SystemExit) as excinfo:
+            cdk_nag_scanner._script_report_json(False, scanner)
+
+    assert excinfo.value.code == 1
+    assert asked == [scanner]
+    assert any(
+        "cdk-nag did not scan: the reader's text" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_the_script_still_exits_one_when_the_reason_hook_raises(
+    scanner, caplog, monkeypatch
+):
+    """At the base a hook that raised ended the script in that exception instead of
+    the exit status it owes its caller. Through the reader the raise is a DEBUG
+    line and the error line says no reason was recorded."""
+
+    def raising(self):
+        raise RuntimeError("the hook's own failure")
+
+    monkeypatch.setattr(CdkNagScanner, "missing_dependency_reason", raising)
+    with caplog.at_level(logging.ERROR, logger="ash"):
+        with pytest.raises(SystemExit) as excinfo:
+            cdk_nag_scanner._script_report_json(False, scanner)
+
+    assert excinfo.value.code == 1
+    assert any(
+        "cdk-nag did not scan: the scanner recorded no reason" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_the_scanner_and_the_wrapper_share_one_location_test_for_jsii_node():
+    """The scanner's dependency check and the wrapper read JSII_NODE by the same test,
+    and the wrapper's docstring said the two must apply it alike. Each module held its
+    own copy of the function. They now import the one definition from the module both
+    already depend on, so the identity is what keeps them from drifting apart."""
+    assert cdk_nag_scanner.names_a_location is subprocess_utils.names_a_location
+    assert wrapper_module.names_a_location is subprocess_utils.names_a_location
+    assert not hasattr(cdk_nag_scanner, "_names_a_location")
+    assert not hasattr(wrapper_module, "_names_a_location")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("", False),
+        ("node", False),
+        ("nodejs", False),
+        ("/opt/node/bin/node", True),
+        ("bin/node", True),
+        ("./node", True),
+    ],
+)
+def test_a_value_with_a_separator_names_a_location_and_a_bare_name_does_not(
+    value, expected
+):
+    assert subprocess_utils.names_a_location(value) is expected

@@ -1217,12 +1217,15 @@ def test_ash_log_keeps_the_absolute_path_the_reports_write_as_tilde(
 def test_home_as_tilde_replaces_only_the_whole_home_directory(
     monkeypatch, home, text, expected
 ):
-    from pathlib import PureWindowsPath
+    from pathlib import PurePosixPath, PureWindowsPath
 
     from automated_security_helper.core import constants
     from automated_security_helper.utils.get_shortest_name import home_as_tilde
 
-    simulated = PureWindowsPath(home) if ":" in home else Path(home)
+    # A pure path of the simulated platform: a concrete Path("/home/u") is a
+    # WindowsPath on Windows, whose str() is "\\home\\u", and home_as_tilde reads
+    # no home in that, so the POSIX rows would fail there for the wrong reason.
+    simulated = PureWindowsPath(home) if ":" in home else PurePosixPath(home)
     # The home comes from core.constants.usable_home, the one place ASH reads it.
     monkeypatch.setattr(constants, "usable_home", lambda: simulated)
     monkeypatch.setattr("os.path.realpath", lambda p: p)
@@ -1232,10 +1235,12 @@ def test_home_as_tilde_replaces_only_the_whole_home_directory(
 
 def test_home_as_tilde_replaces_the_resolved_home_too(monkeypatch):
     """A home that is a symlink: a reason can name either spelling."""
+    from pathlib import PurePosixPath
+
     from automated_security_helper.core import constants
     from automated_security_helper.utils.get_shortest_name import home_as_tilde
 
-    monkeypatch.setattr(constants, "usable_home", lambda: Path("/home/u"))
+    monkeypatch.setattr(constants, "usable_home", lambda: PurePosixPath("/home/u"))
     monkeypatch.setattr(
         "os.path.realpath", lambda p: "/data/home/u" if p == "/home/u" else p
     )

@@ -75,10 +75,14 @@ def test_the_shard_disagreement_refusal_prints_on_its_lines(tmp_path):
 
 
 def test_an_invalid_override_with_line_breaks_is_refused_on_one_line(tmp_path):
-    """The refusal quotes the override as the operator typed it, so a line break
-    in it must not start a log line of its own: the message is one line, with the
-    breaks written as escapes. Only the shard-disagreement refusal, above, is
-    written on several lines."""
+    """An entry with no ``=`` that is not key-shaped is hidden, on one line.
+
+    Refusals name keys and never values (``_override_shown``): an entry with no
+    separator can be a value whose key the operator forgot, a hex digest or an
+    access-key id among them, so the refusal names it by its length alone. The
+    message stays one line, so a line break in the entry cannot start a log
+    line of its own. Only the shard-disagreement refusal, above, is written on
+    several lines."""
     override = "no-separator\r\nforged: first line\nforged: second line"
 
     result = _merge(
@@ -95,8 +99,9 @@ def test_an_invalid_override_with_line_breaks_is_refused_on_one_line(tmp_path):
     assert not forged, result.output
     assert (
         "Invalid config override: "
-        "'no-separator\\x0d\\x0aforged: first line\\x0aforged: second line'"
+        f"an entry of {len(override)} characters with no '=' (not shown)"
     ) in result.output, result.output
+    assert "no-separator" not in result.output, result.output
     assert len([line for line in lines if "Invalid configuration:" in line]) == 1
     assert "Traceback" not in result.output
     assert not (tmp_path / "merged").exists()

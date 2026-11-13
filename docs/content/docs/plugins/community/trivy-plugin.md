@@ -28,7 +28,7 @@ The ASH Trivy plugin provides seamless integration with Trivy's repository scann
 
 ### Trivy CLI Installation
 
-`ash dependencies install` installs the pinned trivy release (v0.75.0, checked against the SHA256 in `automated_security_helper/utils/tool_downloads.py`) that both `trivy` and `trivy-repo` run, and the ASH container image ships it. A trivy you install yourself, as below, is used when it is on `PATH`; ASH is tested against the pinned version.
+`ash dependencies install` installs the pinned trivy release (v0.76.2, checked against the SHA256 in `automated_security_helper/utils/tool_downloads.py`) that both `trivy` and `trivy-repo` run, and the ASH container image ships it. A trivy you install yourself, as below, is used when it is on `PATH`; ASH is tested against the pinned version.
 
 trivy-repo runs the first `trivy` it finds: on `PATH`, then in ASH's bin directory (`~/.ash/bin`, or the directory `ASH_BIN_PATH` names), then in `/usr/local/bin`, except on Windows. Only an executable file counts ([Where ASH looks for a tool](../../advanced-usage.md#where-ash-looks-for-a-tool)).
 
@@ -675,18 +675,32 @@ jobs:
           echo "files=$(cat changed_files.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
       
       - name: Scan changed files
+        # Workflow commands are stopped around the scan, as the reusable scan
+        # workflow does: tool output is untrusted, and a `::`-line in it would
+        # otherwise be acted on by the runner.
         run: |
           # Create directory structure for changed files
           mkdir -p scan_target
-          while read file; do
-            if [ -f "$file" ]; then
-              mkdir -p "scan_target/$(dirname "$file")"
-              cp "$file" "scan_target/$file"
-            fi
-          done < changed_files.txt
-          
+          if [ -f changed_files.txt ]; then
+            while read -r file; do
+              if [ -f "$file" ]; then
+                mkdir -p "scan_target/$(dirname "$file")"
+                cp "$file" "scan_target/$file"
+              fi
+            done < changed_files.txt
+          fi
+
           # Run security scan
-          ash --source-dir scan_target --scanners trivy-repo --formats sarif,markdown
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          ash --source-dir scan_target --scanners trivy-repo --formats sarif,markdown 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       
       - name: Comment PR
         uses: actions/github-script@v6
@@ -1406,7 +1420,20 @@ ash --mode container --scanners trivy-repo
   run: trivy image --download-db-only
 
 - name: Run ASH with Trivy
-  run: ash --scanners trivy-repo --formats sarif
+  # Workflow commands are stopped around the scan, as the reusable scan
+  # workflow does: tool output is untrusted, and a `::`-line in it would
+  # otherwise be acted on by the runner.
+  run: |
+    token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    if [ "${#token}" -ne 32 ]; then
+      echo "::error::no random token could be read for stop-commands, so the command did not run"
+      exit 1
+    fi
+    printf '::stop-commands::%s\n' "${token}"
+    status=0
+    ash --scanners trivy-repo --formats sarif 2>&1 || status=$?
+    printf '\n::%s::\n' "${token}"
+    exit "${status}"
   timeout-minutes: 10
 ```
 
@@ -1471,17 +1498,29 @@ jobs:
       - uses: actions/checkout@v3
       
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
       
       - name: Run Trivy Security Scan
+        # Workflow commands are stopped around the scan, as the reusable scan
+        # workflow does: tool output is untrusted, and a `::`-line in it would
+        # otherwise be acted on by the runner.
         run: |
-          ash --scanners trivy-repo --formats sarif,html
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          ash --scanners trivy-repo --formats sarif,html 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
       
       - name: Upload Results
         # Also when ASH exits non-zero on findings: without a status function
         # GitHub skips this step after any failed step.
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: security-results
           # Not the whole output directory: scanners/ and converted/ hold each
@@ -1499,7 +1538,7 @@ security-scan:
   stage: test
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
     - ash --scanners trivy-repo --formats sarif,markdown
   artifacts:
     reports:
@@ -1629,7 +1668,7 @@ global_settings:
     - rule_id: "CVE-2023-12345"
       path: "**/*"
       reason: "Patched in our custom build"
-      expiration: "2024-12-31"
+      expires: "2024-12-31"
     
     # Suppress by severity and path
     - rule_id: "GHSA-*"

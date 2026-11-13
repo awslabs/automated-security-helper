@@ -153,7 +153,9 @@ def test_a_run_command_names_its_container(state):
         resolved_oci_runner="docker",
         image_name="img",
         source_dir=state.parent,
-        output_dir=state.parent,
+        # An output directory that is the source (or above it) is refused: the
+        # source is mounted read-only beside it. Inside the source is the default.
+        output_dir=state.parent / ".ash" / "ash_output",
         offline=False,
         debug=False,
         color=False,
@@ -409,6 +411,7 @@ def _nix_mode_run(tmp_path, runtime_path, monkeypatch):
 
     monkeypatch.setattr(run_ash_scan, "_discard_prior_run_artifacts", clear)
     monkeypatch.setattr(run_ash_scan, "run_ash_nix", nix_shell)
+    monkeypatch.setattr(run_ash_scan, "nix_preflight", lambda: None)
     monkeypatch.delenv("OCI_RUNNER_WRAPPER", raising=False)
     opts = run_ash_scan.ScanOptions(
         source_dir=source,

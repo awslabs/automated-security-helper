@@ -42,7 +42,7 @@ import os
 import signal
 import sys
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
+from subprocess import CalledProcessError
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import patch
@@ -74,7 +74,7 @@ from automated_security_helper.utils.subprocess_utils import (
     INTERRUPT_WAIT_SLICE_SECONDS,
     create_completed_process,
 )
-from tests.utils.windows_console import as_windows
+from tests.utils.windows_console import as_windows, with_a_slice_clock
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +396,29 @@ class _StubProcess:
 
 @pytest.fixture
 def stub_process(monkeypatch):
-    """Install a _StubProcess as the process run_cmd_direct will drive."""
+    """Install a _StubProcess as the process run_cmd_direct will drive.
+
+    Also emulates an ``os.waitid`` build whatever the host: CPython leaves
+    ``waitid`` out on macOS, where the discard helpers fall back to
+    ``process.poll()`` and consume the stub's scripted answers at points the
+    expected wait sequences do not model. The stand-in answers as a waitid
+    build does for a stub pid past the kernel's pid space (ECHILD), so the
+    record is dropped at once and the caller's own waits are the only waits,
+    on every platform.
+    """
+
+    def _waitid_echild(idtype, pid, options):
+        raise ChildProcessError("stub pid has no child")
+
+    monkeypatch.setattr(os, "waitid", _waitid_echild, raising=False)
+    for name, value in (
+        ("P_PID", 1),
+        ("WEXITED", 4),
+        ("WNOHANG", 1),
+        ("WNOWAIT", 0x1000000),
+    ):
+        if not hasattr(os, name):
+            monkeypatch.setattr(os, name, value, raising=False)
 
     def install(process: _StubProcess) -> _StubProcess:
         monkeypatch.setattr(
@@ -494,7 +516,7 @@ class TestRunCmdDirectInterruption:
         assert process.signals == [signal.SIGINT]
         assert process.terminated is False
         assert process.killed is True
-        assert process.wait_timeouts == [5, None]
+        assert process.wait_timeouts == [5, _REAP]
 
     def test_ctrl_c_does_not_kill_a_runtime_that_stops_on_the_interrupt(
         self, stub_process
@@ -524,7 +546,7 @@ class TestRunCmdDirectInterruption:
             run_cmd_direct(["ignored"], check=False)
 
         assert process.killed is True
-        assert process.wait_timeouts == [5, None]
+        assert process.wait_timeouts == [5, _REAP]
 
     def test_a_terminals_ctrl_c_is_not_sent_to_the_runtime_twice(
         self, stub_process, monkeypatch
@@ -543,20 +565,49 @@ class TestRunCmdDirectInterruption:
         assert process.wait_timeouts == [5]
 
 
-class _StillRunning(_StubProcess):
-    """A runtime that outlives every timed wait, as Popen.wait reports it."""
+class _WindowsRuntime(_StubProcess):
+    """A runtime for the Windows grace wait: one Ctrl-C, then polls and sleeps.
+
+    The Ctrl-C ``poll_raises`` holds lands at the first poll only, as one
+    keypress does; later polls answer ``returncode``. The grace is polled and
+    slept out, so a timed ``wait`` other than the bounded reap after a kill
+    (which ``Popen.wait``'s own Ctrl-C handler could turn into an endless wait)
+    fails the test.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._interrupted = False
+
+    def poll(self):
+        if self._poll_raises is not None and not self._interrupted:
+            self._interrupted = True
+            raise self._poll_raises
+        return self.returncode
 
     def wait(self, timeout=None):
         self.wait_timeouts.append(timeout)
-        if timeout is not None:
-            raise TimeoutExpired("runtime", timeout)
+        assert timeout in (None, subprocess_utils._REAP_SECONDS), (
+            f"Popen.wait(timeout={timeout}) on the Windows grace path"
+        )
         return self.returncode
 
 
-#: The waits on Windows: the grace in slices, so a second Ctrl-C lands between them.
+#: The sleeps on Windows: the grace in slices, so a second Ctrl-C lands between them.
 _SLICES = [INTERRUPT_WAIT_SLICE_SECONDS] * round(
     INTERRUPT_GRACE_SECONDS / INTERRUPT_WAIT_SLICE_SECONDS
 )
+
+#: The wait after a kill: bounded, so a runtime SIGKILL did not end (in
+#: uninterruptible sleep, say) is not waited for without end.
+_REAP = subprocess_utils._REAP_SECONDS
+
+
+@pytest.mark.unit
+def test_the_wait_after_a_kill_is_a_number_not_unbounded():
+    """The expectations above read ``_REAP`` from the product, so a product that
+    went back to waiting without end (None) would still satisfy all of them."""
+    assert isinstance(_REAP, (int, float)) and 0 < _REAP <= 30, _REAP
 
 
 @pytest.mark.unit
@@ -574,8 +625,9 @@ class TestRunCmdDirectInterruptionOnWindows:
     ):
         """terminate() at once cut short the runtime's own handling of the Ctrl-C."""
         as_windows(monkeypatch, console=True)
+        clock = with_a_slice_clock(monkeypatch)
         process = stub_process(
-            _StillRunning(returncode=None, poll_raises=KeyboardInterrupt())
+            _WindowsRuntime(returncode=None, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -583,15 +635,17 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.signals == []
-        assert process.wait_timeouts == _SLICES + [None]
+        assert clock.sleeps == _SLICES
+        assert process.wait_timeouts == [_REAP]
         assert process.killed is True, "a runtime still running after the grace"
 
     def test_with_a_console_a_runtime_that_stops_in_the_grace_is_not_killed(
         self, stub_process, monkeypatch
     ):
         as_windows(monkeypatch, console=True)
+        clock = with_a_slice_clock(monkeypatch)
         process = stub_process(
-            _StubProcess(returncode=130, poll_raises=KeyboardInterrupt())
+            _WindowsRuntime(returncode=130, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -599,18 +653,16 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.killed is False
-        assert process.wait_timeouts == _SLICES[:1]
+        assert clock.sleeps == []
+        assert process.wait_timeouts == []
 
     def test_with_a_console_a_second_ctrl_c_kills_at_once(
         self, stub_process, monkeypatch
     ):
         as_windows(monkeypatch, console=True)
+        clock = with_a_slice_clock(monkeypatch, interrupt_on=1)
         process = stub_process(
-            _StubProcess(
-                returncode=None,
-                poll_raises=KeyboardInterrupt(),
-                wait_raises=KeyboardInterrupt(),
-            )
+            _WindowsRuntime(returncode=None, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -618,15 +670,17 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.killed is True
-        assert process.wait_timeouts == _SLICES[:1] + [None]
+        assert clock.sleeps == _SLICES[:1]
+        assert process.wait_timeouts == [_REAP]
 
     def test_without_a_console_the_runtime_is_terminated(
         self, stub_process, monkeypatch
     ):
         """Nothing passed the Ctrl-C to the runtime, so ASH stops it."""
         as_windows(monkeypatch, console=False)
+        with_a_slice_clock(monkeypatch)
         process = stub_process(
-            _StubProcess(returncode=1, poll_raises=KeyboardInterrupt())
+            _WindowsRuntime(returncode=1, poll_raises=KeyboardInterrupt())
         )
 
         with pytest.raises(KeyboardInterrupt):
@@ -634,7 +688,7 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is True
         assert process.signals == []
-        assert process.wait_timeouts == _SLICES[:1]
+        assert process.wait_timeouts == []
 
 
 @pytest.mark.unit
@@ -1572,19 +1626,33 @@ class TestExecuteContainer:
         self, monkeypatch, capfd
     ):
         """The caller inspects returncode; raising here would lose the stderr."""
-        failure = CalledProcessError(
-            2, ["docker", "run"], output="out", stderr="scan failed"
-        )
+        command = [
+            "docker",
+            "run",
+            "img",
+            "ash",
+            "--config-overrides",
+            "project_name=hunter2",
+        ]
+        failure = CalledProcessError(2, command, output="out", stderr="scan failed")
 
         def explode(cmd, debug=False, env=None):
             raise failure
 
         monkeypatch.setattr(rac, "run_cmd_direct", explode)
 
-        result = _execute_container(["docker", "run"], debug=True)
+        result = _execute_container(command, debug=True)
 
         assert result is failure
-        assert "Container execution failed with error:" in capfd.readouterr().out
+        out = capfd.readouterr().out
+        # The line names the status and the command in its shown form, each
+        # override value as its key, never the raw argv.
+        assert "hunter2" not in out, out
+        (failure_line,) = [
+            line for line in out.splitlines() if "Container execution failed" in line
+        ]
+        assert "code 2" in failure_line, failure_line
+        assert "project_name" in failure_line, failure_line
 
     def test_without_debug_nothing_extra_is_printed(self, monkeypatch, capfd):
         expected = create_completed_process(args=["docker"], returncode=0)

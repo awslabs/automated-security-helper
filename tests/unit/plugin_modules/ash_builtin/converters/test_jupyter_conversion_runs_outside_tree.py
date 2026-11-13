@@ -67,6 +67,7 @@ from tests.unit.converters.nbconvert_stand_in import (
     notebook_patterns,
     run_like_nbconvert,
 )
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 pytestmark = pytest.mark.unit
 
@@ -187,6 +188,10 @@ def hermetic_lookups(monkeypatch, tmp_path):
     monkeypatch.setattr(
         subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
     )
+    # On Windows the tool guard makes jupyter-nbconvert resolve to its ``.bat``
+    # stand-in alone; these tests put their own ``jupyter-nbconvert.exe`` on PATH,
+    # so the lookup uses its own candidate list (``.exe``, ``.bat``, ``.cmd``).
+    use_the_real_candidate_names(monkeypatch)
     subprocess_utils.clear_find_executable_cache()
     yield
     subprocess_utils.clear_find_executable_cache()

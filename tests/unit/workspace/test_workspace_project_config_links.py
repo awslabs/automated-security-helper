@@ -50,14 +50,16 @@ class _Stop(Exception):
     pass
 
 
-#: On Windows a project's discovery under an MCP session's gate refuses any linked
-#: config source before it opens it (``config_sources._permitted``: resolving a
-#: link there can open a connection to the host a UNC target names), so a test
-#: that needs the link followed to the host file cannot reach what it asserts.
+#: On Windows a project's discovery under an MCP session's gate refuses a linked
+#: config source whose chain leads to a network share before it opens it
+#: (``config_sources._permitted``: resolving a link there can open a connection
+#: to the host a UNC target names), and judges a link that leads to a local file
+#: as the file it names, as on POSIX. The tests that need the link followed have
+#: not been measured on a Windows host with links, so they stay skipped there.
 #: The refusals this file pins (``_assert_refused_unread``) hold on every platform.
 follows_a_link = pytest.mark.skipif(
     sys.platform == "win32",
-    reason="an MCP session refuses a linked config source on Windows before reading it",
+    reason="not yet measured on a Windows host with links (see config_sources._permitted)",
 )
 
 
@@ -200,7 +202,8 @@ def _assert_refused_unread(server, result: Any, read: List[Path]) -> None:
     host_file = (server["host"] / "ash.yaml").resolve()
     assert result.get("success") is False, result
     assert result.get("error_type") == "config_input_not_permitted", result
-    assert result.get("exit_code") == 4, result
+    # config_input_not_permitted carries exit 3 in every MCP tool (_error_response).
+    assert result.get("exit_code") == 3, result
     assert host_file not in read
     assert CANARY not in repr(result)
     assert str(server["host"]) not in repr(result)
@@ -402,7 +405,7 @@ def test_a_linked_pyproject_is_refused_alike_whatever_it_reaches(
 
     assert not any(was_opened for _, was_opened, *_ in responses), responses
     assert len({tuple(r[2:]) for r in responses}) == 1, responses
-    assert responses[0][2:5] == (False, 4, "config_input_not_permitted"), responses
+    assert responses[0][2:5] == (False, 3, "config_input_not_permitted"), responses
     assert _MARKER not in json.dumps(responses, default=str)
     assert "Errno" not in json.dumps(responses, default=str)
 
@@ -446,7 +449,7 @@ def test_a_linked_ash_directory_is_refused_alike_whatever_it_holds(
         dirs["unreadable"].chmod(0o755)
 
     assert len({tuple(r[1:]) for r in responses}) == 1, responses
-    assert responses[0][1:4] == (False, 4, "config_input_not_permitted"), responses
+    assert responses[0][1:4] == (False, 3, "config_input_not_permitted"), responses
     assert _MARKER not in json.dumps(responses, default=str)
 
 

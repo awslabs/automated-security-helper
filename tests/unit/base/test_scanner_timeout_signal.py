@@ -102,7 +102,11 @@ def test_checkov_through_uv_reports_the_timeout(checkov, uv_available):
 
     # The uv command, not a direct-execution fallback.
     assert run.call_count == 1
-    assert run.call_args.args[0][1:3] == ["tool", "run"]
+    # On Windows a uv.cmd shim is replaced by the running interpreter's launch
+    # (python -P -c <runpy uv>), so "tool run" follows the launcher's words
+    # rather than sitting at index 1; it is still the uv command, once.
+    argv = list(run.call_args.args[0])
+    assert any(argv[i : i + 2] == ["tool", "run"] for i in range(len(argv) - 1)), argv
     message = str(excinfo.value)
     assert "timed out after '5' s" in message, message
     assert "No such file or directory" not in message, message

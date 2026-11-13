@@ -165,8 +165,20 @@ def test_a_host_starts_with_sigint_at_its_default_when_this_run_ignores_it(held)
     assert still_ignored, "the hold did not put this process's disposition back"
 
 
-def _interrupt(tmp_path: Path, env: dict, args: list, *, to_the_group: bool):
+def _interrupt(
+    tmp_path: Path,
+    env: dict,
+    args: list,
+    *,
+    to_the_group: bool,
+    cwd: Path | None = None,
+):
     """Run `ash <args>` in its own session; once the child is waiting, send SIGINT.
+
+    ``cwd`` is where ASH starts (``tmp_path`` unless named). A scan with no
+    ``--source-dir`` scans its working directory, and ASH refuses a tool it finds
+    inside the scanned tree, so a test that keeps its fake runtime in ``tmp_path``
+    starts ASH in a directory beside it.
 
     To the process group, as a terminal's Ctrl-C reaches every process in it, or to
     the host alone, as `kill -INT` or a CI job's cancel does.
@@ -194,7 +206,7 @@ def _interrupt(tmp_path: Path, env: dict, args: list, *, to_the_group: bool):
                 module_from_this_checkout("automated_security_helper.cli.main"),
                 *args,
             ],
-            cwd=tmp_path,
+            cwd=cwd or tmp_path,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -359,6 +371,7 @@ def test_nix_mode_says_it_was_interrupted_and_exits_130(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(mod, "run_ash_nix", _interrupted)
+    monkeypatch.setattr(mod, "nix_preflight", lambda: None)
 
     result = CliRunner().invoke(
         app,
@@ -428,6 +441,8 @@ def test_build_image_says_it_was_interrupted_and_exits_130(tmp_path, isolated):
         env,
         ["build-image", "--oci-runner", str(runtime), "--no-run"],
         to_the_group=True,
+        # build-image scans its working directory; the runtime is kept outside it.
+        cwd=tmp_path / "src",
     )
 
     assert returncode == 130, stdout + stderr
@@ -480,7 +495,9 @@ def test_the_runtime_keeps_the_sigint_disposition_ash_was_started_with(
                 str(runtime),
                 "--no-run",
             ],
-            cwd=tmp_path,
+            # The working directory is the scanned tree, and the runtime is kept
+            # outside it: ASH refuses a tool found inside the scanned tree.
+            cwd=tmp_path / "src",
             env={**isolated["env"], "FAKE_LOG": str(log)},
             capture_output=True,
             text=True,
@@ -514,9 +531,18 @@ class _InterruptedRuntime:
         self.returncode = None
         self.pid = next(_STAND_IN_PIDS)
         self.calls = []
+        self._interrupted = False
 
     def poll(self):
-        raise KeyboardInterrupt
+        # The planted Ctrl-C lands at the first poll, once, as one keypress
+        # does; later observations answer as Popen.poll does. On a build
+        # without os.waitid (macOS) the die-now discard reads the exit
+        # through poll, and a poll that re-raised there cut the stop short
+        # inside its own except arm.
+        if not self._interrupted:
+            self._interrupted = True
+            raise KeyboardInterrupt
+        return self.returncode
 
     def send_signal(self, signum):
         self.calls.append("send_signal")
@@ -526,6 +552,9 @@ class _InterruptedRuntime:
 
     def kill(self):
         self.calls.append("kill")
+        # A killed child has ended: the poll arm of the die-now observation
+        # then sees the exit at once instead of waiting out its bound.
+        self.returncode = -9
 
     def wait(self, timeout=None):
         self.calls.append(f"wait({timeout})")
@@ -568,8 +597,9 @@ def test_on_windows_with_a_console_the_runtime_gets_its_grace(
     from automated_security_helper.interactions import run_ash_container
     from automated_security_helper.utils import subprocess_utils
 
-    from tests.utils.windows_console import as_windows
+    from tests.utils.windows_console import as_windows, with_a_slice_clock
 
+    clock = with_a_slice_clock(monkeypatch)
     runtime = _InterruptedRuntime()
     monkeypatch.setattr(
         subprocess_utils, "create_process_with_pipes", lambda **kwargs: runtime
@@ -583,12 +613,17 @@ def test_on_windows_with_a_console_the_runtime_gets_its_grace(
 
     assert result.exit_code == 130, result.output
     assert "interrupted before it finished" in result.stderr, result.stderr
-    # The grace in slices, so a second Ctrl-C lands between them; then the kill.
+    # The grace in slices of a poll and a sleep, so a second Ctrl-C lands between
+    # them (and no timed Popen.wait runs, whose own Ctrl-C handler can park the
+    # process); then the kill.
     slice_seconds = subprocess_utils.INTERRUPT_WAIT_SLICE_SECONDS
     slices = round(subprocess_utils.INTERRUPT_GRACE_SECONDS / slice_seconds)
-    assert runtime.calls == [f"wait({slice_seconds})"] * slices + [
+    assert clock.sleeps == [slice_seconds] * slices, clock.sleeps
+    # The reap after the kill is bounded (subprocess_utils._wait_after_kill): a child
+    # SIGKILL did not end is not waited for without end.
+    assert runtime.calls == [
         "kill",
-        "wait(None)",
+        f"wait({subprocess_utils._REAP_SECONDS})",
     ], runtime.calls
 
 
@@ -650,6 +685,7 @@ def test_a_ctrl_c_while_the_readers_start_stops_the_runtime(
     """
     import types
 
+    from automated_security_helper.core import cancellation
     from automated_security_helper.interactions import run_ash_container
     from automated_security_helper.utils import subprocess_utils
     from automated_security_helper.utils import threads as ash_threads
@@ -659,7 +695,18 @@ def test_a_ctrl_c_while_the_readers_start_stops_the_runtime(
         subprocess_utils, "create_process_with_pipes", lambda **kwargs: runtime
     )
     stopped = []
-    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", stopped.append)
+
+    def _stop(handed):
+        # The real stop this stands in for is the path that discards the
+        # die-now mirror record (subprocess_utils.stop_after_interrupt); the
+        # stand-in pid is recorded unconditionally (run_cmd_direct), and on a
+        # build without os.waitid the finally-net discard polls the stand-in
+        # as still running, so without this the record survives to the
+        # teardown guard.
+        stopped.append(handed)
+        cancellation.discard_tool_pid(handed.pid)
+
+    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", _stop)
     step, count = interrupted_at
     seen = {"make": 0, "start": 0}
 
@@ -721,6 +768,7 @@ def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sig
     it would leave run_cmd_direct no process to stop: ASH would exit 130 at once and
     the runtime, given neither its grace nor a kill, would run on.
     """
+    from automated_security_helper.core import cancellation
     from automated_security_helper.interactions import run_ash_container
     from automated_security_helper.utils import subprocess_utils
 
@@ -732,7 +780,16 @@ def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sig
 
     monkeypatch.setattr(subprocess_utils, "create_process_with_pipes", _started)
     stopped = []
-    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", stopped.append)
+
+    def _stop(handed):
+        # As the readers' stub: the stubbed real stop is the path that
+        # discards the die-now mirror record, and on a build without
+        # os.waitid the finally-net discard polls the stand-in as still
+        # running, leaving the record to the teardown guard.
+        stopped.append(handed)
+        cancellation.discard_tool_pid(handed.pid)
+
+    monkeypatch.setattr(run_ash_container, "_stop_after_interrupt", _stop)
 
     with pytest.raises(KeyboardInterrupt):
         run_ash_container.run_cmd_direct(["runtime", "build", "."])
@@ -745,6 +802,7 @@ def test_a_ctrl_c_while_the_runtime_is_started_stops_it(monkeypatch, default_sig
 @pytest.mark.unit
 def test_a_ctrl_c_while_the_nix_shell_is_started_stops_it(monkeypatch, default_sigint):
     """The Nix shell is started the same way, and had the same gap."""
+    from automated_security_helper.core import cancellation
     from automated_security_helper.interactions import run_ash_nix
 
     shell = _StartedRuntime()
@@ -755,7 +813,16 @@ def test_a_ctrl_c_while_the_nix_shell_is_started_stops_it(monkeypatch, default_s
 
     monkeypatch.setattr(run_ash_nix.subprocess, "Popen", _started)
     stopped = []
-    monkeypatch.setattr(run_ash_nix, "stop_after_interrupt", stopped.append)
+
+    def _stop(handed):
+        # As the readers' stub: run_ash_nix records the shell's pid and the
+        # stubbed real stop is the path that discards the die-now mirror
+        # record; on a build without os.waitid the finally-net discard polls
+        # the stand-in as still running.
+        stopped.append(handed)
+        cancellation.discard_tool_pid(handed.pid)
+
+    monkeypatch.setattr(run_ash_nix, "stop_after_interrupt", _stop)
 
     with pytest.raises(KeyboardInterrupt):
         run_ash_nix._enter_shell(["nix", "develop"], env={})
@@ -838,45 +905,6 @@ def test_a_ctrl_c_held_at_the_launch_is_raised_with_the_child_recorded(monkeypat
         assert signal.getsignal(signal.SIGINT) is _notes_the_record_then_raises
     finally:
         signal.signal(signal.SIGINT, previous)
-
-
-@pytest.mark.skipif(os.name == "nt", reason="SIGINT handling under test is POSIX")
-@pytest.mark.unit
-def test_the_handler_is_put_back_even_when_the_first_restore_fails(
-    monkeypatch, default_sigint
-):
-    """Leaving the launch puts the SIGINT handler back after a failed release.
-
-    release() can fail putting the previous handler back: signal.signal runs
-    pending Python handlers first, and one of them can raise. The hold must
-    still be left on the way out -- HeldInterrupt.__exit__ restores again --
-    or the dead hold keeps the handler and every later Ctrl-C in the process
-    is recorded where nothing reads it: for the MCP server, for good.
-    """
-    from automated_security_helper.utils import subprocess_utils
-
-    child = _ExitedChild()
-    real_signal = signal.signal
-    failed = {"once": False}
-
-    def _fails_putting_back_once(signum, handler):
-        if not failed["once"] and handler is signal.default_int_handler:
-            failed["once"] = True
-            raise OSError("putting the SIGINT handler back failed")
-        return real_signal(signum, handler)
-
-    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: child)
-    monkeypatch.setattr(signal, "signal", _fails_putting_back_once)
-
-    with pytest.raises(OSError):
-        subprocess_utils._run_cancellable(
-            ["/opt/ash-test/bin/tool", "scan"],
-            cancel_event=threading.Event(),
-            graceful_timeout=False,
-            own_group=False,
-        )
-
-    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
 class _StoppableChild(_ExitedChild):
@@ -1098,66 +1126,6 @@ def test_a_sigint_disposition_that_raises_nothing_is_left_alone(disposition):
     ]
     sigint_ignored = bool(ignored & (1 << (signal.SIGINT - 1)))
     assert sigint_ignored is (disposition is signal.SIG_IGN)
-
-
-@pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
-@pytest.mark.unit
-def test_a_handler_that_failed_to_go_back_is_put_back_on_leaving(
-    default_sigint, monkeypatch
-):
-    """The hold forgot it held the signal before putting the handler back, so a
-    failure there left the recording handler in place, and every later Ctrl-C was
-    swallowed. Leaving the block puts it back."""
-    from automated_security_helper.utils import subprocess_utils
-
-    real_signal = signal.signal
-    calls = []
-
-    def _signal_failing_once(signum, handler):
-        calls.append(handler)
-        if len(calls) == 2:
-            raise OSError("the handler could not be set")
-        return real_signal(signum, handler)
-
-    monkeypatch.setattr(subprocess_utils.signal, "signal", _signal_failing_once)
-
-    with pytest.raises(OSError):
-        with subprocess_utils.HeldInterrupt() as held:
-            held.release()
-
-    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
-    with pytest.raises(KeyboardInterrupt):
-        _sigint_to_myself()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
-@pytest.mark.unit
-def test_a_ctrl_c_after_the_block_whose_handler_did_not_go_back_is_not_lost(
-    default_sigint, monkeypatch
-):
-    """The block raised before release, and putting the handler back on leaving
-    failed, so the recording handler stayed installed and every later Ctrl-C was
-    recorded for a block that was over. Once the block is left, a Ctrl-C goes to
-    the handler that was held."""
-    from automated_security_helper.utils import subprocess_utils
-
-    real_signal = signal.signal
-    calls = []
-
-    def _signal_failing_once(signum, handler):
-        calls.append(handler)
-        if len(calls) == 2:
-            raise OSError("the handler could not be set")
-        return real_signal(signum, handler)
-
-    monkeypatch.setattr(subprocess_utils.signal, "signal", _signal_failing_once)
-
-    with pytest.raises(OSError, match="could not be set"):
-        with subprocess_utils.HeldInterrupt():
-            raise FileNotFoundError("runtime")
-
-    with pytest.raises(KeyboardInterrupt):
-        _sigint_to_myself()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")

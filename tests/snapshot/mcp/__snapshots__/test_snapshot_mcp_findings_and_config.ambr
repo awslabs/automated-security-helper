@@ -188,7 +188,7 @@
           'cve_id': None,
           'cwe_id': None,
           'description': "Possible hardcoded password: 'h******'",
-          'detected_at': '2026-01-15T12:00:00+00:00',
+          'detected_at': None,
           'file_path': 'src/settings.py',
           'fix_available': None,
           'id': 'bandit-B105-d8e89f4bf133',
@@ -201,6 +201,8 @@
           'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "MEDIUM"}',
           'raw_data': '{"ruleId":"B105","ruleIndex":-1,"kind":"fail","level":"warning","message":{"text":"Possible hardcoded password: \'h******\'","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"src/settings.py","index":-1},"region":{"startLine":7,"endLine":7,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"MEDIUM"}}',
           'references': None,
+          'resource_id': None,
+          'resource_type': None,
           'rule_id': 'B105',
           'scanner': 'bandit',
           'scanner_type': 'UNKNOWN',
@@ -218,7 +220,7 @@
           'cve_id': None,
           'cwe_id': None,
           'description': 'Use of assert detected.',
-          'detected_at': '2026-01-15T12:00:00+00:00',
+          'detected_at': None,
           'file_path': 'tests/test_app.py',
           'fix_available': None,
           'id': 'bandit-B101-30eccaf87e25',
@@ -231,6 +233,8 @@
           'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "LOW"}',
           'raw_data': '{"ruleId":"B101","ruleIndex":-1,"kind":"fail","level":"note","message":{"text":"Use of assert detected.","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"tests/test_app.py","index":-1},"region":{"startLine":4,"endLine":4,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"suppressions":[{"kind":"external","justification":"Asserts are expected in tests."}],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"LOW"}}',
           'references': None,
+          'resource_id': None,
+          'resource_type': None,
           'rule_id': 'B101',
           'scanner': 'bandit',
           'scanner_type': 'UNKNOWN',
@@ -246,7 +250,7 @@
           'cve_id': None,
           'cwe_id': None,
           'description': 'AWS Access Key detected in configuration file.',
-          'detected_at': '2026-01-15T12:00:00+00:00',
+          'detected_at': None,
           'file_path': 'config/settings.ini',
           'fix_available': None,
           'id': 'detect-secrets-SECRET-AWS-ACCESS-KEY-49559df70b2e',
@@ -259,6 +263,8 @@
           'properties': '{"tags": ["detect-secrets"], "scanner_name": "detect-secrets", "issue_severity": "CRITICAL"}',
           'raw_data': '{"ruleId":"SECRET-AWS-ACCESS-KEY","ruleIndex":-1,"kind":"fail","level":"error","message":{"text":"AWS Access Key detected in configuration file.","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"config/settings.ini","index":-1},"region":{"startLine":3,"endLine":3,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["detect-secrets"],"scanner_name":"detect-secrets","issue_severity":"CRITICAL"}}',
           'references': None,
+          'resource_id': None,
+          'resource_type': None,
           'rule_id': 'SECRET-AWS-ACCESS-KEY',
           'scanner': 'detect-secrets',
           'scanner_type': 'UNKNOWN',
@@ -661,6 +667,7 @@
       ]),
       'fail_on_findings': False,
       'fail_on_incomplete_scanners': True,
+      'fail_on_unknown_keys': False,
       'global_settings': dict({
         'ignore_paths': list([
         ]),
@@ -841,6 +848,7 @@
           'extension': 'ghas.sarif',
           'name': 'github-ghas',
           'options': dict({
+            'emit_automation_details': False,
             'exclude_suppressed': True,
           }),
         }),
@@ -944,6 +952,21 @@
       'sandbox': dict({
         'env_scanners': list([
         ]),
+        'environment': list([
+          'ALL_PROXY',
+          'HTTPS_PROXY',
+          'HTTP_PROXY',
+          'NO_PROXY',
+          'all_proxy',
+          'http_proxy',
+          'https_proxy',
+          'no_proxy',
+          'SSL_CERT_FILE',
+          'REQUESTS_CA_BUNDLE',
+          'CURL_CA_BUNDLE',
+          'NODE_EXTRA_CA_CERTS',
+          'SSL_CERT_DIR',
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
@@ -979,7 +1002,7 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
-            'tool_version': '>=1.7.0,<2.0.0',
+            'tool_version': '>=1.7.8,<2.0.0',
           }),
         }),
         'cdk_nag': dict({
@@ -1139,7 +1162,7 @@
             'severity_threshold': None,
             'sha256': dict({
             }),
-            'version': 'v1.30.2',
+            'version': 'v1.33.1',
           }),
         }),
         'semgrep': dict({
@@ -1256,6 +1279,7 @@
       ]),
       'fail_on_findings': True,
       'fail_on_incomplete_scanners': True,
+      'fail_on_unknown_keys': False,
       'global_settings': dict({
         'ignore_paths': list([
         ]),
@@ -1436,6 +1460,7 @@
           'extension': 'ghas.sarif',
           'name': 'github-ghas',
           'options': dict({
+            'emit_automation_details': False,
             'exclude_suppressed': True,
           }),
         }),
@@ -1539,6 +1564,21 @@
       'sandbox': dict({
         'env_scanners': list([
         ]),
+        'environment': list([
+          'ALL_PROXY',
+          'HTTPS_PROXY',
+          'HTTP_PROXY',
+          'NO_PROXY',
+          'all_proxy',
+          'http_proxy',
+          'https_proxy',
+          'no_proxy',
+          'SSL_CERT_FILE',
+          'REQUESTS_CA_BUNDLE',
+          'CURL_CA_BUNDLE',
+          'NODE_EXTRA_CA_CERTS',
+          'SSL_CERT_DIR',
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
@@ -1574,7 +1614,7 @@
             'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
-            'tool_version': '>=1.7.0,<2.0.0',
+            'tool_version': '>=1.7.8,<2.0.0',
           }),
         }),
         'cdk_nag': dict({
@@ -1734,7 +1774,7 @@
             'severity_threshold': None,
             'sha256': dict({
             }),
-            'version': 'v1.30.2',
+            'version': 'v1.33.1',
           }),
         }),
         'semgrep': dict({
@@ -2030,7 +2070,7 @@
     'result': dict({
       'json': dict({
         'client_supplied': False,
-        'expiration': '2031-01-31',
+        'expires': '2031-01-31',
         'line_end': 12,
         'line_start': 12,
         'path': 'src/app.py',
@@ -2040,7 +2080,7 @@
       'success': True,
       'yaml': '''
         client_supplied: false
-        expiration: '2031-01-31'
+        expires: '2031-01-31'
         line_end: 12
         line_start: 12
         path: src/app.py

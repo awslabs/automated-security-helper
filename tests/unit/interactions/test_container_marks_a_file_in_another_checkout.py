@@ -16,6 +16,14 @@ the file travels in the mark, so a mark cannot carry a grant. A file the host
 could not place because the walk of the links in its name stopped is marked the
 same way: the limits are the same, and no second option exists for it.
 
+A file of ``ASH_CONFIG``'s chain is marked the same way, file by file: with
+``--config-file-from-scanned-repository`` when the scanned checkout holds it, and
+with ``--config-file-from-another-checkout`` when some other checkout does
+(run-in-a-container.md, The config file, pinned by tests/unit/docs/test_page_claims.py,
+test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_it_is).
+The scanned-repository mark keeps nothing inside, so it is not given to a file the
+host lets keep what only restricts.
+
 Each end-to-end cell resolves one layout twice: on the host (``resolve_config``,
 or each workspace project's config), and in container mode, where
 ``run_ash_container`` assembles the run command against a recording runner, the
@@ -363,7 +371,12 @@ def test_a_config_in_another_checkout_grants_nothing_inside_in_a_workspace_scan(
     assert host["bare"]["sandbox.env_scanners"] == []
     assert inside == host
     run = container.last
-    assert run[run.index(FLAG) + 1] == "/ash-config/ash.yaml"
+    # A workspace scan's --config from another checkout is marked as a whole chain
+    # (run-in-a-container.md, The config file: "A workspace scan does the same with
+    # a `--config` from another git checkout"), so the another-checkout mark, which
+    # a one-directory --config chain keeps, is not sent.
+    assert CHAIN_FLAG in run
+    assert FLAG not in run
 
 
 def test_a_base_in_another_checkout_grants_nothing_but_the_root_keeps_its_own_section(
@@ -533,9 +546,12 @@ def test_a_base_in_the_scanned_checkout_is_marked_once_as_the_scanned_trees(
     assert CHAIN_FLAG not in inner
 
 
-def test_an_ash_config_in_another_checkout_is_marked_as_such(
+def test_an_ash_config_in_another_checkout_is_marked_file_by_file(
     launch, monkeypatch, tmp_path
 ):
+    """A file of ASH_CONFIG's chain in another checkout carries the
+    another-checkout mark, not the scanned tree's, so the scan inside keeps what
+    only restricts as the host does (run-in-a-container.md, The config file)."""
     envco = tmp_path / "envco"
     mark_git_checkout(envco)
     env = _write(envco / "env.yaml", "project_name: env\n")
@@ -1151,9 +1167,11 @@ def test_a_base_whose_walk_stopped_is_marked_beside_a_root_found_in_another_chec
     assert _flags(inner, TREE_FILE_FLAG) == []
 
 
-def test_an_ash_config_file_whose_walk_stopped_is_marked_as_in_another_checkout(
+def test_an_ash_config_file_whose_walk_stopped_is_marked_file_by_file(
     launch, monkeypatch, tmp_path
 ):
+    """The fail-closed answer takes the per-file another-checkout mark, as a file of
+    ASH_CONFIG's chain in any other checkout does."""
     env = _write(tmp_path / "envdir" / "env.yaml", "project_name: env\n")
     config = _write(launch["operator"] / "ash.yaml")
     monkeypatch.setenv("ASH_CONFIG", str(env))

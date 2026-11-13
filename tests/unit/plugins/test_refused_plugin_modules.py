@@ -56,6 +56,7 @@ from tests.utils.isolated_tool_env import (
     isolated_tool_env,
     without_inherited_aws,
 )
+from tests.utils.helpers import checkout_env
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
 #: Refused by the loader. The second and third are what a prefix test written as
@@ -339,7 +340,7 @@ class _Run:
         return subprocess.run(
             [sys.executable, "-c", _PROGRAM, mode, json.dumps(spec)],
             cwd=self.workdir,
-            env=self.env(extra_env),
+            env=checkout_env(self.env(extra_env)),
             capture_output=True,
             text=True,
             encoding="utf-8",

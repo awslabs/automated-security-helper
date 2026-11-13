@@ -57,7 +57,7 @@ class _ReportOnlyOrchestrator:
         """run_ash_scan records changed_files_only and scan_source before the scan
         (ASHScanOrchestrator.add_metadata); this report-only stand-in keeps none."""
 
-    def execute_scan(self, phases=None):
+    def execute_scan(self, phases=None, **settle):
         from automated_security_helper.base.plugin_context import PluginContext
         from automated_security_helper.config.ash_config import AshConfig
         from automated_security_helper.core.phases.report_phase import ReportPhase

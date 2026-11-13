@@ -13,6 +13,7 @@ opts in with ``pytestmark = pytest.mark.usefixtures(...)``.
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 import shutil
 import sys
@@ -22,6 +23,7 @@ from typing import NamedTuple, Optional
 
 import pytest
 
+from automated_security_helper.utils import subprocess_utils as _subprocess_utils
 from tests.utils.tool_guard import (
     ToolGuard,
     install_tool_guard,
@@ -46,6 +48,10 @@ REAL_TOOL_MODULES = frozenset(
         "base/test_scanner_uv_commands_discover_nothing_from_the_tree.py",
         # Runs the real npm and gem from an empty directory and from the planted
         # repository; a stand-in cannot read a .npmrc or a Gemfile.
+        # test_on_this_host runs the real installation checks against whatever
+        # this host has installed; its docstring declares the probes may start
+        # tools, so the zero-starts teardown is not that test's contract.
+        "cli/mcp/test_check_installation_status.py",
         "cli/test_dependencies_install_commands_start_outside_the_tree.py",
         "cli/test_dependencies_uv_commands_discover_nothing_from_the_tree.py",
         "cli/test_genai_guide_ships_with_install.py",
@@ -83,7 +89,11 @@ REAL_HOME_MODULES = frozenset({"home_isolation_probe.py", "test_home_isolation.p
 #: the stand-in records ``uv tool run ... <tool> --version`` as a start; a test
 #: of a probe has to reach the real code under its own doubles, so these keep
 #: the probes as they are. Each still runs under the guard: a probe that reaches
-#: a stand-in is recorded as before.
+#: a stand-in is recorded as before. A module can be here and in REAL_TOOL_MODULES
+#: at once: that list only permits the ``runs_real_tools`` marker, and the tests of
+#: such a module that do not carry it are guarded and keep their real probes only
+#: through this entry, so the dual listing is load-bearing, not a leftover
+#: (tests/unit/test_unit_conftest_module_lists.py pins both lists).
 PROBE_SUBJECT_MODULES = frozenset(
     {
         "base/test_failure_lines_carry_no_environment_value.py",
@@ -104,8 +114,11 @@ PROBE_SUBJECT_MODULES = frozenset(
         "plugin_modules/ash_builtin/test_trivy_probe_isolation.py",
         "plugin_modules/ash_builtin/test_trivy_scanner.py",
         "plugin_modules/ash_ferret_plugins/test_ferret_scanner.py",
+        "plugin_modules/test_offline_scanner_network_checks.py",
         "plugin_modules/test_offline_trivy_terraform_modules.py",
+        "plugin_modules/test_scanner_offline_option_reaches_probes.py",
         "plugin_modules/test_trivy_misconfig_list_cache.py",
+        "test_conftest_tool_state_isolation.py",
         "utils/test_a_bare_value_string_is_one_value.py",
         "utils/test_a_cache_reset_during_a_version_probe_drops_its_answer.py",
         "utils/test_a_parked_probe_waiter_stops_when_its_scan_is_cancelled.py",
@@ -123,6 +136,7 @@ PROBE_SUBJECT_MODULES = frozenset(
         "utils/test_parsed_child_output_ignores_the_callers_terminal.py",
         "utils/test_pre_installed_tool.py",
         "utils/test_pre_installed_tool_sandbox_grant.py",
+        "utils/test_pre_installed_tool_verdict_causes.py",
         "utils/test_the_uv_runner_keeps_the_stop_state.py",
         "utils/test_the_uv_tool_version_carries_no_piece_of_a_value.py",
         "utils/test_tool_lookups_follow_path_and_bin_path.py",
@@ -132,7 +146,11 @@ PROBE_SUBJECT_MODULES = frozenset(
         "utils/test_uv_memos_answer_for_the_probed_environment.py",
         "utils/test_uv_tool_command_whose_file_is_gone.py",
         "utils/test_uv_tool_runner.py",
+        "utils/test_uv_tool_runner_bundled_uv_inside_the_scanned_tree.py",
         "utils/test_uv_tool_runner_extended.py",
+        "utils/test_uv_tool_runner_memos_and_records.py",
+        "utils/test_uv_tool_runner_probe_memo_and_specs.py",
+        "utils/test_uv_tool_python_request.py",
     }
 )
 
@@ -147,6 +165,45 @@ def pytest_configure(config):
 
 
 @pytest.fixture
+def capture(caplog):
+    """Route ASH's logger at WARNING into caplog.
+
+    ASH's configured handler renders to a console and leaves nothing in
+    ``caplog.records``, so its handlers are swapped for pytest's capture handlers
+    for the duration, and the logger's own level is set, since
+    ``caplog.at_level`` with no ``logger=`` lowers the root logger only and a
+    merge that ran earlier in the process may have left ``ash`` higher. A test
+    that asserts ``records == []`` through plain ``caplog`` passes with no capture
+    at all; through this fixture the absence is a measurement.
+
+    Here, at the unit tests' root conftest, so every module under tests/unit gets
+    it by name: the merge tests under tests/unit/cli, and
+    tests/unit/test_ash_output_dirs_are_not_scanned.py beside them. It used to be
+    defined in tests/unit/cli/test_merge.py, and a module that took it from there
+    had to bind it under its own name for pytest to register it.
+    """
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    saved_handlers = ASH_LOGGER.handlers
+    saved_propagate = ASH_LOGGER.propagate
+    capture_handlers = [
+        handler
+        for handler in saved_handlers
+        if isinstance(handler, type(caplog.handler))
+    ]
+    if caplog.handler not in capture_handlers:
+        capture_handlers.append(caplog.handler)
+    ASH_LOGGER.handlers = capture_handlers
+    ASH_LOGGER.propagate = False
+    caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
+    try:
+        yield caplog
+    finally:
+        ASH_LOGGER.handlers = saved_handlers
+        ASH_LOGGER.propagate = saved_propagate
+
+
+@pytest.fixture
 def in_ci() -> bool:
     """Whether this is a CI run, for tests that fail instead of skipping when a tool
     the runner images ship is missing.
@@ -158,6 +215,44 @@ def in_ci() -> bool:
         os.environ.get(name, "").strip().lower() not in ("", "false", "0")
         for name in ("CI", "GITHUB_ACTIONS")
     )
+
+
+#: ``subprocess_utils.own_environment_dirs`` as it was when this file was imported,
+#: before any test could patch it; see ``pytest_runtest_teardown`` below.
+_IMPORT_TIME_OWN_ENVIRONMENT_DIRS = getattr(
+    _subprocess_utils, "own_environment_dirs", None
+)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item, nextitem):
+    """Fail the test that leaves ``own_environment_dirs`` patched, naming it.
+
+    On macOS under Python 3.10, one xdist worker saw ``own_environment_dirs()`` return
+    ``[]`` at test time in ``test_uv_installed_with_ash.py`` and
+    ``test_verified_present_pinned_tool.py``: some earlier test in that worker left a
+    permanent patch of it, and nine unrelated tests failed in its place.
+
+    This runs as a hook wrapper, after ``yield``, because that is after every fixture
+    finalizer of the test, ``monkeypatch``'s undo included, whatever order the
+    autouse fixtures were set up in. A fixture finalizer would run before the undo of
+    a ``monkeypatch`` that another autouse fixture requested first, and read an
+    in-test patch as a leak. A patch made for one test and undone by its fixture is
+    therefore never seen here. A patch still in place now is a leak, so the function
+    is put back (the next test is not made its victim) and this test is failed.
+    """
+    result = yield
+    original = _IMPORT_TIME_OWN_ENVIRONMENT_DIRS
+    if original is not None:
+        current = getattr(_subprocess_utils, "own_environment_dirs", None)
+        if current is not original:
+            _subprocess_utils.own_environment_dirs = original
+            raise AssertionError(
+                f"{item.nodeid} left subprocess_utils.own_environment_dirs patched "
+                f"({current!r} where the import-time function "
+                f"{original!r} belongs); the patch outlived the test's fixtures"
+            )
+    return result
 
 
 class UnitTestGuard(NamedTuple):

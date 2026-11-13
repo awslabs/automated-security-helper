@@ -34,7 +34,7 @@ import subprocess
 import traceback
 import typing
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Tuple
 
 import boto3
 import botocore.client
@@ -47,7 +47,6 @@ from automated_security_helper.config.ash_config import (
     ALWAYS_DENIED_PATHS,
     RuntimeOverridesConfig,
 )
-from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.config.runtime_patch import (
     RuntimePatchDeniedError,
     check_runtime_ops,
@@ -397,6 +396,70 @@ def aws_requests(monkeypatch, tmp_path) -> List[Dict[str, Any]]:
     return made
 
 
+#: What the standard library's ``socket`` module calls the function that builds a
+#: socket pair out of a loopback connection, on a platform with no ``socketpair``
+#: of its own (Windows). Releases with the fix for gh-122133 call it
+#: ``_fallback_socketpair``. Before it, the function is ``socketpair`` itself, as
+#: in the last Windows installers of 3.10 and 3.11.
+_LOOPBACK_PIPE_FUNCTIONS = ("_fallback_socketpair", "socketpair")
+
+
+def _is_the_pipe_of_an_event_loop(stack: Iterable[traceback.FrameSummary]) -> bool:
+    """Whether a connect made under ``stack`` is an event loop joining its own pipe.
+
+    On Windows, creating an event loop makes ``socket.socketpair`` connect a
+    client socket to a listener on a loopback port that the same call opened.
+    That joins two ends of one pipe inside the process and sends nothing. Only a
+    connect made from that function of the standard library's ``socket`` module
+    is it; every other connect, to a loopback port too, is something else.
+    """
+    return any(
+        frame.name in _LOOPBACK_PIPE_FUNCTIONS
+        and Path(frame.filename).name == "socket.py"
+        for frame in stack
+    )
+
+
+def _stack_of(*frames: Tuple[str, str]) -> List[traceback.FrameSummary]:
+    """A call stack of ``(file, function)`` frames, the innermost last."""
+    return [
+        traceback.FrameSummary(filename, number, name, lookup_line=False)
+        for number, (filename, name) in enumerate(frames, start=1)
+    ]
+
+
+@pytest.mark.parametrize("function", ["_fallback_socketpair", "socketpair"])
+@pytest.mark.unit
+def test_the_socket_guard_lets_an_event_loop_join_its_own_pipe(function):
+    """Under whichever name the standard library gives the function that does it.
+
+    On Windows every ``asyncio.run`` makes ``socket.socketpair`` connect to a
+    loopback listener of its own. A guard that knew one of the two names refused
+    the other's connect, and ``asyncio.run`` raised ``ConnectionRefusedError`` in
+    every scan below on the Windows builds of 3.10 and 3.11.
+    """
+    stack = _stack_of(
+        ("proactor_events.py", "_make_self_pipe"),
+        (socket.__file__, function),
+    )
+
+    assert _is_the_pipe_of_an_event_loop(stack)
+
+
+@pytest.mark.parametrize(
+    "stack",
+    [
+        [("urllib3/connection.py", "_new_conn")],
+        [(socket.__file__, "create_connection")],
+        [("helpers.py", "socketpair")],
+    ],
+    ids=["library", "socket-create-connection", "other-file"],
+)
+@pytest.mark.unit
+def test_control_the_socket_guard_still_refuses_any_other_connect(stack):
+    assert not _is_the_pipe_of_an_event_loop(_stack_of(*stack))
+
+
 @pytest.fixture
 def other_traffic(monkeypatch) -> List[Tuple[str, Any]]:
     """Each connection a socket opens, refused, and each child process the off-host
@@ -405,30 +468,16 @@ def other_traffic(monkeypatch) -> List[Tuple[str, Any]]:
     So that "no request" does not rest on every reporter sending through botocore.
     A scan starts child processes of its own (tool version checks, the scanners),
     so a child process is recorded when a frame of the reporters' package is on
-    the stack that starts it.
+    the stack that starts it. An event loop joining the two ends of its own pipe
+    is let through and not recorded (``_is_the_pipe_of_an_event_loop``); every
+    other connect, to a loopback port too, is refused and recorded.
     """
     reporters_dir = str(Path(importlib.import_module(_AWS_PLUGINS).__file__).parent)
     made: List[Tuple[str, Any]] = []
     real_connect = socket.socket.connect
 
-    def opens_an_event_loop() -> bool:
-        """Whether this connect is an asyncio event loop joining its own self-pipe.
-
-        On Windows, creating an event loop makes ``socket.socketpair`` connect a
-        client socket to a listener on a loopback port that the same call opened.
-        That joins two ends of one pipe inside the process and sends nothing, so
-        it is let through and not recorded. Only a connect made from that
-        function of the standard library's ``socket`` module is; every other
-        connect, to a loopback port too, is refused and recorded below.
-        """
-        return any(
-            frame.name == "_fallback_socketpair"
-            and Path(frame.filename).name == "socket.py"
-            for frame in traceback.extract_stack()
-        )
-
     def refused_connect(self, address, *args, **kwargs):
-        if opens_an_event_loop():
+        if _is_the_pipe_of_an_event_loop(traceback.extract_stack()):
             return real_connect(self, address, *args, **kwargs)
         made.append(("connect", address))
         raise ConnectionRefusedError(f"connection to {address!r} refused by the test")
@@ -653,6 +702,24 @@ def _scan_with_client_enabled(
     return result, project / ".ash" / "ash_output"
 
 
+#: How the warning for a client's ignored ``enabled: false`` begins, by the way the
+#: change reached the server. Each route drops the change before anything is
+#: written, so the copy of the profile a scan reads holds no ``enabled: false`` and
+#: ``reporter_trust`` has nothing to confine; the warning it gives, which names a
+#: file, is for a config file that sets one. ``select_profile`` drops a
+#: ``patch_ops`` or ``override_yaml`` change (``runtime_patch._without_turn_offs``),
+#: and a workspace scan leaves it out of its ``config_overrides``
+#: (``workspace._gate_client_overrides``).
+_TURN_OFF_IGNORED = {
+    "patch_ops": "Ignoring '/reporters/{reporter}/enabled' from the MCP client: ",
+    "override_yaml": "Ignoring '/reporters/{reporter}/enabled' from the MCP client: ",
+    "config_overrides": (
+        "Ignoring the config override 'reporters.{reporter}.enabled' from the MCP "
+        "client: "
+    ),
+}
+
+
 @pytest.mark.parametrize("change", _CHANGES_OVER_A_SECTION)
 @pytest.mark.parametrize("reporter", OFF_HOST_REPORTERS)
 @pytest.mark.usefixtures("mcp_server")
@@ -662,7 +729,7 @@ def test_a_client_s_enabled_false_leaves_the_operator_s_reporter_running(
 ):
     """The operator's profile enables the reporter. The client's ``false`` is
     accepted, the reporter still runs with the operator's settings, and a warning
-    says the client's value was ignored."""
+    says the client's value was ignored (``_TURN_OFF_IGNORED``)."""
     profile = _register_profile(tmp_path, reporter, "enabled")
 
     result, _ = _scan_with_client_enabled(tmp_path, change, reporter, False, profile)
@@ -682,13 +749,11 @@ def test_a_client_s_enabled_false_leaves_the_operator_s_reporter_running(
     ignored = [
         message
         for message in ash_warnings
-        if message.startswith(f"Ignoring reporters.{reporter}.enabled from ")
+        if message.startswith(_TURN_OFF_IGNORED[change].format(reporter=reporter))
     ]
     assert ignored, ash_warnings
     for message in ignored:
-        assert message.endswith(KEEP_A_SETTING), message
-        if change == "config_overrides":
-            assert "config_overrides" in message, message
+        assert message.endswith("the operator's setting."), message
 
 
 @pytest.mark.parametrize("change", _CHANGES)

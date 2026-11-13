@@ -37,7 +37,10 @@ from automated_security_helper.core.resource_management.scan_registry import (
 )
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils.log import ASHLogger
-from tests.utils.mcp_sessions import a_session_with_a_bound_profile
+from tests.utils.mcp_sessions import (
+    BASE_PROFILE_FILENAME,
+    a_session_with_a_bound_profile,
+)
 from tests.utils.tasks import drain
 
 pytestmark = pytest.mark.unit
@@ -204,7 +207,7 @@ def test_a_runner_failure_shows_no_value_the_config_read(tmp_path, monkeypatch):
 _PROFILE_SECRET = "a-profile-value-read-from-the-environment"
 _BASE_SECRET = "a-base-value-read-from-the-environment"
 _SESSION_PROFILE_TEXT = (
-    "extends: base.ash.yaml\nproject_name: ${ASH_PROFILE_ARM_HELD:unset}\n"
+    f"extends: {BASE_PROFILE_FILENAME}\nproject_name: ${{ASH_PROFILE_ARM_HELD:unset}}\n"
 )
 _SESSION_BASE_TEXT = (
     "global_settings:\n"
@@ -434,6 +437,12 @@ def test_a_timed_out_scan_hides_a_limit_the_profile_also_read(tmp_path, monkeypa
         with (
             patch.object(ras, "run_ash_scan", a_run_that_outlives_the_limit),
             patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
+            # The sandbox judges the profile's per-scan copy by asking the scan
+            # management registry whether this session holds the scan. Left on
+            # the default registry it holds none, the copy reads as a file the
+            # client delivered, its environment read is refused, and the
+            # profile's value never joins the redaction set.
+            patch(f"{_MGMT}.get_scan_registry", return_value=registry),
             patch(f"{_TOOLS}._logger", logger),
         ):
             asyncio.run(

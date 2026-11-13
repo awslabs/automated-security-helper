@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Tuple
 
 import pytest
+from rich.text import Text
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
@@ -180,6 +181,21 @@ def _scanner(name: str, config, source: Path, tmp_path: Path):
     )
 
 
+def _shown(record: logging.LogRecord) -> str:
+    """The record's message as every sink writes it.
+
+    A plugin's warning is logged with markup (PluginBase._plugin_log styles its
+    prefix and escapes each part for Rich), so the raw message carries tags and
+    empty styles around a part that holds a colon, and the console and both log
+    files render it to its text first (utils/log.py's _file_text). The remedy is
+    read where the operator reads it, at the end of that text.
+    """
+    message = record.getMessage()
+    if not getattr(record, "markup", False):
+        return message
+    return Text.from_markup(message).plain
+
+
 def test_the_reason_holds_no_remedy_of_its_own():
     assert "--config-overrides" not in NOT_THE_OPERATORS
     assert NOT_THE_OPERATORS.startswith("it came from")
@@ -196,8 +212,8 @@ def test_the_warning_ends_with_the_shared_remedy(tmp_path, caplog, case):
     read(scanner, source)
 
     key = f"scanners.{name}.options.{option}"
-    messages = [r.getMessage() for r in caplog.records if key in r.getMessage()]
-    assert messages, [r.getMessage() for r in caplog.records]
+    messages = [_shown(r) for r in caplog.records if key in r.getMessage()]
+    assert messages, [_shown(r) for r in caplog.records]
     for message in messages:
         assert message.endswith(KEEP_A_SETTING), message
         assert RESTATED not in message, message

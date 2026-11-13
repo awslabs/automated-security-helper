@@ -1,7 +1,7 @@
 [
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -37,10 +37,6 @@
             "start_line": 5
           }
         ],
-        "cve": {
-          "desc": "github-pat has detected secret for file docs/example.md.",
-          "uid": "github-pat"
-        },
         "desc": "github-pat has detected secret for file docs/example.md.",
         "severity": "CRITICAL",
         "title": "github-pat"
@@ -49,7 +45,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -85,10 +81,6 @@
             "start_line": 6
           }
         ],
-        "cve": {
-          "desc": "slack-bot-token has detected secret for file app/settings.py.",
-          "uid": "slack-bot-token"
-        },
         "desc": "slack-bot-token has detected secret for file app/settings.py.",
         "severity": "CRITICAL",
         "title": "slack-bot-token"
@@ -97,7 +89,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -133,10 +125,6 @@
             "start_line": 4
           }
         ],
-        "cve": {
-          "desc": "github-pat has detected secret for file app/settings.py.",
-          "uid": "github-pat"
-        },
         "desc": "github-pat has detected secret for file app/settings.py.",
         "severity": "CRITICAL",
         "title": "github-pat"
@@ -145,7 +133,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -181,10 +169,6 @@
             "start_line": 5
           }
         ],
-        "cve": {
-          "desc": "aws-access-token has detected secret for file app/settings.py.",
-          "uid": "aws-access-token"
-        },
         "desc": "aws-access-token has detected secret for file app/settings.py.",
         "severity": "CRITICAL",
         "title": "aws-access-token"
@@ -193,7 +177,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -229,10 +213,6 @@
             "start_line": 2
           }
         ],
-        "cve": {
-          "desc": "github-pat has detected secret for file app/inline_allowed.py.",
-          "uid": "github-pat"
-        },
         "desc": "github-pat has detected secret for file app/inline_allowed.py.",
         "severity": "CRITICAL",
         "title": "github-pat"

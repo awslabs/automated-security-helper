@@ -42,7 +42,8 @@ from tests.unit import test_ash_output_dirs_are_not_scanned as named
 from tests.unit import test_output_dir_patterns_are_escaped as patterns
 from tests.unit.workspace.test_execution import _git
 
-capture = named.capture
+# ``capture`` is the ``caplog`` fixture tests/unit/conftest.py defines for every
+# unit test; it is no longer re-exported through test_ash_output_dirs_are_not_scanned.
 
 #: The scanners built here start no tool, and a tree built without ``git init`` is
 #: outside git wherever tmp_path is (tests/unit/conftest.py).
@@ -269,7 +270,12 @@ def _tool_scanner(kind: str, context):
             "bandit.sarif"
         )
     if kind in ("semgrep", "opengrep"):
-        return patterns._grep_scanner(kind, context), "results_sarif.sarif"
+        scanner = patterns._grep_scanner(kind, context)
+        # Both are off by default on Windows, where the executor leaves a disabled
+        # scanner unscanned and keeps no raw results. The tool is stubbed below, so
+        # the platform's default is not what this test measures.
+        scanner.config.enabled = True
+        return scanner, "results_sarif.sarif"
     if kind == "grype":
         from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
             GrypeScanner,
@@ -390,9 +396,13 @@ def test_each_tool_reads_the_committed_files_in_this_runs_output_dir(
 
     values = _exclusion_values(kind, seen["argv"])
     assert not _skipped_by_tool(kind, values, source, COMMITTED[0]), values
-    assert _skipped_by_tool(kind, values, source, _UNTRACKED_NAMED) is (
-        kind in _TOLD_TO_SKIP
-    ), values
+    # checkov is told nothing on Windows (checkov_scanner._output_dir_skip_patterns:
+    # its walked paths use "\\", so --skip-path is unreliable there); ASH drops the
+    # findings it reports in the directory after the scan, which `kept` checks.
+    told_to_skip = kind in _TOLD_TO_SKIP and not (kind == "checkov" and os.sep != "/")
+    assert _skipped_by_tool(kind, values, source, _UNTRACKED_NAMED) is told_to_skip, (
+        values
+    )
     assert kept == sorted(["app.py", COMMITTED[0]]), kept
 
 

@@ -51,6 +51,7 @@ from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.secret_masking import MASKED_LINE
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from tests.utils.gitleaks_fixture import TEMPLATE, fabricated_tokens, materialize
+from tests.utils.helpers import checkout_env
 
 PluginContext.model_rebuild()
 
@@ -647,8 +648,13 @@ def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
         ],
         capture_output=True,
         text=True,
+        # ASH writes UTF-8 to a pipe on Windows (utils/log.py). A parent that decodes
+        # it with the ANSI code page loses stdout and stderr to None when one byte has
+        # no mapping there, so the log below raised TypeError whatever the scan did.
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
-        env=env,
+        env=checkout_env(env),
     )
     log = f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\nSTDERR:\n{proc.stderr[-4000:]}"
     return proc, log

@@ -16,6 +16,7 @@ whose parameter is directory_path, can give the same ones
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess  # nosec B404 - each surface runs as a child process, as an operator runs it
@@ -123,7 +124,16 @@ def unmakeable(tmp_path, request):
     if request.param == "under-a-file":
         (tmp_path / "blocker").write_text("x\n", encoding="utf-8")
         out = tmp_path / "blocker" / "out"
-        yield out, f"Output directory cannot be created: {out} (Not a directory)"
+        # The product walks up to the first part of the path that is there and
+        # gives every platform that part's reason, ENOTDIR's strerror
+        # (utils/directory_refusals.py, _obstacle_on_the_way), because Windows
+        # mkdir under a file fails with "The system cannot find the path
+        # specified" and never says "Not a directory". The reason is therefore
+        # the platform's text for ENOTDIR, not the failing mkdir's own.
+        with pytest.raises(OSError):
+            os.mkdir(out)
+        reason = os.strerror(errno.ENOTDIR)
+        yield out, f"Output directory cannot be created: {out} ({reason})"
         return
     _without_permissions_skip()
     parent = tmp_path / "read-only"
@@ -288,11 +298,17 @@ def test_ash_scan_refuses_ash_source_dir_the_same_way(tmp_path):
 #: read as a second message saying all is well.
 _FORGED = "n\nSource directory is fine"
 
+_NEEDS_NEWLINE_NAMES = pytest.mark.skipif(
+    os.name == "nt",
+    reason="NTFS forbids control characters in names, so the forged name cannot exist",
+)
+
 
 def _one_line(path: Path) -> str:
     return str(path).replace("\n", "\\x0a")
 
 
+@_NEEDS_NEWLINE_NAMES
 @pytest.mark.parametrize(
     "command",
     [pytest.param(_SCAN, id="scan"), pytest.param(("config", "validate"), id="config")],
@@ -308,6 +324,7 @@ def test_a_source_dir_refusal_stays_on_one_line(tmp_path, command):
     assert "Source directory is fine" not in result.stderr.splitlines(), result.stderr
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_an_output_dir_refusal_stays_on_one_line(tmp_path):
     (tmp_path / "src").mkdir()
     blocker = tmp_path / _FORGED
@@ -334,6 +351,7 @@ def _no_forged_line(stderr: str) -> None:
     ), stderr
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_the_use_existing_refusal_names_the_output_dir_on_one_line(tmp_path):
     """--use-existing with no results there exits 1 naming where it looked, on one
     line whatever the --output-dir holds."""
@@ -356,6 +374,7 @@ def test_the_use_existing_refusal_names_the_output_dir_on_one_line(tmp_path):
     _no_forged_line(result.stderr)
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_ash_report_without_results_names_the_output_dir_on_one_line(tmp_path):
     out = tmp_path / _FORGED
     out.mkdir()
@@ -368,6 +387,7 @@ def test_ash_report_without_results_names_the_output_dir_on_one_line(tmp_path):
     _no_forged_line(result.stderr)
 
 
+@_NEEDS_NEWLINE_NAMES
 def test_ash_report_that_cannot_read_its_results_names_them_on_one_line(tmp_path):
     out = tmp_path / _FORGED
     out.mkdir()

@@ -125,9 +125,9 @@ def test_the_stderr_record_of_a_real_child_hides_the_value(tmp_path, sep):
 
 
 def test_a_timed_out_runs_partial_stdout_hides_a_crlf_value(tmp_path):
-    """The partial output of a timed-out run is decoded from the exception's
-    bytes with no newline translation, so a CRLF value keeps its own spelling
-    there and has to stay hidden in that spelling too."""
+    """The timeout path reads the partial bytes as a finished text-mode run would
+    (``_as_text_mode_reads``), so a CRLF value comes back with LF and has to stay
+    hidden in that translated spelling too."""
     value = f"{HEAD}\r\n{TAIL}"
     context = _context(tmp_path, [value])
     scanner = _scanner(context)
@@ -140,7 +140,9 @@ def test_a_timed_out_runs_partial_stdout_hides_a_crlf_value(tmp_path):
         timeout=2,
     )
     assert response.get("timed_out") is True, response
-    assert value in (response.get("stdout") or ""), repr(response.get("stdout"))
+    stdout = response.get("stdout") or ""
+    assert value not in stdout, repr(stdout)
+    assert f"{HEAD}\n{TAIL}" in stdout, repr(stdout)
     joined = " | ".join(_recorded(scanner, context, scanner.output))
     assert "tool saw" in joined, repr(joined)
     assert HEAD not in joined and TAIL not in joined, repr(joined)

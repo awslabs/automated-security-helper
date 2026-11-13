@@ -279,12 +279,23 @@ def test_the_cli_model_records_click_choices():
 @pytest.mark.unit
 def test_the_registries_match_the_inventories_the_reference_checks_read():
     """Plugin names come from the plugin modules' ASH_* lists. The gate's scanner and
-    reporter checks read the same plugins another way, so the two must agree."""
+    reporter checks read the same plugins another way, so the two must agree.
+
+    The gate's reporter inventory is the doc generator's, which counts only the
+    reporters defined under the built-in package, so the reporter side is held to
+    the built-in package's own ASH_REPORTERS list; the plugin-module reporters the
+    CLI check accepts are a superset of it."""
+    from automated_security_helper.plugin_modules import ash_builtin
+
     gate = _load(
         "_ash_docs_gate_for_values", REPO_ROOT / "scripts" / "verify_docs_freshness.py"
     )
+    builtin_reporters = frozenset(
+        dc._declared_plugin_name(plugin) for plugin in ash_builtin.ASH_REPORTERS
+    )
     assert dc.plugin_names("scanner") == frozenset(gate.scanner_names())
-    assert dc.plugin_names("reporter") == frozenset(gate.reporter_names())
+    assert builtin_reporters == frozenset(gate.reporter_names())
+    assert builtin_reporters <= dc.plugin_names("reporter")
     assert dc.plugin_names("converter") == frozenset(
         dc.load_config_models().plugin_configs["converters"]
     )
@@ -311,8 +322,10 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
 
     Where ASH exits with its own usage-error code and that code is not also the
     actionable-findings code, the runner proves the refusal, so the static check
-    leaves the value alone. Where the two codes are the same, an expect-exit block
-    cannot tell a typo from findings, so the value is still reported.
+    leaves the value alone. The bad-selection code (2) proves one too, but only on
+    a ``dependencies`` command, which never scans (``shows_a_selection_refusal``);
+    on any other command exit 2 means actionable findings, so an expect-exit=2
+    block cannot tell a typo from findings there and the value is still reported.
     """
     text = (
         f"<!-- doctest: run expect-exit=5 -->\n{FENCE}bash\n"
@@ -323,11 +336,22 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
     monkeypatch.setattr(dc, "usage_error_exit", lambda: None)
     _assert_reports(_check(cli_root, text), "named 'gryp'", 3)
     monkeypatch.setattr(dc, "usage_error_exit", lambda: 5)
+    # expect-exit=2 is ash dependencies install's refusal code for an unknown
+    # tool, so the runner proves the refusal and the value is left alone there...
+    assert _check(cli_root, text.replace("expect-exit=5", "expect-exit=2")) == []
+    monkeypatch.setattr(dc, "bad_selection_exit", lambda: None)
     _assert_reports(
         _check(cli_root, text.replace("expect-exit=5", "expect-exit=2")),
         "named 'gryp'",
         3,
     )
+    monkeypatch.undo()
+    # ... and on a command whose exit 2 is the findings code, it is still reported.
+    scan_text = (
+        f"<!-- doctest: run expect-exit=2 -->\n{FENCE}bash\n"
+        f"ash --source-dir . --scanners banditt --offline\n{FENCE}\n"
+    )
+    _assert_reports(_check(cli_root, scan_text), "named 'banditt'", 3)
 
 
 @pytest.mark.unit

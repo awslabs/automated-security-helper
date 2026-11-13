@@ -222,6 +222,7 @@ def test_nix_mode_judges_the_config_the_same_way(
         raise AssertionError("the nix launcher was invoked")
 
     monkeypatch.setattr(ras, "run_ash_nix", never)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     with pytest.raises(SystemExit) as refusal:
         ras.run_ash_scan(
             source_dir=str(src),
@@ -757,8 +758,16 @@ def test_an_exit_field_is_read_with_the_constraints_its_annotation_carries(
 #: reference at a boolean field, bare or held in a container, by a named
 #: refusal that keeps the reference marker on the error's input, and hands every
 #: value that holds no such text on as it is.
+#: Also inherited by every section: the after-validator on every field
+#: (``redacted_model``'s ``_env_resolved_text_validation_kept_reads_as_text``),
+#: which only downcasts a leftover str-subclass environment marker inside a
+#: container a before-validator kept. As a ``"*"`` validator it formally
+#: reaches the exit fields too; its downcast changes no exit-field decision.
 _VALIDATORS_THAT_ONLY_REFUSE_AN_EXIT_FIELD_REFERENCE = frozenset(
-    {"_env_resolved_text_reads_as_the_field_type"}
+    {
+        "_env_resolved_text_reads_as_the_field_type",
+        "_env_resolved_text_validation_kept_reads_as_text",
+    }
 )
 
 
@@ -986,50 +995,46 @@ def test_the_gate_and_the_exit_fields_resolve_the_selected_document_once(
     assert len(resolved) == 1, resolved
 
 
-def test_the_sandbox_mode_probe_asks_for_the_selected_file_with_the_scans_base_gate(
+def test_the_symlinked_output_directory_refusal_reads_no_configuration(
     tmp_path, monkeypatch
 ):
-    """What a local scan's sandbox-mode probe takes from the scan. A scan whose
-    output directory is reached through a link asks the sandbox mode of the
-    configuration (``_refuse_symlinked_output_dir``), and it resolves the
-    selected file again through ``resolve_config`` with the scan's own
-    arguments: no document of the gate's is handed to it, so a file that
-    changes between the gate and the probe is read in two versions. The probe
-    only decides whether the sandbox is on (an unresolvable file counts as on),
-    and the scan's own load judges the file. This cell pins the two things the
-    probe must take from the scan, one resolve of the selected path and the
-    scan's base gate; it does not pin the rest of the call."""
+    """What a local scan's output-directory link refusal takes from the scan. A
+    scan whose output directory is reached through a link is refused whatever
+    the sandbox mode (``_refuse_symlinked_output_dir``), so it asks the
+    configuration nothing: no ``resolve_config`` call, no document of the
+    gate's, and a config that turns the sandbox off changes nothing. The
+    refusal is ``OutputDirRefusedExit`` with exit code 3 naming the link, and
+    the scan's own load judges the file."""
     from automated_security_helper.config import resolve_config as resolving
-    from automated_security_helper.utils.sandbox import policy
-
-    def unavailable(*_args, **_kwargs):
-        raise policy.SandboxUnavailable("the output directory is a symlink")
 
     asked = []
 
-    def resolve_the_sandbox_mode(**kwargs):
+    def resolve_anything(**kwargs):
         asked.append(kwargs)
         return SimpleNamespace(sandbox=SimpleNamespace(mode="off"))
 
-    monkeypatch.setattr(policy, "refuse_symlinked_output_dir", unavailable)
-    monkeypatch.setattr(resolving, "resolve_config", resolve_the_sandbox_mode)
+    monkeypatch.setattr(resolving, "resolve_config", resolve_anything)
     config = _write(tmp_path / "ops" / "ash.yaml", {"project_name": "op"})
-    gate = object()
+    real_out = tmp_path / "real-out"
+    real_out.mkdir()
+    link = tmp_path / "out"
+    link.symlink_to(real_out, target_is_directory=True)
     opts = SimpleNamespace(
         mode=RunMode.local,
         source_dir=tmp_path,
-        output_dir=tmp_path / "out",
+        output_dir=link,
         config=str(config),
-        config_overrides=["project_name=other"],
-        config_base_gate=gate,
+        config_overrides=["sandbox.mode=off"],
+        config_base_gate=object(),
         workspace_plan=None,
     )
 
-    ras._refuse_symlinked_output_dir(opts)
+    with pytest.raises(ras.OutputDirRefusedExit) as refused:
+        ras._refuse_symlinked_output_dir(opts)
 
-    assert len(asked) == 1, asked
-    assert asked[0]["config_path"] == str(config), asked
-    assert asked[0]["permit_base"] is gate, asked
+    assert refused.value.code == ras.OUTPUT_DIR_REFUSED_EXIT_CODE == 3
+    assert refused.value.found, "the refusal names no link"
+    assert asked == [], asked
 
 
 def test_the_exit_field_read_takes_the_gates_answer_about_the_image(
@@ -1352,6 +1357,7 @@ def test_nix_mode_refuses_an_unparsable_config_before_clearing_output(
 
     launcher = MagicMock(return_value=SimpleNamespace(returncode=0))
     monkeypatch.setattr(ras, "run_ash_nix", launcher)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     with pytest.raises(SystemExit) as finished:
         ras.run_ash_scan(
             source_dir=str(opts.source_dir),
@@ -2845,7 +2851,10 @@ def test_each_outer_mode_hands_the_gates_answer_to_the_record_repair(
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     runner = ras._run_container_mode if mode == "container" else ras._run_nix_mode
     target = "run_ash_container" if mode == "container" else "run_ash_nix"
-    with patch.object(ras, target, side_effect=inner):
+    with (
+        patch.object(ras, target, side_effect=inner),
+        patch.object(ras, "nix_preflight", lambda: None),
+    ):
         runner(opts, MagicMock(), image_may_differ=answer)
     assert seen == [{"image_may_differ": answer}]
 
@@ -3024,6 +3033,7 @@ def _scan_through_the_gate(
     previous.write_text('{"runs": []}\n', encoding="utf-8")
     launcher = MagicMock(return_value=SimpleNamespace(returncode=0))
     monkeypatch.setattr(ras, "run_ash_nix", launcher)
+    monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     options = (
         {"mode": RunMode.nix}
         if mode == "nix"

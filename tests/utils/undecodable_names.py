@@ -95,8 +95,11 @@ def make_tree(root: Path, files: Mapping[Name, bytes]) -> Path:
     base = os.fsencode(root)
     for name, content in files.items():
         raw = name if isinstance(name, bytes) else os.fsencode(name)
-        path = os.path.join(base, raw)
         try:
+            # Inside the try: on Windows ntpath.join decodes a bytes name that is
+            # not UTF-8 and raises UnicodeDecodeError, the same refusal as a
+            # filesystem that cannot hold the name.
+            path = os.path.join(base, raw)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as handle:
                 handle.write(content)

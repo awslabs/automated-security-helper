@@ -69,28 +69,60 @@ test("search keeps keyboard focus in the dialog until closed", async ({ page }) 
   await expect(page.getByRole("button", { name: "Search documentation" })).toBeFocused();
 });
 
-test("installation tabs support the keyboard, scan modes update copied commands", async ({ page, context }) => {
+test("snippet builder: picks and backends choose one panel and the copy button copies it", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("./");
   const release = (await page.locator(".ash-hero__version").innerText()).trim();
   expect(release).toMatch(/^ASH v\d+\.\d+\.\d+$/);
   const version = release.slice(5);
-  await page.getByRole("button", { name: "Copy pipx installation command" }).click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    `pipx install git+https://github.com/awslabs/automated-security-helper.git@v${version}`
+  const builder = page.locator("[data-ash-builder]");
+  const panels = builder.locator("[data-ash-panel]");
+  const pick = id => builder.locator(`[data-ash-pick="${id}"]`);
+  const backend = id => builder.locator(`[data-ash-backend="${id}"]`);
+  await expect(builder.locator("[data-ash-builder-pickers]")).toBeVisible();
+  await expect(pick("local")).toHaveAttribute("aria-pressed", "true");
+  await expect(backend("uvtool")).toHaveAttribute("aria-pressed", "true");
+  await expect(builder.locator("[data-ash-panel]:visible")).toHaveCount(1);
+  await expect(builder.locator("[data-ash-panel='local-uvtool']")).toBeVisible();
+
+  await backend("pipx").click();
+  await expect(backend("pipx")).toHaveAttribute("aria-pressed", "true");
+  await expect(backend("uvtool")).toHaveAttribute("aria-pressed", "false");
+  await expect(builder.locator("[data-ash-panel]:visible")).toHaveCount(1);
+  await expect(builder.locator("[data-ash-panel='local-pipx']")).toBeVisible();
+  await expect(builder.locator("[data-ash-builder-status]")).toContainText("Local scan with pipx");
+  await builder.getByRole("button", { name: "Copy Local scan with pipx: Shell" }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+    `pipx install --python python3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v${version}'`
   );
-  const tabs = page.getByRole("tab");
-  await tabs.first().focus();
-  await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("tab", { name: "uvx", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator("#panel-uvx")).toBeVisible();
-  await page.keyboard.press("End");
-  await expect(page.getByRole("tab", { name: "pip", exact: true })).toBeFocused();
-  await page.getByRole("button", { name: "Local", exact: true }).click();
-  await expect(page.locator("[data-ash-scan-command]")).toHaveText("ash --mode local");
-  await page.locator("[data-ash-copy-scan]").click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("ash --mode local");
   await expect(page.locator("[data-ash-toast]")).toContainText("Command copied");
+
+  await pick("gitlab").click();
+  await expect(pick("gitlab")).toHaveAttribute("aria-pressed", "true");
+  await expect(pick("local")).toHaveAttribute("aria-pressed", "false");
+  await expect(builder.locator("[data-ash-panel]:visible")).toHaveCount(1);
+  await expect(builder.locator("[data-ash-panel='gl-pip']")).toBeVisible();
+
+  await backend("nix").click();
+  await expect(builder.locator("[data-ash-panel]:visible")).toHaveCount(1);
+  await expect(builder.locator("[data-ash-panel='gl-na']")).toBeVisible();
+  await expect(builder.locator("[data-ash-builder-status]")).toContainText("Nix mode is not in any release");
+
+  const picks = await builder.locator("[data-ash-pick]").evaluateAll(buttons => buttons.map(button => button.dataset.ashPick));
+  const backends = await builder.locator("[data-ash-backend]").evaluateAll(buttons => buttons.map(button => button.dataset.ashBackend));
+  expect(picks.length).toBeGreaterThan(1);
+  expect(backends.length).toBeGreaterThan(1);
+  for (const pickId of picks) {
+    for (const backendId of backends) {
+      await pick(pickId).click();
+      await backend(backendId).click();
+      await expect(builder.locator("[data-ash-panel]:visible")).toHaveCount(1);
+      const shown = builder.locator("[data-ash-panel]:visible");
+      await expect(shown).toHaveAttribute("data-ash-pick-for", pickId);
+      expect((await shown.getAttribute("data-ash-backends-for")).split(" ")).toContain(backendId);
+    }
+  }
+  expect(await panels.count()).toBeGreaterThan(picks.length);
 });
 
 test("scanner filters announce results and FAQ answers expand", async ({ page }) => {
@@ -99,7 +131,18 @@ test("scanner filters announce results and FAQ answers expand", async ({ page })
   await expect(page.locator("[data-ash-category]:visible")).toHaveCount(1);
   await expect(page.locator("[data-ash-filter-status]")).toContainText("1 secrets scanner");
   await page.getByRole("button", { name: "All tools" }).click();
-  await expect(page.locator("[data-ash-category]:visible")).toHaveCount(10);
+  // The count on the button and the cards both come from the generated plugin data
+  // (docs/overrides/partials/generated/plugin-data.html); a template that stopped
+  // reading it would leave them disagreeing, or both at zero.
+  const advertised = Number(await page.locator("[data-ash-filter='all'] span").innerText());
+  expect(advertised).toBeGreaterThan(0);
+  await expect(page.locator("[data-ash-category]:visible")).toHaveCount(advertised);
+  const cards = page.locator("a.ash-scanner");
+  await expect(cards).toHaveCount(advertised);
+  for (const href of await cards.evaluateAll(links => links.map(link => link.getAttribute("href")))) {
+    expect(href).toContain("reference/scanners/#");
+  }
+  await expect(page.locator("[data-ash-filter-status]")).toContainText(`${advertised} scanners`);
   await page.getByText("Do I need an AWS account?", { exact: true }).click();
   await expect(page.getByText("Core ASH scanning runs locally", { exact: false })).toBeVisible();
 });
@@ -193,9 +236,12 @@ test("mobile navigation and installation work without JavaScript", async ({ brow
   await page.goto("./");
   const navigation = page.getByRole("navigation", { name: "Site navigation" });
   await expect(navigation).toBeVisible();
-  await expect(page.locator("#panel-pipx")).toBeVisible();
-  await expect(page.locator("#panel-uvx")).toBeVisible();
-  await expect(page.locator("#panel-pip")).toBeVisible();
+  const panels = page.locator("[data-ash-panel]");
+  expect(await panels.count()).toBeGreaterThan(1);
+  for (const panel of await panels.all()) {
+    await expect(panel).toBeVisible();
+  }
+  await expect(page.locator("[data-ash-builder-pickers]")).toBeHidden();
   await navigation.getByRole("link", { name: "Documentation" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Quick Start");
   await context.close();

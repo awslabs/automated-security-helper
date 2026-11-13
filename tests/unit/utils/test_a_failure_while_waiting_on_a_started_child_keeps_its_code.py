@@ -73,6 +73,22 @@ RUNNERS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    Many cells below replace the process boundary (``_runner``) and pass it
+    "stub-tool", a program installed nowhere. On Windows ASH refuses a bare name
+    its lookup cannot resolve before it spawns anything
+    (``subprocess_utils._refuse_unresolved_on_windows``), so the stand-in runner
+    was never called and each cell read the refusal's spawn-failure response, not
+    the behavior it pins. Those cells are about what happens after the spawn, so
+    that decision is set aside here. Only a bare name that resolves nowhere
+    reaches that check.
+    """
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
 @contextlib.contextmanager
 def _runner(kind: Optional[str]) -> Iterator[None]:
     if kind == "cancel-scope":
@@ -89,12 +105,29 @@ def _runner(kind: Optional[str]) -> Iterator[None]:
         yield
 
 
+def _is_asks_to_stop(process) -> bool:
+    """Whether ``process`` is the taskkill ASH runs to stop a tool's tree on Windows.
+
+    These cells make ASH's wait on the TOOL fail by patching Popen's methods for
+    the whole class. On Windows a stop inside a cancel scope runs taskkill through
+    ``subprocess.run``, which goes through the same patched methods, so the stop
+    itself failed with the injected error and the tool was reported as one ASH
+    could not stop. The injected failure belongs to the tool's wait alone.
+    """
+    args = getattr(process, "args", None)
+    first = args[0] if isinstance(args, (list, tuple)) and args else args
+    return os.path.basename(os.fsdecode(first or "")).lower() == "taskkill.exe"
+
+
 def _reading_the_pipes_fails():
-    return patch.object(
-        subprocess.Popen,
-        "_communicate",
-        side_effect=RuntimeError("reading the pipes failed"),
-    )
+    real = subprocess.Popen._communicate
+
+    def _communicate(self, *args, **kwargs):
+        if _is_asks_to_stop(self):
+            return real(self, *args, **kwargs)
+        raise RuntimeError("reading the pipes failed")
+
+    return patch.object(subprocess.Popen, "_communicate", _communicate)
 
 
 def _tool_that_exits_3(marker) -> list:
@@ -108,6 +141,8 @@ def _communicate_returns_then_raises():
     real = subprocess.Popen.communicate
 
     def communicate(self, *args, **kwargs):
+        if _is_asks_to_stop(self):
+            return real(self, *args, **kwargs)
         real(self, *args, **kwargs)
         raise RuntimeError("handling the output failed")
 
@@ -195,7 +230,7 @@ def _waiting_fails_once_the_stderr_was_read(
     failed: list = []
 
     def communicate(self, *args, **kwargs):
-        if any(process is self for process in failed):
+        if _is_asks_to_stop(self) or any(process is self for process in failed):
             return real(self, *args, **kwargs)
         failed.append(self)
         to_send = args[0] if args else kwargs.get("input")
@@ -496,7 +531,10 @@ def test_a_raise_while_noting_the_start_stops_the_child(tmp_path, monkeypatch, k
     class _Recorded(subprocess.Popen):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            started.append(self)
+            # The tool's children only: on Windows the stop runs taskkill, a
+            # Popen of ASH's own that is not one of the two children counted.
+            if not _is_asks_to_stop(self):
+                started.append(self)
 
     monkeypatch.setattr(subprocess, "Popen", _Recorded)
     # Put back afterwards: a cancellable spawn that raised here may have left its
@@ -623,12 +661,17 @@ _POPEN_STOPPED = [
 
 @contextlib.contextmanager
 def _the_kernel_refuses_the_stop() -> Iterator[list]:
-    """Every signal ASH sends the tool's child through Popen raises EPERM, as for a
-    setuid program the tool started, and the child keeps running. Yields the
-    children started; each is killed for real afterwards."""
+    """Every signal ASH sends the tool's child raises EPERM, as for a setuid
+    program the tool started, and the child keeps running: the ones sent through
+    Popen (send_signal) and the ones sent to the child's own process group
+    (os.killpg, the plain runner's stop of a timed-out child, which leads a group
+    of its own so the kill reaches what it started). A probe of the group (signal
+    0) is answered for real, so the stop paths read the group as it is. Yields
+    the children started; each is killed for real afterwards."""
     children: list = []
     real_init = subprocess.Popen.__init__
     real_send_signal = subprocess.Popen.send_signal
+    real_killpg = os.killpg
 
     def recording(self, *args, **kwargs):
         real_init(self, *args, **kwargs)
@@ -640,10 +683,16 @@ def _the_kernel_refuses_the_stop() -> Iterator[list]:
             raise PermissionError(errno.EPERM, "Operation not permitted")
         return real_send_signal(self, sig)
 
+    def group_refused(pgid, signum):
+        if signum != 0 and any(child.pid == pgid for child in children):
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+        return real_killpg(pgid, signum)
+
     try:
         with (
             patch.object(subprocess.Popen, "__init__", recording),
             patch.object(subprocess.Popen, "send_signal", refused),
+            patch.object(os, "killpg", group_refused),
         ):
             yield children
     finally:

@@ -4,24 +4,25 @@
 """A workspace scan's spool is refused when committed and never written through.
 
 A workspace scan spools each project's SARIF run to
-``<output>/.workspace-spool/<key>.run.json`` and removes the directory when it
-writes the unified results. A committed entry under ``.workspace-spool`` stops
+``<output>/.workspace-spool/<ordinal>-<key>.run.json`` (the ordinal is a four-digit
+count of the runs already spooled, so ``0000-api.run.json`` for the first) and
+removes the directory when it writes the unified results. A committed entry under
+``.workspace-spool`` stops
 the scan before anything is written or removed, and the spool is written without
-following links: a link at a spool name or at the directory's name is replaced,
-never written through.
+following links: a link at the directory's name or at a spool file's name is
+refused, never written through.
 
 A committed entry anywhere under ``.workspace-spool`` stops the workspace at
 each entry point that checks the others (the CLI, locally and in container mode,
 and the MCP workspace tool) before anything is written or removed. And the spool
-is written without following links: a link at the directory's name is replaced by
-a directory, and each spool file replaces whatever is at its name. The red run of
+is written without following links: a link at the directory's name is refused and
+left in place, and a link at a spool file's name is refused too. The red run of
 these tests did the writes they guard against, so every path is under
 ``tmp_path``.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import stat
 import sys
@@ -52,6 +53,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 SPOOL = ".workspace-spool"
+# The spool file of the workspace's first project, ``api``: the aggregator
+# prefixes the key with the count of runs already spooled
+# (WorkspaceAggregator.add), so two keys that differ only in case stay apart.
+SPOOLED = "0000-api.run.json"
 
 
 def _outside(tmp_path: Path) -> Path:
@@ -80,8 +85,8 @@ def _committed_spool(
     if layout == "inside":
         (output / SPOOL).mkdir()
         (output / SPOOL / "notes.txt").write_text("committed notes\n", encoding="utf-8")
-        (output / SPOOL / "api.run.json").symlink_to(outside / "target.json")
-        committed = [f"{SPOOL}/notes.txt", f"{SPOOL}/api.run.json"]
+        (output / SPOOL / SPOOLED).symlink_to(outside / "target.json")
+        committed = [f"{SPOOL}/notes.txt", f"{SPOOL}/{SPOOLED}"]
     else:
         (output / SPOOL).symlink_to(outside, target_is_directory=True)
         committed = [SPOOL]
@@ -191,23 +196,24 @@ def _spool_one_project(aggregator: WorkspaceAggregator) -> Dict[str, object]:
 
 @pytest.mark.unit
 def test_a_link_at_the_spool_directory_is_replaced_not_written_through(tmp_path):
+    """A link at the spool directory's name is refused with the family of
+    refusals ASH's other output names give a link (``OutputDirLinkRefused``),
+    before anything is written: the link is left where it is, and nothing is
+    spooled through it."""
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+
     outside = _outside(tmp_path)
     aggregator, output = _aggregator(tmp_path)
     (output / SPOOL).symlink_to(outside, target_is_directory=True)
     outside_before = _entries(outside)
 
-    _spool_one_project(aggregator)
+    with pytest.raises(OutputDirLinkRefused, match="symlink"):
+        _spool_one_project(aggregator)
 
     assert _entries(outside) == outside_before, "the run was spooled outside"
-    assert not (output / SPOOL).is_symlink()
-    assert sorted(p.name for p in (output / SPOOL).iterdir()) == ["api.run.json"]
-
-    results = aggregator.write(exit_code=2, wall_clock_seconds=1.0)
-
-    assert _entries(outside) == outside_before
-    assert not os.path.lexists(output / SPOOL), "the spool was left behind"
-    runs = json.loads(results.read_text(encoding="utf-8"))["sarif"]["runs"]
-    assert [run["results"][0]["ruleId"] for run in runs] == ["RULE-API"]
+    assert (output / SPOOL).is_symlink(), "the link was removed"
+    assert os.readlink(output / SPOOL) == str(outside)
+    assert os.listdir(outside) == ["target.json"], "something was written through it"
 
 
 @pytest.mark.unit
@@ -220,9 +226,11 @@ def test_a_junction_at_the_spool_name_is_replaced_not_written_through(
     """A Windows junction's lstat reads as a directory, with the reparse-point
     attribute and a name-surrogate tag (IO_REPARSE_TAG_MOUNT_POINT), and
     ``Path.is_symlink()`` is False for it, so the spool code reads the reparse
-    tag and replaces a junction rather than writing through it. Modeled with a
-    symlink whose lstat reads as such a junction until it is unlinked; the spool
-    must be unlinked, then made."""
+    tag and refuses a junction as it refuses a symlink, rather than writing
+    through it. Modeled with a symlink whose lstat reads as such a junction:
+    the spool is neither unlinked nor made, and the link is left in place."""
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+
     outside = _outside(tmp_path)
     aggregator, output = _aggregator(tmp_path)
     spool = output / SPOOL
@@ -234,19 +242,17 @@ def test_a_junction_at_the_spool_name_is_replaced_not_written_through(
         st_file_attributes = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
         st_reparse_tag = 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT
 
-    present = [True]
     calls: List[str] = []
     real_lstat, real_unlink, real_mkdir = os.lstat, Path.unlink, Path.mkdir
 
     def lstat(path, *args, **kwargs):
-        if present[0] and os.fspath(path) == os.fspath(spool):
+        if os.fspath(path) == os.fspath(spool):
             return JunctionStat()
         return real_lstat(path, *args, **kwargs)
 
     def unlink(self, *args, **kwargs):
         if self == spool:
             calls.append("unlink")
-            present[0] = False
         return real_unlink(self, *args, **kwargs)
 
     def mkdir(self, *args, **kwargs):
@@ -259,13 +265,14 @@ def test_a_junction_at_the_spool_name_is_replaced_not_written_through(
     monkeypatch.setattr(Path, "unlink", unlink)
     monkeypatch.setattr(Path, "mkdir", mkdir)
 
-    _spool_one_project(aggregator)
+    with pytest.raises(OutputDirLinkRefused, match="symlink"):
+        _spool_one_project(aggregator)
 
     monkeypatch.undo()
-    assert calls[:2] == ["unlink", "mkdir"], calls
+    assert calls == [], calls
     assert _entries(outside) == outside_before, "the run was spooled outside"
-    assert not os.path.islink(spool)
-    assert sorted(p.name for p in spool.iterdir()) == ["api.run.json"]
+    assert os.path.islink(spool), "the link was removed"
+    assert os.listdir(outside) == ["target.json"]
 
 
 @pytest.mark.unit
@@ -280,13 +287,13 @@ def test_a_link_at_a_spool_file_is_replaced_not_written_through(tmp_path):
     outside = _outside(tmp_path)
     aggregator, output = _aggregator(tmp_path)
     (output / SPOOL).mkdir()
-    (output / SPOOL / "api.run.json").symlink_to(outside / "target.json")
+    (output / SPOOL / SPOOLED).symlink_to(outside / "target.json")
     outside_before = _entries(outside)
 
     with pytest.raises(OutputLinkRefused, match="symlink"):
         _spool_one_project(aggregator)
 
     assert _entries(outside) == outside_before, "the run was written into the target"
-    spooled = output / SPOOL / "api.run.json"
+    spooled = output / SPOOL / SPOOLED
     assert spooled.is_symlink()
-    assert sorted(p.name for p in (output / SPOOL).iterdir()) == ["api.run.json"]
+    assert sorted(p.name for p in (output / SPOOL).iterdir()) == [SPOOLED]

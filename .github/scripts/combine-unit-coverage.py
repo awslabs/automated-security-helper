@@ -3,12 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Combine the coverage data of one set of unit-test artifacts and apply the threshold.
 
-The unit tier is not sharded, so a set is usually one artifact (``...-shard1of1``). The
-check below still guards a set that was sharded: no single shard of a split run can meet
-the 80% total-coverage gate. A run measures coverage, writes ``test-results/coverage.data``
-and uploads it with the rest of its test results. This script runs in the
-``unit-coverage`` job after they are downloaded, one subdirectory per artifact, and does
-what a single whole-suite "Run PyTest" step did in one process:
+The unit tier runs in four shards per OS and Python version, so a set is four artifacts
+(``...-shard1of4`` to ``...-shard4of4``); a set of one (``...-shard1of1``) is still a
+complete set, for a run of the tier that was not split. The check below is what makes the
+split safe: no single shard of a split run can meet the 80% total-coverage gate, so a
+missing shard is a failure, never a lower number. A run measures coverage, writes
+``test-results/coverage.data`` and uploads it with the rest of its test results. This
+script runs in the ``unit-coverage`` job after they are downloaded, one subdirectory per
+artifact, and does what a single whole-suite "Run PyTest" step did in one process:
 
 1. Check that every shard of the set is there. The shard names carry their own count
    (``...-shard3of8``), so a shard that crashed before uploading, or a matrix entry that
@@ -24,7 +26,10 @@ The set is named by the artifact name up to the shard suffix, which the run-unit
 action builds from the operating system, the architecture, the Python version and the
 tier marker. This script rebuilds that name from ``--os``, ``--python-version``,
 ``--marker`` and the runner's own ``RUNNER_ARCH``, so it must run on the same kind of
-runner as the runs it combines. Without ``--marker`` the name has no tier segment.
+runner as the runs it combines. ``--marker`` is required, with no default: without it the
+name would have no tier segment, so a combine that named no tier would look for the
+untiered artifact name no job uploads, or combine whatever set it found under it, and a
+gate run over an unmarked shard set could pass without having read the unit tier at all.
 That is also what makes path remapping unnecessary: coverage data records absolute source
 paths, and a runner of the same image has the same workspace path, so the combine finds
 every source file where the shard recorded it. A path that did not match would make
@@ -171,7 +176,8 @@ def self_test() -> list[str]:
     tiered_cases = [
         ("tiered complete set", tiered, False),
         ("tiered last shard missing", tiered[:2], True),
-        # The unsharded unit run uploads one artifact, a complete set of one.
+        # An unsharded run uploads one artifact, shard1of1, a complete set of
+        # one; the check still admits it.
         ("tiered single set", [f"{unit_prefix}-shard1of1"], False),
         # An artifact from another tier is not one of this set's shards.
         (
@@ -187,6 +193,41 @@ def self_test() -> list[str]:
                 f"{label}: expected {'problems' if should_fail else 'none'}, got {problems}"
             )
     return failures
+
+
+#: The name a flat download is read as. actions/download-artifact extracts straight into
+#: its path, with no per-artifact directory, whenever exactly one artifact matched the
+#: pattern (its source: ``isSingleArtifactDownload || mergeMultiple || artifacts.length
+#: === 1``), and an unsharded run uploads exactly one artifact, shard1of1. The data file
+#: carries no shard name, so a flat download is read as that complete set of one. The
+#: limit: one shard of a multi-shard set that was the only artifact found would pass as
+#: whole; the unit-coverage job needs every unit job, so that set is not reached.
+FLAT_SHARD_SUFFIX = "-shard1of1"
+
+
+def find_shard_dirs(results: Path, prefix: str) -> list[tuple[str, Path]]:
+    """(artifact name, directory holding its files) per shard, in both layouts.
+
+    One artifact per directory named after it, or, when only one artifact matched, its
+    files directly under ``results``.
+    """
+    dirs = sorted(p for p in results.glob(f"{prefix}-shard*") if p.is_dir())
+    if dirs:
+        return [(p.name, p) for p in dirs]
+    if (results / DATA_FILE).is_file():
+        return [(prefix + FLAT_SHARD_SUFFIX, results)]
+    return []
+
+
+def describe_root(results: Path) -> str:
+    """One level of what the download root holds, for the 'no shard artifacts' error."""
+    try:
+        entries = sorted(
+            f"{e.name}/" if e.is_dir() else e.name for e in results.iterdir()
+        )
+    except OSError as error:
+        return f"{results} cannot be listed: {error}"
+    return f"{results} holds {entries or 'nothing'}"
 
 
 def data_problem(path: Path) -> str | None:
@@ -216,7 +257,9 @@ def _coverage(*args: str) -> subprocess.CompletedProcess:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--results-dir", help="directory holding one subdirectory per artifact"
+        "--results-dir",
+        help="directory holding one subdirectory per artifact, or the one artifact's "
+        "files directly when download-artifact matched exactly one",
     )
     parser.add_argument(
         "--os", help="the runs-on value of the shards, e.g. macos-latest"
@@ -224,8 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python-version", help="the Python version of the shards")
     parser.add_argument(
         "--marker",
-        default=None,
-        help="the tier marker in the artifact names, e.g. unit (default: none)",
+        help="the tier marker in the artifact names, e.g. unit (required, no default)",
     )
     parser.add_argument(
         "--fail-under", type=float, help="minimum total coverage, percent"
@@ -248,13 +290,16 @@ def main(argv: list[str] | None = None) -> int:
         not args.results_dir
         or not args.os
         or not args.python_version
+        or not args.marker
         or args.fail_under is None
     ):
-        # Not parser.error(): argparse exits 2 there, which is coverage's own status for
-        # a run below the threshold.
+        # Not parser.error(), and not argparse's required=True: argparse exits 2 there,
+        # which is coverage's own status for a run below the threshold, and a required
+        # option would also refuse --self-test. --marker is required here for the reason
+        # the module docstring gives: without a tier the gate reads no tier.
         print(
-            "combine-unit-coverage: --results-dir, --os, --python-version and "
-            "--fail-under are required",
+            "combine-unit-coverage: --results-dir, --os, --python-version, --marker "
+            "and --fail-under are required",
             file=sys.stderr,
         )
         return 64
@@ -270,13 +315,15 @@ def main(argv: list[str] | None = None) -> int:
         return 64
 
     results = Path(args.results_dir)
-    shard_dirs = sorted(p for p in results.glob(f"{prefix}-shard*") if p.is_dir())
-    problems = check_shards([p.name for p in shard_dirs], prefix)
+    shard_dirs = find_shard_dirs(results, prefix)
+    problems = check_shards([name for name, _ in shard_dirs], prefix)
+    if problems == [f"no shard artifacts found for {prefix!r}"]:
+        problems = [f"{problems[0]}; {describe_root(results)}"]
     data_files = []
-    for shard_dir in shard_dirs:
+    for name, shard_dir in shard_dirs:
         data = shard_dir / DATA_FILE
         if not data.is_file():
-            problems.append(f"{shard_dir.name} has no {DATA_FILE}")
+            problems.append(f"{name} has no {DATA_FILE}")
             continue
         problem = data_problem(data)
         if problem:

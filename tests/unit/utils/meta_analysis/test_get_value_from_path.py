@@ -44,8 +44,10 @@ def test_get_value_from_path_with_arrays():
         "value": "item2",
     }
 
-    # Out of bounds
-    assert get_value_from_path(obj, "items[2].id") == {"exists": True, "value": None}
+    # Out of bounds: a field the object does not have. check_field_presence_in_reports
+    # reads "exists", and True here counted a dropped array element as preserved.
+    assert get_value_from_path(obj, "items[2].id") == {"exists": False, "value": None}
+    assert get_value_from_path(obj, "items[2]") == {"exists": False, "value": None}
 
     # Invalid index
     assert get_value_from_path(obj, "items[a].id") == {"exists": False, "value": None}

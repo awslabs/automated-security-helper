@@ -19,6 +19,7 @@ from __future__ import annotations
 import gzip
 import io
 import logging
+import os
 import re
 import tarfile
 from pathlib import Path
@@ -28,6 +29,9 @@ import pytest
 
 from automated_security_helper.plugin_modules.ash_builtin.converters import (
     archive_converter,
+)
+from automated_security_helper.utils.scan_output_dirs import (
+    CONVERTED_SOURCES_FILE_NAME,
 )
 
 pytestmark = pytest.mark.unit
@@ -80,12 +84,16 @@ def _convert(test_plugin_context, monkeypatch, name: str, content: bytes):
 
 
 def _extracted(converter) -> List[str]:
-    """The member files the converter wrote, relative to its archive's directory."""
+    """The member files the converter wrote, relative to its archive's directory.
+
+    The converter's own record of what it extracted (converted-sources.json, at the
+    top of the results directory) is not a member and is left out.
+    """
     results = Path(converter.results_dir)
     return sorted(
         p.relative_to(results).as_posix().split("/", 1)[1]
         for p in results.rglob("*")
-        if p.is_file()
+        if p.is_file() and p != results / CONVERTED_SOURCES_FILE_NAME
     )
 
 
@@ -184,16 +192,31 @@ def test_the_warning_for_an_archive_extracted_in_part_is_one_line(
     test_plugin_context, monkeypatch, caplog
 ):
     """The archive's name comes from the scanned tree, so a newline in it is
-    written as its escape: the warning stays one line."""
-    tarred = _with_a_damaged_header(
-        _tar_of(
-            ("ok.js", "ok = 1\n"), ("mid.js", "mid = 1\n"), ("after.js", "a = 1\n")
-        ),
-        "mid.js",
-    )
+    written as its escape: the warning stays one line.
 
+    Windows cannot create a file whose name holds a newline (ERROR_INVALID_NAME),
+    so there the warning is raised by the converter's own recorder for an archive
+    of that name instead of by converting a file of it; the line it logs is the
+    one a converted archive logs."""
     with caplog.at_level(logging.WARNING):
-        _convert(test_plugin_context, monkeypatch, "new\nline.tar", tarred)
+        if os.name == "nt":
+            converter = archive_converter.ArchiveConverter(
+                context=test_plugin_context,
+                config=archive_converter.ArchiveConverterConfig(),
+            )
+            converter._record_extracted_in_part(
+                "lib/new\nline.tar", [1024], [], archive_file="lib/new\nline.tar"
+            )
+        else:
+            tarred = _with_a_damaged_header(
+                _tar_of(
+                    ("ok.js", "ok = 1\n"),
+                    ("mid.js", "mid = 1\n"),
+                    ("after.js", "a = 1\n"),
+                ),
+                "mid.js",
+            )
+            _convert(test_plugin_context, monkeypatch, "new\nline.tar", tarred)
 
     (warning,) = _partly_warnings(caplog)
     assert "\n" not in warning, warning

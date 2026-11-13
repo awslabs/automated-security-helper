@@ -6,6 +6,9 @@ tools, scans the repository, and reports the result on the pull request.
 write the steps yourself. For a first setup, follow
 [Add ASH to a GitHub Actions pipeline](../../getting-started/ci.md).
 
+If developers also run the pre-commit hook, it covers only five scanners; this workflow
+runs the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
+
 ## Call the reusable workflows {#reusable}
 
 <!-- doctest: config kind=github-actions -->
@@ -19,19 +22,19 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.0
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.8.0
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
-      ash-version: v3.7.0
+      ash-version: v3.8.0
       ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
   sarif:
     needs: ash
     if: ${{ !cancelled() && needs.ash.outputs.artifact-id != '' }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.7.0
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.8.0
     permissions:
       contents: read
       security-events: write
@@ -56,10 +59,10 @@ code 1.
 
 ASH's zizmor scanner reports each `uses:` line that names a tag as `zizmor/unpinned-uses` at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
-commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.7.0`
-prints the commit that `v3.7.0` names. Replace the `v3.7.0` after each `@`, and the
+commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.8.0`
+prints the commit that `v3.8.0` names. Replace the `v3.8.0` after each `@`, and the
 `ash-version` value, with that SHA, and end each `uses:` line with the comment
-`# v3.7.0`.
+`# v3.8.0`.
 
 A pull request scan reads the configuration in the branch it scans, so the branch can change
 the gate. The workflow passes the `fail-on-findings` choice on the command line, and the
@@ -79,6 +82,8 @@ affect.
 | `ash-version` | empty | Git tag, branch, or commit of ASH to install. When empty, the job installs the ASH of the commit it was called at: a caller of a release tag gets that release, and a caller of `@main` gets that commit of main. The job resolves the value to one commit before it installs anything, and every step uses that commit; the job summary names it. A value that starts with `-` or holds a space, that names nothing in `ash-repo`, or that is both a branch and a tag on different commits fails the job. Every run installs it again. |
 | `ash-repo` | empty | Repository (`owner/repo`) to install ASH from. When empty, the job uses the repository the workflow file comes from. A value other than that repository needs `ash-version` too. The owner and the name may hold letters, digits, `.`, `_`, and `-`; any other form fails the job. |
 | `ash-mode` | `local` | Value of `--mode`. `container` builds ASH's image on the runner and scans inside it; see [Run ASH in a container](../run-in-a-container.md). |
+| `runner` | `ubuntu-latest` | Runner label for the scan job and the reporting job. Pass `ubuntu-24.04-arm` where your repository has hosted arm64 runners and you want their shorter queue; this repository's own scan does. |
+| `scan-timeout-minutes` | `30` | Minutes the scan job may run before it is cancelled. The pull-request-head informational workflow passes `50`: it runs the pull request's own ASH verbose, and its report phase renders every suppressed finding, which outgrew the 30-minute default. |
 | `config` | empty | Path to an ASH config file, passed as `--config` and as `ASH_CONFIG`. When empty, ASH finds the config in the checkout. |
 | `config-ref` | empty | Commit, branch, or tag of the scanned repository to read the `config` file from, instead of the checkout. Needs `config`. The workflow writes the file under `$RUNNER_TEMP` and passes it as `--config`, and the tool config files it names by a relative path (`config_file`, and opengrep's and semgrep's `config`) come from the same commit. ASH treats it as the operator's config only while `$RUNNER_TEMP` is outside every git checkout and outside the scanned directory, as it is on GitHub-hosted runners; on a self-hosted runner, keep `$RUNNER_TEMP` outside them. A config that `extends` another file fails, and so does one at that commit that is missing, unless `config-ref-missing` is `defaults`. A value that starts with `-` or holds a space fails the job before git reads it. |
 | `config-ref-missing` | `refuse` | What `config-ref` does when that commit has no `config` file: `refuse` fails the job, and `defaults` scans with ASH's default config and logs a warning, for the pull request that adds a repository's first config. |
@@ -100,7 +105,7 @@ affect.
 | `install-cfn-guard` | `true` | Install cfn-guard and the rule files it evaluates. |
 | `install-gitleaks` | `true` | Install gitleaks. |
 | `install-trivy` | `true` | Install trivy. trivy downloads its vulnerability database during each scan. |
-| `changed-files-only` | `false` | Passes `--changed-files-only` and `--base-ref`, and checks out the repository's whole history to compute the changed files; see [Scan only the files a pull request changes](#changed-files). Not supported with `ash-mode: container`: the scan stops with exit code 5. |
+| `changed-files-only` | `false` | Passes `--changed-files-only` and `--base-ref`, and checks out the repository's whole history to compute the changed files; see [Scan only the files a pull request changes](#changed-files). Not supported with `ash-mode: container`: the workflow stops the job with its own error before the scan. |
 | `base-ref` | `origin/main` | The base for `changed-files-only` on events other than `pull_request` and `merge_group`, which use their own base commit. |
 | `artifact-name` | `ash_output` | Name of the artifact the scan's output directory is uploaded as. A matrix, or a caller that calls this workflow more than once in one run, must give each call its own name: in the first attempt a second upload under a name already taken fails, and in a re-run it replaces the earlier upload. |
 
@@ -117,7 +122,7 @@ to `false`.
 
 The binary tools come from `ash dependencies install`, which downloads the versions that
 the installed ASH pins and checks each download against its pinned SHA256 before
-installing it. bandit, checkov, and semgrep need no input: ASH installs
+installing it. bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH installs
 them from PyPI with `uv tool install` during the scan. detect-secrets is part of ASH, and
 cdk-nag and npm-audit use the Node.js and npm that GitHub's Ubuntu runners include.
 
@@ -193,8 +198,8 @@ git gives it before printing it, and fails the step on one that does not.
 
 ### What the workflow does {#steps}
 
-The workflow runs two jobs on `ubuntu-latest`; neither the runner nor the timeouts are
-inputs. The scan job, `SAST, SCA, and IaC Scan`, has a 30-minute timeout and holds only
+The workflow runs two jobs on the runner its `runner` input names, `ubuntu-latest` by
+default; the timeouts are not inputs, apart from `scan-timeout-minutes`. The scan job, `SAST, SCA, and IaC Scan`, has a 30-minute timeout and holds only
 `contents: read`, so nothing it runs, ASH and the scanners included, holds a token that can
 write.
 
@@ -239,6 +244,41 @@ comment and the check run and prints a notice. The scan, its exit code, the job 
 and the artifact are unchanged. On a push, the comment goes to the pull request that the
 pushed commit came from, if there is one.
 
+## Scan inside a container with ash-mode: container {#container-mode}
+
+Set `ash-mode: container` to build ASH's image on the runner and scan inside it. The image
+holds every scanner tool, so the runner needs none of them. ASH publishes no image, so each
+run builds one; see [Run ASH in a container](../run-in-a-container.md).
+
+Add it to the call in [Call the reusable workflows](#reusable), keeping the call's other
+`with:` entries as they are. The `ash-args` line is the gate, so leave it in place.
+
+<!-- doctest: config kind=other reason="two entries to add to the with: block of the call in Call the reusable workflows, not a workflow on their own" -->
+```yaml
+with:
+  ash-version: v3.8.0
+  ash-mode: container
+```
+
+The `install-*` inputs only matter in local mode, where they download scanner tools onto
+the runner. In container mode the scanners run inside the image, so the example sets none
+of them. The inputs a workflow accepts depend on its version: the workflow at `v3.8.0`
+defines only `install-grype`, `install-syft`, and `install-opengrep`, all defaulting to
+`false`, and a caller that passes an input the referenced workflow does not define fails
+before any job starts. Check the workflow file at the tag you pin before adding one.
+
+`changed-files-only` does not work with container mode. The workflow checks the mode before
+it runs ASH, whether it comes from `ash-mode` or from `--mode container` in `ash-args`, and
+stops the job with its own error (a non-zero exit) instead of starting the scan. The check
+is the workflow's: releases through v3.7.1 ignore `--changed-files-only` in container mode
+and report the findings in every file, while later builds refuse the combination with exit
+code 5. To report only a pull request's changes, use the default `ash-mode: local`, as
+described in [Scan only the files a pull request changes](#changed-files).
+
+`ash-args: --mode container` has the same effect as `ash-mode: container`, and an
+explicit `--mode` in `ash-args` wins over `ash-mode` if the two disagree, with no warning.
+Set one of them.
+
 ## Upload SARIF with upload-ash-sarif.yml {#sarif}
 
 `run-ash-security-scan.yml` does not declare `security-events: write`, and a called workflow
@@ -256,9 +296,10 @@ To upload on every trigger, set `collect-sarif-report: false` and add a job that
 
 - downloads the artifact that the scan job uploaded in the same workflow run, and uploads
   `reports/ash.ghas.sarif` from it with category `ash`;
-- takes two optional inputs: `artifact-id`, the scan workflow's `artifact-id` output,
-  which names exactly the artifact that scan uploaded, and `artifact-name`, the name to
-  download by when `artifact-id` is empty, `ash_output` by default;
+- takes three optional inputs: `artifact-id`, the scan workflow's `artifact-id` output,
+  which names exactly the artifact that scan uploaded, `artifact-name`, the name to
+  download by when `artifact-id` is empty, `ash_output` by default, and `runner`, the
+  runner label for the upload job, `ubuntu-latest` by default;
 - skips `merge_group` events;
 - declares `contents: read` and `security-events: write`, which the calling job must grant.
 
@@ -310,7 +351,7 @@ jobs:
       security-events: write
       actions: read # private repositories only
     env:
-      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -348,8 +389,8 @@ jobs:
           printf '::stop-commands::%s\n' "${token}"
           status=0
           ash dependencies install \
-            --tool grype --tool syft --tool opengrep --tool cfn-nag \
-            --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy \
+            --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+            --tool grype --tool opengrep --tool syft --tool trivy \
             2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
@@ -396,8 +437,8 @@ Notes on the steps:
   [Tools inside the scanned directory](../../docs/advanced-usage.md#tools-inside-the-scanned-directory).
 - Run `ash dependencies install` outside the checkout too, as `working-directory` does
   here, so a config in the repository cannot change what it installs.
-- ASH installs bandit, checkov, and semgrep during the scan with the `uv`
-  installed with it, or with a `uv` on `PATH`.
+- ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor during the scan with the
+  `uv` installed with it, or with a `uv` on `PATH`.
 - `ruby/setup-ruby` is there for cfn-nag, which `ash dependencies install` installs with
   `gem` and which builds native extensions.
 - The three gate flags keep a pull request's own config from turning off the gate for
@@ -444,7 +485,7 @@ the install and scan steps of the job above:
   uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
   with:
     path: ~/.ash/bin
-    key: ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.7.0
+    key: ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.8.0
 - name: Install scanner tools
   working-directory: ${{ runner.temp }}
   run: |
@@ -456,8 +497,8 @@ the install and scan steps of the job above:
     printf '::stop-commands::%s\n' "${token}"
     status=0
     ash dependencies install \
-      --tool grype --tool syft --tool opengrep --tool cfn-nag \
-      --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy \
+      --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+      --tool grype --tool opengrep --tool syft --tool trivy \
       2>&1 || status=$?
     printf '\n::%s::\n' "${token}"
     exit "${status}"
@@ -572,3 +613,75 @@ its file on both events.
 
 Code scanning already shows a pull request only the alerts on lines it changed, so for the
 SARIF upload alone you do not need this option.
+
+## Run in Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`, and the reusable
+    workflows' `ash-mode` input takes `local` or `container`, not `nix`. Write the steps
+    yourself, as below, and install ASH from `main`. Pin a commit SHA instead of `main`
+    when you need to know which code ran.
+
+Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
+ASH's `flake.nix`, so the job installs neither Ruby nor the scanner binaries. The job
+needs Nix on the runner, and ASH installed with the `cdk` extra: Nix mode does not install
+ASH, and cdk-nag runs on the Python environment ASH is installed in. ASH passes
+`nix-command` and `flakes` on each invocation. A `main` install cannot find a release tag
+that contains `flake.nix`, so `ASH_NIX_FLAKE_REF` points the scan at `main`'s flake.
+
+<!-- doctest: config kind=github-actions runner=none reason="installs ASH from main, which the runner cannot swap for the pull request's build" -->
+```yaml
+name: ASH (Nix mode)
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ash-nix:
+    runs-on: ubuntu-latest
+    env:
+      ASH_NIX_FLAKE_REF: github:awslabs/automated-security-helper/main
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: latest
+      - name: Install ASH
+        run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main' \
+            2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
+      - name: Scan in Nix mode
+        run: |
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          if [ "${#token}" -ne 32 ]; then
+            echo "::error::no random token could be read for stop-commands, so the command did not run"
+            exit 1
+          fi
+          printf '::stop-commands::%s\n' "${token}"
+          status=0
+          {
+            export PATH="$(uv tool dir --bin):${PATH}"
+            ash scan --mode nix --no-progress \
+              --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+          } 2>&1 || status=$?
+          printf '\n::%s::\n' "${token}"
+          exit "${status}"
+```
+
+`cachix/install-nix-action` is the action ASH's own install-methods workflow uses for its
+Nix legs. Exit codes and the output directory are the same as in local mode, so the report
+and SARIF steps from [Write the steps yourself](#plain-steps) apply unchanged. The Nix
+shell supplies the tools of every built-in scanner except cdk-nag; it does not supply
+ferret-scan or the Snyk CLI. [Install ASH](../install.md#nix-mode) has the full list.

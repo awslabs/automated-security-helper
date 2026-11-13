@@ -107,7 +107,9 @@ def test_credential_in_a_hand_authored_declaration_is_reported(
     assert _scan(tmp_path, {filename: body}) == 1
 
 
-@pytest.mark.unit
+# integration like its siblings: the scan it runs reaches scanner.scan(), which
+# starts detect-secrets on any file the pre-filter it guards lets through.
+@pytest.mark.integration
 def test_generated_lockfile_is_still_skipped(tmp_path):
     """The other half of the split: generated locks stay out by default.
 

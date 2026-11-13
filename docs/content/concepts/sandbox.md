@@ -48,7 +48,7 @@ A scanner that has a network shares the host's network. There is no egress filte
 
 ## Grants, and who may make them {#grants}
 
-Four settings grant a sandboxed scanner more than the policy above: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, and `sandbox.env_scanners`. [Give a scanner more access](../docs/scanner-sandbox.md#grants) says what each one grants.
+Five settings grant a sandboxed scanner more than the policy above: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners`, and `sandbox.environment`. [Give a scanner more access](../docs/scanner-sandbox.md#grants) says what each one grants.
 
 Only the operator may grant. A grant counts when it comes from `--config-overrides`; from a config file outside every git checkout and outside the scanned directory, named with `--config` or `ASH_CONFIG`; in workspace mode, from the `--config` file given to the workspace scan, under the same rule with the workspace root as the scanned directory; or from the MCP server's own configuration, under the same rule. When such a file extends a base that cannot grant, only the grants it writes in its own `sandbox` section count, not what it inherits from any base or changes with `patch`. `--sandbox` sets the mode and grants nothing.
 
@@ -56,7 +56,7 @@ A config file inside any git checkout, the scanned one or a separate one such as
 
 ## What fails closed
 
-A scanner that cannot be sandboxed the way the configuration asks is never run unsandboxed. Its tool cannot start as asked, so each scan is recorded `ERROR` with the start-failure code 127 as the scanner's `exit_code` in `ash_aggregated_results.json`, and the default `fail_on_incomplete_scanners` makes the scan exit 1; 127 is the scanner's recorded code, not the exit status. The reason is in the scan output and `ash.log`, as a line such as `detect-secrets could not start its tool on source: sandbox-exec is not available: sandbox-exec is not available on Linux`. That covers:
+A scanner that cannot be sandboxed the way the configuration asks is never run unsandboxed. Its tool cannot start as asked, so each scan is recorded `ERROR` with the start-failure code 127 as the scanner's `exit_code` in `ash_aggregated_results.json`, and the default `fail_on_incomplete_scanners` makes the scan exit 1; 127 is the scanner's recorded code, not the exit status. The reason is in the scan output and `ash.log`, as a line such as `detect-secrets could not start its tool on source: sandbox-exec is not available on Linux`. That covers:
 
 - an explicit backend that is not installed or cannot start a sandbox on this host;
 - `auto` when no backend works, with a reason that lists why each one failed;
@@ -64,7 +64,7 @@ A scanner that cannot be sandboxed the way the configuration asks is never run u
 - turning the sandbox on at all on Windows;
 - a scanner that the config file names under a different name than its own, because grants follow a scanner's own name.
 
-A converter's tool is held to the same rule. When the sandbox cannot be provided, nbconvert does not run: each notebook is listed in the converter's `refused_inputs` with the reason, the row's `failure` reads `jupyter could not start its tool: <reason>`, and its `dependencies_satisfied` stays true, since nothing was found missing. A tree with no notebooks loses nothing.
+A converter's tool is held to the same rule. When the sandbox cannot be provided, nbconvert does not run: the converter's own dependency check is refused under the same sandbox, so its row reads `dependencies_satisfied` false with the reason in `dependency_unavailable_reason`, the notebooks still count in `candidate_inputs`, and the converter is reported as incomplete, so the default `fail_on_incomplete_scanners` makes the scan exit 1. A tree with no notebooks loses nothing.
 
 ASH also refuses, rather than runs unsandboxed, a shell command that a scanner tries to start, and a scanner whose results directory is reached through a symbolic link. ASH looks up the sandbox programs themselves (`bwrap`, `firejail`) the way it looks up scanner tools: never through the working directory or from inside the scanned tree, unless you allow in-tree tools. Which backend a scan used is written to `ash.log`; the results record only the requested mode, in `ash_config.sandbox.mode`.
 

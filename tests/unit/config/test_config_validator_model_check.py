@@ -653,7 +653,10 @@ def test_both_plugin_spellings_say_which_a_scan_reads(tmp_path):
         )
         (issue,) = [i for i in result.issues if "cdk_nag" in i.message]
         assert issue.severity.value == "warning", str(issue)
-        assert "a scan reads 'cdk-nag'" in issue.message, str(issue)
+        # The lint says what the scan does: it merges the two sections key by
+        # key and the declared spelling wins where both set a key.
+        assert "a scan merges them key by key" in issue.message, str(issue)
+        assert "where both set a key 'cdk-nag' wins" in issue.message, str(issue)
 
 
 def test_a_patch_that_replaces_the_root_is_reported_as_the_scan_reports_it(tmp_path):

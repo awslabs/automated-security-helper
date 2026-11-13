@@ -1,7 +1,7 @@
 [
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -37,10 +37,6 @@
             "start_line": 9
           }
         ],
-        "cve": {
-          "desc": "subprocess call with shell=True identified, security issue.",
-          "uid": "B602"
-        },
         "desc": "subprocess call with shell=True identified, security issue.",
         "severity": "HIGH",
         "title": "B602"
@@ -49,7 +45,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -85,10 +81,6 @@
             "start_line": 5
           }
         ],
-        "cve": {
-          "desc": "Possible hardcoded password: 'hu**********************t'",
-          "uid": "B105"
-        },
         "desc": "Possible hardcoded password: 'hu**********************t'",
         "severity": "LOW",
         "title": "B105"
@@ -97,7 +89,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -133,10 +125,6 @@
             "start_line": 6
           }
         ],
-        "cve": {
-          "desc": "S3 Bucket has an ACL defined which allows public READ access.",
-          "uid": "CKV_AWS_20"
-        },
         "desc": "S3 Bucket has an ACL defined which allows public READ access.",
         "severity": "HIGH",
         "title": "CKV_AWS_20"
@@ -145,7 +133,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -181,10 +169,6 @@
             "start_line": 2
           }
         ],
-        "cve": {
-          "desc": "Ensure the S3 bucket has access logging enabled",
-          "uid": "CKV_AWS_18"
-        },
         "desc": "Ensure the S3 bucket has access logging enabled",
         "severity": "MEDIUM",
         "title": "CKV_AWS_18"
@@ -193,7 +177,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -229,10 +213,6 @@
             "start_line": 5
           }
         ],
-        "cve": {
-          "desc": "Ensure the last USER is not root",
-          "uid": "CKV_DOCKER_8"
-        },
         "desc": "Ensure the last USER is not root",
         "severity": "MEDIUM",
         "title": "CKV_DOCKER_8"
@@ -241,7 +221,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -277,10 +257,6 @@
             "start_line": 1
           }
         ],
-        "cve": {
-          "desc": "Ensure that HEALTHCHECK instructions have been added to container images",
-          "uid": "CKV_DOCKER_2"
-        },
         "desc": "Ensure that HEALTHCHECK instructions have been added to container images",
         "severity": "LOW",
         "title": "CKV_DOCKER_2"
@@ -289,13 +265,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
-      "title": "dockerfile.security.last-user-is-root.last-user-is-root in Dockerfile - The last user in the container is 'root'. Switch...",
+      "title": "dockerfile.security.last-user-is-root.last-user-is-root in Dockerfile - The last user in the container is 'root'. Swi...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -325,10 +301,6 @@
             "start_line": 5
           }
         ],
-        "cve": {
-          "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
-          "uid": "dockerfile.security.last-user-is-root.last-user-is-root"
-        },
         "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
         "severity": "LOW",
         "title": "dockerfile.security.last-user-is-root.last-user-is-root"
@@ -337,13 +309,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Command string built with an f-string; prefer an argument list.",
-      "title": "python.lang.best-practice.unpinned-shell-command in app.py - Command string built with an f-string; prefer an argument l...",
+      "title": "python.lang.best-practice.unpinned-shell-command in app.py - Command string built with an f-string; prefer an argumen...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -373,10 +345,6 @@
             "start_line": 9
           }
         ],
-        "cve": {
-          "desc": "Command string built with an f-string; prefer an argument list.",
-          "uid": "python.lang.best-practice.unpinned-shell-command"
-        },
         "desc": "Command string built with an f-string; prefer an argument list.",
         "severity": "INFO",
         "title": "python.lang.best-practice.unpinned-shell-command"
@@ -385,7 +353,7 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
@@ -422,10 +390,6 @@
             "start_line": 5
           }
         ],
-        "cve": {
-          "desc": "Secret of type Secret Keyword detected in file app/app.py at line 5",
-          "uid": "SECRET-SECRET-KEYWORD"
-        },
         "desc": "Secret of type Secret Keyword detected in file app/app.py at line 5",
         "severity": "HIGH",
         "title": "SECRET-SECRET-KEYWORD"
@@ -434,13 +398,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
-      "title": "CVE-2018-18074-requests in requirements.txt - A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at...",
+      "title": "CVE-2018-18074-requests in requirements.txt - A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -472,7 +436,7 @@
         ],
         "cve": {
           "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
-          "uid": "CVE-2018-18074-requests"
+          "uid": "CVE-2018-18074"
         },
         "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
         "severity": "CRITICAL",
@@ -482,13 +446,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
-      "title": "CVE-2023-32681-requests in requirements.txt - A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at r...",
+      "title": "CVE-2023-32681-requests in requirements.txt - A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found a...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -520,7 +484,7 @@
         ],
         "cve": {
           "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
-          "uid": "CVE-2023-32681-requests"
+          "uid": "CVE-2023-32681"
         },
         "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
         "severity": "MEDIUM",

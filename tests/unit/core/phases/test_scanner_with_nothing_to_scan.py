@@ -668,13 +668,17 @@ def test_the_hook_reads_the_scan_set_the_scanners_read(
 
 
 def test_npm_shrinkwrap_is_a_lockfile_npm_audits(context):
+    """The lockfile lookup is read on an instance: it skips the lockfiles the
+    scan's ignore list dropped, a set each scanner holds, so there is no
+    class-level answer to ask for."""
     (context.source_dir / "package.json").write_text('{"name": "app"}\n')
     (context.source_dir / "npm-shrinkwrap.json").write_text(
         json.dumps({"name": "app", "lockfileVersion": 3})
     )
 
-    assert NpmAuditScanner(context=context).nothing_to_scan_reason() is None
-    assert NpmAuditScanner._lockfile_beside(context.source_dir / "package.json") == (
+    scanner = NpmAuditScanner(context=context)
+    assert scanner.nothing_to_scan_reason() is None
+    assert scanner._lockfile_beside(context.source_dir / "package.json") == (
         context.source_dir / "npm-shrinkwrap.json"
     )
 

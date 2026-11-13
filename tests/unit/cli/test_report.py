@@ -3,6 +3,7 @@
 
 import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import typer
@@ -30,6 +31,46 @@ def _results_file_only_in_the_directory_itself(mock_output_dir: MagicMock) -> No
     mock_output_dir.joinpath.side_effect = joinpath
 
 
+def _presence_of_a_mocked_candidate(candidate: MagicMock) -> bool:
+    """What ``_presence`` answers for a candidate the mocked ``Path`` returned.
+
+    The command reads each candidate's presence with ``os.stat`` (``_presence``
+    in cli/report.py), not ``Path.exists``. A MagicMock is an ``os.PathLike``
+    whose ``__fspath__`` names a file that does not exist, so every candidate
+    read as absent and the command refused before the reporter ran. Patched in
+    for ``_presence``, this reads the ``exists`` answer set above instead.
+    """
+    return candidate.exists()
+
+
+def _declares_name(mock_plugin_class: MagicMock, name: str) -> None:
+    """Give the mock reporter class the name the command looks ``--format`` up by.
+
+    The command matches the format against each reporter class's declared name
+    (base/plugin_config.declared_plugin_name: the ``name`` default of the class
+    its ``config`` field is typed with) without building the class, and falls
+    back to the lowercased class name only when none is declared. A bare
+    MagicMock declares none, so it answered to ``mockreporterplugin`` and the
+    command refused the requested format as unknown before it read anything.
+
+    The reporter the class builds declares no companion files. A MagicMock is an
+    ``os.PathLike`` (it answers ``__fspath__``), so the one its
+    ``companion_file_names()`` returned was read as a file named
+    ``MagicMock/mock().companion_file_names()/...``, which the pre-write check
+    refused as a name outside the reports directory before ``report`` ran.
+    """
+    config_class = MagicMock()
+    config_class.model_fields = {"name": SimpleNamespace(default=name)}
+    mock_plugin_class.model_fields = {
+        "config": SimpleNamespace(annotation=config_class)
+    }
+    mock_plugin_class.return_value.companion_file_names.return_value = ()
+
+
+@patch(
+    "automated_security_helper.cli.report._presence",
+    new=_presence_of_a_mocked_candidate,
+)
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
@@ -57,6 +98,7 @@ def test_report_command_basic(
     mock_plugin_class = MagicMock()
     mock_plugin_class.__name__ = "MockReporterPlugin"  # Add __name__ attribute
     mock_plugin_class.return_value = mock_reporter_plugin
+    _declares_name(mock_plugin_class, mock_reporter_plugin.config.name)
     mock_plugin_manager.plugin_modules.return_value = [mock_plugin_class]
 
     # Mock open to return a file with JSON content
@@ -100,6 +142,10 @@ def test_report_command_basic(
     assert "Error" not in err, err
 
 
+@patch(
+    "automated_security_helper.cli.report._presence",
+    new=_presence_of_a_mocked_candidate,
+)
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
@@ -127,6 +173,7 @@ def test_a_reporter_that_returns_none_exits_non_zero(
     mock_plugin_class = MagicMock()
     mock_plugin_class.__name__ = "MockReporterPlugin"
     mock_plugin_class.return_value = mock_reporter_plugin
+    _declares_name(mock_plugin_class, mock_reporter_plugin.config.name)
     mock_plugin_manager.plugin_modules.return_value = [mock_plugin_class]
 
     mock_file = MagicMock()
@@ -202,6 +249,10 @@ def test_report_command_with_nonexistent_file(tmp_path, monkeypatch, capfd):
     ) in _squeezed(err), err
 
 
+@patch(
+    "automated_security_helper.cli.report._presence",
+    new=_presence_of_a_mocked_candidate,
+)
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
@@ -229,6 +280,7 @@ def test_report_command_with_verbose(
     mock_plugin_class = MagicMock()
     mock_plugin_class.__name__ = "MockReporterPlugin"  # Add __name__ attribute
     mock_plugin_class.return_value = mock_reporter_plugin
+    _declares_name(mock_plugin_class, mock_reporter_plugin.config.name)
     mock_plugin_manager.plugin_modules.return_value = [mock_plugin_class]
 
     # Mock open to return a file with JSON content
@@ -310,6 +362,9 @@ def test_a_linked_output_or_reports_directory_is_refused(
     plugin.report.return_value = "rendered"
     plugin_class = MagicMock(return_value=plugin)
     plugin_class.__name__ = "MockTextReporter"
+    # The reporter answers to the format asked for, so the refusal below is the
+    # link check's and not an unknown format's.
+    _declares_name(plugin_class, "text")
     mock_plugin_manager.plugin_modules.return_value = [plugin_class]
     monkeypatch.chdir(tmp_path)
 

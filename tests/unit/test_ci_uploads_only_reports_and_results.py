@@ -234,3 +234,42 @@ def test_the_scan_workflow_uploads_the_per_project_copies_too():
         f"{_SCAN_OUTPUT_DIR}/projects/*/ash_aggregated_results.json",
     ):
         assert expected in values, (expected, sorted(values))
+
+
+# GitHub archived the v1 to v3 releases of the artifact actions and no longer runs
+# them, so an example that names one is a workflow that fails for the reader.
+_ARCHIVED_ARTIFACT_ACTION = re.compile(
+    r"actions/(?:upload|download)-artifact@v[123](?!\d)"
+)
+
+
+def test_no_example_names_an_archived_release_of_the_artifact_actions():
+    named = [
+        f"{path.relative_to(REPO_ROOT).as_posix()}:{number}: {line.strip()}"
+        for path in SOURCES
+        if path.is_file()
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+        )
+        if _ARCHIVED_ARTIFACT_ACTION.search(line)
+    ]
+    assert not named, (
+        "these examples run an archived release of an artifact action; name a "
+        "current release:\n" + "\n".join(named)
+    )
+
+
+def test_the_archived_release_scan_reads_the_forms_it_is_about():
+    for archived in (
+        "uses: actions/upload-artifact@v3",
+        "uses: actions/download-artifact@v2",
+        "uses: actions/upload-artifact@v1 # old",
+    ):
+        assert _ARCHIVED_ARTIFACT_ACTION.search(archived), archived
+    for current in (
+        "uses: actions/upload-artifact@v4",
+        "uses: actions/upload-artifact@v4.6.2",
+        "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+        "uses: actions/download-artifact@v30",
+    ):
+        assert not _ARCHIVED_ARTIFACT_ACTION.search(current), current

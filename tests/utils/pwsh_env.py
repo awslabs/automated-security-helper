@@ -33,8 +33,16 @@ def scratch_home(tmp_path: Path) -> dict[str, str]:
     home = tmp_path / "pwsh-home"
     for sub in ("", ".cache", ".local/share", ".config"):
         (home / sub).mkdir(parents=True, exist_ok=True)
+    # pwsh on Windows derives $HOME from the user profile, not from HOME:
+    # USERPROFILE first, with HOMEDRIVE+HOMEPATH as the older pair. All of
+    # them point at the scratch home, so the tests' pwsh reads and writes the
+    # same directory on every platform.
+    drive, tail = os.path.splitdrive(str(home))
     return {
         "HOME": str(home),
+        "USERPROFILE": str(home),
+        "HOMEDRIVE": drive,
+        "HOMEPATH": tail,
         "XDG_CACHE_HOME": str(home / ".cache"),
         "XDG_DATA_HOME": str(home / ".local" / "share"),
         "XDG_CONFIG_HOME": str(home / ".config"),

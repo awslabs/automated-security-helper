@@ -262,9 +262,13 @@ When more than one of the three holds a results file, ASH prints
 Point `--output-dir` at the directory that holds the one to report on.
 
 `ash report` writes its log to standard error, so standard output holds the report
-alone. To get the report exactly as the reporter wrote it, command lines included,
-redirect standard output to a file, as in the command above: ASH then writes the
-reporter's output unchanged, so the command above writes a SARIF file.
+alone. The text, Markdown and HTML reporters neutralize a finding's scanner text as
+they build the document: a control character is written as a visible escape, and a CI
+command form is broken where it stands, so no line of the document is one a CI runner
+reads as a command. A JSON report, such as SARIF, carries scanner text as data, command
+forms included. To get the report exactly as the reporter wrote it, redirect standard
+output to a file, as in the command above: ASH then writes the reporter's output
+unchanged, so the command above writes a SARIF file.
 
 On a pipe, ASH changes every line of the report that a CI system (GitHub Actions, Azure
 Pipelines, or TeamCity) would read as a command, so that none of them runs, whether or
@@ -273,15 +277,16 @@ own escape for it, so it parses to the same document. On a terminal it changes t
 lines when `GITHUB_ACTIONS`, `TF_BUILD`, or `TEAMCITY_VERSION` is set. Apart from that,
 the output on a pipe is the reporter's output as the reporter wrote it, not wrapped or
 styled. On a terminal with color, JSON is indented and Markdown is rendered. On a
-terminal, with or without color, no character a terminal acts on is written as it is: it
-is shown as an escape, such as `\x1b` for an escape character in a file name, or in a
-JSON report as JSON's own escape, such as `\u001b`. Rendered Markdown leaves such
-characters out. ASH's own messages, such as a refusal that quotes a path, have their CI
-command lines changed the same way even when they go to a file; only the report itself
-is written to a file as is.
+terminal, with or without color, no character a terminal acts on is written as it is: a
+text or Markdown report already holds it as the escape the reporter wrote, such as
+`\x1b` for an escape character in a file name, and a JSON report shows it as JSON's own
+escape, such as `\u001b`. A Markdown report that holds such escape text is written as
+that text, not rendered. ASH's own messages, such as a refusal that quotes a path, have
+their CI command lines changed the same way even when they go to a file; only the
+report itself is written to a file as is.
 
 A missing results file prints `No scan results found:` with the paths it checked, and
-exits 5. With `--output-dir` or `ASH_OUTPUT_DIR` the message names the three paths ASH
+exits 1. With `--output-dir` or `ASH_OUTPUT_DIR` the message names the three paths ASH
 looked in (`none of … exists`); otherwise it names
 `.ash/ash_output/ash_aggregated_results.json` under the current directory, in full
 (`… does not exist`). `ash report` creates nothing then, and an output directory under a

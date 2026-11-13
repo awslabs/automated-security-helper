@@ -244,6 +244,10 @@ def test_a_group_kill_the_kernel_refuses_falls_back_to_the_pid(
         cancellation.os, "kill", lambda pid, sig: killed.append((pid, sig))
     )
     monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (2**30 + 41,), raising=False)
+    # The fallback kills only a pid that is still a live child of this process
+    # (cancellation._is_live_child); the recorded id here is a made-up pid, so
+    # the answer is stood in for.
+    monkeypatch.setattr(cancellation, "_is_live_child", lambda pid: True)
     sigterm_state.install_sigterm_shutdown()
     _installed_handler()(signal.SIGTERM, None)
     assert killed == [(2**30 + 41, signal.SIGKILL)], (
@@ -251,6 +255,28 @@ def test_a_group_kill_the_kernel_refuses_falls_back_to_the_pid(
         f"pid, or the groupless child outlives the process stopping it: {killed}"
     )
     assert raised_signals == [signal.SIGTERM]
+
+
+@pytest.mark.unit
+def test_a_group_kill_the_kernel_refuses_spares_a_pid_that_is_no_live_child(
+    sigterm_state, raised_signals, monkeypatch
+):
+    """The control of the fallback above: a recorded id whose child was reaped
+    is a pid another process can hold by now, so the fallback kills nothing."""
+    killed: List[Tuple[int, int]] = []
+
+    def refuse(pgid: int, sig: int) -> None:
+        raise ProcessLookupError(pgid)
+
+    monkeypatch.setattr(cancellation.os, "killpg", refuse)
+    monkeypatch.setattr(
+        cancellation.os, "kill", lambda pid, sig: killed.append((pid, sig))
+    )
+    monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (2**30 + 41,), raising=False)
+    monkeypatch.setattr(cancellation, "_is_live_child", lambda pid: False)
+    sigterm_state.install_sigterm_shutdown()
+    _installed_handler()(signal.SIGTERM, None)
+    assert killed == [], killed
 
 
 @pytest.mark.unit

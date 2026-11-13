@@ -479,8 +479,9 @@ def scans_started(monkeypatch) -> list:
         if claim is not None:
             claim.release_scan()
 
-    def record(scan_id, coroutine) -> None:
-        # The stand-in never awaits, so one step runs it to the end.
+    def record(scan_id, coroutine, **start_options) -> None:
+        # The stand-in never awaits, so one step runs it to the end. The
+        # start's keywords (ran, if_never_run) are accepted and left alone.
         with pytest.raises(StopIteration):
             coroutine.send(None)
         started.append(scan_id)
@@ -1127,8 +1128,13 @@ class TestANamedFilesSearchDirCrossesTheRootGateToo:
             config_path=config, search_dir=absent, session_id=_SESSION
         )
 
-        a = json.dumps(with_present, default=str).replace(present, "<outside>")
-        b = json.dumps(with_absent, default=str).replace(absent, "<outside>")
+        # The path as json.dumps writes it: a Windows path's backslashes are doubled.
+        a = json.dumps(with_present, default=str).replace(
+            json.dumps(present)[1:-1], "<outside>"
+        )
+        b = json.dumps(with_absent, default=str).replace(
+            json.dumps(absent)[1:-1], "<outside>"
+        )
         assert a == b, (a, b)
 
     @pytest.mark.parametrize("named", [True, False], ids=["named-file", "discovery"])
@@ -1173,8 +1179,13 @@ class TestANamedFilesSearchDirCrossesTheRootGateToo:
             config_path=config, search_dir=absent, session_id=_SESSION
         )
 
-        a = json.dumps(with_present, default=str).replace(present, "<target>")
-        b = json.dumps(with_absent, default=str).replace(absent, "<target>")
+        # The path as json.dumps writes it: a Windows path's backslashes are doubled.
+        a = json.dumps(with_present, default=str).replace(
+            json.dumps(present)[1:-1], "<target>"
+        )
+        b = json.dumps(with_absent, default=str).replace(
+            json.dumps(absent)[1:-1], "<target>"
+        )
         assert a == b, (a, b)
 
     def test_the_refused_directory_is_never_opened(self, layout, monkeypatch):

@@ -246,6 +246,16 @@ def test_aws_reporter_output_and_payload(
         assert aws_stub.recorded_calls() == []
         return
 
+    if reporter_name in ("cloudwatch-logs", "s3") and model.workspace is not None:
+        # Both reporters publish per project: each project's own scan already
+        # sent its event or uploaded its object, so a workspace's unified
+        # results are declined with a logged reason and no document and no
+        # AWS call. The text snapshot takes a rendered string, so the refusal
+        # is asserted here instead of handing it None.
+        assert reporter.report(model) is None
+        assert aws_stub.recorded_calls() == []
+        return
+
     if reporter_name == "aws-security-hub":
         # The scope's directory is what the scan recorded, not what this host
         # computes: the golden must not depend on running inside a git checkout.

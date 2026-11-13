@@ -194,7 +194,10 @@ class TestTheProgressGuardDiscriminates:
 
         progress = self._poll(ctx, source, output)
 
-        assert progress["severity_counts"]["high"] == 5
+        # The producer's totals are kept when it gave any (the walk sums the
+        # files only when the producer gave none), so the walk's proof is the
+        # per-scanner file content it stores under its scanner and target.
+        assert progress["scanners"]["bandit"]["source"]["severity_counts"]["high"] == 5
         assert "bandit" in progress["scanners"]
 
     def test_an_upstream_failure_is_returned_untouched(self, ctx):

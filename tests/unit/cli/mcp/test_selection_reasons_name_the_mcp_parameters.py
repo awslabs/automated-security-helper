@@ -598,7 +598,12 @@ def test_a_cli_scan_of_a_scanner_that_cannot_construct_exits_one(
 # operator's chain (``ASH_CONFIG``, outside the tree) resolves ``${VAR}`` for a
 # local caller and is the config each project of a workspace scan starts from.
 
-ENV_CANARY = "/nonexistent/ENVCANARY-scanner-error/bandit.toml"
+# Rooted at the current drive's root: on Windows a drive-less "/nonexistent/..."
+# is read back as "D:\nonexistent\...", which is not the text the config holds, so
+# the redaction would be tested against a spelling it never saw.
+ENV_CANARY = str(
+    Path(Path.cwd().anchor) / "nonexistent" / "ENVCANARY-scanner-error" / "bandit.toml"
+)
 
 
 @pytest.fixture(params=["elsewhere", "under-home"])

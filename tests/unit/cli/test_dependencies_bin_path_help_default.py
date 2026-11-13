@@ -23,6 +23,8 @@ import sys
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = pytest.mark.integration
 
 RENDER_HELP = (
@@ -45,11 +47,13 @@ def test_the_help_default_is_the_same_for_any_home(tmp_path, home_name, bin_path
     if bin_path_env:
         env["ASH_BIN_PATH"] = str(home / "custom-bin")
     result = subprocess.run(
-        [sys.executable, "-c", RENDER_HELP],
+        [sys.executable, "-c", importing_this_checkout(RENDER_HELP)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         timeout=120,
     )

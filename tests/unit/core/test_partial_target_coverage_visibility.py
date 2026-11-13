@@ -457,6 +457,17 @@ class TestTheShortfallReachesTheConsole:
         assert "cdk-nag" in out
         assert "-1" not in out
 
+    def test_a_misfiled_claim_is_not_blamed_on_unreadable_counters(self):
+        """A report filed under another scanner's key carries perfectly readable
+        counters. The console names the scanner it belongs to and does not say its
+        counters could not be read."""
+        misfiled = {"bandit": {"source": _report("ERROR", 4, 1, name="semgrep")}}
+
+        out = self._render(_model(misfiled))
+
+        assert "semgrep" in out
+        assert "counter" not in out
+
 
 #: Stored reports whose counters cannot be trusted. ``target_counts`` answers its internal
 #: sentinel pair for each of them. The unified row must not grade PASSED on such a report

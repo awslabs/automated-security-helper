@@ -156,6 +156,8 @@ def _ash(packages: Path, args, cwd: Path, extra_env=None):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         env=_child_env(cwd, extra_env),
         cwd=cwd,
@@ -193,6 +195,9 @@ def _scan(packages: Path, tmp_path: Path, plugin_args, extra_env=None):
     return completed, rows
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the stand-in uv is a POSIX shell script"
+)
 @pytest.mark.integration
 def test_a_comma_list_in_the_flag_loads_each_module(plugin_packages, tmp_path):
     completed, rows = _scan(
@@ -428,6 +433,8 @@ def _load_plugins(plugin_packages, tmp_path, entry, direct=""):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         env=env,
         cwd=tmp_path,

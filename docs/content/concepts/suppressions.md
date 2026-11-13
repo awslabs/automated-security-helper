@@ -23,6 +23,42 @@ A suppression with a `rule_id` matches only findings with that rule ID. The rule
 
 Because ASH does not deduplicate findings, the same problem reported by two scanners is two findings with two rule IDs. A suppression written for one scanner's rule ID leaves the other one in place. See [How ASH works](how-ash-works.md#findings-are-merged-not-deduplicated).
 
+## Scoping a suppression to a resource
+
+IaC findings carry a resource identity: for cdk-nag, the CDK construct path and the CloudFormation resource type. A suppression's `scope` narrows it to that identity, so one wildcard policy on one role can be accepted without accepting every `AwsSolutions-IAM5` in the template:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: AwsSolutions-IAM5
+      path: "cdk.out/*.template.json"
+      reason: "Wildcard is scoped to the collector's own log group prefix"
+      scope:
+        resource_id: "Stack/CollectorTaskRole/DefaultPolicy/Resource"
+        resource_type: "AWS::IAM::Policy"
+```
+
+`resource_id` and `resource_type` are universal: ASH matches them itself against the identity the finding carries, whatever engine produced it. Both are literal matches first, then globs with `[` and `]` taken literally; `resource_id` is case-sensitive, `resource_type` is not. A finding that carries no resource identity never matches a resource-scoped entry, the same safe direction as a finding with no line and a line-scoped suppression, and an engine gains support by writing the `ash_resource_id` and `ash_resource_type` properties into its SARIF results, not by changing ASH. The common case has first-class sugar: a top-level `resource_id` on the entry is folded into `scope.resource_id` (setting both to different values is an error), and `expiration` is accepted as a deprecated alias of `expires` when a config is read; the alias is removed in ASH v4.
+
+A scope may also carry per-engine blocks, keyed by scanner name and owned by that scanner's plugin:
+
+<!-- doctest: config kind=other reason="the scope key of one suppression entry, indented as it sits in the entry, not a whole ASH config" -->
+```yaml
+      scope:
+        engines:
+          cdk-nag:
+            applies_to: "Action::logs:*"
+            resource_path: "Stack/CollectorTaskRole/DefaultPolicy/Resource"
+```
+
+Listing engines enumerates the engines the entry covers: a finding from a scanner not listed does not match the entry, and a listed scanner's finding matches only when its plugin accepts the block. A listed scanner whose plugin is not installed or enabled this run suppresses nothing, with a warning naming it. cdk-nag's block takes `applies_to` (compared exactly, as cdk-nag's own `appliesTo`, against the granular qualifier cdk-nag appends to rule ids, so `rule_id: AwsSolutions-IAM5` plus a scope also covers `AwsSolutions-IAM5[Action::logs:*]` findings; the value is never read as a glob, so a literal ported from a cdk-nag config covers only its own qualifier) and `resource_path` (a glob over the construct path).
+
+Everything about a scope fails closed. An empty `scope`, an empty `engines` map and an empty engine block are refused: match-all is the absence of the field, never an empty dict.
+
+## Unknown keys: warn now, error at v4
+
+A key a suppression or ignore-path entry does not declare is a defect to surface loudly: silently dropped (as ASH did through v3.7.x), a misspelled `rule_id` leaves a suppression covering every rule in its path. Today's default is to warn: the config loads, a warning names the key with a did-you-mean (and, for a key that belongs elsewhere, where it belongs), and the entry it sits in suppresses nothing until it is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error at config load instead. ASH v4 flips that default to true; the flag stays as an escape hatch.
+
 ## Order of application
 
 ASH applies these rules to each scanner's SARIF as it arrives, and again to the merged SARIF before the reporters run:
@@ -35,9 +71,9 @@ ASH applies these rules to each scanner's SARIF as it arrives, and again to the 
 
 ## Expiration
 
-A suppression's `expiration` is a date. On that date, by the host's local clock, the suppression stops matching, and the finding counts toward the gate again on the next scan. The config stays valid: the scan fails on the finding, and a warning at the start of the scan lists every suppression and ignore path that has expired. ASH also logs a warning at the start of a scan for the entries that expire within the next 30 days, and `ash config lint` reports suppressions and ignore paths that have already expired.
+A suppression's `expires` is a date. On that date, by the host's local clock, the suppression stops matching, and the finding counts toward the gate again on the next scan. The config stays valid: the scan fails on the finding, and a warning at the start of the scan lists every suppression and ignore path that has expired. ASH also logs a warning at the start of a scan for the entries that expire within the next 30 days, and `ash config lint` reports suppressions and ignore paths that have already expired.
 
-An ignore path's `expiration` works the same way: on that date it stops applying, and the findings it dropped come back on the next scan. The entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude` expire the same way, and stop excluding their files. An expired entry stays in the config file and in the results; only its effect stops.
+An ignore path's `expires` works the same way: on that date it stops applying, and the findings it dropped come back on the next scan. The entries of bandit `excluded_paths`, checkov `skip_path`, and syft `exclude` expire the same way, and stop excluding their files. An expired entry stays in the config file and in the results; only its effect stops.
 
 Results written by another ASH version can hold an entry that this version refuses in a config file, such as one with an unknown key or a date in another format. `ash report`, `ash merge`, and the other commands that read results still load them, with a warning that names the problem, and never apply that entry.
 

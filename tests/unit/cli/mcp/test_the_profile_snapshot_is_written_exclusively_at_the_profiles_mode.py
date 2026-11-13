@@ -11,16 +11,29 @@ copy's name must be taken exclusively: writing through a name that already
 exists would truncate that file, or follow a link planted there to a file
 outside the config directory. A name already present is not this scan's to
 remove either -- the refusal leaves it as it was.
+
+The cells that compare permission bits skip on Windows. A Windows file has no
+group or world bits: ``chmod`` there only sets or clears the read-only flag, so a
+profile "at 0640" or "at 0600" reads back as 0666 and so does its copy, and no
+mode but that one can be expected of either.
 """
 
 import os
 import stat
+import sys
 
 import pytest
 
 from automated_security_helper.cli import mcp_tools
 
 pytestmark = pytest.mark.unit
+
+#: The cells that compare the copy's permission bits with the profile's.
+posix_permission_bits = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a Windows file has no group or world permission bits: chmod only "
+    "sets the read-only flag, so every mode reads back as 0666",
+)
 
 #: A scan id as the writer spells one (``str(uuid.uuid4())``): the copy's name
 #: must parse as a scan copy's (config_sources.parse_scan_copy_name), and only
@@ -73,15 +86,17 @@ def test_the_copy_is_created_at_mode_0600_exactly(tmp_path, monkeypatch):
         finally:
             os.umask(previous_umask)
     try:
-        copy_mode = stat.S_IMODE(snapshot.stat().st_mode)
-        assert (recorded, copy_mode) == ([0o600], 0o640), (
-            [oct(mode) for mode in recorded],
-            oct(copy_mode),
-        )
+        # The mode the create passes is the same on every platform; the bits the
+        # copy ends with are the profile's, which only a POSIX file has.
+        assert recorded == [0o600], [oct(mode) for mode in recorded]
+        if sys.platform != "win32":
+            copy_mode = stat.S_IMODE(snapshot.stat().st_mode)
+            assert copy_mode == 0o640, oct(copy_mode)
     finally:
         snapshot.unlink()
 
 
+@posix_permission_bits
 def test_the_copy_keeps_the_profiles_mode(tmp_path):
     """A 0600 profile's copy is 0600, not the umask's default."""
     profile = _a_profile(tmp_path, 0o600)
@@ -114,7 +129,12 @@ def test_a_name_already_present_refuses_without_following_or_removing_it(tmp_pat
     victim_content = "the victim's own content\n"
     victim.write_text(victim_content, encoding="utf-8")
     planted = mcp_tools._scan_snapshot_path(profile, A_SCAN_ID)
-    planted.symlink_to(victim)
+    try:
+        planted.symlink_to(victim)
+    except (OSError, NotImplementedError) as error:
+        # Windows makes a symbolic link only for an account that holds the
+        # privilege; without it there is no link to plant.
+        pytest.skip(f"cannot make a symbolic link here: {error}")
 
     with pytest.raises(mcp_tools.ProfileSnapshotUnavailable) as refused:
         mcp_tools._snapshot_profile_for_scan(profile, A_SCAN_ID, snapshot_path=planted)
@@ -128,6 +148,7 @@ def test_a_name_already_present_refuses_without_following_or_removing_it(tmp_pat
     assert planted.is_symlink()
 
 
+@posix_permission_bits
 def test_the_copy_is_written_on_a_platform_without_fchmod(tmp_path, monkeypatch):
     """Without ``os.fchmod`` the copy is still written at the profile's mode.
 
@@ -153,6 +174,7 @@ def test_the_copy_is_written_on_a_platform_without_fchmod(tmp_path, monkeypatch)
         snapshot.unlink(missing_ok=True)
 
 
+@posix_permission_bits
 def test_without_fchmod_a_non_0600_profiles_mode_still_lands(tmp_path, monkeypatch):
     """Without ``os.fchmod``, a profile whose mode is not 0600 keeps it.
 

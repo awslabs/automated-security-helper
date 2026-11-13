@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, Literal, List, Optional
@@ -277,6 +278,17 @@ class ScanResultsContainer(BaseModel):
             values: Text to redact from what is recorded: the config's
                 environment values (``utils.error_text.config_environment_values``).
         """
+        self.add_error(self._record_exception(exception, values))
+
+    def _record_exception(
+        self, exception: BaseException, values: Iterable[str] = ()
+    ) -> str:
+        """Record ``exception`` and its stack trace and mark the container FAILED.
+
+        Returns the exception's text, which :meth:`set_exception` adds to the
+        errors; :meth:`for_failure` decides whether the caller's own errors
+        already say it.
+        """
         # Described, not quoted: these go into the results file, and a pydantic
         # error's own text quotes the refused input (utils/error_text.py).
         from automated_security_helper.utils.error_text import (
@@ -286,14 +298,25 @@ class ScanResultsContainer(BaseModel):
         from automated_security_helper.utils.redacted_model import value_tuple
 
         values = value_tuple(values)
+        text = error_text(exception, values)
         # Tilded like add_error's entries: both fields persist in the saved
         # results, and a stack trace names files by their full paths. The
         # environment values are redacted first; a value under the home
-        # directory no longer matches once it is written as ~.
-        self.exception = home_as_tilde(error_text(exception, values))
-        self.stack_trace = home_as_tilde(traceback_text(values=values))
-        self.add_error(error_text(exception, values))
+        # directory no longer matches once it is written as ~. The trace is the
+        # one of the exception given, not of whatever the caller is handling,
+        # unless the one given was never raised: it has no traceback, and its
+        # trace would be one line. That is an exception built to wrap the one
+        # being handled (``ScannerError(f"...: {e}")``), so the handled one's
+        # trace is the only trace there is.
+        trace_of = exception
+        if exception.__traceback__ is None:
+            handled = sys.exc_info()[1]
+            if handled is not None and handled is not exception:
+                trace_of = handled
+        self.exception = home_as_tilde(text)
+        self.stack_trace = home_as_tilde(traceback_text(trace_of, values=values))
         self.status = ScannerStatus.FAILED
+        return text
 
     # ---- Factory methods ------------------------------------------------
 
@@ -335,18 +358,35 @@ class ScanResultsContainer(BaseModel):
 
         *values* are redacted from what is recorded of *exception*, as
         :meth:`set_exception` does; *errors* go through :meth:`add_error`,
-        which writes the home directory in each entry as ``~``.
+        which writes the home directory in each entry as ``~``. The exception's
+        own text is added to the errors only when none of *errors* already says
+        it, so a failure given as both is listed once. An error says it when it
+        is the text or ends in ``: `` and the text; one that only contains the
+        text does not.
+
+        The duration is None, as for the excluded and missing containers: no
+        timed run is recorded here, and 0 would claim a run of no time.
         """
         container = cls(
             scanner_name=scanner_name,
             status=ScannerStatus.FAILED,
+            duration=None,
         )
         if errors:
             for err in errors:
                 container.add_error(err)
         if exception is not None:
-            container.set_exception(exception, values)
-            # set_exception already sets status to FAILED
+            # _record_exception also sets status to FAILED
+            text = home_as_tilde(container._record_exception(exception, values))
+            # Said already when an error is the text, or ends in it after a
+            # ``label: `` as the callers write it. Not when the text is only
+            # somewhere inside one: ``timed out`` is in every "... timed out
+            # after 300s", and is not that error.
+            if not any(
+                recorded == text or recorded.endswith(f": {text}")
+                for recorded in container.errors
+            ):
+                container.add_error(text)
         return container
 
     # ---- Threshold evaluation ------------------------------------------
@@ -359,7 +399,8 @@ class ScanResultsContainer(BaseModel):
         attempt count or an attempt count of zero. For one that failed SOME targets,
         the severity gate runs first: FAILED when the findings from the evaluated
         targets fail it, ERROR otherwise. SKIPPED when a tracking scanner attempted
-        none, and otherwise PASSED/FAILED from the severity gate: any finding
+        none and no finding of it fails the gate (FAILED when one does), and
+        otherwise PASSED/FAILED from the severity gate: any finding
         at or above the configured severity threshold fails the scanner. Does not mutate the
         container's current status — the caller assigns the result.
 
@@ -454,7 +495,14 @@ class ScanResultsContainer(BaseModel):
         # ``is not None`` is the load-bearing half of this condition. Dropping it would fire on
         # every scanner that does not track targets -- bandit, checkov, semgrep, grype, syft,
         # detect-secrets, opengrep -- and turn an entire clean report yellow.
+        #
+        # SKIPPED says nothing was evaluated, so it holds only while no finding fails the
+        # gate. Findings that do fail it beside no attempts are a contradiction of the
+        # counters, as a failure count beside no attempts is, and the gate is not skipped
+        # on the strength of a counter: FAILED, so the findings reach whatever gates on it.
         if self.targets_attempted is not None and self.targets_attempted <= 0:
+            if self._severity_gate(threshold) == ScannerStatus.FAILED:
+                return ScannerStatus.FAILED
             return ScannerStatus.SKIPPED
 
         return self._severity_gate(threshold)

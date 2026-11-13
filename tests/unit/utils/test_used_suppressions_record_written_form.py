@@ -601,14 +601,21 @@ def test_an_older_results_files_summary_adds_up(tmp_path, config):
     assert summary["unused_suppressions"] == 2, summary
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 def test_an_older_results_file_then_fix_unused_keeps_the_entry_it_applied(
-    tmp_path, config
+    tmp_path, config, newline
 ):
     """The sequence the unused report feeds: re-render a results file written
     before used ids took the written form, then ``ash config lint
     --fix-unused``. The entry that file recorded by its resolved id was
     applied, so the fixer leaves it in place; the entry nothing used is
-    commented out."""
+    commented out.
+
+    The fixer keeps the config's own line breaks, so the checks read the result
+    with them taken out. Before, they looked for a bare ``\\n``: the fixture is
+    written in the platform's line break (CRLF on Windows), the result kept it,
+    and the one test failed there alone. Both line breaks are written here as
+    bytes, so the CRLF case runs on any platform."""
     from automated_security_helper.config.config_linter import ConfigLinter
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
@@ -630,17 +637,26 @@ def test_an_older_results_file_then_fix_unused_keeps_the_entry_it_applied(
         UnusedSuppressionsReporter(context=context).report(model), encoding="utf-8"
     )
 
+    profile = tmp_path / "suppressions.ash.yaml"
+    # The fixture wrote the file in the platform's line break; write it again in
+    # the one under test. The loaded config is not affected.
+    as_written = profile.read_bytes().decode("utf-8").replace("\r\n", "\n")
+    profile.write_bytes(as_written.replace("\n", newline).encode("utf-8"))
+
     fixed, issues, _stamp = ConfigLinter.fix_unused_suppressions(
-        tmp_path / "suppressions.ash.yaml", output_dir=tmp_path / "out"
+        profile, output_dir=tmp_path / "out"
     )
 
     # The control: the entry nothing used was commented out.
     assert [issue.path for issue in issues] == ["global_settings.suppressions[2]"], [
         issue.message for issue in issues
     ]
-    assert "# - path: never-used/*.py" in fixed, fixed
-    assert f"    - path: {WRITTEN}\n      rule_id: SECRET-AWS-ACCESS-KEY" in fixed, (
-        fixed
+    # Every line break of the result is the file's own.
+    assert "\n" not in fixed.replace(newline, ""), repr(fixed)
+    lines = fixed.replace(newline, "\n")
+    assert "# - path: never-used/*.py" in lines, lines
+    assert f"    - path: {WRITTEN}\n      rule_id: SECRET-AWS-ACCESS-KEY" in lines, (
+        lines
     )
 
 
@@ -769,3 +785,134 @@ def test_the_results_json_carries_no_environment_value(tmp_path, config):
     assert entries, dumped
     assert all("ENVCANARYG9" not in entry for entry in entries), entries
     assert f"{WRITTEN}|SECRET-AWS-ACCESS-KEY|*|*" in entries, entries
+
+
+def test_scoped_entries_change_no_rendered_output_shape(tmp_path):
+    """The id-only nested scope record (recorded_suppressions) leaks into no
+    rendered output: the unused report renders a scoped entry with exactly an
+    unscoped entry's key set (no "scope" key, no injected resource_id or
+    resource_type, so an engines-only scope adds no None values either), and
+    the SARIF justification for a match in the same config keeps its exact
+    wording, carrying only the ashApplied marker bag every ASH suppression
+    gets (ash_applied_properties) with no scope-provenance keys for an
+    unscoped entry. Pins the consumer audit: every record
+    consumer reads named flat keys (the reporter's _suppression_to_dict, the
+    expiration checker's _shown), never the record's items."""
+    import json
+
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+        UnusedSuppressionsReporter,
+    )
+
+    profile = tmp_path / "suppressions.ash.yaml"
+    profile.write_text(
+        "project_name: output-shape\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: u/*.py\n"
+        "      rule_id: SECRET-AWS-ACCESS-KEY\n"
+        "      reason: unscoped entry\n"
+        "    - path: s/*.py\n"
+        "      rule_id: SECRET-AWS-ACCESS-KEY\n"
+        "      reason: scoped entry\n"
+        "      scope:\n"
+        "        resource_id: Stack/Thing/Resource\n"
+        "    - path: e/*.py\n"
+        "      rule_id: SECRET-AWS-ACCESS-KEY\n"
+        "      reason: engines only\n"
+        "      scope:\n"
+        "        engines:\n"
+        "          cdk-nag:\n"
+        "            resource_path: Stack/*\n",
+        encoding="utf-8",
+    )
+    loaded = load_config_file_for_run(profile)[1]
+    context = _context(tmp_path, loaded)
+
+    # The SARIF side: a match in this config renders exactly the unscoped
+    # wording, with main's ashApplied marker bag (ash_applied_properties) and
+    # no scope-provenance key for an unscoped entry.
+    out = apply_suppressions_to_sarif(
+        _sarif_with_finding("u/app.py"), context, used_suppressions=set()
+    )
+    (applied,) = out.runs[0].results[0].suppressions
+    assert applied.justification == (
+        "(ASH) Suppressing finding for rule 'SECRET-AWS-ACCESS-KEY' in "
+        "'u/app.py' with reason: unscoped entry"
+    )
+    bag = applied.properties
+    assert bag is not None
+    assert getattr(bag, "ashApplied", None) is True, bag
+    # Shape-unchanged relative to MAIN (ffl93's WORD on the R14 composition):
+    # a scoped entry adds only its scope keys (scope_resource_id,
+    # scope_engines) BESIDE the marker bag an unscoped entry also carries, so
+    # the unscoped bag is exactly MAIN's: the marker and the model's tags
+    # default, nothing scope-shaped. Never a revert to properties is None.
+    bag_dump = bag.model_dump(exclude_none=True)
+    assert set(bag_dump) == {"tags", "ashApplied"}, bag_dump
+
+    # The unused report: all three entries render with ONE key set.
+    rendered = UnusedSuppressionsReporter(context=context).report(
+        AshAggregatedResults()
+    )
+    data = json.loads(rendered)
+    entries = data["unused_suppressions"]
+    assert len(entries) == 3, entries
+    key_sets = {tuple(sorted(entry)) for entry in entries}
+    assert len(key_sets) == 1, key_sets
+    assert "scope" not in entries[0]
+    assert "resource_id" not in entries[0]
+    assert "resource_type" not in entries[0]
+    assert '"scope"' not in rendered, rendered
+
+
+def test_a_canonical_scopes_written_form_reaches_the_id(tmp_path, monkeypatch):
+    """A ``scope.resource_id`` read from the environment is recorded by its
+    reference in the id: the written id equals the raw YAML dict's id (the
+    config linter's keying) and never holds the resolved value. The entry-level
+    sugar is covered by the flat record; this pins the canonical spelling,
+    which has no flat field for the record to rewrite."""
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+    from automated_security_helper.models.core import suppression_id
+    from automated_security_helper.utils.suppression_matcher import (
+        recorded_suppressions,
+        written_suppression_id,
+    )
+
+    construct = "Stack/EnvCanaryRole/DefaultPolicy/Resource"
+    monkeypatch.setenv("ASH_G9_CONSTRUCT", construct)
+    profile = tmp_path / "suppressions.ash.yaml"
+    profile.write_text(
+        "project_name: canonical-scope\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: cdk.out/*.template.json\n"
+        "      rule_id: AwsSolutions-IAM5\n"
+        "      reason: r\n"
+        "      scope:\n"
+        "        resource_id: ${ASH_G9_CONSTRUCT}\n",
+        encoding="utf-8",
+    )
+    loaded = load_config_file_for_run(profile)[1]
+    entry = loaded.global_settings.suppressions[0]
+    # The controls: the value resolved, in the canonical spelling alone.
+    assert entry.scope is not None and entry.scope.resource_id == construct
+    assert entry.resource_id is None
+
+    written_id = written_suppression_id(entry, recorded_suppressions(loaded))
+
+    raw = {
+        "path": "cdk.out/*.template.json",
+        "rule_id": "AwsSolutions-IAM5",
+        "reason": "r",
+        "scope": {"resource_id": "${ASH_G9_CONSTRUCT}"},
+    }
+    assert written_id == suppression_id(raw), written_id
+    assert "${ASH_G9_CONSTRUCT}" in written_id, written_id
+    assert construct not in written_id, written_id

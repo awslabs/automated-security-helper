@@ -204,7 +204,13 @@ def test_a_value_is_redacted_when_the_products_redaction_cannot_be_imported(
 
     value = "canary-" + secrets.token_hex(16)
     other = "sentinel-" + secrets.token_hex(16)
-    monkeypatch.setenv(CANARY, value)
+    # The fallback replaces every environment value of four characters or
+    # more wherever it appears, so a short host value (a port, a year) that
+    # happens to occur inside the sentinel's random hex would redact the
+    # sentinel too. The probe runs over a one-variable environment so the
+    # only value in play is the canary's.
+    monkeypatch.setattr(os, "environ", {CANARY: value})
+    monkeypatch.setattr(env_assertions, "_VALUES_AT_START", ())
     monkeypatch.delattr(config_validator, "_redact_for_test_reports")
     monkeypatch.delattr(config_validator, "_printed_forms")
     env_assertions._folded_printed_forms.cache_clear()
@@ -833,7 +839,10 @@ def test_a_value_set_only_in_a_worker_is_hidden_in_the_writes_report(
         {CANARY: canary, "ASH_TEST_BACKSTOP_PLANT": str(plant)},
         options=("-n", workers, "-p", "no:randomly"),
     )
-    lines = [line for line in output.splitlines() if "/vis-a/" in line]
+    # The refused path is printed as the OS spells it: backslashes on Windows.
+    lines = [
+        line for line in output.replace("\\", "/").splitlines() if "/vis-a/" in line
+    ]
     if (
         "outside any test" not in output
         or len(lines) != 1
@@ -939,7 +948,10 @@ def test_a_path_holding_the_other_workers_value_hides_it(tmp_path: Path) -> None
         {CANARY: canary, "ASH_TEST_BACKSTOP_PLANT": str(plant)},
         options=("-n", "2", "-p", "no:randomly"),
     )
-    lines = [line for line in output.splitlines() if "/vis-a/" in line]
+    # The refused path is printed as the OS spells it: backslashes on Windows.
+    lines = [
+        line for line in output.replace("\\", "/").splitlines() if "/vis-a/" in line
+    ]
     workers = {line.split(":", 1)[0].strip() for line in lines}
     if returncode == 0 or len(lines) != 2 or workers != {"gw0", "gw1"}:
         raise RuntimeError(

@@ -876,10 +876,10 @@ def _record_grype_parses(monkeypatch) -> list:
         seen.append(str(config_path))
         return real(config_path)
 
-    def recording_bound(environ, grype_config, values=()):
+    def recording_bound(environ, grype_config, values=(), *, shown=None):
         if grype_config is not None:
             seen.append(str(grype_config))
-        return real_bound(environ, grype_config, values)
+        return real_bound(environ, grype_config, values, shown=shown)
 
     monkeypatch.setattr(
         grype_scanner.GrypeScanner, "_output_restricting_keys", staticmethod(recording)
@@ -2105,12 +2105,16 @@ def test_a_path_typed_field_holding_a_url_is_judged_by_its_collapsed_text():
     """A ``Path``-typed field has already collapsed the separator after the
     scheme (``file:///a/b`` reads back as ``file:/a/b``), so its text folds
     whole and meets the collapsed spelling. The raw ``scheme://`` spelling
-    keeps its separator and stays a different value."""
-    from pathlib import PurePath
+    keeps its separator and stays a different value.
+
+    ``PurePosixPath`` is pinned so the collapsed spelling is the same text on
+    every platform: ``os.fspath(PurePath(...))`` on Windows renders
+    backslashes, while the product's own folding is platform-consistent."""
+    from pathlib import PurePosixPath
 
     from automated_security_helper.config.operator_only_options import _holds
 
-    typed_text = os.fspath(PurePath("file:///a/b"))
+    typed_text = os.fspath(PurePosixPath("file:///a/b"))
     assert typed_text == "file:/a/b"
     assert _holds(typed_text, ["file:/./a/b"])
     assert not _holds("file:///a/b", [typed_text])

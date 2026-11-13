@@ -298,7 +298,7 @@ def test_the_refused_value_never_reaches_a_uv_argv(tmp_path):
     assert recorder.argvs, "the probe and the run should both have been attempted"
     for argv in recorder.argvs + [scanner.uv_tool_install_commands]:
         assert not any(standin.as_posix() in part for part in argv), argv
-    assert scanner._uv_from_spec() == "bandit[sarif,toml]>=1.7.0,<2.0.0"
+    assert scanner._uv_from_spec() == "bandit[sarif,toml]>=1.7.8,<2.0.0"
 
 
 def test_the_runner_refuses_a_requirement_that_is_not_an_index_package(tmp_path):

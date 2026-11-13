@@ -135,18 +135,28 @@ class TestValidateTrivyOfflineMode:
         assert any("TRIVY_CACHE_DIR" in m for m in messages)
 
     def test_old_db_returns_true_with_warning(self, tmp_path, monkeypatch):
+        from automated_security_helper.utils.content_databases import (
+            get as get_content_database,
+        )
+
         cache_dir = tmp_path / "trivy-cache"
-        cache_dir.mkdir()
-        db_file = cache_dir / "db.db"
+        # The check counts only files named trivy.db under the cache (the
+        # vulnerability database itself, TRIVY_DATABASE_FILE), where trivy
+        # keeps it: db/trivy.db.
+        db_file = cache_dir / "db" / "trivy.db"
+        db_file.parent.mkdir(parents=True)
         db_file.write_bytes(b"fake")
-        # Make the file appear 8 days old
-        old_mtime = time.time() - (8 * 24 * 3600)
+        # One day past the registry's own bound for trivy-db, which is what
+        # the validator warns against (the old 7-day literal is gone).
+        bound = get_content_database("trivy-db").max_age
+        old_mtime = time.time() - (bound.total_seconds() + 24 * 3600)
         os.utime(db_file, (old_mtime, old_mtime))
 
         monkeypatch.setenv("TRIVY_CACHE_DIR", str(cache_dir))
         valid, messages = validate_trivy_offline_mode()
         assert valid is True
         assert any("days old" in m for m in messages)
+        assert any("consider updating" in m for m in messages)
 
     def test_fresh_db_returns_true_no_staleness_warning(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "trivy-cache"

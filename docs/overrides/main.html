@@ -10,9 +10,13 @@
 
   A release page carries the outdated notice. Material hides it, and shows it when
   the version being read does not have the `latest` alias (extra.version.default),
-  which it can only know when the page is read. An unreleased page always carries the
-  unreleased notice instead, and no outdated one: main is ahead of the latest release,
-  not behind it.
+  which it can only know when the page is read. A release is published twice, as
+  3.8.0/ and as a copy at latest/ (mike alias_type: copy), and the copy holds the
+  same markup, so a page read under latest/ removes the notice itself: whatever
+  Material decides, or has cached in sessionStorage, the page that is the latest
+  release never says it is not. An unreleased page always carries the unreleased
+  notice instead, and no outdated one: main is ahead of the latest release, not
+  behind it, and its notice says so.
 
   Both notices link to the site root, which redirects to the latest release. The
   unreleased notice says the install commands install main only when
@@ -35,9 +39,8 @@
   <noscript>
     <style>
       .ash-search-trigger, .ash-menu-toggle, .ash-motion-toggle, .ash-copy,
-       .ash-tabs, .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
+       .ash-mode-picker, .ash-filter, [data-ash-run], [data-scan-controls],
        [data-ash-drawer], [data-ash-handbook] { display: none !important; }
-      .ash-install-panel[hidden] { display: block !important; margin-top: 1.5rem; }
        @media (max-width: 960px) {
         .ash-header { position: relative; height: auto; }
       }
@@ -48,8 +51,8 @@
 {% block announce %}
   {%- if not (config.extra.docs_version or "")[:1].isdigit() -%}
     <span data-ash-notice="unreleased">
-      These docs describe the main branch, which is not released yet, so a feature
-      described here may not be in the latest release.
+      These docs describe the main branch, which is ahead of the latest release, so a
+      feature described here may not be in a release yet.
       {%- if config.extra.install_ref %}
       The install commands in this version of the docs install
       <code>{{ config.extra.install_ref }}</code>, not a release.
@@ -57,8 +60,8 @@
       <a href="{{ 'how-to/install/' | url }}#install-from-main">Install from main</a>
       to use it now.
       {%- endif %}
-      <a href="{{ '../' ~ base_url }}">Read the docs for the latest release</a>
-      to install a release.
+      To install a release,
+      <a href="{{ '../' ~ base_url }}">read the docs for the latest release</a>.
     </span>
   {%- endif -%}
 {% endblock %}
@@ -69,6 +72,17 @@
       These docs are for ASH {{ config.extra.docs_version }}, which is not the latest release.
       <a href="{{ '../' ~ base_url }}"><strong>Read the docs for the latest release.</strong></a>
     </span>
+    {#- __md_scope is Material's own record of the directory the page was served
+        from (base_url resolved against the location); its last path segment is
+        what Material's version check reads too. The script runs while the page is
+        parsed, before Material's bundle looks for the notice. -#}
+    <script>
+      (function () {
+        var dir = __md_scope.pathname.split("/").filter(Boolean).pop();
+        var notice = document.querySelector("[data-md-component=outdated]");
+        if (dir === "latest" && notice) notice.remove();
+      })();
+    </script>
   {%- endif -%}
 {% endblock %}
 

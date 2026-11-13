@@ -1,4 +1,8 @@
 Package: nodejs
+Version: 22.23.4-1nodesource1
+Architecture: amd64
+
+Package: nodejs
 Version: 22.23.3-1nodesource1
 Architecture: amd64
 

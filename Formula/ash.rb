@@ -10,7 +10,7 @@ class Ash < Formula
   #
   # CI installs a copy of this formula in which only this line differs: it points
   # at a tarball of the commit under test (.github/scripts/render-homebrew-formula.py).
-  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.0"
+  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.8.0"
   license "Apache-2.0"
 
   # After the build, Homebrew rewrites every dylib ID in the keg to the library's
@@ -81,7 +81,7 @@ class Ash < Formula
     # PATH, the same thing `uvx` does. Node.js goes last, so a node the user put
     # on PATH still wins and this one is there when none is.
     path = "#{libexec}/bin:$PATH:#{Formula["node"].opt_bin}"
-    %w[ash ashv3 automated-security-helper].each do |script|
+    %w[ash ashv3 automated-security-helper agentic-security-harness].each do |script|
       (bin/script).write_env_script libexec/"bin"/script, PATH: path
     end
   end

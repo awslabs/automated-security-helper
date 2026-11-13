@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
@@ -59,7 +60,10 @@ def timed_out_scan(test_plugin_context, tmp_path):
                 return_value={"timed_out": True, "returncode": 124, "stderr": ""},
             ),
         ):
-            scanner.scan(target=target_dir, target_type="source")
+            # A timed-out worker fails the scan (the raise is the product
+            # contract); the line under test is written before the raise.
+            with pytest.raises(ScannerError, match="timed out"):
+                scanner.scan(target=target_dir, target_type="source")
         return [e for e in scanner.errors if "timed out" in e]
 
     return run

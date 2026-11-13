@@ -113,17 +113,21 @@ def _executable(bin_dir: Path, name: str, source: str) -> Path:
     would leave on PATH. On POSIX that is an executable file named ``name``. On Windows a
     shebang script cannot be started at all -- ``CreateProcess`` rejects it with
     ``[WinError 193] %1 is not a valid Win32 application`` -- so the launcher is a
-    ``name.cmd`` shim, the same form npm installs. ``find_executable`` tries ``.exe``,
-    ``.bat`` and ``.cmd`` before the bare name on Windows, and ``subprocess.run`` with a
-    list starts a ``.cmd`` directly, so the scanner's own lookup and invocation are the
-    ones under test rather than a patched-out subprocess call.
+    ``name.bat`` shim, the form RubyGems installs. ``find_executable`` tries ``.exe``,
+    ``.bat`` and ``.cmd`` before the bare name on Windows, each across the whole PATH
+    before the next, and ``subprocess.run`` with a list starts a ``.bat`` directly, so
+    the scanner's own lookup and invocation are the ones under test rather than a
+    patched-out subprocess call. It is ``.bat``, not ``.cmd``, because the tool guard
+    (tests/utils/tool_guard.py) puts a ``name.bat`` stand-in on PATH for each guarded
+    tool: a ``.cmd`` shim ranks after it whatever the PATH order, so the lookup
+    answered the stand-in and the test started a guarded tool.
 
     Returns the launcher's path, which is what a scanner's ``find_executable`` would return.
     """
     script = bin_dir / f"_fake_{name}.py"
     script.write_text(source, encoding="utf-8")
     if platform.system().lower() == "windows":
-        launcher = bin_dir / f"{name}.cmd"
+        launcher = bin_dir / f"{name}.bat"
         launcher.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
         return launcher
     launcher = bin_dir / name
@@ -322,13 +326,27 @@ CASES = {
     "semgrep-offline-rules": _ruleset_case("semgrep"),
     "opengrep-offline-rules": _ruleset_case("opengrep"),
 }
+# The one place a case's tier is written. CASES and CASE_TIERS are two dicts
+# because the suite's static tier check follows `marks=CASE_TIERS[name]` only over
+# a dict literal of marks; the assertion below names a case one of them lacks
+# instead of letting a bare KeyError error the module's collection.
 CASE_TIERS = {
     "grype-db": pytest.mark.integration,
     "trivy-db": pytest.mark.integration,
     "semgrep-offline-rules": pytest.mark.unit,
     "opengrep-offline-rules": pytest.mark.unit,
 }
+assert CASES.keys() == CASE_TIERS.keys(), (
+    "every database case needs a factory in CASES and a tier in CASE_TIERS",
+    sorted(CASES.keys() ^ CASE_TIERS.keys()),
+)
 TIERED_CASES = [pytest.param(name, marks=CASE_TIERS[name]) for name in sorted(CASES)]
+# Every case but trivy-db, whose offline default is the subject of
+# TestTheOfflineImageDefault; the tiers come from CASE_TIERS, not a second list.
+_EVERY_OTHER_DATABASE = sorted(set(CASES) - {"trivy-db"})
+EVERY_OTHER_TIERED_CASE = [
+    pytest.param(name, marks=CASE_TIERS[name]) for name in _EVERY_OTHER_DATABASE
+]
 
 
 def _over(name: str) -> timedelta:
@@ -1062,14 +1080,7 @@ class TestTheOfflineImageDefault:
         )
         assert "OFFLINE=YES" in flat["policy_source"]
 
-    @pytest.mark.parametrize(
-        "name",
-        [
-            pytest.param("grype-db", marks=pytest.mark.integration),
-            pytest.param("semgrep-offline-rules", marks=pytest.mark.unit),
-            pytest.param("opengrep-offline-rules", marks=pytest.mark.unit),
-        ],
-    )
+    @pytest.mark.parametrize("name", EVERY_OTHER_TIERED_CASE)
     def test_every_other_database_still_fails(self, tmp_path, name):
         scanner = CASES[name](tmp_path, _over(name))
         sarif = _sarif(scanner.config.name)
@@ -1768,7 +1779,13 @@ class TestTheProbeReadsNothingTheRepositoryWrote:
         )
         scanner._process_config_options()
         monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
-        monkeypatch.setattr(scanner, "_run_subprocess", lambda command, **kw: {})
+        # A run that ended: the scanner refuses a response with no exit code,
+        # so the stand-in answers as a finished tool does, with nothing to read.
+        monkeypatch.setattr(
+            scanner,
+            "_run_subprocess",
+            lambda command, **kw: {"returncode": 0, "stdout": "", "stderr": ""},
+        )
         scanner.scan(repo, "source")
         record = staleness.measure(
             cdb.get("trivy-db"),

@@ -66,6 +66,17 @@ def _no_value(lines, control: str) -> None:
     assert CANARY_DIR not in text, text
 
 
+def _dump_text(line: str) -> str:
+    """The text a plugin log line carries after its caller prefix.
+
+    ``_plugin_log`` escapes each part for Rich (utils/log.py ``escape_markup``),
+    which closes a value holding a colon off with an empty style at both ends,
+    so the text after the tab reads ``[none][/none]self.config: ...``. The
+    breaks render as nothing on the console; the match drops them.
+    """
+    return line.partition("\t")[2].replace("[none][/none]", "")
+
+
 def test_detect_secrets_baseline_lookup(tmp_path, debug_logged):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
         DetectSecretsScanner,
@@ -385,7 +396,7 @@ def test_detect_secrets_scan_config_dumps_show_env_value_as_written(
     dumps = [
         line
         for line in debug_logged
-        if line.partition("\t")[2].startswith(("self.config: ", "config: "))
+        if _dump_text(line).startswith(("self.config: ", "config: "))
     ]
     assert len(dumps) == 2, debug_logged
     for line in dumps:
@@ -423,8 +434,7 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
     monkeypatch.chdir(tmp_path)
     # A baseline_file a repository config writes is left out at load
     # (config/tool_config_trust.py), so the value is handed over directly and
-    # declared the context's, which the scanner refuses as a derived product
-    # that is not the operator's own.
+    # declared the context's.
     ash_config = resolve_config(source_dir=source)
     ctx = PluginContext(
         source_dir=source, output_dir=output, work_dir=work, config=ash_config
@@ -433,6 +443,20 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
         options=module.DetectSecretsScannerConfigOptions(
             baseline_file=derived.as_posix()
         )
+    )
+    # The refusal under test fires only for a value that is not the operator's
+    # own (config/path_trust.py, refused_derived_product returns False on
+    # operator_written). resolve_config over a tree with no config file
+    # returns on the wholly-operator early path before any operator view is
+    # recorded, and with no view recorded operator_wrote_value reads every
+    # value as the operator's, so the fixture has to establish the
+    # non-operator provenance directly, as the environment-reference sibling
+    # below does. The patch precedes construction because the scanner decides
+    # the refusal in _process_config_options, which runs at construction.
+    from automated_security_helper.config import operator_only_options
+
+    monkeypatch.setattr(
+        operator_only_options, "operator_wrote_value", lambda *_a, **_k: False
     )
     scanner = module.DetectSecretsScanner(
         context=ctx, config=config, config_from_context=True
@@ -453,7 +477,7 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
     dumps = [
         line
         for line in debug_logged
-        if line.partition("\t")[2].startswith(("self.config: ", "config: "))
+        if _dump_text(line).startswith(("self.config: ", "config: "))
     ]
     assert len(dumps) == 2, debug_logged
     for line in dumps:
@@ -535,7 +559,7 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_env_baseline_as_written
     dumps = [
         line
         for line in debug_logged
-        if line.partition("\t")[2].startswith(("self.config: ", "config: "))
+        if _dump_text(line).startswith(("self.config: ", "config: "))
     ]
     assert len(dumps) == 2, debug_logged
     for line in dumps:
@@ -583,19 +607,26 @@ def test_detect_secrets_timeout_warning_prints_its_limit_whole(
     work_dir.mkdir()
     debug_logged.clear()
 
-    scanned = scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[str(ctx.source_dir / "app.py")],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=limit,
-    )
+    # A killed worker wrote no results, so the scan fails: the WARNING is
+    # logged and ScannerError is raised (a None return graded a never-scanned
+    # tree as clean).
+    with pytest.raises(ScannerError, match="timed out") as excinfo:
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[str(ctx.source_dir / "app.py")],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=limit,
+        )
 
-    assert scanned is None
     text = "\n".join(debug_logged)
     assert "timed out after" in text, text
     assert f"timed out after {token}" in text, text
     assert "1e+06" not in text, text
+    # The raised text is the logged line plus advice; the same token, so the
+    # two surfaces cannot drift.
+    assert f"timed out after {token}" in str(excinfo.value)
+    assert "1e+06" not in str(excinfo.value)
 
 
 def test_grype_db_settings_read(tmp_path, debug_logged):
@@ -928,19 +959,23 @@ def test_a_timeout_warning_names_the_option_for_an_env_typed_limit(
     """
     scanner, work_dir = _timeout_scanner(tmp_path, monkeypatch, "067")
 
-    out = scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=67.0,
-    )
+    # The WARNING is recorded on the scanner's errors, then the failed scan
+    # is raised (a None return graded a never-scanned tree as clean).
+    with pytest.raises(ScannerError, match="timed out") as excinfo:
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=67.0,
+        )
 
-    assert out is None
     text = "\n".join(scanner.errors)
     assert "timed out" in text, text
     assert "the configured scan_timeout" in text, text
     assert "67" not in text, text
+    assert "the configured scan_timeout" in str(excinfo.value)
+    assert "67" not in str(excinfo.value)
 
 
 def _without_embedded_paths(text: str, tmp_path) -> str:
@@ -1000,15 +1035,17 @@ def test_the_runner_s_own_timeout_line_names_the_option_for_an_env_typed_limit(
     work_dir.mkdir()
     debug_logged.clear()
 
-    out = scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=67.0,
-    )
+    # The runner's own line is logged before the scanner fails the scan with
+    # ScannerError (a None return graded a never-scanned tree as clean).
+    with pytest.raises(ScannerError, match="timed out"):
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=67.0,
+        )
 
-    assert out is None
     runner_lines = [line for line in debug_logged if "Command timed out" in line]
     # The control: the real runner logged its own timeout line.
     assert runner_lines, debug_logged

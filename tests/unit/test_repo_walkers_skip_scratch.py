@@ -225,11 +225,6 @@ _EXEMPT = {
                 "cwd",
             ),
             (
-                "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
-                "test_the_child_copies_no_file_that_leaves_the_tree",
-                "child.cwd",
-            ),
-            (
                 "tests/unit/plugin_modules/ash_builtin/test_npm_audit_project_rc_ignored.py",
                 "fake_run",
                 "cwd",
@@ -313,6 +308,31 @@ _NPM_AUDIT_CWD = (
     "The directory the npm-audit child was started in: a staged copy under the "
     "test's tmp_path, never the checkout or the scratch root."
 )
+_PRODUCT_PACKAGE = (
+    "A subtree of the checkout's automated_security_helper package, resolved "
+    "through a call the guard cannot follow; no per-run directory lies under it."
+)
+_SCANNER_STAGED_COPY = (
+    "The directory the stand-in tool was handed on its command line: the "
+    "scanner's own staged copy or rescan tree under the test's tmp_path output."
+)
+_PMC_COPY = (
+    "The private copy package_manager_child made of the test's own tmp_path "
+    "package, under the parent directory the test created."
+)
+_ACT_RUN_TREE = (
+    "A directory of the act/CI-runner session the integration docs tests set up: "
+    "the run's artifact store, output or work directory under the test's own "
+    "session root in tmp."
+)
+_SCENARIO_TREE = (
+    "The characterization scenario's own tree under its tmp path: <SRC>, <OUT>, "
+    "<WORK> or the scenario's tmp itself. Only this scenario's teardown removes it."
+)
+_NON_UTF8_TREE = (
+    "The test's own tree of non-UTF-8 names under its tmp_path; _entries reads "
+    "it back bytes-for-bytes."
+)
 
 #: Walks of a directory the test made for itself, passed in as an argument or
 #: returned by a call, so the guard cannot resolve it. Same rules as _EXEMPT.
@@ -383,11 +403,6 @@ _EXEMPT.update(
         ): _TEST_OWN_TREE,
         (
             "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
-            "test_the_child_copies_no_file_that_leaves_the_tree",
-            "child.cwd",
-        ): _NPM_AUDIT_CWD,
-        (
-            "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
             "fake_run",
             "cwd",
         ): _NPM_AUDIT_CWD,
@@ -396,6 +411,345 @@ _EXEMPT.update(
             "fake_run",
             "cwd",
         ): _NPM_AUDIT_CWD,
+    }
+)
+
+#: Walks of a tree that only exists at run time, grouped by what makes it safe.
+#: The receiver strings are the guard's own rendering; same rules as _EXEMPT.
+_EXEMPT.update(
+    {
+        # act / CI-runner session trees
+        (
+            "tests/integration/docs/ci_runners/reports.py",
+            "aggregated_results_in",
+            "root",
+        ): _ACT_RUN_TREE,
+        (
+            "tests/integration/docs/ci_runners/reports.py",
+            "copy_without_links",
+            "source",
+        ): _ACT_RUN_TREE,
+        (
+            "tests/integration/docs/ci_runners/reports.py",
+            "junit_counts",
+            "root",
+        ): _ACT_RUN_TREE,
+        (
+            "tests/integration/docs/ci_runners/reports.py",
+            "_holds_something",
+            "path",
+        ): (
+            "An entry of act's artifact store that artifact_problems found under the "
+            "store it was given, which the tests put under their session root."
+        ),
+        (
+            "tests/integration/docs/ci_runners/reports.py",
+            "artifact_problems",
+            "artifact_dir",
+        ): _ACT_RUN_TREE,
+        (
+            "tests/integration/docs/ci_runners/reports.py",
+            "results_from_artifact_store",
+            "store",
+        ): _ACT_RUN_TREE,
+        (
+            "tests/integration/docs/ci_runners/reports.py",
+            "_copy_stored_artifact",
+            "source",
+        ): (
+            "One artifact's directory inside act's store (the parent of the "
+            "aggregated results file results_from_artifact_store found there), "
+            "copied out for the caller."
+        ),
+        (
+            "tests/integration/docs/ci_runners/run_act.py",
+            "copy_local_uses",
+            "source",
+        ): (
+            "A `uses:` path resolved under source_root with any '..' component "
+            "refused first; local actions live under .github/, a subtree no per-run "
+            "directory lies under."
+        ),
+        (
+            "tests/integration/docs/ci_runners/run_act.py",
+            "copy_local_uses",
+            "target",
+        ): (
+            "What copytree just wrote under the act project, which the caller "
+            "stages under the run's own work directory."
+        ),
+        (
+            "tests/unit/test_docs_ci_runner_judgments.py",
+            "test_every_jenkins_home_is_in_the_work_directory_and_none_is_uploaded",
+            "upload",
+        ): (
+            "session.options.out, the upload directory of the fake session the test "
+            "built under its tmp root; listing it is the assertion."
+        ),
+        (
+            "tests/unit/test_docs_ci_runner_tools.py",
+            "_tree",
+            "root",
+        ): (
+            "A directory the archive tests extracted or staged under their own tmp "
+            "paths; _tree is the module's listing helper."
+        ),
+        # a directory outside the checkout
+        (
+            "tests/integration/sandbox/test_sandbox_exec_services.py",
+            "_readable_files",
+            "directory",
+        ): (
+            "The keychain directory the unsandboxed control reads: /Library/Keychains, "
+            "or Library/Keychains under developer_home, the runner's own home "
+            "(_keychain_directory). Both are outside the checkout and no worker "
+            "writes a per-run directory there."
+        ),
+        # literal globs
+        (".github/scripts/combine-unit-coverage.py", "find_shard_dirs", "results"): (
+            "results is the --results-dir the CI job downloads its own shard "
+            "artifacts into (a tmp directory in the self-tests); the prefix "
+            "main() builds from the job's OS, label and Python version carries "
+            "no wildcard or separator, so the glob matches one directory "
+            "level of that store and never descends."
+        ),
+        ("tests/unit/deploy/test_deploy_ash_cli_contract.py", "_pins", "DEPLOY"): (
+            "PIN_SHAPES globs are literal module constants with no `**`, relative "
+            "to deploy/, which holds no test scratch to race."
+        ),
+        # characterization harness
+        (
+            "tests/unit/characterization/_harness.py",
+            "_chmod_and_remove",
+            "root",
+        ): (
+            "A short root the harness itself created and is removing; "
+            "make_writable raises before touching anything whose real path leaves "
+            "real_root."
+        ),
+        (
+            "tests/unit/characterization/_harness.py",
+            "begin",
+            "self.tmp",
+        ): _SCENARIO_TREE,
+        (
+            "tests/unit/characterization/_harness.py",
+            "begin",
+            "self.src",
+        ): _SCENARIO_TREE,
+        (
+            "tests/unit/characterization/_harness.py",
+            "_run_scanner",
+            "self.out",
+        ): _SCENARIO_TREE,
+        (
+            "tests/unit/characterization/_harness.py",
+            "golden",
+            "self.src",
+        ): _SCENARIO_TREE,
+        (
+            "tests/unit/characterization/_harness.py",
+            "tree",
+            "Path(root)",
+        ): _SCENARIO_TREE,
+        (
+            "tests/unit/characterization/_harness.py",
+            "_capture_argv_files",
+            "path",
+        ): (
+            "A directory named in a captured launch's argv, listed only when "
+            "_captured says it is inside the scenario's tmp (links never followed, "
+            "entries capped at DIR_ENTRY_LIMIT)."
+        ),
+        (
+            "tests/unit/characterization/test_harness_confinement.py",
+            "<module>",
+            "_tree(tmp)",
+        ): (
+            "_tree builds a two-entry fixture under its tmp argument, which every "
+            "caller passes as the test's own tmp_path; the copytree source is "
+            "that fixture."
+        ),
+        # cli, config, core
+        (
+            "tests/unit/cli/inspect/test_finding_text_is_not_markup.py",
+            "_inspect_sources",
+            "package",
+        ): _PRODUCT_PACKAGE,
+        (
+            "tests/unit/cli/mcp/test_a_refused_scanner_selection_answers_failure.py",
+            "test_a_refused_selection_leaves_the_output_tree_alone",
+            "out",
+        ): (
+            "The workspace fixture's output directory under its tmp_path; the "
+            "before/after listing is the test's whole point."
+        ),
+        (
+            "tests/unit/cli/mcp/test_profile_registry_binding_write_is_staged.py",
+            "_session_directories",
+            "root",
+        ): (
+            "The session's directory under ASH_MCP_WORKSPACE_ROOT, which the "
+            "module's autouse fixture points at a tmp_path workspace root."
+        ),
+        (
+            "tests/unit/cli/test_outputs_hold_no_value_read_from_the_environment.py",
+            "test_no_other_output_file_holds_a_value",
+            "run['output']",
+        ): (
+            "The output directory of the scan the module's run fixture performed "
+            "under its own tmp root."
+        ),
+        (
+            "tests/unit/cli/test_recorded_config_quotes_no_env_value.py",
+            "_log_files",
+            "directory",
+        ): (
+            "A directory of the module's runs fixture, under the tmp_path_factory "
+            "root it made."
+        ),
+        (
+            "tests/unit/config/test_a_config_file_that_does_not_load_is_refused.py",
+            "results_written",
+            "self.output",
+        ): "The output directory of the _Run, under the tmp_path the run fixture used.",
+        (
+            "tests/unit/core/phases/test_not_enabled_warning_quotes_no_env_value.py",
+            "test_the_scan_logs_name_the_type",
+            "directory",
+        ): "The out directory of the module's runs fixture under its tmp root.",
+        # converters
+        (
+            "tests/unit/converters/test_archive_member_admission.py",
+            "_convert",
+            "extracted",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_converters.py",
+            "test_convert_tar_with_traversal_does_not_write_outside",
+            "extracted_dir",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_converters.py",
+            "test_convert_zip_with_traversal_does_not_write_outside",
+            "extracted_dir",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_members_ignored_in_source_terms.py",
+            "_convert",
+            "extracted",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_a_tar_is_extracted_past_where_tarfile_stops.py",
+            "_extracted",
+            "results",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_members_follow_the_skip_scanning_contract.py",
+            "_convert",
+            "extracted",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_converter_edge_inputs.py",
+            "test_an_archive_with_a_member_past_the_host_limit_is_not_recorded_whole",
+            "extracted",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_archive_member_named_with_a_backslash_is_scanned.py",
+            "_converted",
+            "extracted",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/converters/test_which_archives_the_converter_extracts.py",
+            "test_an_archive_that_fails_to_extract_leaves_nothing_and_is_refused",
+            "Path(converter.results_dir)",
+        ): _CONVERTER_OUTPUT,
+        # scanner stand-ins reading the tree the tool was handed
+        (
+            "tests/unit/plugin_modules/ash_builtin/test_gitleaks_rescan_edges.py",
+            "fake_run",
+            "root",
+        ): _SCANNER_STAGED_COPY,
+        (
+            "tests/unit/plugin_modules/ash_snyk_plugins/test_snyk_code_copy_is_what_snyk_reads.py",
+            "run",
+            "directory",
+        ): _SCANNER_STAGED_COPY,
+        (
+            "tests/unit/plugin_modules/ash_snyk_plugins/test_snyk_code_scanner_behavior.py",
+            "_side_effect",
+            "tested",
+        ): _SCANNER_STAGED_COPY,
+        (
+            "tests/unit/plugin_modules/test_walking_scanners_skip_links_leaving_the_tree.py",
+            "_record",
+            "tested",
+        ): _SCANNER_STAGED_COPY,
+        # the product package and package_manager_child copies
+        (
+            "tests/unit/base/test_missing_dependency_reason_has_one_reader.py",
+            "_package_modules",
+            "root",
+        ): _PRODUCT_PACKAGE,
+        (
+            "tests/unit/utils/test_ignore_path_expiration.py",
+            "test_no_reader_bypasses_active_ignore_paths",
+            "self.PACKAGE",
+        ): _PRODUCT_PACKAGE,
+        (
+            "tests/unit/utils/test_ignore_path_expiration.py",
+            "_entry_fields",
+            "self.PACKAGE",
+        ): _PRODUCT_PACKAGE,
+        (
+            "tests/unit/utils/test_package_manager_child.py",
+            "test_the_copy_holds_a_member_reached_first_through_a_link",
+            "child.cwd",
+        ): _PMC_COPY,
+        (
+            "tests/unit/utils/test_package_manager_child.py",
+            "test_the_copy_holds_the_members_below_a_link_into_the_package",
+            "child.cwd",
+        ): _PMC_COPY,
+        (
+            "tests/unit/utils/test_package_manager_child.py",
+            "test_the_copy_holds_the_members_below_a_linked_directory",
+            "child.cwd",
+        ): _PMC_COPY,
+        (
+            "tests/unit/utils/test_package_manager_child.py",
+            "test_the_copy_holds_the_members_below_a_linked_directory_without_a_top_manifest",
+            "child.cwd",
+        ): _PMC_COPY,
+        # non-UTF-8 fixture trees
+        (
+            "tests/unit/workspace/test_a_workspace_path_that_is_not_utf8_is_refused.py",
+            "_entries",
+            "os.fsencode(top)",
+        ): _NON_UTF8_TREE,
+        (
+            "tests/unit/interactions/test_a_source_dir_that_is_not_utf8_is_refused.py",
+            "_entries",
+            "os.fsencode(top)",
+        ): _NON_UTF8_TREE,
+        # test helpers
+        ("tests/utils/child_tool_starts.py", "starts", "directory"): (
+            "The uv cache and uv tools directories the guard itself placed "
+            "(self.uv_directories), under the root the test gave ChildToolStarts; "
+            "listing what uv left is the probe's answer."
+        ),
+        (
+            "tests/utils/source_delivery_doubles.py",
+            "rmtree_calling_windows_unlink",
+            "path",
+        ): (
+            "A stand-in for shutil.rmtree on Windows: it walks only the tree the "
+            "caller is deleting, which every test passes as its own tmp tree."
+        ),
+        ("tests/utils/tool_guard.py", "files_left_in", "Path(home)"): (
+            "The test's own session HOME, which the guard gave the run; listing "
+            "what was left there is the assertion."
+        ),
     }
 )
 

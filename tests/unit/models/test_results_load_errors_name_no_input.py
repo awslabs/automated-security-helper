@@ -23,6 +23,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import typer
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.resource_management import scan_tracking
@@ -64,10 +65,31 @@ def _assert_no_value(text: str) -> None:
 
 
 def test_the_record_s_own_error_quotes_the_value():
-    """Control: loaded as it is, pydantic's text for this record quotes it."""
+    """Control: pydantic's own text for a refused input quotes it.
+
+    Whether the text for THIS record quotes the value depends on the pydantic
+    release and on which model's ``hide_input_in_errors`` it honors (the
+    record's sections set it; the newer releases apply a nested model's
+    setting, the older ones only the outer model's), so the record alone is not
+    a stable control. A default-configured model is: it shows the quoting the
+    reporting layers below exist to keep out of their output. The record's own
+    error still names the field and is a ValueError, which is what those
+    layers read.
+    """
+    from typing import Literal
+
+    from pydantic import BaseModel
+
+    class Plain(BaseModel):
+        severity_threshold: Literal["LOW", "HIGH"]
+
+    with pytest.raises(ValueError) as quoting:
+        Plain.model_validate({FIELD: CANARY})
+    assert CANARY in str(quoting.value)
+
     with pytest.raises(ValueError) as refused:
         AshAggregatedResults.model_validate(_record())
-    assert CANARY in str(refused.value)
+    assert FIELD in str(refused.value)
 
 
 @pytest.fixture
@@ -124,7 +146,11 @@ def test_inspect_findings_names_the_field(output_dir, capsys):
         findings_command,
     )
 
-    findings_command(output_dir=output_dir, report_file=RESULTS)
+    # A results file that does not load ends the command with exit code 1; the
+    # error is printed before the exit.
+    with pytest.raises(typer.Exit) as exited:
+        findings_command(output_dir=output_dir, report_file=RESULTS)
+    assert exited.value.exit_code == 1
     printed = capsys.readouterr()
     text = f"{printed.out}\n{printed.err}"
     assert FIELD in text, text
@@ -147,7 +173,10 @@ def test_an_outer_scan_s_read_back_names_the_field(tmp_path, monkeypatch, mode):
     logger = MagicMock()
     runner = "run_ash_container" if mode == "container" else "run_ash_nix"
     wrapper = _run_container_mode if mode == "container" else _run_nix_mode
-    with patch.object(module, runner, side_effect=inner):
+    with (
+        patch.object(module, runner, side_effect=inner),
+        patch.object(module, "nix_preflight", lambda: None),
+    ):
         with pytest.raises(SystemExit) as exited:
             wrapper(opts, logger)
 

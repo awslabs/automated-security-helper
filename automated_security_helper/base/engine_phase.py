@@ -7,17 +7,26 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    error_text,
+    plugin_environment_values,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class EnginePhase(ABC):
     """Base class for execution engine phases with observer pattern support."""
 
-    #: Which event handlers this phase's events reach: a filter from
-    #: ``loader.plugins_of`` for the run's own plugin modules, which
-    #: ScanExecutionEngine sets on the phases it builds, or that an engine hands
-    #: the constructor as ``plugin_filter``. None, for a phase built outside an
-    #: engine, reaches every subscriber.
+    #: Which event handlers this phase's events reach. An engine hands the
+    #: constructor its scan's ``plugins.loader.scan_handler_filter`` as
+    #: ``plugin_filter``, kept here: the handlers of the run's own plugins plus
+    #: every handler the embedding program subscribed from outside the plugin
+    #: namespace, so a phase event (SCAN_START, *_PHASE_COMPLETE) reaches the
+    #: same handlers the engine's EXECUTION_* events reach. A scope set on the
+    #: phase afterward is combined with the handed filter, so a handler either
+    #: one admits is notified. None, for a phase built outside an engine with no
+    #: filter, reaches every subscriber.
     plugin_scope: Optional[Callable[[Any], bool]] = None
 
     def __init__(
@@ -75,8 +84,67 @@ class EnginePhase(ABC):
             f"EnginePhase.notify_event: Notifying event {event_type} from phase {self.phase_name}"
         )
         return ash_plugin_manager.notify(
-            event_type, handler_filter=self.plugin_scope, **event_data
+            event_type, handler_filter=self._event_handler_filter(), **event_data
         )
+
+    def _event_handler_filter(self) -> Optional[Callable[[Any], bool]]:
+        """Which handlers this phase's events reach: the scope AND the filter handed in.
+
+        ``plugin_scope`` is the run's plugin set (``loader.plugins_of``), which
+        the engine sets on a phase after building it; ``plugin_filter`` is what
+        the engine handed the constructor, the scan's ``scan_handler_filter``,
+        which admits those plugins and every handler subscribed from outside
+        the plugin namespace (the embedding program's). Passing the scope alone
+        dropped the program's handlers from every phase event (SCAN_START,
+        SCAN_COMPLETE, CONVERT_*, REPORT_*, *_PHASE_*) although they still got
+        the engine's EXECUTION_* events. A handler either one admits is notified;
+        with one of the two unset, that one decides; with neither, every
+        subscriber is.
+        """
+        scope, handed = self.plugin_scope, self.plugin_filter
+        if scope is None or handed is None or scope is handed:
+            return scope if scope is not None else handed
+
+        def admits(callback: Any) -> bool:
+            return bool(scope(callback) or handed(callback))
+
+        return admits
+
+    def _notify_phase_event(self, event: Any, **kwargs) -> None:
+        """Notify a phase's START event; a handler that raises ends the run.
+
+        A *_PHASE_START handler's exception propagates as itself: that is the
+        contract the engine's own tests pin (a failing start handler ends the
+        run before the phase's work, with the phase's completions read cleanly
+        on the way out), and nothing of the phase has run yet, so nothing is
+        lost. The COMPLETE event is the one guarded (``_notify_phase_complete``):
+        there a raising handler discarded a finished phase's results.
+        """
+        self.notify_event(event, **kwargs)
+
+    def _notify_phase_complete(self, event: Any, **kwargs) -> None:
+        """Notify a phase's COMPLETE event, logging a handler that raises.
+
+        Every other notification site in the phases catches and logs a
+        handler's failure; this one did not, so one raising *_PHASE_COMPLETE
+        handler discarded a finished phase's results. The START event is not
+        guarded this way (``_notify_phase_event``).
+
+        The handler is plugin code and its exception can quote anything, a value
+        the run's configuration read from the environment included, so the text
+        is redacted with the configuration's values before it is logged, as the
+        engine's other error lines are.
+        """
+        try:
+            self.notify_event(event, **kwargs)
+        except Exception as error:  # noqa: BLE001 -- handlers are plugin-supplied
+            values = config_environment_values(
+                getattr(self.plugin_context, "config", None)
+            )
+            ASH_LOGGER.error(
+                f"Failed to notify {event} event for phase {self.phase_name}: "
+                f"{error_text(error, values)}"
+            )
 
     def execute(
         self,
@@ -106,7 +174,7 @@ class EnginePhase(ABC):
             )
             start_event = start_event_name
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {start_event} event")
-        self.notify_event(start_event, **kwargs)
+        self._notify_phase_event(start_event, **kwargs)
 
         # Execute the phase-specific logic
         ASH_LOGGER.debug(
@@ -152,7 +220,7 @@ class EnginePhase(ABC):
             )
             complete_event = complete_event_name
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {complete_event} event")
-        self.notify_event(complete_event, results=results, **kwargs)
+        self._notify_phase_complete(complete_event, results=results, **kwargs)
 
         return results
 
@@ -181,6 +249,7 @@ class EnginePhase(ABC):
         plugin_context: Any,
         python_only: bool = False,
         check_dependencies: bool = True,
+        failures: Optional[dict] = None,
     ) -> list:
         """Return only the plugins that are enabled and have satisfied dependencies.
 
@@ -196,6 +265,13 @@ class EnginePhase(ABC):
                 ``python_only`` only. ScanPhase passes False: it decides what a run
                 selects before it asks for any tool, and records an absent tool
                 itself, as MISSING.
+            failures: When given, a dict the method fills with the text of the
+                exception a dropped instance's own check raised, keyed by
+                ``id(instance)``. A caller that reads it can tell a plugin whose
+                check RAISED from one the check excluded, and record the first as
+                a failure rather than as an exclusion: without it, under
+                ``--python-only`` a selected scanner whose check raised was
+                recorded SKIPPED as not Python-only.
 
         Returns:
             Filtered list of plugin instances in original order.
@@ -212,6 +288,20 @@ class EnginePhase(ABC):
                     continue
                 result.append(instance)
             except Exception as e:
+                # The exception is plugin-sourced text: redacted of the values
+                # the config read from the environment AND of the plugin's own
+                # (plugin_environment_values: a plugin can know a value the
+                # run's configuration does not, and its check's exception can
+                # quote it), and of escape sequences, as every other place that
+                # shows an error it did not raise. The text reaches the scan
+                # phase's ERROR row, ash.log and the reports.
+                values = plugin_environment_values(
+                    instance,
+                    config_environment_values(getattr(plugin_context, "config", None)),
+                )
+                described = f"{type(e).__name__}: {error_text(e, values)}"
+                if failures is not None:
+                    failures[id(instance)] = described
                 # Swallowed deliberately: one plugin whose enabled/dependency
                 # check raises must not take down the whole phase, and every
                 # caller already treats an absent instance as "not enabled".
@@ -219,15 +309,16 @@ class EnginePhase(ABC):
                 # and is_python_only are plugin-supplied, so the exception set is
                 # open by design.
                 #
-                # Logged rather than silent because the plugin otherwise vanishes
-                # from the run with no trace anywhere:
+                # Logged as a warning, not at DEBUG, because the plugin otherwise
+                # vanishes from a default run with no trace: DEBUG reaches neither
+                # the console nor ash.log by default, and
                 # report_phase._excluded_reporter_reason attributes every leftover
                 # exclusion to unsatisfied dependencies, so a plugin that blew up
                 # here is reported to the operator as merely unsatisfied.
-                ASH_LOGGER.debug(
+                ASH_LOGGER.warning(
                     f"Excluding {type(instance).__name__} from the "
                     f"{self.phase_name} phase: its enabled/dependency check "
-                    f"raised {e!r}"
+                    f"raised {described}"
                 )
         return result
 

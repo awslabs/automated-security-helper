@@ -1,18 +1,15 @@
-"""Unit tests for Opengrep scanner version detection, metrics flags and patterns mode."""
-
-import json
-from pathlib import Path
+"""Unit tests for Opengrep scanner version detection, metrics flags and the
+refusal of patterns mode."""
 
 import pytest
 from unittest.mock import MagicMock, patch
-from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
+    patterns_mode_refusal,
 )
-from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 pytestmark = pytest.mark.unit
 
@@ -195,60 +192,61 @@ def test_process_config_options_online_new_version(test_plugin_context):
         assert len(metrics_args) == 0
 
 
-def test_patterns_mode_reads_the_results_file_its_command_writes(tmp_path):
-    """Patterns mode moves the results file to opengrep_results.json.
+def test_patterns_mode_is_refused_before_a_command_is_built(test_plugin_context):
+    """A configuration that sets ``patterns`` is refused while the scanner is built.
 
-    _execute_scan resolves the command a second time after the move. Without that,
-    the command still names results_sarif.sarif: opengrep writes its report there
-    and the scan reads a file nothing wrote. No opengrep runs here: the spawn is a
-    stand-in that writes an empty report where the command says, and the version
-    probe and the tool check are answered without it.
+    opengrep runs a ``--pattern`` search only with ``--lang``, which no option of
+    this scanner supplies, so the command the scanner used to build was started and
+    failed at the tool. Red at the base: the scanner was built, its command carried
+    one ``--pattern`` per entry and no ``--lang``, and nothing was raised. The
+    refusal names the option, the missing language option and the rule-file shape,
+    and no tool is started: the version probe is answered here and the spawn is a
+    stand-in that records any call.
     """
-    source = tmp_path / "src"
-    source.mkdir()
-    (source / "app.py").write_text("x = 1\n", encoding="utf-8")
-    context = PluginContext(
-        source_dir=source,
-        output_dir=tmp_path / "out",
-        work_dir=tmp_path / "out" / "converted",
-        config=get_default_config(),
-    )
-    commands = []
-
-    def opengrep(command, **_kwargs):
-        commands.append(command)
-        output = Path(command[command.index("--sarif-output") + 1])
-        output.write_text(
-            json.dumps(
-                {
-                    "version": "2.1.0",
-                    "runs": [{"tool": {"driver": {"name": "opengrep"}}, "results": []}],
-                }
-            ),
-            encoding="utf-8",
-        )
-        return {"returncode": 0}
-
     with (
-        # Online, whatever ASH's offline mode is here: offline without a rule
-        # cache, the scanner declines before it builds a command.
+        # Online, whatever ASH's offline mode is here, so the refusal is read
+        # against the online argument build.
         patch.object(OpengrepScanner, "_scanner_offline", return_value=False),
         patch.object(OpengrepScanner, "_get_opengrep_version", return_value=(1, 15, 1)),
-        patch.object(OpengrepScanner, "_validate_tool_dependencies", return_value=True),
-        patch.object(OpengrepScanner, "_run_subprocess", side_effect=opengrep),
+        patch.object(OpengrepScanner, "_run_subprocess") as spawn,
+        pytest.raises(ScannerError) as refused,
     ):
-        scanner = OpengrepScanner(
-            context=context,
+        OpengrepScanner(
+            context=test_plugin_context,
+            config=OpengrepScannerConfig(
+                options=OpengrepScannerConfigOptions(patterns=["eval($X)", "exec($X)"])
+            ),
+        )
+
+    message = str(refused.value)
+    assert message == patterns_mode_refusal(["eval($X)", "exec($X)"])
+    assert "scanners.opengrep.options.patterns names 2 patterns" in message
+    assert "--pattern" in message
+    assert "--lang" in message
+    assert "scanners.opengrep.options.config" in message
+    spawn.assert_not_called()
+
+
+def test_one_pattern_is_refused_in_the_singular(test_plugin_context):
+    """The control for the count: one entry reads "1 pattern"."""
+    with pytest.raises(ScannerError) as refused:
+        OpengrepScanner(
+            context=test_plugin_context,
             config=OpengrepScannerConfig(
                 options=OpengrepScannerConfigOptions(patterns=["eval($X)"])
             ),
         )
-        report = scanner.scan(target=source, target_type="source")
 
-    (command,) = commands
-    assert command[command.index("--pattern") + 1] == "eval($X)"
-    assert "--json" in command
-    written = Path(command[command.index("--sarif-output") + 1])
-    assert written.name == "opengrep_results.json", command
-    assert isinstance(report, SarifReport)
-    assert len(report.runs) == 1
+    assert "names 1 pattern," in str(refused.value)
+
+
+def test_rules_mode_is_not_refused(test_plugin_context):
+    """The control: the default, no patterns, builds its rules command as before."""
+    scanner = OpengrepScanner(
+        context=test_plugin_context,
+        config=OpengrepScannerConfig(options=OpengrepScannerConfigOptions()),
+    )
+
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert "--config" in keys
+    assert "--pattern" not in keys

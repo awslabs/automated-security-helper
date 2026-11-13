@@ -21,16 +21,42 @@ Not covered: what the git binary on ``PATH`` is, and settings that only matter t
 commands ASH does not run (``core.sshCommand`` for a fetch, a diff driver for a
 patch). ``tests/unit/utils/test_git_command.py`` checks that every git argv in the
 package is built here.
+
+``core.fsmonitor=false`` is a boolean to a git that has the built-in file system
+monitor. A git from before it reads the value as the name of a hook command, so
+there it starts the program named ``false`` on each index read instead of turning
+the monitor off. That program is found through the ``PATH`` git is given, which
+the scan-set helpers reduce to its anchored entries (``get_scan_set._git_environ``),
+so one planted in the scanned tree is not reached; its exit status of 1 makes git
+treat every file as possibly changed, which costs time and nothing else. The
+option stays as it is: the argv tests and the MCP tool-surface golden pin it.
 """
 
 from __future__ import annotations
 
 import sys
-from typing import Sequence, Union
+from typing import Optional, Sequence, Union
 
 #: The program name every git command ASH runs starts from, before a caller resolves
-#: it to an absolute path.
+#: it to an absolute path (:func:`resolved_git`).
 GIT_PROGRAM = "git"
+
+
+def resolved_git() -> Optional[str]:
+    """The git to run, as an absolute path, or None when there is none on PATH.
+
+    The one resolver every helper that starts git goes through. Not the bare
+    name: on Windows a program started by name is looked for in the working
+    directory before PATH, and ASH usually runs from the repository it scans, so
+    a ``git.exe`` committed to that repository would run. ``find_executable``
+    answers only from anchored PATH entries and ASH's own directories, never from
+    the working directory or the scanned tree. Imported where it is called, since
+    ``subprocess_utils`` is a heavier module than this one.
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    return find_executable(GIT_PROGRAM)
+
 
 #: How the output of a git command is decoded. git prints a path as the bytes of
 #: its name, and Python reads a file name with the filesystem encoding, so the
@@ -79,10 +105,13 @@ def git_argv(*args: str, program: Union[str, Sequence[str]] = GIT_PROGRAM) -> li
     the index starts no fsmonitor command, and ``-c core.hooksPath=/dev/null``, so
     git finds no hook to run. Nothing else in *args* is changed or checked.
 
-    ``program`` is the git to run: the bare name, or the absolute path a caller
-    resolved so that Windows does not look for git in the working directory first.
-    A sequence is the program followed by what must come before the options, such
-    as a stand-in script run through its interpreter.
+    ``program`` is the git to run: the absolute path :func:`resolved_git` gives a
+    caller that starts the command itself, so that Windows does not look for git
+    in the working directory first; or the bare name, for a caller whose spawn
+    helper resolves ``argv[0]`` on its own (``subprocess_utils.spawn_run``). A
+    sequence is the program followed by what must come before the options, such
+    as a stand-in script run through its interpreter. This function only builds
+    the argv; it resolves nothing, so it can be called where no git is installed.
     """
     prefix = [program] if isinstance(program, str) else list(program)
     return [*prefix, *GIT_SAFETY_OPTIONS, *args]

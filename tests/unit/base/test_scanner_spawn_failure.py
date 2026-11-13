@@ -22,6 +22,8 @@ OSError at the plain runner (``_run_plain``), before it started any child, or at
 """
 
 import errno
+import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -226,7 +228,11 @@ def test_semgrep_through_uv_is_not_accepted(semgrep):
         scanner.scan(target=source, target_type="source")
 
     assert run.call_count == 1, "a spawn failure is reported, not retried"
-    assert run.call_args.args[0][1:3] == ["tool", "run"]
+    # On Windows a uv.cmd shim is replaced by the running interpreter's launch
+    # (python -P -c <runpy uv>), so "tool run" follows the launcher's words
+    # rather than sitting at index 1; it is still the uv command, once.
+    argv = list(run.call_args.args[0])
+    assert any(argv[i : i + 2] == ["tool", "run"] for i in range(len(argv) - 1)), argv
     assert scanner.exit_code == 127
     assert not scanner._exit_code_accepted()
     assert scanner.scan_spawn_failure and "Bad address" in scanner.scan_spawn_failure
@@ -489,9 +495,11 @@ def test_handling_that_raises_keeps_the_responses_flag(
 #: The calls after the uv launch that the cells make raise, once: the three in
 #: _try_uv_tool_execution's try, and the recorders _run_subprocess calls on the
 #: uv result. (There is no _record_result_rejected or _record_cancelled here.)
+#: The offline-resolve explainer is not among them: the mixin guards it on its
+#: own (uv_tool_mixin.py, around the explainer call), so a raise inside it does
+#: not grade the run, and the test after this table pins that.
 AFTER_THE_UV_LAUNCH = {
     "process_command_response": ("_process_command_response", None),
-    "explain_offline_resolve_failure": ("_explain_offline_resolve_failure", None),
     "completion_plugin_log": (
         "_plugin_log",
         lambda message, *args, **kwargs: str(message).startswith(
@@ -531,6 +539,47 @@ def test_handling_that_raises_after_a_uv_launch_runs_nothing_again(
     assert scanner.scan_spawn_failure is None or flag == "spawn_failed", (
         scanner.scan_spawn_failure
     )
+
+
+@pytest.mark.unit
+def test_a_raising_offline_explainer_leaves_the_response_alone(tmp_path, monkeypatch):
+    """The offline-resolve explainer is best-effort text about a run that was
+    already processed. A raise inside it used to fall into the mixin's handler and
+    grade the run post_run_error; the mixin now guards it on its own, logs the
+    failure at DEBUG, and leaves the run's real result as it was."""
+    launches = _Launches("none")
+    scanner = _scanner_on(tmp_path, monkeypatch, "uv", launches)
+    monkeypatch.setattr(
+        _Handled,
+        "_explain_offline_resolve_failure",
+        _raises_once(_Handled._explain_offline_resolve_failure),
+    )
+    logged: list = []
+    original_log = _Handled._plugin_log
+
+    def recording_log(self, message, *args, **kwargs):
+        logged.append((str(message), kwargs.get("level")))
+        return original_log(self, message, *args, **kwargs)
+
+    monkeypatch.setattr(_Handled, "_plugin_log", recording_log)
+
+    response = scanner._run_subprocess(
+        command=["tool", "scan"], results_dir=tmp_path / "results"
+    )
+
+    assert (launches.uv, launches.direct) == (1, 0), (launches.uv, launches.direct)
+    assert not any(response.get(flag) is True for flag in _ERROR_FLAGS), response
+    assert response["returncode"] == _FLAGGED["none"][0], response
+    assert not scanner.scan_post_run_error, "the explainer's raise graded the run"
+    guard_lines = [
+        (message, level)
+        for message, level in logged
+        if message.startswith("The offline-resolve explainer could not run")
+    ]
+    assert len(guard_lines) == 1, logged
+    message, level = guard_lines[0]
+    assert level == logging.DEBUG, guard_lines
+    assert "the handler broke" in message, message
 
 
 def _uv_scanner_whose_run_returns(tmp_path, monkeypatch, result) -> _Handled:
@@ -929,6 +978,14 @@ def _waiting_fails_once_the_stderr_was_read():
                 to_send = None
                 if b"diag before the failure" in (partial.stderr or b""):
                     break
+                if os.name == "nt":
+                    # On Windows a TimeoutExpired carries nothing (the reader
+                    # threads deliver at EOF; see _output_after_stop), so the
+                    # diagnostic is never visible here. Give the child the time
+                    # to write it to its pipe, then fail the wait; the later
+                    # real communicate collects what the pipe holds.
+                    time.sleep(2)
+                    break
             else:
                 break
         raise RuntimeError("reading the output failed")
@@ -950,7 +1007,11 @@ def test_a_uv_launch_that_raised_during_a_failed_wait_keeps_the_stderr_read(
         # the launch's own spawn.
         with subprocess_utils.watched_launch():
             return subprocess_utils.spawn_run(
-                list(_DIAGNOSES_THEN_SLEEPS), capture_output=True, text=True
+                list(_DIAGNOSES_THEN_SLEEPS),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
 
     launches = _Launches("none")
@@ -1176,10 +1237,11 @@ def test_a_probes_start_before_the_launch_does_not_grade_the_launch(
 
     monkeypatch.setattr(UVToolRunner, "uv_availability", really_probed)
 
-    def requirement_check_breaks(spec, naming="a tool requirement"):
-        # The real checked_requirement's signature (spec, naming=...): run_tool
-        # passes naming positionally, and a stub narrower than the real
-        # callable raises TypeError instead of this cell's own reason.
+    def requirement_check_breaks(spec, naming="a tool requirement", **kwargs):
+        # The real checked_requirement's signature (spec, naming=..., *,
+        # package=...): run_tool passes naming positionally and the package by
+        # keyword, and a stub narrower than the real callable raises TypeError
+        # instead of this test's own reason.
         raise RuntimeError("a pre-launch step broke")
 
     monkeypatch.setattr(runner_module, "checked_requirement", requirement_check_breaks)

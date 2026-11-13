@@ -11,12 +11,15 @@ from typing import (
     List,
     Literal,
     TypeVar,
+    cast,
 )
 from typing_extensions import Self
 
 from pydantic import (
     Field,
     PrivateAttr,
+    ValidationError,
+    ValidationInfo,
     ValidatorFunctionWrapHandler,
     field_validator,
     model_validator,
@@ -27,6 +30,7 @@ from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import (
     PluginConfigBase,
     config_validated_by_declared_model,
+    declared_config_model,
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import (
@@ -53,6 +57,12 @@ class ConverterPluginConfigBase(PluginConfigBase):
 
 
 T = TypeVar("T", bound=ConverterPluginConfigBase)
+
+#: What an accepted input's record and log line carry as the suppression's
+#: reason when the config's environment record cannot be read: a reason the
+#: config file read from the environment is quoted by its reference, never its
+#: value, and without the record the two cannot be told apart.
+REASON_NOT_RENDERED = "the suppression's reason could not be rendered as written"
 
 
 class ConverterPluginBase(PluginBase, Generic[T]):
@@ -82,20 +92,29 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     #: re-derives the entry from the record's path only for a record that
     #: carries no id.
     _accepted_suppression_ids: List[str] = PrivateAttr(default_factory=list)
+    #: The reason _default_config recorded when the declared config model could
+    #: not be built without a section, while it stands: ``configure`` with a real
+    #: config clears it and the unavailable state it put on the converter, so a
+    #: converter configured after construction is not still read as unavailable
+    #: for want of the section it now has.
+    _config_fallback_reason: str | None = PrivateAttr(default=None)
 
     @field_validator("config", mode="wrap")
     @classmethod
     def _config_is_validated_by_the_declared_model(
-        cls, value: Any, handler: ValidatorFunctionWrapHandler
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
     ) -> Any:
         """A converter that declares a config model is configured by that model.
 
         A section it refuses is a ValidationError, which ``ConvertPhase`` records
         as that converter's failure, naming the option, before it goes on with
-        the others. See ``plugin_config.config_validated_by_declared_model``.
+        the others. The model validates under this field's own validation context
+        (``info``), so what the converter was validated with (the stored-config
+        tolerance's notes, say) reaches the model's validators as it would have
+        through the union. See ``plugin_config.config_validated_by_declared_model``.
         """
         return config_validated_by_declared_model(
-            cls, ConverterPluginConfigBase, value, handler
+            cls, ConverterPluginConfigBase, value, handler, info
         )
 
     @model_validator(mode="after")
@@ -112,26 +131,171 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         return self
 
     def model_post_init(self, context):
+        # pydantic runs model_post_init inside the model's own schema, before an
+        # after-validator such as setup_paths, so the context is checked here too:
+        # without it a converter built with none raised AttributeError on the
+        # work directory below, and the ScannerError the validator names was
+        # never reached.
+        if self.context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         if self.config is None:
-            self.config = ConverterPluginConfigBase()
+            self.config = self._default_config()
         self.results_dir = self.context.work_dir.joinpath(
             self.config.name or self.__class__.__name__
         )
         return super().model_post_init(context)
 
+    @classmethod
+    def _declared_config_model(cls) -> type[ConverterPluginConfigBase] | None:
+        """The config model this converter class declares, or None.
+
+        Read from the class itself: a class taken from a value (``type(self)``)
+        handed to a call is what the shown-text guard refuses in the package.
+        """
+        return cast(
+            "type[ConverterPluginConfigBase] | None",
+            declared_config_model(cls, ConverterPluginConfigBase),
+        )
+
+    def _default_config(self) -> ConverterPluginConfigBase:
+        """The config a converter runs with when it is given none.
+
+        An instance of the model the converter declares
+        (``ConverterPluginBase[XConfig]``), so its name, its declared ``enabled``
+        default and its options' defaults apply, as they do for a configured
+        run: a converter declared disabled by default stays disabled, and its
+        work directory is named for the converter. The generic base for a
+        converter that declares no model.
+
+        A converter whose declared model cannot be built without a section is
+        UNAVAILABLE: it gets the generic config, enabled, its dependencies are
+        recorded as not satisfied, and the reason names the model, so
+        ``ConvertPhase`` asks its dependency check, reads the answer False and
+        records it as it records a missing tool, with the reason in its row, and
+        does not run it. That record reaches the phase through the base
+        ``validate_plugin_dependencies``; a converter that OVERRIDES the check
+        answers from its own tool probe, so the record was lost on it and the
+        converter ran on the generic config its model never gave it. For such a
+        converter the constructor raises ScannerError instead, naming the model
+        and the reason, which the phase records as that converter's failure under
+        its declared name. The config stays enabled on purpose: the phase reads a
+        disabled converter as one the config turned off, whose check never ran
+        and whose row carries no reason, so a disabled fallback made the
+        converter read as deliberately excluded and the reason reached no row.
+        Before, such a converter ran on the generic config, whose ``enabled``
+        default is True and whose name is not the converter's: a model declared
+        ``enabled = False`` with a required field ran anyway, under a name its
+        own model never gave it, and a defect in a computed default (anything but
+        a ValidationError) was logged and then run past.
+        """
+        declared = self._declared_config_model()
+        if declared is None:
+            return ConverterPluginConfigBase()
+        try:
+            return declared()
+        except Exception as error:
+            # A model that needs a section raises ValidationError, the expected
+            # shape, told at DEBUG; one whose defaults are computed can raise
+            # anything, which is a defect in that default and is told at
+            # WARNING so it is seen.
+            if isinstance(error, ValidationError):
+                detail = f"{error.error_count()} error(s)"
+                log = ASH_LOGGER.debug
+            else:
+                detail = type(error).__name__
+                log = ASH_LOGGER.warning
+            reason = (
+                f"its config model {declared.__name__} cannot be built without a "
+                f"section ({detail})"
+            )
+            if self._overrides_dependency_check():
+                # Construction fails here, so there is no converter to be
+                # unavailable until it is configured.
+                log(
+                    f"{self.__class__.__name__}: {reason}; the converter cannot "
+                    "be built without it"
+                )
+                raise ScannerError(
+                    f"{self.__class__.__name__} cannot be built without a config "
+                    f"section: {reason}; configure it, or give the model's fields "
+                    "defaults"
+                ) from error
+            log(
+                f"{self.__class__.__name__}: {reason}; the converter is "
+                "unavailable until it is configured"
+            )
+            self.dependencies_satisfied = False
+            self.dependency_unavailable_reason = reason
+            self._config_fallback_reason = reason
+            # Under the name the model declares, where it declares one: the
+            # phase keys the converter's results row, its progress rows and
+            # its events on config.name, and falls back to the class name, so
+            # a nameless fallback filed the converter under a second name.
+            declared_name = getattr(declared.model_fields.get("name"), "default", None)
+            if isinstance(declared_name, str) and declared_name:
+                return ConverterPluginConfigBase(name=declared_name)
+            return ConverterPluginConfigBase()
+
+    def _overrides_dependency_check(self) -> bool:
+        """Whether this converter class answers ``validate_plugin_dependencies``
+        itself, so the record _default_config leaves in ``dependencies_satisfied``
+        would never reach ``ConvertPhase``."""
+        return (
+            type(self).validate_plugin_dependencies
+            is not ConverterPluginBase.validate_plugin_dependencies
+        )
+
     def configure(
         self,
         config: ConverterPluginConfigBase | None = None,
     ) -> None:
-        """Configure the converter with provided configuration."""
+        """Configure the converter with provided configuration.
+
+        A converter built without a config is recorded as unavailable until it is
+        configured (_default_config); given the config its declared model builds
+        here, that record is cleared, unless the converter's own dependency check
+        has since recorded another reason, which stands. A config of any other
+        class, the generic base included, does not clear it: the section the
+        converter needs is still missing, and reading it as ready would run the
+        converter on a config its model never gave it, the state the record
+        exists to prevent. The work directory keeps the name it was given at
+        construction.
+        """
         if config:
             self.config = config
+            if self._config_fallback_reason is not None:
+                declared = self._declared_config_model()
+                if declared is not None and isinstance(self.config, declared):
+                    if (
+                        self.dependency_unavailable_reason
+                        == self._config_fallback_reason
+                    ):
+                        self.dependencies_satisfied = True
+                        self.dependency_unavailable_reason = None
+                    self._config_fallback_reason = None
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate converter configuration and requirements.
 
-        Defaults to returning True as most converter plugins are entirely Python based."""
-        return True
+        Most converter plugins are entirely Python based, so the default answers
+        from the converter's own ``dependencies_satisfied``: True unless the
+        converter declared otherwise. ``ConvertPhase`` assigns the answer back to
+        that field, so a fixed True here overwrote a converter's own False, and
+        its ``dependency_unavailable_reason`` named a missing tool the phase
+        then ran the converter without.
+        """
+        if not self.dependencies_satisfied:
+            ASH_LOGGER.debug(
+                f"{self.__class__.__name__}: its dependencies are recorded as "
+                "not satisfied"
+                + (
+                    f": {self.dependency_unavailable_reason}"
+                    if self.dependency_unavailable_reason
+                    else ""
+                ),
+                extra=NO_MARKUP,
+            )
+        return bool(self.dependencies_satisfied)
 
     def open_source_file(self, path: Path | str) -> BinaryIO:
         """Open a file from the scan set for reading, under the scanned-tree rule.
@@ -163,8 +327,11 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         model can hold. So the warning is shown here, once, with
         utils/terminal_text.py's shown_on_one_line, which writes a surrogate as its
         escape (``\\udce9``). Each field of the record is the text as given, with
-        only its lone surrogates written as escapes (utils/undecodable_text.py):
-        whatever prints the record shows it for its own sink.
+        only its lone surrogates written as escapes (utils/undecodable_text.py);
+        ``RefusedInputInfo`` and ``FailedInputInfo`` keep every string field as
+        given, whitespace included, so a name that ends in a space is recorded
+        with it, as the warning shown here shows it. Whatever prints the record
+        shows it for its own sink.
 
         Args:
             refusal: What :meth:`open_source_file` raised, or an equivalent built for
@@ -252,25 +419,45 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         global_settings = getattr(config, "global_settings", None)
         # --ignore-suppressions runs the scan as if no suppression existed, and
         # this acceptance is a suppression (scan_result_processor reads the same
-        # flag for finding suppressions).
-        accepting = (
-            accepting_unconverted_input(
-                display, getattr(global_settings, "suppressions", None)
-            )
-            if kind == "input"
-            and not getattr(self.context, "ignore_suppressions", False)
-            else None
-        )
+        # flag for finding suppressions). Guarded as the bookkeeping below is:
+        # the match reads the configured suppressions (their paths, expirations
+        # and client_supplied flags), and an error there lost the input's record
+        # before it was appended, the loss this method exists to prevent. On an
+        # error the input is not accepted, the side that keeps the gate strict,
+        # and the error's type is logged.
+        accepting = None
+        if kind == "input" and not getattr(self.context, "ignore_suppressions", False):
+            try:
+                accepting = accepting_unconverted_input(
+                    display, getattr(global_settings, "suppressions", None)
+                )
+            except Exception as error:
+                accepting = None
+                ASH_LOGGER.debug(
+                    "could not read the suppressions for an unconverted input, so "
+                    f"it is recorded as not accepted: {type(error).__name__}"
+                )
         # A reason read from the environment is quoted by its reference, as
         # every quote of a suppression's reason is (written_suppression_reasons):
         # the log line and the record both reach the results and the reports.
-        accepted_reason = (
-            None
-            if accepting is None
-            else written_suppression_reasons(config).get(
-                id(accepting), accepting.reason
-            )
-        )
+        # Guarded as the id bookkeeping below is: recording a failure must not
+        # itself fail, and this reads the same environment record. Without the
+        # guard an error here lost the accepted input's record. With the record
+        # unreadable nothing says whether the reason was read from the
+        # environment, so the expanded value never stands in for the written
+        # one: a fixed text does.
+        accepted_reason = None
+        if accepting is not None:
+            try:
+                accepted_reason = written_suppression_reasons(config).get(
+                    id(accepting), accepting.reason
+                )
+            except Exception as error:
+                accepted_reason = REASON_NOT_RENDERED
+                ASH_LOGGER.debug(
+                    "could not read an accepted input's suppression reason as "
+                    f"written: {type(error).__name__}"
+                )
         accepted_id = None
         if accepting is not None:
             from automated_security_helper.utils.suppression_matcher import (

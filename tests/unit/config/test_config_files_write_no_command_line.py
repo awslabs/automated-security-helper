@@ -19,6 +19,7 @@ starts with one, and reads the value back as a scan reads it.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -99,6 +100,12 @@ def test_config_update(tmp_path, value):
 
 
 @pytest.mark.parametrize("value", CASES)
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="init takes the project name from a DIRECTORY named with the value; "
+    "every value holds a newline and two hold ':', which Windows refuses in a "
+    "file name, so the fixture mkdir cannot succeed there",
+)
 def test_config_init(tmp_path, monkeypatch, value):
     project = tmp_path / value
     project.mkdir()

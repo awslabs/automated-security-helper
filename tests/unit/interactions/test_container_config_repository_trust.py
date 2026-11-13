@@ -346,7 +346,9 @@ class TestTheScanInsideAppliesTheSameLimits:
         (honor,) = [
             message
             for message in messages
-            if "Ignoring honor_ignore_files from" in message and str(mounted) in message
+            # The warning names the file in forward slashes on every platform.
+            if "Ignoring honor_ignore_files from" in message
+            and mounted.as_posix() in message
         ]
         assert "someone other than the operator may have written it" in honor
         assert "MCP client" not in honor
@@ -440,7 +442,8 @@ class TestTheScanInsideAppliesTheSameLimits:
         assert result.exit_code == 0, result.output
         assert seen["ASH_CONFIG"] == str(env)
         assert seen["kwargs"]["config"] is None
-        assert seen["env"] == [env.resolve()]
+        resolved_config = seen["env"] == [env.resolve()]
+        assert resolved_config
         # Membership over the NAMES only: a failed assert over the mapping
         # itself, or over its .get, makes pytest print every environment
         # value (the meta-test in tests/unit pins this file to this shape).

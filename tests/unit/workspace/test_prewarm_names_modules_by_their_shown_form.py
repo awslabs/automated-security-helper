@@ -284,7 +284,10 @@ class TestTheUnionKeepsTheMaskedFormWhateverTheProjectOrder:
 
         assert module not in str(refusal.value), str(refusal.value)
         assert _records_naming(caplog, _FROM_THE_ENVIRONMENT) == []
-        assert _records_naming(caplog, "Loading workspace plugin modules"), caplog.text
+        # Control: the namespace refusal comes before the prewarm's own log line
+        # (nothing is imported or logged for a refused name), so the entry is
+        # named by its masked form in the refusal itself.
+        assert ENVIRONMENT_VALUE_SHOWN in str(refusal.value), str(refusal.value)
 
 
 class TestNoLogLineNamesAnEntryReadFromTheEnvironment:
@@ -298,14 +301,16 @@ class TestNoLogLineNamesAnEntryReadFromTheEnvironment:
         # Outside the plugin namespace, so the prewarm refuses it.
         plan = _plan_whose_config_read(tmp_path, f"value_{_FROM_THE_ENVIRONMENT}")
 
-        with pytest.raises(PluginModuleNamespaceError):
+        with pytest.raises(PluginModuleNamespaceError) as refusal:
             prewarm_plugin_registry(
                 plan, ProjectScanSettings(output_dir=tmp_path / "out")
             )
 
         assert _records_naming(caplog, _FROM_THE_ENVIRONMENT) == []
-        # Control: the line is still written, with the entry by its masked form.
-        assert _records_naming(caplog, "Loading workspace plugin modules"), caplog.text
+        # Control: the refusal comes before the prewarm's own log line (nothing
+        # is imported or logged for a refused name), so the entry is named by its
+        # masked form in the refusal itself.
+        assert ENVIRONMENT_VALUE_SHOWN in str(refusal.value), str(refusal.value)
 
     def test_an_imported_entry(self, tmp_path, caplog, monkeypatch):
         caplog.set_level(1, logger="ash")

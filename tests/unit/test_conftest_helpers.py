@@ -3,12 +3,19 @@
 
 """The helpers ``tests/conftest.py`` offers test authors do what they say.
 
-``temp_env_vars`` deletes, on teardown, no environment variable it did not set --
-``PATH`` and ``HOME`` included -- so the next test in the same xdist worker keeps its
-environment. These tests check the environment after the
-fixture's teardown, which only a fixture set up before it can see: pytest tears
-fixtures down in reverse order, so ``environment_check`` (requested first) is torn down
-after ``temp_env_vars`` and the ``monkeypatch`` it uses.
+``temp_env_vars`` puts back, on teardown, every environment variable it set, and sets
+nothing it was not asked to, so the next test in the same xdist worker keeps its
+environment. These tests check that after the fixture's teardown. That teardown is the
+shared ``monkeypatch``'s undo, and the autouse unit tool guard (tests/unit/conftest.py)
+takes ``monkeypatch`` before any test fixture is set up and patches PATH and the uv
+directories on it, so pytest's reverse-order teardown would undo it only AFTER
+``environment_check`` has compared, and an undo run by the check itself unwinds the
+guard's patches as well as the test's. ``environment_check`` therefore reads the test's
+FOOTPRINT (the variables whose value differs between its snapshot and the end of the
+test), undoes the shared instance, and asserts that each variable in the footprint is
+back to its snapshot value; the guard's variables are outside the footprint unless a
+test changes them, and the environment is left as the undo leaves it (re-applying the
+snapshot would plant the guard's values in every later test of the worker).
 """
 
 from __future__ import annotations
@@ -41,33 +48,53 @@ ADDED = "ASH_TEST_TEMP_ENV_VARS_ADDED"
 PYTEST_OWNED = {"PYTEST_CURRENT_TEST"}
 
 
-@pytest.fixture
-def environment_check():
-    """Fail the test unless the environment after teardown is the one it started with.
+def _environment() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
 
-    The sentinels are set through ``os.environ`` rather than ``monkeypatch``, because
-    ``monkeypatch`` would be torn down after this fixture and the comparison would see
-    its undo still pending.
+
+@pytest.fixture
+def environment_check(monkeypatch):
+    """Fail the test unless every variable it changed is back after the teardown.
+
+    The sentinels are set through ``os.environ`` rather than ``monkeypatch``, so they
+    are part of the snapshot and not of what the undo reverts. The shared
+    ``monkeypatch`` is created by the autouse unit tool guard before this fixture, with
+    the guard's own patches (PATH, UV_CACHE_DIR, UV_TOOL_DIR) already on it when the
+    snapshot is taken, so the fixture cannot compare the whole environment after an
+    undo: pytest's own undo would come after this check, and an undo run here reverts
+    the guard's patches too, which the snapshot holds. It reads the test's footprint
+    instead: the variables whose value differs between the snapshot and the end of the
+    test, which is what ``temp_env_vars`` set (and nothing the test did not ask for),
+    then undoes the shared instance and asserts each of them is back to its snapshot
+    value. The guard's own variables (PATH, UV_CACHE_DIR, UV_TOOL_DIR) are outside the
+    footprint unless the test itself changes one of them, so this check does not
+    police the guard's keys. A ``temp_env_vars`` that set variables outside
+    ``monkeypatch`` would leave them in the footprint unrestored. The environment is
+    left as the undo leaves it: the guard's later undo finds nothing to do, and
+    re-applying the snapshot would plant the guard's values in every later test of the
+    worker.
     """
     os.environ.update({KEPT: "kept", OVERWRITTEN: "before"})
-    before = {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
+    before = _environment()
     yield
-    after = {k: v for k, v in os.environ.items() if k not in PYTEST_OWNED}
-    # Put the environment back before asserting, so a failure here cannot leave the
-    # rest of this worker's tests without PATH.
-    for key in after.keys() - before.keys():
-        os.environ.pop(key, None)
-    os.environ.update(before)
+    during = _environment()
+    footprint = sorted(
+        key
+        for key in before.keys() | during.keys()
+        if before.get(key) != during.get(key)
+    )
+    monkeypatch.undo()
+    after = _environment()
     os.environ.pop(KEPT, None)
     os.environ.pop(OVERWRITTEN, None)
 
-    deleted = sorted(before.keys() - after.keys())
-    added = sorted(after.keys() - before.keys())
-    changed = sorted(k for k in before.keys() & after.keys() if before[k] != after[k])
-    assert (deleted, added, changed) == ([], [], []), (
-        f"temp_env_vars did not restore the environment: deleted {len(deleted)} "
-        f"variables ({', '.join(deleted[:8])}{'...' if len(deleted) > 8 else ''}), "
-        f"left {added} set, left {changed} changed"
+    assert footprint, "the test changed no variable, so there was nothing to check"
+    assert KEPT not in footprint, "a variable the test did not set was changed under it"
+    unrestored = sorted(key for key in footprint if after.get(key) != before.get(key))
+    assert unrestored == [], (
+        f"temp_env_vars did not restore the environment: of the variables the test "
+        f"changed ({footprint}), these are not back to their value before the test: "
+        f"{unrestored}"
     )
 
 
@@ -113,6 +140,9 @@ class _RecordingParser:
     def addoption(self, *names: str, **_kwargs) -> None:
         self.flags.append(names[0])
 
+    def getgroup(self, *_args, **_kwargs) -> "_RecordingParser":
+        return self
+
 
 class _RecordingConfig:
     def __init__(self) -> None:
@@ -130,10 +160,28 @@ class _ItemWithMarker:
 
     def __init__(self, marker: str) -> None:
         self.marker = marker
-        self.keywords = {marker: True}
+        self.nodeid = f"fake-item-{marker}"
+        # Exactly one tier marker per fake, as the collection hook requires of every
+        # item. Never "unit" as the filler: a unit item marked slow is refused.
+        self.markers = (
+            {marker}
+            if marker in ("unit", "integration", "e2e")
+            else {marker, "integration"}
+        )
+        self.keywords = dict.fromkeys(self.markers, True)
+        # The hook reads .kwargs on a ci_runner marker, so a marker is not a bare object.
+        self._marks = {
+            name: types.SimpleNamespace(name=name, args=(), kwargs={})
+            for name in self.markers
+        }
 
     def get_closest_marker(self, name):
-        return object() if name == self.marker else None
+        return self._marks.get(name)
+
+    def iter_markers(self, name):
+        mark = self._marks.get(name)
+        if mark is not None:
+            yield mark
 
     def add_marker(self, marker) -> None:
         pass
@@ -481,10 +529,18 @@ class TestToolInstallingChildrenGetTheirOwnHome:
         receipt = Path(written.read_text())
         assert Path.home() in receipt.parents, receipt
         assert developer_home / ".ash" not in receipt.parents, receipt
-        assert not any(
-            os.path.commonpath([os.path.realpath(receipt), root]) == root
-            for root in guarded
-        ), receipt
+
+        def under(path: str, root: str) -> bool:
+            # ntpath.commonpath raises ValueError across drives (the receipt on
+            # D: against a guarded root on C:). Such a pair has no common path,
+            # so the receipt is not under that root.
+            try:
+                return os.path.commonpath([path, root]) == root
+            except ValueError:
+                return False
+
+        real_receipt = os.path.realpath(receipt)
+        assert not any(under(real_receipt, root) for root in guarded), receipt
 
     @pytest.mark.unit
     def test_ash_run_as_a_module_with_the_developer_home_is_refused(
@@ -547,11 +603,13 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         return str(path)
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("name", ["ashv3", "automated-security-helper"])
+    @pytest.mark.parametrize(
+        "name", ["ashv3", "automated-security-helper", "agentic-security-harness"]
+    )
     def test_each_of_ashs_console_scripts_is_an_installer(
         self, home_guard_violations, developer_home, name
     ):
-        """pyproject.toml gives the CLI three names; ``ash`` is only one of them."""
+        """pyproject.toml gives the CLI four names; ``ash`` is only one of them."""
         destination = str(developer_home / ".ash" / "bin")
         argv = [self._console_script(name), "dependencies", "install"]
         argv += ["--bin-path", destination, "--help"]
@@ -561,7 +619,9 @@ class TestInstallersAreRefusedADestinationInTheDeveloperHome:
         home_guard_violations.clear()
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("name", ["ashv3", "automated-security-helper"])
+    @pytest.mark.parametrize(
+        "name", ["ashv3", "automated-security-helper", "agentic-security-harness"]
+    )
     def test_each_of_ashs_console_scripts_needs_a_home_of_its_own(
         self, home_guard_violations, developer_home, name
     ):
@@ -1012,6 +1072,46 @@ class TestTheGuardReadsThroughWrappers:
         self._refused(home_guard_violations, outcome, "--bin-path", into_home)
 
     @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "options",
+        [
+            pytest.param(["-euo", "pipefail", "-c"], id="o-inside-a-cluster-before-c"),
+            pytest.param(["-co", "pipefail"], id="c-and-o-in-one-cluster"),
+        ],
+    )
+    def test_an_option_letter_that_takes_a_value_inside_a_cluster(
+        self, home_guard_violations, into_home, options
+    ):
+        """The o inside ``-euo`` takes pipefail as its value, as the whole word ``-o``
+        does, so the command string is still the operand after it. Read without that,
+        pipefail was the command string, and the destination inside the real one was
+        never seen: the installer started."""
+        command = ["ash", "dependencies", "install", "--bin-path", into_home, "--help"]
+        outcome = self._start(["bash", *options, shlex.join(command)])
+        self._refused(home_guard_violations, outcome, "--bin-path", into_home)
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "argv, reads_stdin",
+        [
+            pytest.param(
+                ["sh", "-euo", "pipefail"], True, id="the-value-leaves-no-script"
+            ),
+            pytest.param(
+                ["sh", "-euo", "pipefail", "run.sh"], False, id="a-script-after-it"
+            ),
+            pytest.param(["sh", "-eu", "pipefail"], False, id="no-valued-letter"),
+        ],
+    )
+    def test_a_shell_whose_cluster_takes_a_value_reads_stdin_or_a_script(
+        self, request, argv, reads_stdin
+    ):
+        """``sh -euo pipefail`` reads its commands from standard input: pipefail is
+        the value of o, not a script file. Without the o, pipefail is the script."""
+        conftest = _root_conftest(request.config)
+        assert conftest._shell_reads_stdin(argv) is reads_stdin
+
+    @pytest.mark.unit
     def test_env_with_an_empty_environment(self, home_guard_violations):
         """``env -i`` drops HOME with the rest: the child falls back to the passwd home."""
         installer = TestToolInstallingChildrenGetTheirOwnHome.installer()
@@ -1050,7 +1150,12 @@ class TestTheGuardReadsThroughWrappers:
     @pytest.mark.unit
     @pytest.mark.parametrize("form", ["-S", "--split-string"])
     def test_env_splitting_a_string(self, home_guard_violations, into_home, form):
-        line = f"ASH_BIN_PATH={into_home} ash dependencies install --help"
+        import shlex
+
+        # env -S splits its string with POSIX shell rules, in which an unquoted
+        # backslash escapes the next character: a Windows path (C:\Users\...) must
+        # be quoted to reach the guard as written.
+        line = f"ASH_BIN_PATH={shlex.quote(into_home)} ash dependencies install --help"
         argv = ["env", "-S", line] if form == "-S" else ["env", f"{form}={line}"]
         self._refused(home_guard_violations, self._start(argv), "ASH_BIN_PATH")
 

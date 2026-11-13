@@ -1748,15 +1748,11 @@ if os.supports_bytes_environ:
     def test_a_set_of_an_imported_environb():
         assert b"ASH_TEST_UNSET_VARIABLE" in set(imported_environb)
 
-import warnings
-
 import pytest
 
-# The suite collection hook requires one tier per test. Under its own rootdir
-# this child does not know the mark and would warn, so the warning is dropped.
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    pytestmark = pytest.mark.unit
+# The suite collection hook requires one tier per test (tests/NAMING_CONVENTIONS.md);
+# under its own rootdir the child's conftest registers the mark.
+pytestmark = pytest.mark.unit
 """
 
 #: The child's first cell, which passes: the ASH the child imported is this
@@ -1845,6 +1841,12 @@ from tests.utils.env_assertions import (
 )
 
 hide_environ_values()
+
+
+def pytest_configure(config):
+    # The child carries the suite's tier marker (tests/NAMING_CONVENTIONS.md); under
+    # this rootdir the suite's pytest.ini is not read, so the mark is registered here.
+    config.addinivalue_line("markers", "unit: the unit tier, as the suite marks it")
 """
 
 
@@ -1988,6 +1990,17 @@ def test_under_the_suites_conftest_no_failure_prints_the_value(
     assert printed == [], "these failures printed the value under the backstop"
     unmarked = [name for name in CONTROLS if "<value>" not in failures[name]]
     assert unmarked == [], "these controls show no marker, so the run may be blind"
+
+
+@pytest.mark.unit
+def test_the_child_carries_its_tier_and_its_conftest_registers_the_mark():
+    """The child runs both ways: under the suite's conftest, whose collection hook
+    refuses a test with no tier marker, and under its own rootdir, where the suite's
+    pytest.ini is not read. So it carries the marker and CHILD_CONFTEST registers it,
+    and no warning filter hides an unknown mark."""
+    assert "pytestmark = pytest.mark.unit" in CHILD
+    assert "catch_warnings" not in CHILD and "simplefilter" not in CHILD
+    assert 'config.addinivalue_line("markers", "unit:' in CHILD_CONFTEST
 
 
 COMPARISONS_CHILD = f"""\
@@ -2235,18 +2248,33 @@ def test_a_comparison_with_an_environment_mapping_is_explained_by_names(
     assert gives_notice, "the fallback explanation does not say values are not shown"
 
 
-@dataclasses.dataclass
+def _fields_not_shown(self: object) -> str:
+    """The repr of the carriers below, which hold ``os.environ`` as a field:
+    their type alone, so that no report of a failing cell (an argument or a
+    local, shown whole under ``-vv`` and ``-l``) is built from the field's
+    repr, whatever frames that repr is asked from. A dataclass's generated
+    repr runs in a ``dataclasses`` wrapper frame, which does not read as a
+    formatting layer to env_assertions' check of who asks, so it would give
+    the field's real repr, values included."""
+    return f"{type(self).__name__}(<fields not shown>)"
+
+
+@dataclasses.dataclass(repr=False)
 class _Result:
     env: object
     returncode: int
     stdout: str
     extra: object
 
+    __repr__ = _fields_not_shown
 
-@dataclasses.dataclass
+
+@dataclasses.dataclass(repr=False)
 class _ResultEnvironmentLast:
     returncode: int
     env: object
+
+    __repr__ = _fields_not_shown
 
 
 @pytest.mark.unit
@@ -2311,21 +2339,27 @@ DECIMAL = "ASH_TEST_DECIMAL"
 DIGIT = "ASH_TEST_DIGIT"
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(repr=False)
 class _Read:
     env: object
     other: object
 
+    __repr__ = _fields_not_shown
 
-@dataclasses.dataclass
+
+@dataclasses.dataclass(repr=False)
 class _ReadEnvironmentLast:
     other: object
     env: object
+
+    __repr__ = _fields_not_shown
 
 
 class _ReadCarried(NamedTuple):
     env: object
     other: object
+
+    __repr__ = _fields_not_shown
 
 
 class _Port(int):

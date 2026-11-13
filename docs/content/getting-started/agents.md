@@ -75,6 +75,38 @@ Add this server to your agent's MCP configuration:
 }
 ```
 
+If you did not install ASH, or you would rather not, let the agent start the server with
+`uvx` instead. It needs uv and git on the `PATH` the agent uses, and network access to GitHub
+the first time the server starts:
+
+<!-- doctest: config kind=mcp-client -->
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.8.0",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+This is the entry the generated plugins use. The ref after `@` pins what is installed: a release
+tag does not move, while a branch like `main` resolves to its newest commit at install time. Change it
+to the ref you want, as described in
+[Change the ASH version a plugin uses](../how-to/agent-plugins.md#change-the-ash-version-a-plugin-uses).
+The entry does not install the scanner tools; step 1
+still applies, and [Install the ASH plugin for your agent](../how-to/agent-plugins.md) shows how
+to run `ash dependencies install` through `uvx`. Step 1 does not change what the entry
+installs: the entry installs ASH without the `cdk` extra, so the cdk-nag scanner is reported MISSING,
+and [Run the MCP server](../how-to/mcp-server.md#start-the-server-with-uvx-instead-of-an-installed-ash)
+shows how to add the extra. To run the server in a container or over HTTP
+instead, see [Run the MCP server](../how-to/mcp-server.md#run-in-a-container).
+
 Where the file lives depends on the agent. VS Code reads `.vscode/mcp.json` and uses the key
 `servers` instead of `mcpServers`. [Install the ASH plugin for your
 agent](../how-to/agent-plugins.md) shows the file each agent reads, and it also covers the
@@ -227,7 +259,7 @@ takes.
 
 ```text
 client_supplied: false
-expiration: '2027-01-08'
+expires: '2027-01-08'
 line_end: 6
 line_start: 6
 path: app.py
@@ -250,7 +282,7 @@ global_settings:
       line_start: 6
       line_end: 6
       reason: "MD5 builds a cache key; it does not protect anything"
-      expiration: "2027-06-30"
+      expires: "2027-06-30"
 EOF
 ```
 
@@ -262,12 +294,16 @@ ash config validate
 
 It checks the config a scan of the project would use, the way the scan loads it, and ends
 with `Configuration is valid! A scan accepts it.` It may also warn that `project_name` is not
-set, which a scan accepts. A wrong value, a missing required field such as `reason`, or a
-misspelled key such as `expiry` for `expiration` makes it name the field and exit with code 3:
+set, which a scan accepts. A typo in an optional key such as `expiry` for `expires` does
+not make the file invalid: validate still accepts it, the entry suppresses nothing until the
+key is fixed, and the scan that loads the config warns, naming the key with a did-you-mean
+(`fail_on_unknown_keys: true` makes it an error, the default from ASH v4). A wrong value or a
+missing required field such as `reason` makes validate name the field and exit with code 3; a
+typo in a required key does the same, because the required field then goes missing:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-sed 's/expiration:/expiry:/' .ashrc.yaml > typo.yaml
+sed 's/reason:/reasn:/' .ashrc.yaml > typo.yaml
 ash config validate --config typo.yaml
 ```
 

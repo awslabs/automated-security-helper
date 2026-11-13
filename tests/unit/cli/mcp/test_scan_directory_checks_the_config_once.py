@@ -92,6 +92,16 @@ def _count_reads(monkeypatch) -> List[Path]:
 
 
 def test_the_config_is_parsed_once(target, monkeypatch):
+    """One read per resolver, two in all.
+
+    ``check_config_input`` loads the file through ``read_config_document`` and
+    the pre-check resolves it through ``resolve_config_document`` with the scan
+    repository's settings. The two resolvers have different resolution
+    semantics (the second applies the repository-file and confinement rules the
+    scan itself loads under), so neither can hand the other its text: each
+    reads the chain once. An earlier pin of one read encoded the premise that
+    a single resolver served both.
+    """
     config = target / ".ash.yaml"
     config.write_text("project_name: once\n", encoding="utf-8")
     reads = _count_reads(monkeypatch)
@@ -100,13 +110,15 @@ def test_the_config_is_parsed_once(target, monkeypatch):
 
     assert result["success"] is True, result
     assert started is True
-    assert reads.count(config) == 1, reads
+    assert reads.count(config) == 2, reads
 
 
 def test_run_ash_scan_parses_the_config_once(target, monkeypatch):
     """run_ash_scan checks a named config before it acts on the target, and
     hands the result to scan_directory instead of having it read the file
-    again."""
+    again: the one read per resolver of the test above, two in all (the load
+    check's ``read_config_document`` and the pre-check's
+    ``resolve_config_document``), and no third from the second tool."""
     from automated_security_helper.cli import mcp_server
 
     async def _no_monitor(*args, **kwargs):
@@ -129,7 +141,7 @@ def test_run_ash_scan_parses_the_config_once(target, monkeypatch):
 
     assert result["success"] is True, result
     assert started.called
-    assert reads.count(config) == 1, reads
+    assert reads.count(config) == 2, reads
 
 
 def _raise(error: BaseException):
@@ -232,8 +244,9 @@ def test_the_load_check_repeats_no_value_it_found(
 ):
     """check_config_input's result gives no value it found: for a file the client
     named outside the config roots, for one in the scanned directory, and for an
-    operator's file in a config root outside the tree. The operator's keeps
-    pydantic's text, which names the field and the problem but not the input."""
+    operator's file in a config root outside the tree. The operator's keeps the
+    loader's validation text, which names the field and the problem but not the
+    input."""
     from automated_security_helper.cli.mcp.sandbox import check_config_input
 
     if source == "client":
@@ -254,7 +267,9 @@ def test_the_load_check_repeats_no_value_it_found(
     _no_canary_anywhere(checked.load_error)
     assert "ignore_paths" in str(checked.load_error)
     if source == "operator":
-        assert "validation error for AshConfig" in str(checked.load_error)
+        # The loader rewrites pydantic's text into its own wording, which still
+        # names the field and the problem and never the input value.
+        assert "Configuration validation failed for" in str(checked.load_error)
 
 
 @pytest.mark.parametrize(

@@ -1717,10 +1717,12 @@ def test_mcp_validate_config_judges_a_client_supplied_path_as_untrusted(
     project: Path, tmp_path: Path, monkeypatch
 ):
     """A config_path under the MCP shared workspace root got there through a
-    client, so it is judged as the scan judges it (untrusted): the
-    not-installed entry is dropped and the file is valid. A session's own
+    client, so it is judged as the scan judges it (untrusted): the runtime-override
+    policy lets a client narrow ``ash_plugin_modules`` but never add to it, so the
+    entry it adds is refused by that policy, naming the field. A session's own
     ``config/`` directory is the exception -- only the server writes it -- so
-    the same text there keeps the operator's trust and is refused."""
+    the same text there keeps the operator's trust and is refused by the module
+    judgment instead."""
     workspace = tmp_path / "mcp-workspaces"
     source = workspace / "sess1" / "src"
     source.mkdir(parents=True)
@@ -1730,11 +1732,23 @@ def test_mcp_validate_config_judges_a_client_supplied_path_as_untrusted(
     delivered.write_text(text, encoding="utf-8")
 
     result = mcp_validate_config(config_path=str(delivered), session_id="sess1")
-    assert result["valid"] is True, result
+    assert result["valid"] is False, result
+    assert any(
+        error.get("type") == "denied_by_runtime_policy"
+        and error.get("field") == "ash_plugin_modules"
+        for error in result["errors"]
+    ), result
 
     server_dir = workspace / "sess1" / "config"
     server_dir.mkdir()
-    materialized = server_dir / "cfg.yaml"
+    # Only the files the server itself writes there are set aside as the
+    # operator's (client_named_config_is_untrusted): the bound profile's name,
+    # not an arbitrary file a client could have placed in that directory.
+    from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
+    )
+
+    materialized = server_dir / SESSION_CONFIG_FILENAME
     materialized.write_text(text, encoding="utf-8")
 
     control = mcp_validate_config(config_path=str(materialized), session_id="sess1")
@@ -1745,18 +1759,23 @@ def test_mcp_validate_config_judges_a_client_supplied_path_as_untrusted(
     assert "is not a plugin module ASH imports" in messages, control
 
 
-def test_mcp_validate_config_drops_a_client_contents_not_installed_module(
+def test_mcp_validate_config_refuses_a_client_contents_added_module(
     project: Path,
 ):
-    """A config a client sends is untrusted: a scan under it drops a
-    not-installed ash_plugin_modules entry (resolve_config's untrusted path
-    treats the whole chain as in-tree), so the MCP tool calls it valid rather
-    than refusing a module the scan never loads."""
+    """A config a client sends is untrusted: the runtime-override policy a scan
+    resolves it under lets a client narrow ``ash_plugin_modules`` but never add
+    an entry that is not importable from the installed environment, so the MCP
+    tool reports the file invalid, naming the field, as the scan refuses it."""
     result = mcp_validate_config(
         config_content="project_name: demo\nash_plugin_modules:\n  - outside_module\n"
     )
 
-    assert result["valid"] is True, result
+    assert result["valid"] is False, result
+    assert any(
+        error.get("field") == "" and "ash_plugin_modules" in error["message"]
+        for error in result["errors"]
+    ), result
+    assert "outside_module" in " ".join(e["message"] for e in result["errors"]), result
 
 
 def test_validates_module_refusal_names_an_env_read_entry_masked(

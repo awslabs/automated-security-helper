@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import List
 from unittest.mock import patch
@@ -126,14 +127,28 @@ def _write(context: PluginContext, name: str, text: str) -> Path:
     ],
 )
 def test_a_tree_exclusion_file_refuses_the_scan(
-    context: PluginContext, runs: List[List[str]], name: str, text: str
+    context: PluginContext,
+    runs: List[List[str]],
+    name: str,
+    text: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    """The source target is judged on its staged copy, so the refusal comes after a
+    copy of the source exists under the temporary directory: that copy is removed
+    with the refusal, and the message names the file by its place in the tree,
+    not by the deleted temporary path the operator cannot act on."""
+    copies = tmp_path / "copies"
+    copies.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(copies))
     _write(context, name, text)
     with pytest.raises(ScannerError) as raised:
         _scan(context)
     message = str(raised.value)
     assert name in message
     assert "scanners.snyk-code.options.honor_tree_exclusions" in message
+    assert str(copies) not in message, message
+    assert list(copies.iterdir()) == [], list(copies.iterdir())
     assert runs == [], "snyk must not run on a tree whose exclusions apply"
 
 
@@ -220,11 +235,37 @@ def test_the_operator_can_accept_the_trees_exclusions(
     assert len(runs) == 1
 
 
-def test_a_file_under_git_counts_too(
-    context: PluginContext, runs: List[List[str]]
+def test_a_file_under_git_never_reaches_snyk_so_it_does_not_refuse(
+    context: PluginContext,
 ) -> None:
-    """snyk's native file filter collects rule files under .git as well."""
+    """snyk reads a copy of the scan set, and the scan set leaves ``.git`` out, so a
+    rule file under it is never in what snyk reads: the source target is judged on
+    the copy (``tree_exclusion_files`` on the staged directory), the file counts
+    for nothing, and snyk runs. Read at the moment snyk runs, on the directory it
+    is given: the file is not in the copy, and the copy carries no exclusion file,
+    so a copy that put ``.git`` back would fail here rather than let snyk apply
+    the rule quietly."""
     _write(context, ".git/.snyk", "exclude:\n  global:\n    - app.js\n")
-    with pytest.raises(ScannerError, match=r"\.git/\.snyk"):
+    seen: List[dict] = []
+
+    def run(self, command, **kwargs):
+        destination = next(
+            a.split("=", 1)[1] for a in command if a.startswith("--sarif-file-output=")
+        )
+        target = Path(
+            next(a for a in command[3:] if not a.startswith("-") and a != destination)
+        )
+        seen.append(
+            {
+                "git_snyk_in_copy": (target / ".git" / ".snyk").exists(),
+                "exclusion_files": snyk_code_scanner.tree_exclusion_files(target),
+            }
+        )
+        Path(destination).write_text(SARIF, encoding="utf-8")
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    with patch.object(SnykCodeScanner, "_run_subprocess", autospec=True) as double:
+        double.side_effect = run
         _scan(context)
-    assert runs == []
+
+    assert seen == [{"git_snyk_in_copy": False, "exclusion_files": []}], seen

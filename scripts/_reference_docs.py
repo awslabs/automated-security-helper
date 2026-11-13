@@ -63,8 +63,8 @@ the like. Online, one ``--check`` of the scanner page installed every scanner's
 tool into the user's home directory, though the page it produces is the same
 offline. :func:`isolate_run` therefore makes uv and pip offline, points every
 proxy variable at a local port this process holds and never listens on, so a
-connection is refused rather than made, and gives uv and the XDG directories
-temporary homes that are removed when the generator exits.
+connection is never made (Linux refuses it, macOS drops it), and gives uv and the
+XDG directories temporary homes that are removed when the generator exits.
 
 This module never imports ASH at module level, so importing it is cheap and safe
 from any test.
@@ -204,7 +204,7 @@ ISOLATED_DIRECTORIES = (
 )
 #: Set for the rest of the run: uv and pip do not reach an index.
 OFFLINE_ENVIRONMENT = {"UV_OFFLINE": "1", "PIP_NO_INDEX": "1"}
-#: Holds the socket behind the refusing proxy port for the life of the process.
+#: Holds the proxy-port socket and the temporary root for the life of the process.
 _ISOLATION: dict[str, Any] = {}
 
 
@@ -212,9 +212,12 @@ def isolate_run() -> list[str]:
     """Keep this process and its children off the network and out of the home directory.
 
     Returns the names set or removed. See "Why a run is kept off the network" above.
-    The proxy port is bound and never listened on, so nothing else can take it and
-    a connection to it is refused. The temporary directories live under one root,
-    removed at exit.
+    The proxy port is bound by this process and never listened on, and the socket is
+    held until exit, so no other local process can take the port and receive a
+    child's proxy connection. Linux and Windows refuse a connection to it; macOS
+    drops it instead, so a connection there times out rather than being refused.
+    Either way nothing is ever connected. The temporary directories live under one
+    root, removed at exit.
     """
     import atexit
     import shutil

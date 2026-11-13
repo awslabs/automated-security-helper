@@ -79,7 +79,7 @@ def _git(marker: str, *, fail_at: Optional[str] = None, how: str = "exit") -> An
     runs past its limit).
     """
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         name = next(part for part in cmd if part in ("clone", "fetch", "checkout"))
         if name == "clone":
             target = Path(cmd[-1])
@@ -155,7 +155,7 @@ def test_the_previous_tree_is_still_there_while_git_runs(monkeypatch) -> None:
     seen: Dict[str, Any] = {}
     run_git = _git("second")
 
-    def watching_run_git(cmd, *, env):
+    def watching_run_git(cmd, *, env, grows_in=None):
         if "clone" in cmd:
             seen["previous_tree"] = (source / "cloned.txt").read_text()
             seen["record"] = sd.get_session_source_dir(SESSION)

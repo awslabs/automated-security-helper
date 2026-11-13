@@ -196,7 +196,7 @@ def test_a_reference_two_shards_recorded_is_named_once_with_both_shards(shards):
     result = _merge([first, second])
     printed = _plain(result)
     assert result.exit_code == 3, printed
-    assert printed.count(f"{FIELD} is recorded as {REFERENCE}") == 1, printed
+    assert printed.count(f"{FIELD} holds {REFERENCE}") == 1, printed
     assert re.search(
         rf"in shard 0 \(\S*shard0/{RESULTS}\) and shard 1 \(\S*shard1/{RESULTS}\)",
         printed,

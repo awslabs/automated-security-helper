@@ -75,8 +75,22 @@ def _env(tree: Path) -> dict[str, str]:
 
 
 def _git(tree: Path, *args: str) -> None:
+    # The fixture's git must spawn no background maintenance or auto-gc child:
+    # tests delete .git while such a child would still be writing its lock files,
+    # and the rmtree walk then races the child's cleanup.
     subprocess.run(
-        ["git", "-C", str(tree), *args],
+        [
+            "git",
+            "-C",
+            str(tree),
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            "-c",
+            "gc.autoDetach=false",
+            *args,
+        ],
         env=_env(tree),
         check=True,
         capture_output=True,

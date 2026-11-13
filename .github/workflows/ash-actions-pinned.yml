@@ -62,7 +62,8 @@ concurrency:
 jobs:
   actions-pinned:
     name: Assert every action is pinned to a commit sha
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 24s on 4-vCPU ubuntu-latest (run 41724960359) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       contents: read

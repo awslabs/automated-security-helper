@@ -7,7 +7,7 @@
       "name": "security-scanner"
     }
   ],
-  "ash_version": "v3.7.0",
+  "ash_version": "v3.8.0",
   "author": {
     "name": "AWS Labs",
     "url": "https://github.com/awslabs/automated-security-helper"

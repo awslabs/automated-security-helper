@@ -458,14 +458,38 @@ REAL_CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 TEMPLATE = REPO_ROOT / ".github" / "changelog" / "CHANGELOG.md.j2"
 
 
+def _latest_released_version(changelog: str) -> str:
+    """The version of the newest ``## v<version> (<date>)`` entry below Unreleased."""
+    for line in changelog.splitlines():
+        if line.startswith("## v"):
+            return line.split()[1][1:]
+    raise AssertionError("CHANGELOG.md has no released entry")
+
+
 @pytest.fixture
 def real_changelog_fixture(tmp_path: Path) -> Fixture:
     """A scratch repo carrying the real CHANGELOG.md, template and v3.8.0 notes."""
     if not CZ_BIN.exists():
         pytest.skip(f"commitizen is not installed next to {sys.executable}")
-    if "## Unreleased" not in REAL_CHANGELOG.read_text(encoding="utf-8").splitlines():
+    changelog = REAL_CHANGELOG.read_text(encoding="utf-8")
+    if "## Unreleased" not in changelog.splitlines():
         pytest.skip("CHANGELOG.md has no Unreleased section on this checkout")
-    fx = Fixture(tmp_path)
+    # The scratch repo is tagged at the newest released entry the real changelog
+    # carries, because that is the tag commitizen's incremental changelog looks
+    # for: it matches the entry's version against the repo's tags by name
+    # similarity (threshold 0.89, under which "v3.7.1" does not match "v3.7.0")
+    # and with no match `cz bump` exits 16 (NO_REVISION) before writing, while
+    # the fold step's dry run fails the same way and refuses with "next tag could
+    # not be determined". A fixed v3.7.0 tag went stale the moment the v3.7.1
+    # entry landed in CHANGELOG.md.
+    latest = _latest_released_version(changelog)
+    major, minor, _patch = latest.split(".")
+    if f"{major}.{int(minor) + 1}.0" != "3.8.0":
+        pytest.skip(
+            "the curated notes under test are v3.8.0's, and the next minor after "
+            f"the newest changelog entry v{latest} is not 3.8.0"
+        )
+    fx = Fixture(tmp_path, version=latest)
     (fx.repo / ".github" / "changelog").mkdir(parents=True)
     (fx.repo / ".github" / "release-notes").mkdir(parents=True)
     shutil.copy(TEMPLATE, fx.repo / ".github" / "changelog" / TEMPLATE.name)
@@ -479,7 +503,7 @@ def real_changelog_fixture(tmp_path: Path) -> Fixture:
     )
     _git(fx.repo, "add", "-A", env=fx.env)
     _git(fx.repo, "commit", "-q", "-m", "chore: real changelog", env=fx.env)
-    _git(fx.repo, "tag", "-f", "v3.7.0", env=fx.env)
+    _git(fx.repo, "tag", "-f", f"v{latest}", env=fx.env)
     fx.commit("feat!: drop the old default")
     return fx
 

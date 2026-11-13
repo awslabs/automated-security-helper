@@ -1871,6 +1871,48 @@ def test_a_checkout_that_is_itself_a_link_does_not_mark_a_file_beside_it_as_the_
 
 @pytest.mark.integration
 @pytest.mark.parametrize("via", ["option", "environment"])
+def test_a_name_back_into_the_checkout_through_its_own_link_still_meets_the_links_it_holds(
+    fake_runner, tmp_path, via
+):
+    """The twin of the launcher's check in
+    tests/unit/test_sandbox_refused_by_every_container_entrypoint.py: the operator's
+    link to the checkout is followed out of the checkout by a ``..``, and the name
+    comes back in by the checkout's real name to a link the checkout holds that leads
+    outside it. The walk goes on past the operator's link, so the name is the tree's
+    and the file is refused as one the repository chose: exit 3, nothing built or
+    run. (The previous two checks are the other half: a ``..`` that leaves the
+    checkout and stays out is not refused.)"""
+    real = tmp_path / "data-root" / "repo"
+    (real / ".git").mkdir(parents=True)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("project_name: outside\n", encoding="utf-8")
+    (real / "lnk.yaml").symlink_to(outside)
+    home = tmp_path / "operator-home"
+    home.mkdir()
+    (home / "repo").symlink_to(real, target_is_directory=True)
+    words, env = _config_by_option_or_environment(via, f"{home}/repo/../repo/lnk.yaml")
+
+    rc, output_text, calls = _run_ash(
+        fake_runner,
+        tmp_path,
+        [
+            "--no-build",
+            "--source-dir",
+            str(home / "repo"),
+            "--output-dir",
+            str(tmp_path / "out"),
+            *words,
+        ],
+        env,
+    )
+
+    assert rc == 3, output_text
+    assert calls == [], calls
+    assert "is a link, or is reached through one" in output_text, output_text
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("via", ["option", "environment"])
 def test_a_file_in_the_checkout_is_the_repositorys_when_the_source_is_reached_through_an_alias(
     fake_runner, tmp_path, via
 ):
@@ -1907,12 +1949,30 @@ def test_a_file_in_the_checkout_is_the_repositorys_when_the_source_is_reached_th
 
     assert rc == 0, output_text
     run = _only_run(calls)
-    assert any(
-        Path(str(mount["source"])) == config.resolve()
-        for mount in _mounts(run).values()
-        if "source" in mount
-    ), _mounts(run)
-    assert any("from-scanned-repository" in word for word in _inner_args(run))
+    inner = _inner_args(run)
+    mounts = _mounts(run)
+    # The mark and the mount are the route's own: the --config file is mounted at
+    # /ash-config and marked with --config-from-scanned-repository; the ASH_CONFIG
+    # file at /ash-env-config, named with --ash-config-from-host, marked with the
+    # --config-file-from-scanned-repository pair, and, with no --config given, also
+    # the scan's --config with that mark. A match on any mount or on one mark word
+    # read the two routes alike and could not tell a dropped word from a given one.
+    if via == "option":
+        destination = "/ash-config/cfg.yaml"
+        assert _flag(inner, "--config") == destination, inner
+        assert "--config-from-scanned-repository" in inner, inner
+        assert "--config-file-from-scanned-repository" not in inner, inner
+    else:
+        destination = "/ash-env-config/cfg.yaml"
+        assert _flag(inner, "--ash-config-from-host") == destination, inner
+        assert _flag(inner, "--config-file-from-scanned-repository") == destination, (
+            inner
+        )
+        assert _flag(inner, "--config") == destination, inner
+        assert "--config-from-scanned-repository" in inner, inner
+    assert destination in mounts, mounts
+    assert Path(str(mounts[destination]["source"])) == config.resolve(), mounts
+    assert mounts[destination].get("readonly") is True, mounts
 
 
 @pytest.mark.integration
@@ -2361,9 +2421,13 @@ def _flat(text: str) -> str:
 
 @pytest.mark.unit
 def test_the_bash_wrapper_marks_another_checkout_by_the_container_path_only():
-    """One mark for the --config file and one for the ASH_CONFIG file, each the
-    option and the path inside the container, as the launcher sends it. No value
-    of the file and no host path travels in a mark."""
+    """A file in another checkout keeps the restriction-keeping another-checkout
+    mark, as the option and the path inside the container, for both the --config
+    file and the ASH_CONFIG file. The ASH_CONFIG file is not promoted to the
+    scanned-repository mark: that mark is given only when the file sits in the
+    scanned tree. So the another-checkout emission appears twice (once per
+    carried file), and no value of the file and no host path travels in a
+    mark."""
     bash = ASH_SCRIPT.read_text(encoding="utf-8")
 
     sites = [
@@ -2372,14 +2436,28 @@ def test_the_bash_wrapper_marks_another_checkout_by_the_container_path_only():
         if "CONFIG_PROVENANCE_ARGS+=" in line
         and "--config-file-from-another-checkout" in line
     ]
-    assert (
-        sites
-        == [
-            'CONFIG_PROVENANCE_ARGS+=(--config-file-from-another-checkout "${CARRIED_INNER}")'
-        ]
-        * 2
-    )
+    site = 'CONFIG_PROVENANCE_ARGS+=(--config-file-from-another-checkout "${CARRIED_INNER}")'
+    assert sites == [site, site]
     assert "--config-file-from-another-checkout=" not in bash
+
+    # No promotion: the scanned-repository mark for the ASH_CONFIG file is guarded
+    # by CARRIED_MARK alone, and the another-checkout case has its own guard.
+    flat = _flat(bash)
+    assert (
+        'if [[ "${CARRIED_MARK}" = "YES" || "${CARRIED_ELSEWHERE}" = "YES" ]]; then '
+        "CONFIG_PROVENANCE_ARGS+=(--config-file-from-scanned-repository"
+    ) not in flat
+    env_arm = flat.index(
+        'carry_config_file ASH_CONFIG "ASH_CONFIG file" "${ASH_CONFIG}" /ash-env-config'
+    )
+    env_tail = flat[env_arm:]
+    scanned = (
+        'if [[ "${CARRIED_MARK}" = "YES" ]]; then '
+        'CONFIG_PROVENANCE_ARGS+=(--config-file-from-scanned-repository "${CARRIED_INNER}") fi '
+        'if [[ "${CARRIED_ELSEWHERE}" = "YES" ]]; then '
+        'CONFIG_PROVENANCE_ARGS+=(--config-file-from-another-checkout "${CARRIED_INNER}") fi'
+    )
+    assert scanned in env_tail
 
 
 @pytest.mark.unit
@@ -2403,6 +2481,33 @@ def test_the_bash_wrapper_judges_another_checkout_only_for_a_file_it_mounts_unma
         if line.strip().startswith("in_another_checkout ")
     ]
     assert len(calls) == 1, calls
+
+
+@pytest.mark.unit
+def test_the_bash_wrapper_refuses_when_it_cannot_judge_another_checkout():
+    """The twin of the launcher's check below, read from ./ash's text: an undecided
+    judgment inside in_another_checkout is a refusal with the code of any other
+    (refuse, exit 3), in the launcher's words, and never an unmarked file.
+    test_a_judgment_that_cannot_be_made_refuses_and_starts_nothing runs it."""
+    raw = ASH_SCRIPT.read_text(encoding="utf-8")
+    bash = _flat(raw)
+
+    judging = bash.index("in_another_checkout() {")
+    judged = bash[judging : bash.index("# Resolve one config input", judging)]
+    assert 'refuse_unjudged "${given}" "${reason}"' in judged, judged
+    assert judged.count("refuse_unjudged ") == 1, "one undecided exit, one refusal"
+
+    # The function's body, to its closing brace at column 0, read in the raw text:
+    # _flat folds every newline into a space, so the brace line is found in ``raw``
+    # and the body is flattened afterwards for the same whitespace-blind reads.
+    helper = raw.index("refuse_unjudged() {")
+    body = _flat(raw[helper : raw.index("\n}\n", helper) + 3])
+    assert body.index("refuse ") < body.index("could not be judged"), body
+    assert "git checkout other than the scanned one" in body, body
+    assert "without the mark a local scan's judgment would give it" in body, body
+    # refuse exits with the wrapper's refusal code, the same for every refusal.
+    assert 'exit "${WRAPPER_REFUSAL_EXIT}"' in bash
+    assert "WRAPPER_REFUSAL_EXIT=3" in bash
 
 
 @pytest.mark.unit

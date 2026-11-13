@@ -55,8 +55,16 @@ def test_a_memoized_uv_is_not_available_is_rolled_back():
         # there to run. The probe spawns through spawn_run, not subprocess.run,
         # and a stand-in that fails any other way answers False for that call
         # only, leaving the memo None.
-        with patch.object(
-            uv_tool_runner, "spawn_run", side_effect=FileNotFoundError("uv")
+        # The executable is named outright, so the answer does not depend on where
+        # the host installed uv (a CI venv inside the checkout is a uv the spawn
+        # layer may refuse as lying in the tree, which is a per-call answer and
+        # leaves the memo None), and no refusal is on record for it.
+        uv_tool_runner.get_uv_tool_runner().uv_executable = "/nonexistent/bin/uv"
+        with (
+            patch.object(
+                uv_tool_runner, "spawn_run", side_effect=FileNotFoundError("uv")
+            ),
+            patch.object(subprocess_utils, "in_tree_refusal", return_value=None),
         ):
             assert uv_tool_runner.get_uv_tool_runner().is_uv_available() is False
         assert uv_tool_runner.get_uv_tool_runner()._uv_available_cache is False

@@ -13,8 +13,8 @@ pattern test_bedrock_summary_reporter.py uses. A MagicMock accepts any parameter
 so a finding missing a required ASFF field would pass a mocked test and fail only
 against the service; a real client validates every request against the
 Security Hub service model before the Stubber answers it. Nothing is signed and
-no request leaves the process: the ``no_network`` fixture fails any request that
-reaches the send stage.
+no request leaves the process: ``block_network`` (in
+security_hub_reporter_doubles.py) fails any request that reaches the send stage.
 
 The limits the reporter is built on, quoted from the AWS documentation:
 
@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,6 @@ from unittest.mock import MagicMock, patch
 import botocore.exceptions
 import botocore.session
 import pytest
-from botocore.stub import Stubber
 from botocore.validate import ParamValidator
 from pydantic import ValidationError
 
@@ -66,27 +66,36 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
-    ArtifactLocation,
-    Location,
-    Message,
-    PhysicalLocation,
-    PhysicalLocation2,
-    PropertyBag,
-    Region,
     Result,
-    Run,
-    SarifReport,
-    Suppression,
-    Tool,
-    ToolComponent,
+)
+from tests.unit.plugin_modules.ash_aws_plugins.security_hub_reporter_doubles import (
+    ACCOUNT,
+    PRODUCT_ARN,
+    REGION,
+    Capture as _Capture,
+    FixedClientSession as _FixedClientSession,
+    archive_run as _archive_run,
+    block_network as _block_network,
+    built_finding as _built,
+    caller_identity as _caller,
+    import_ok as _ok,
+    isolated_aws_environment,  # noqa: F401  (autouse fixture)
+    make_model as _model,
+    make_reporter as _reporter,
+    make_result as _result,
+    no_retry_sleep,  # noqa: F401  (autouse fixture)
+    report_with as _report_with,
+    stored_finding as _stored,
+    stubbed_client as _stubbed_client,
+    validate_with as _validate_with,
 )
 from tests.utils.helpers import mark_git_checkout
 
 AshConfig.model_rebuild()
 
-ACCOUNT = "123456789012"
-REGION = "us-east-1"
-PRODUCT_ARN = f"arn:aws:securityhub:{REGION}:{ACCOUNT}:product/{ACCOUNT}/default"
+# The builders, fixtures and doubles this module and its sibling test modules
+# share live in security_hub_reporter_doubles.py under public names; the private
+# aliases above keep the calls below short.
 
 #: The required top-level attributes, written out from the user guide page rather
 #: than imported from the reporter, so the test cannot agree with a reporter that
@@ -128,270 +137,8 @@ FINDING_SIZE_LIMIT_BYTES = 240 * 1024
 # --------------------------------------------------------------------------- #
 
 
-@pytest.fixture(autouse=True)
-def isolated_aws_environment(monkeypatch, tmp_path):
-    """Fake credentials and region; no profile, config file or metadata service.
-
-    ``create_client`` resolves the profile eagerly, so an ``AWS_PROFILE`` that
-    names a profile this machine lacks would raise before any stub is consulted.
-    The instance metadata service is disabled so a credential lookup that finds
-    nothing ends in NoCredentialsError instead of a network probe.
-    """
-    for name in (
-        "AWS_PROFILE",
-        "AWS_DEFAULT_PROFILE",
-        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-        "AWS_WEB_IDENTITY_TOKEN_FILE",
-        "AWS_ROLE_ARN",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "no-aws-config"))
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-aws-creds"))
-    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")  # pragma: allowlist secret
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")  # pragma: allowlist secret
-    monkeypatch.setenv("AWS_DEFAULT_REGION", REGION)
-
-
-@pytest.fixture(autouse=True)
-def no_retry_sleep():
-    """Retries back off with ``time.sleep``; the tests count attempts instead.
-
-    The ``time`` name aws_utils looks up is replaced, not ``time.sleep`` itself:
-    patching the attribute on the shared ``time`` module also recorded sleeps from
-    threads other tests left running in the same worker, so the count depended
-    on which tests ran first.
-    """
-    from types import SimpleNamespace
-
-    sleeps: list[float] = []
-    with patch(
-        "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils.time",
-        SimpleNamespace(sleep=sleeps.append),
-    ):
-        yield sleeps
-
-
-def _block_network(client) -> None:
-    """Fail the test if any request reaches the HTTP layer."""
-
-    def _refuse(request, **_: Any):
-        raise AssertionError(f"request reached the network: {request.url}")
-
-    client.meta.events.register_first("before-send.*.*", _refuse)
-
-
-def _stubbed_client(service_name: str):
-    """A real botocore client for ``service_name`` and its activated Stubber."""
-    session = botocore.session.Session()
-    # Not secrets: the Stubber answers before anything is signed.
-    session.set_credentials("testing", "testing")  # pragma: allowlist secret
-    client = session.create_client(service_name, region_name=REGION)
-    _block_network(client)
-    stub = Stubber(client)
-    stub.activate()
-    return client, stub
-
-
-class _FixedClientSession:
-    """Stands in for ``boto3.Session``, handing out prepared clients by name.
-
-    Not a MagicMock: a client the test did not prepare raises KeyError, so a call
-    to an unexpected service fails the test instead of answering with a mock.
-    """
-
-    def __init__(self, clients: dict):
-        self._clients = clients
-
-    def client(self, service_name, **_: Any):
-        return self._clients[service_name]
-
-
-class _Capture:
-    """Records the parameters of every call a client makes to ``operation``."""
-
-    def __init__(self, client, operation: str = "BatchImportFindings") -> None:
-        self.requests: list[dict] = []
-        client.meta.events.register(
-            f"provide-client-params.securityhub.{operation}", self._record
-        )
-
-    def _record(self, params: dict, **_: Any) -> None:
-        self.requests.append(json.loads(json.dumps(params)))
-
-    @property
-    def findings(self) -> list[dict]:
-        return [f for request in self.requests for f in request["Findings"]]
-
-
-def _result(
-    rule_id: str = "B602",
-    uri: str | None = "app/app.py",
-    line: int | None = 9,
-    message: str = "subprocess call with shell=True identified, security issue.",
-    level: str = "error",
-    issue_severity: str | None = "HIGH",
-    scanner: str = "bandit",
-    suppressed: bool = False,
-    workspace_project: str | None = None,
-    extra_properties: dict | None = None,
-    fingerprints: dict | None = None,
-    partial_fingerprints: dict | None = None,
-    start_column: int | None = None,
-) -> Result:
-    properties: dict[str, Any] = {"scanner_name": scanner, "tags": [scanner]}
-    if issue_severity is not None:
-        properties["issue_severity"] = issue_severity
-    if workspace_project is not None:
-        properties["workspace_project"] = workspace_project
-    properties.update(extra_properties or {})
-    locations = None
-    if uri is not None:
-        locations = [
-            Location(
-                physicalLocation=PhysicalLocation(
-                    root=PhysicalLocation2(
-                        artifactLocation=ArtifactLocation(uri=uri),
-                        region=Region(
-                            startLine=line, endLine=line, startColumn=start_column
-                        )
-                        if line is not None
-                        else None,
-                    )
-                )
-            )
-        ]
-    return Result(
-        ruleId=rule_id,
-        level=level,
-        message=Message(text=message),
-        locations=locations,
-        properties=PropertyBag(**properties),
-        fingerprints=fingerprints,
-        partialFingerprints=partial_fingerprints,
-        suppressions=(
-            [Suppression(kind="external", justification="accepted risk")]
-            if suppressed
-            else None
-        ),
-    )
-
-
-def _model(
-    results: list[Result],
-    generated_at: str = "2026-01-15T12:00:00+00:00",
-    report_id: str = "ASH-20260115",
-    project_name: str | None = None,
-    completed: tuple[str, ...] = (),
-    changed_files_only: bool | None = False,
-    scan_source: str | None = ".",
-) -> AshAggregatedResults:
-    """A results model. ``project_name`` sets the scan's recorded config;
-    ``completed`` lists scanners recorded as having run to completion;
-    ``changed_files_only`` is the marker a scan records (None: not recorded);
-    ``scan_source`` is the scanned directory the scan records (None: not
-    recorded)."""
-    model = AshAggregatedResults(
-        sarif=SarifReport(
-            version="2.1.0",
-            runs=[
-                Run(
-                    tool=Tool(
-                        driver=ToolComponent(
-                            name="AWS Labs - Automated Security Helper"
-                        )
-                    ),
-                    results=results,
-                )
-            ],
-        )
-    )
-    model.metadata.generated_at = generated_at
-    model.metadata.report_id = report_id
-    if project_name is not None:
-        model.ash_config = AshConfig(project_name=project_name)
-    for scanner in completed:
-        model.scanner_results[scanner] = ScannerTargetStatusInfo(
-            status=ScannerStatus.PASSED
-        )
-    if changed_files_only is not None:
-        model.metadata.changed_files_only = changed_files_only
-    if scan_source is not None:
-        model.metadata.scan_source = scan_source
-    return model
-
-
 def _many(count: int) -> list[Result]:
     return [_result(line=index + 1) for index in range(count)]
-
-
-def _reporter(
-    tmp_path: Path,
-    *,
-    findings_scope: str | None = "fixture-project",
-    project_name: str = "fixture-project",
-    account_id: str | None = ACCOUNT,
-    region: str | None = REGION,
-    max_retries: int = 2,
-    archive: bool = False,
-) -> SecurityHubReporter:
-    """A reporter that is enabled. ``archive`` is off unless a test is about it,
-    so the import tests need no GetFindings stub; its default is tested on its own.
-    ``project_name`` is the ASH configuration's, which a repository's own config
-    can set; the reporter must not read it."""
-    source_dir = tmp_path / "checkout"
-    source_dir.mkdir(exist_ok=True)
-    return SecurityHubReporter(
-        context=PluginContext(
-            source_dir=source_dir,
-            output_dir=tmp_path / "out",
-            config=AshConfig(project_name=project_name),
-        ),
-        config=SecurityHubReporterConfig(
-            enabled=True,
-            options=SecurityHubReporterConfigOptions(
-                aws_region=region,
-                aws_profile=None,
-                account_id=account_id,
-                max_retries=max_retries,
-                base_delay=0.0,
-                max_delay=0.0,
-                archive_resolved_findings=archive,
-                findings_scope=findings_scope,
-            ),
-        ),
-    )
-
-
-def _caller(account: str) -> dict:
-    return {
-        "Account": account,
-        "Arn": f"arn:aws:iam::{account}:user/ci",
-        "UserId": "AIDAEXAMPLE",
-    }
-
-
-def _ok(count: int) -> dict:
-    return {"FailedCount": 0, "SuccessCount": count, "FailedFindings": []}
-
-
-def _report_with(reporter, model, clients: dict, *, caller: str | None = ACCOUNT):
-    """report() against prepared clients.
-
-    The send path asks STS whose credentials these are before anything is sent,
-    so an STS client answering ``caller`` is added unless the test prepares its
-    own, or passes ``caller=None`` to prove the account is never looked up.
-    """
-    clients = dict(clients)
-    if caller is not None and "sts" not in clients:
-        sts, sts_stub = _stubbed_client("sts")
-        sts_stub.add_response("get_caller_identity", _caller(caller))
-        clients["sts"] = sts
-    with patch.object(
-        securityhub_module.boto3, "Session", lambda **_: _FixedClientSession(clients)
-    ):
-        return reporter.report(model)
 
 
 # --------------------------------------------------------------------------- #
@@ -580,7 +327,7 @@ def test_a_failed_request_stops_the_import_and_counts_what_was_not_sent(tmp_path
 
 
 @pytest.mark.unit
-def test_throttling_is_retried_and_then_succeeds(tmp_path, no_retry_sleep):
+def test_throttling_is_retried_and_then_succeeds(tmp_path, no_retry_sleep):  # noqa: F811
     """LimitExceededException is the API's 429; the reporter backs off and retries."""
     securityhub, stub = _stubbed_client("securityhub")
     stub.add_client_error(
@@ -1142,15 +889,20 @@ def test_exact_duplicates_get_an_ordinal_and_are_all_sent(tmp_path):
 
 
 @pytest.mark.unit
-def test_one_fingerprint_reported_twice_at_one_place_is_sent_once(tmp_path, caplog):
-    """Security Hub processes only the first of several findings sharing an Id.
+def test_two_results_sharing_a_fingerprint_at_one_place_are_two_findings(
+    tmp_path, caplog
+):
+    """Two results of one scanner and rule with the same fingerprint at the same
+    lines are two findings, not one reported twice.
 
-    Equal fingerprints at the same location are the scanner saying it is one
-    finding, so it is sent once, with a WARNING because a result was not sent.
+    A fingerprint tells findings apart only across locations, so the identity
+    key (utils/finding_identity.py) tells two results at one location apart
+    whatever value they share; each gets its own Id, both are sent, and nothing
+    is skipped as a duplicate or warned about as sent once.
     """
     securityhub, stub = _stubbed_client("securityhub")
     capture = _Capture(securityhub)
-    stub.add_response("batch_import_findings", _ok(1))
+    stub.add_response("batch_import_findings", _ok(2))
     fingerprint = {"matchBasedId/v1": "4f1c0e"}
 
     with caplog.at_level(logging.WARNING):
@@ -1167,28 +919,15 @@ def test_one_fingerprint_reported_twice_at_one_place_is_sent_once(tmp_path, capl
             )
         )
 
-    assert len(capture.findings) == 1
-    assert document["duplicates_skipped"] == 1
-    # Not "the same ... message": the second result was reworded. Only results
-    # with the same fingerprints at one place share an Id.
-    assert any(
-        r.levelno == logging.WARNING
-        and "same scanner, rule, file, location and fingerprints" in r.getMessage()
-        and "sent once" in r.getMessage()
-        for r in caplog.records
-    )
+    assert len(capture.findings) == 2
+    assert len({finding["Id"] for finding in capture.findings}) == 2
+    assert document["duplicates_skipped"] == 0
+    assert not any("sent once" in r.getMessage() for r in caplog.records)
 
 
 # --------------------------------------------------------------------------- #
 # Dependency validation
 # --------------------------------------------------------------------------- #
-
-
-def _validate_with(reporter, clients: dict) -> bool:
-    with patch.object(
-        securityhub_module.boto3, "Session", lambda **_: _FixedClientSession(clients)
-    ):
-        return reporter.validate_plugin_dependencies()
 
 
 @pytest.mark.unit
@@ -1465,6 +1204,11 @@ def _sent_by_ash_report(
     Hub and STS are stubbed: the import must happen, and GetFindings is
     answered only when *archives*, so archiving that was not asked for, or is
     missing, fails the stubber.
+
+    ``ash report`` runs the reporter's dependency check before it reports, as a
+    scan does, so the stubs answer that first: DescribeHub and, because the
+    overrides name no ``account_id``, the account lookup; the import then asks
+    STS for the caller again.
     """
     import typer
 
@@ -1482,10 +1226,16 @@ def _sent_by_ash_report(
     securityhub, stub = _stubbed_client("securityhub")
     imports = _Capture(securityhub)
     queries = _Capture(securityhub, "GetFindings")
+    stub.add_response(
+        "describe_hub",
+        {"HubArn": f"arn:aws:securityhub:{REGION}:{ACCOUNT}:hub/default"},
+    )
     if archives:
         stub.add_response("get_findings", {"Findings": []})
     stub.add_response("batch_import_findings", _ok(1))
     sts, sts_stub = _stubbed_client("sts")
+    # The dependency check's account lookup, then the import's.
+    sts_stub.add_response("get_caller_identity", _caller(ACCOUNT))
     sts_stub.add_response("get_caller_identity", _caller(ACCOUNT))
     clients = {"securityhub": securityhub, "sts": sts}
     monkeypatch.chdir(checkout)
@@ -3488,9 +3238,13 @@ def test_the_resolve_hands_the_chain_walk_the_environment_chosen_paths(
     handed: list = []
     real = module._with_operator_chain_reporters
 
-    def spying(trusted, chain, repository_files, reads, environment_paths):
+    # The walk takes the count of scanned roots as well (``roots``); the spy
+    # accepts what the resolve passes and hands it on unchanged.
+    def spying(trusted, chain, repository_files, reads, environment_paths, roots=1):
         handed.append(set(environment_paths))
-        return real(trusted, chain, repository_files, reads, environment_paths)
+        return real(
+            trusted, chain, repository_files, reads, environment_paths, roots=roots
+        )
 
     monkeypatch.setattr(module, "_with_operator_chain_reporters", spying)
     with caplog.at_level(logging.WARNING):
@@ -4575,8 +4329,13 @@ def test_ash_report_judges_the_config_against_the_results_tree(
                 ],
             )
 
-    session.assert_not_called()
-    assert "options.findings_scope" in capsys.readouterr().err
+    # The command runs the reporter's dependency check before it reports, so
+    # the one session is that check's; it is refused here (the double raises),
+    # and nothing is imported.
+    session.assert_called_once()
+    err = " ".join(capsys.readouterr().err.split())
+    assert "options.findings_scope" in err
+    assert "reporter 'aws-security-hub' cannot run: its dependency check refused" in err
 
 
 _REPOSITORY_OPTIONS = (
@@ -4641,7 +4400,8 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     them. A scan of that checkout ignores both, so they are shown marked. The
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
-    environment is marked by the reference it wrote, never by the value. The
+    environment is shown neither by the value nor by a marker made of it:
+    the option is absent from the answer. The
     rest of the section (aws_region) is the operator's too and is confined
     for a file in another checkout, so it is absent rather than shown as
     applied (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options
@@ -4684,10 +4444,12 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
             '<operator only; ignored from this file: "victim">'
         )
     else:
+        # The confinement settles the place and drops the reference the file
+        # wrote there, so get_config (``_without_environment_read_markers``)
+        # withdraws a marker that would print the server's environment value:
+        # the option is absent, never the value and never a marker made of it.
         assert "victim-from-the-environment" not in json.dumps(result), result
-        assert options["findings_scope"] == (
-            "<operator only; ignored from this file: <from ${ASH_TEST_SH_SCOPE}>>"
-        )
+        assert "findings_scope" not in options, options
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"
     )
@@ -4736,8 +4498,15 @@ def test_in_a_checkout_reads_the_name_and_the_target(tmp_path, layout, inside):
         (checkout / "hop.yaml").symlink_to(outside / "file.yaml")
         path.symlink_to(checkout / "hop.yaml")
     elif layout == "a link in one, then ..":
-        (checkout / "lnk").symlink_to(outside / "sub")
-        assert path.resolve() == (outside / "file.yaml").resolve()
+        # target_is_directory: Windows types a symlink, and a file-type link
+        # to a directory is refused at traversal, which would break the
+        # resolve below and the walk under test; POSIX ignores the argument.
+        (checkout / "lnk").symlink_to(outside / "sub", target_is_directory=True)
+        # POSIX steps up from where the link leads (outside/file.yaml); Windows
+        # removes the ".." before it looks at any link (ntpath.realpath), so the
+        # name opens checkout/file.yaml, which is in the checkout by where it is.
+        reached = checkout if os.name == "nt" else outside
+        assert path.resolve() == (reached / "file.yaml").resolve()
 
     assert in_a_checkout(path) is inside
 
@@ -5411,62 +5180,6 @@ def test_a_request_botocore_refuses_is_not_reported_as_unreachable(
 SCAN_TIME = "2026-01-15T12:00:00.000Z"
 
 
-def _built(reporter, result: Result) -> dict:
-    [finding] = reporter.build_asff_findings(
-        _model([result]), account_id=ACCOUNT, region=REGION
-    )
-    return finding
-
-
-def _stored(
-    finding: dict,
-    *,
-    record_state: str = "ACTIVE",
-    created_at: str = "2026-01-01T00:00:00.000Z",
-    updated_at: str = "2026-01-10T00:00:00.000Z",
-    **overrides: Any,
-) -> dict:
-    """``finding`` as GetFindings returns it after an earlier import."""
-    stored = json.loads(json.dumps(finding))
-    stored.update(
-        RecordState=record_state,
-        CreatedAt=created_at,
-        UpdatedAt=updated_at,
-        Region=REGION,
-        Workflow={"Status": "NEW"},
-        ProcessedAt=updated_at,
-    )
-    stored["Severity"] = {**stored["Severity"], "Normalized": 70}
-    stored["ProductFields"] = {
-        **stored["ProductFields"],
-        "aws/securityhub/FindingId": f"{PRODUCT_ARN}/{stored['Id']}",
-        "aws/securityhub/ProductName": "Default",
-        "aws/securityhub/CompanyName": "Personal",
-    }
-    stored.update(overrides)
-    return stored
-
-
-def _archive_run(
-    tmp_path, model, stored_findings, *, expected_sent: int, reporter=None
-):
-    """Run report() against GetFindings returning ``stored_findings``."""
-    securityhub, stub = _stubbed_client("securityhub")
-    imports = _Capture(securityhub)
-    queries = _Capture(securityhub, "GetFindings")
-    stub.add_response("get_findings", {"Findings": stored_findings})
-    stub.add_response("batch_import_findings", _ok(expected_sent))
-    document = json.loads(
-        _report_with(
-            reporter or _reporter(tmp_path, archive=True),
-            model,
-            {"securityhub": securityhub},
-        )
-    )
-    stub.assert_no_pending_responses()
-    return document, imports, queries
-
-
 @pytest.mark.unit
 def test_archiving_is_off_by_default():
     """Opt-in: what a scan did not report is not always fixed (a scanner that lost
@@ -5609,9 +5322,14 @@ def _scoped_model(rule: str):
         del model.metadata.__pydantic_extra__["changed_files_only"]
     elif rule == "a target of the scanner failed":
         # cdk-nag style: 10 templates attempted, 4 failed, rolled up to FAILED.
+        # The report carries the scanner's name as a scan writes it: the
+        # metrics readers (core/unified_metrics.own_target_reports) read only a
+        # report that names its scanner, so one without the name would count
+        # as no report and the scanner as having lost no target.
         model.scanner_results["bandit"].status = ScannerStatus.FAILED
         model.additional_reports["bandit"] = {
             "source": {
+                "scanner_name": "bandit",
                 "target_type": "source",
                 "status": "FAILED",
                 "targets_attempted": 10,

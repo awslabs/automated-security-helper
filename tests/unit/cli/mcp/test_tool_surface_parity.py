@@ -83,6 +83,8 @@ from typing import Set
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -149,7 +151,11 @@ def _iter_doc_files():
     """Yield every markdown file the documented surface may be declared in."""
     if README.is_file():
         yield README
-    yield from sorted(DOCS_DIR.rglob("*.md"))
+    yield from sorted(
+        path
+        for path in iter_repo_files(DOCS_DIR, skip_dirs=frozenset({"node_modules"}))
+        if path.suffix == ".md"
+    )
 
 
 def _tool_names_declared_in(text: str, *, reference_page: bool = False) -> Set[str]:

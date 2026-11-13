@@ -141,10 +141,7 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         # workspace one; exclude_none drops it otherwise, so single-directory
         # output is unchanged.
         flat_vulns = model.to_flat_vulnerabilities()
-        report_data["findings"] = [
-            vuln.model_dump(exclude_none=True, exclude_unset=True, mode="json")
-            for vuln in flat_vulns
-        ]
+        report_data["findings"] = [self._finding_dict(vuln) for vuln in flat_vulns]
 
         # The per-project verdicts, so a consumer can group and judge without
         # re-deriving anything. Re-deriving would mean applying one threshold to
@@ -156,3 +153,19 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
 
         # Return the JSON string
         return json.dumps(report_data, indent=2, default=str)
+
+    @staticmethod
+    def _finding_dict(vuln: Any) -> Dict[str, Any]:
+        """One finding as the JSON object this report carries.
+
+        ``exclude_unset`` keeps a single-directory finding free of fields nothing
+        set, but it also dropped ``is_suppressed`` from the findings built from a
+        scanner's additional report, whose constructor never sets it, while the
+        findings built from SARIF results set it on every one. A consumer that
+        filtered on the key read those findings as neither suppressed nor open.
+        The field is the one value every finding has an answer for, so it is
+        written for every finding, with its default where nothing set it.
+        """
+        data = vuln.model_dump(exclude_none=True, exclude_unset=True, mode="json")
+        data.setdefault("is_suppressed", bool(getattr(vuln, "is_suppressed", False)))
+        return data

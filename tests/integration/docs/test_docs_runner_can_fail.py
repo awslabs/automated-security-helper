@@ -18,6 +18,13 @@ It also pins the session semantics the docs rely on (files, directory and variab
 carry between blocks; env= applies to one block; fixture= and fresh start over) and
 the isolation the job relies on (private HOME, the venv's ash, downloads refused at
 once).
+
+Skipped on Windows, which the docs runner does not support: it starts a shell block with
+bash, carries the session through env -0 and pwd, ends a timed-out block through its
+process group and builds its PATH from POSIX directories (see docs_runner.py). The docs
+job has no Windows runner, and these tests were written for the Linux integration job.
+The integration tier marker also selects them on the windows-latest leg, where they
+would measure that host and not the docs runner.
 """
 
 from __future__ import annotations
@@ -33,7 +40,13 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX shell and process groups; the docs job has no Windows runner",
+    ),
+]
 
 HERE = Path(__file__).resolve().parent
 
@@ -243,10 +256,16 @@ printf 'echo hi\\n' > not-executable.sh
 {FENCE}
 """,
     )
-    assert [r.exit_code for r in results] == [1, 127, 126], runner.failure_report(
+    # Platform contract, measured on macos-15: /bin/bash is GNU bash 3.2.57 and
+    # a non-executable ./not-executable.sh exits 1 ("Permission denied"), not
+    # 126, so the third block cannot reach 126 there and the runner (which only
+    # rejects 126 and 127) rightly counts that 1 as a failure the block may
+    # expect. Where bash >= 4 runs, the 126 pin stays.
+    third = (1, True) if sys.platform == "darwin" else (126, False)
+    assert [r.exit_code for r in results] == [1, 127, third[0]], runner.failure_report(
         results
     )
-    assert [r.ok for r in results] == [True, False, False]
+    assert [r.ok for r in results] == [True, False, third[1]]
     assert "not found or not executable" in results[1].report()
 
 
@@ -385,13 +404,18 @@ def test_the_tools_ash_installed_are_on_the_session_path(tmp_path, monkeypatch):
     empty copies of both; the invoking user's are on the session's PATH instead,
     resolved as ASH and uv resolve them. Each is planted here in a directory named
     by the variable that moves it, beside a tool on the host PATH that must stay
-    out of reach.
+    out of reach. The test session removes UV_TOOL_BIN_DIR from the process, so uv's
+    directory is named in the record tests/conftest.py exports, not in the process.
     """
     ash_tool = _planted_tool(tmp_path / "ash-bin", "ash-docs-ash-bin-tool")
     uv_tool = _planted_tool(tmp_path / "uv-tool-bin", "ash-docs-uv-tool")
     host_tool = _planted_tool(tmp_path / "host-bin", "ash-docs-host-only-tool")
     monkeypatch.setenv("ASH_BIN_PATH", str(ash_tool.parent))
-    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(uv_tool.parent))
+    monkeypatch.delenv("UV_TOOL_BIN_DIR", raising=False)
+    monkeypatch.setenv(
+        "ASH_TEST_DEVELOPER_HOME",
+        json.dumps({"env": {"UV_TOOL_BIN_DIR": str(uv_tool.parent)}, "home": ""}),
+    )
     monkeypatch.setenv(
         "PATH", f"{host_tool.parent}{os.pathsep}{os.environ.get('PATH', '')}"
     )
@@ -414,7 +438,7 @@ def test_the_tools_in_the_home_the_test_session_replaced_are_on_the_session_path
     """The tools of the user's own home are found though the test session moved HOME.
 
     tests/conftest.py points HOME at a private directory for the whole pytest run and
-    records the value it replaced in ASH_TEST_PRE_SESSION_HOME. `ash dependencies
+    records the values it replaced in ASH_TEST_DEVELOPER_HOME. `ash dependencies
     install` ran as the user, outside the run, so its tools are under the recorded
     home, not under Path.home(). Planted here: a tool in each of the recorded home's
     two default tool directories, an empty private home, and none of the variables
@@ -428,7 +452,8 @@ def test_the_tools_in_the_home_the_test_session_replaced_are_on_the_session_path
     for name in ("ASH_BIN_PATH", "UV_TOOL_BIN_DIR", "XDG_BIN_HOME", "XDG_DATA_HOME"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(
-        "ASH_TEST_PRE_SESSION_HOME", json.dumps({"HOME": str(real_home)})
+        "ASH_TEST_DEVELOPER_HOME",
+        json.dumps({"env": {"HOME": str(real_home)}, "home": str(real_home)}),
     )
     monkeypatch.setenv("HOME", str(private_home))
     found = [directory.resolve() for directory in runner.ash_tool_dirs()]

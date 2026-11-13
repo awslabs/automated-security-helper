@@ -601,7 +601,10 @@ def test_a_queue_error_with_no_queue_checkpoint_creates_one(checkpointer, quiet)
     checkpointer.add_queue_validation_error("nothing was queued")
 
     created = checkpointer.checkpoints[-1]
-    assert created.checkpoint_name == "task_queue_validation_errors"
+    # Named as the lookup above looks for it, so a later error lands on this
+    # checkpoint instead of creating another (the fallback used to be named
+    # "task_queue_validation_errors", which the lookup never found).
+    assert created.checkpoint_name == "task_queue_validation"
     assert created.errors == ["nothing was queued"]
     assert "No queue validation checkpoint found" in quiet.warning.call_args.args[0]
 
@@ -609,9 +612,7 @@ def test_a_queue_error_with_no_queue_checkpoint_creates_one(checkpointer, quiet)
 def test_a_queue_error_on_an_empty_checkpoint_list_creates_one(checkpointer, quiet):
     checkpointer.add_queue_validation_error("nothing at all")
 
-    assert checkpointer.checkpoints[-1].checkpoint_name == (
-        "task_queue_validation_errors"
-    )
+    assert checkpointer.checkpoints[-1].checkpoint_name == "task_queue_validation"
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +745,7 @@ def test_the_manager_delegates_queue_error_recording_to_the_checkpointer(manager
     manager.add_queue_validation_error("delegated error", scanner_name="bandit")
 
     assert manager.checkpoints[-1].errors == ["delegated error"]
-    assert manager.checkpoints[-1].checkpoint_name == "task_queue_validation_errors"
+    assert manager.checkpoints[-1].checkpoint_name == "task_queue_validation"
 
 
 def test_the_manager_exposes_the_tracker_state_and_checkpoint_lists(manager):

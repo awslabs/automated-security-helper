@@ -45,6 +45,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import checkout_env
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: The modules that lost a plugin group when imported first (measured; see above).
@@ -105,6 +107,7 @@ def _probe(first_import: str) -> dict:
         [sys.executable, "-c", textwrap.dedent(_PROBE), first_import],
         capture_output=True,
         text=True,
+        env=checkout_env(),
         cwd=str(REPO_ROOT),
         timeout=300,
     )

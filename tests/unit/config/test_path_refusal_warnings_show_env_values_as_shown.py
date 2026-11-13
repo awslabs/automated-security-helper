@@ -266,6 +266,10 @@ def _unnormalized_in_tree_spelling(layout: dict) -> tuple:
     path it resolves to: (written spelling, resolved path)."""
     resolved = layout["source"] / "marker-trust-value"
     resolved.write_text("")
+    # The directory the spelling steps into and back out of exists: Windows'
+    # realpath leaves a ".." that follows a missing directory in the path, so the
+    # control would read the written spelling back instead of the resolved path.
+    (layout["source"] / "marker-trust-dir").mkdir()
     written = f"{layout['source'].as_posix()}/./marker-trust-dir/../marker-trust-value"
     assert written != resolved.as_posix()
     return written, resolved

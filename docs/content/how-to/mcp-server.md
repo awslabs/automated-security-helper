@@ -11,7 +11,8 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
 
 - Scans run inside the server process, in local mode, with the scanner tools installed for
   the user that runs the server. Install them as that user with `ash dependencies install`.
-  Nothing runs in a container.
+  ASH does not start a container for a scan; if the server itself runs in a container, see
+  [Run the server in a container](#run-in-a-container).
 - A scan writes its output to `.ash/ash_output` inside the directory it scans, so the server
   needs write access there. When the scan starts, it moves the previous scan's results into
   `.ash/ash_output/.ash_previous_results`, and it deletes them once it has results of its own.
@@ -51,7 +52,10 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
 
 `ash mcp` exits with code 5 for an unknown option, a value of the wrong type, options that
 cannot be combined, or an `ASH_MCP_TRANSPORT` that names no transport, and with code 3 when
-a `--profile` file does not load or an HTTP transport cannot listen on its address. It also
+a `--profile` file does not load, is kept inside the MCP workspace root where a client could
+have supplied it (a config the server wrote there itself is fine), or sits inside a git checkout
+under a scan root `ASH_MCP_ALLOWED_ROOTS` grants, or when an HTTP transport cannot listen on
+its address. It also
 exits with code 3 when `ASH_CONFIG` names no config file it can load. It exits
 with code 1 when the MCP package is missing or the server fails, and prints the error to
 standard error even with `--quiet`. Ctrl-C stops the server, and `ash mcp` exits with code
@@ -87,6 +91,52 @@ Clients start the server with this command and arguments:
   }
 }
 ```
+
+### Start the server with uvx instead of an installed `ash`
+
+If you would rather not install ASH, let the client start the server with `uvx`. This is the
+same entry the generated agent plugins use (see
+[Install the ASH plugin for your agent](agent-plugins.md), which covers the 16 supported
+platforms). Aider does not support MCP, so it cannot use this entry. The generic skill ships
+no server config, so add the entry yourself, as in
+[Connect an AI agent to ASH](../getting-started/agents.md#3-connect-the-agent):
+
+<!-- doctest: config kind=mcp-client -->
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.8.0",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+`uvx` installs ASH from GitHub the first time the client starts the server and reuses that copy
+afterward, so the client's machine needs uv, git, and network access to GitHub on the first
+start. Desktop clients often do not see your shell's `PATH`; if the client cannot start the
+server, put the absolute path that `command -v uvx` prints in `command`. The scanner tools are
+not part of that install: install them once for your user with
+`(cd "$(mktemp -d)" && uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.8.0 ash dependencies install)`,
+or accept `incomplete` scans as described in
+[Connect an AI agent to ASH](../getting-started/agents.md#1-install-ash). Run it from an empty
+directory, as the `cd` does, so that a config in a repository cannot change what it installs.
+A server started this way applies every setting on this page, and the `env` block shown below
+works the same way. It differs from an installed `ash` in one respect: the entry installs ASH
+without the `cdk` extra, so the cdk-nag scanner is reported MISSING when the project has files
+it scans. To include it, pass the `uvx --from` specification from
+[Run without installing: uvx](install.md#run-without-installing-uvx), which has the extra, as
+two arguments (`uvx --from` and the specification) in place of the `uvx --from=` argument.
+
+The ref after `@` in these commands pins what is installed: a release tag does not move, while a
+branch like `main` resolves to its newest commit at install time. Change it
+to the ref you want to run, as described in
+[Change the ASH version a plugin uses](agent-plugins.md#change-the-ash-version-a-plugin-uses).
 
 On stdio the server's standard output carries the protocol, so ASH writes every message and
 log line to standard error, and so do the scans and the tools they run. `--quiet` hides the
@@ -153,6 +203,18 @@ which config files a client can name with `config_path`: those are refused only 
 directories above. A file a client names counts as the client's, wherever it is, unless it is
 in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and no client delivered it (see
 [What a delivered config cannot set](#what-a-delivered-config-cannot-set)).
+
+### Run the server in a container {#run-in-a-container}
+
+ASH's container image already hosts the server for the AWS targets: AgentCore and Fargate
+run `ash mcp` over streamable HTTP, as described in [Deploy ASH on AWS](deploy-on-aws.md). That
+is the containerized route these docs cover. This page does not document a local
+`docker run ... ash mcp` over stdio that an agent or IDE could start, so use an installed `ash` or the `uvx` entry above for a client on your own
+machine. If you want the server in a container of your own, run it over
+[streamable HTTP](#run-over-streamable-http) with an auth header and publish the port only on
+the loopback interface or behind a proxy you control. Scans then run inside that container, in
+local mode, with the scanner tools the image holds, and `ASH_MCP_ALLOWED_ROOTS` names the
+paths the container can reach.
 
 ## Run over streamable HTTP
 
@@ -233,7 +295,9 @@ sends SIGKILL, such as the 10 seconds `docker stop` waits by default: a SIGKILL 
 leaves the scanners' tools running. A second Ctrl-C during the wait ends the server at once,
 with code 130. It kills the scanners' tools without waiting for the scans, and previous results
 a scan had not put back stay in `.ash_previous_results`, where the next MCP scan of that
-directory takes them back.
+directory takes them back. On Windows the second Ctrl-C ends the server just the same, but
+it does not kill the scanners' tools: the kill goes by process group, which is POSIX only, so
+a tool still running then outlives the server.
 
 ### Serve clients on another host
 
@@ -299,7 +363,10 @@ session refuse every call with `error_type` `session_identity_required`: `run_as
 `run_ash_workspace_scan` returns its results in its response and needs no session. The session
 is never what a client claims: on a stateful server an `Mcp-Session-Id` the server did not
 issue names no session, and on SSE the session is the one the server issued for the event
-stream.
+stream. On a stateful server a request that names a protocol version outside the ones the
+`initialize` handshake negotiates names no session either, whatever `Mcp-Session-Id` it
+sends, and the refusal says so: send the `Mcp-Protocol-Version` the handshake negotiated
+together with the `Mcp-Session-Id` it returned.
 
 When a platform in front of ASH issues and authenticates `Mcp-Session-Id`, start the server
 with `--trust-upstream-session-id` as well. The header then names the caller's session, so two
@@ -445,9 +512,12 @@ tree the same way for the whole workspace scan. The other way round, `run_ash_sc
 `run_ash_workspace_scan` are refused with the same `error_type` while one of those calls is
 changing the session's tree. Chunks are still accepted, because they land beside the tree.
 `set_source_zip_chunk` and `select_profile` are refused with `error_type`
-`session_workspace_busy` while an HTTP server removes the session's workspace for being unused
-longer than `--session-workspace-ttl`. The upload and the bound profile go with the workspace,
-so the client selects the profile again and sends the upload again from chunk 0.
+`session_workspace_busy` while an HTTP server removes the workspace of a session for being
+unused longer than `--session-workspace-ttl`, a stateless one or a stateful one the MCP SDK
+dropped without telling the server. The upload and the bound profile are removed with the
+workspace, so the client selects the profile again and sends the upload again from chunk 0.
+A session whose SSE event stream is still open is kept whatever its age; see
+[Clean up](#clean-up).
 ASH sets no quota on uploads per session or in total. The server's config limits how many scans run and
 for how long; see [Limit how many scans run and for how long](#limit-how-many-scans-run-and-for-how-long).
 
@@ -467,7 +537,11 @@ ASH checks every MCP-client file in a config chain against the server's policy, 
 `runtime_overrides.enabled` is set. Only what the file writes counts: a value equal to the
 server's at the same key is accepted. Every operation in the file's `patch` is checked as
 written, and one that targets a denied field is
-refused even when it writes the server's value. The policy's `denied_value_patterns` apply to
+refused even when it writes the server's value. A `test` operation in an MCP-client file is
+refused outright, before any operation applies and whatever the configuration holds at its
+path: a `test` against a base the operator owns would reveal, through whether the file loads,
+a value the client may not read, so the message names the file and says the op is one a
+config file chosen by this caller may not use. The policy's `denied_value_patterns` apply to
 delivered files too.
 
 With the default policy, a delivered config is refused as a whole, with `error_type`
@@ -531,9 +605,10 @@ restrict the server's own but not widen them. A file whose own `sandbox` section
   every git checkout and the scanned directory, and never the AWS or Snyk plugin modules,
   or a module inside either.
 
-Any other sandbox grant or plugin module a delivered file asks for, such as a
-`read_path_scanners` or `env_scanners` entry, is dropped with a warning, as for a repository's
-config.
+Any other sandbox grant a delivered file asks for, such as a `read_path_scanners`,
+`env_scanners` or `environment` entry the server's settings lack, is refused the same
+way, with the setting named; an `environment` entry is named by its variable and
+never by its value.
 
 The server's settings are the ones in the file `ASH_CONFIG` names, and that file grants nothing
 when it is inside a git checkout, or inside the directory a scan covers, so keep it outside
@@ -661,11 +736,20 @@ A client cannot add a profile.
   discarded, an SSE event stream that closes, and every session it issued when it shuts down.
 - It also removes a workspace nobody used for `--session-workspace-ttl` seconds, 86400 (24
   hours) by default, which covers sessions whose end it cannot see, such as every stateless
-  one. Each request that names a session counts as a use. A workspace whose scan is running, or
-  whose tree is being changed, is kept, and so is anything under the workspace root that ASH
-  did not create as a session workspace. A `set_source_zip_chunk` or `select_profile` call holds
-  its session from the moment the tool starts, so a sweep that runs while the call writes keeps
-  the session.
+  one. Each request that names a session counts as a use. A workspace whose scan is running,
+  or whose tree is being changed, is kept, and so is anything under the workspace root that
+  ASH did not create as a session workspace. A `set_source_zip_chunk` or `select_profile` call
+  holds its session from the moment the tool starts, so a sweep that runs while the call
+  writes keeps the session.
+- A stateful session nobody has used for that long is removed like any other, whether or not
+  the server has seen it end: the MCP SDK drops an idle stateful session without telling the
+  server, so the server cannot keep it on that account. Only a session whose SSE event stream
+  is still open is kept whatever its age, and the sweep marks that workspace used so another
+  server sharing the root keeps it too. On a stateful server that stream is the session's
+  standalone `GET` stream. A stateful session the sweep removes is ended: its next request
+  names no session the server holds, so the tools that need a session refuse it with
+  `error_type` `session_identity_required` and say that the session expired, and the client
+  opens a new session with `initialize`.
 - Servers that share one workspace root take a lock under the root before a sweep removes a
   session. A sweep that cannot take that lock within about a second, because another server
   holds it, removes nothing more and leaves the remaining sessions to its next sweep, so

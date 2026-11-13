@@ -122,6 +122,7 @@ global_settings:
       replace_default_denied_paths: false
 fail_on_findings: true
 fail_on_incomplete_scanners: true
+fail_on_unknown_keys: false
 honor_ignore_files: true
 sandbox:
   mode: 'off'
@@ -129,11 +130,25 @@ sandbox:
   extra_read_paths: []
   read_path_scanners: []
   env_scanners: []
+  environment:
+  - ALL_PROXY
+  - HTTPS_PROXY
+  - HTTP_PROXY
+  - NO_PROXY
+  - all_proxy
+  - http_proxy
+  - https_proxy
+  - no_proxy
+  - SSL_CERT_FILE
+  - REQUESTS_CA_BUNDLE
+  - CURL_CA_BUNDLE
+  - NODE_EXTRA_CA_CERTS
+  - SSL_CERT_DIR
 content_db_staleness: fail
 content_db_staleness_overrides: []
 content_db_staleness_offline_image_default: true
 ash_plugin_modules:
-- my_org.ash_plugins
+- my_org_ash_plugins
 external_reports_to_include: []
 converters:
   archive:
@@ -169,7 +184,7 @@ scanners:
       ignore_nosec: false
       excluded_paths: []
       additional_formats: []
-      tool_version: '>=1.7.0,<2.0.0'
+      tool_version: '>=1.7.8,<2.0.0'
       install_timeout: 300
   cdk-nag:
     enabled: true
@@ -280,7 +295,7 @@ scanners:
       severity: []
       metrics: auto
       patterns: []
-      version: v1.30.2
+      version: v1.33.1
       sha256: {}
   semgrep:
     enabled: true
@@ -364,6 +379,7 @@ reporters:
     enabled: true
     options:
       exclude_suppressed: true
+      emit_automation_details: false
   junitxml:
     enabled: true
     options:

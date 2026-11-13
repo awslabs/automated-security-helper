@@ -172,12 +172,14 @@ def test_the_custom_scanner_refusal_surfaces_none_of_the_record(tmp_path):
         assert SENTINEL not in str(err.get("msg"))
         assert SENTINEL not in str(err.get("type"))
         shown = repr(err["input"])
-        assert str(context.work_dir) in shown, (
+        # A Path's repr spells it with forward slashes on every platform.
+        assert context.work_dir.as_posix() in shown, (
             "control: the repr walked the carried context: " + shown[:2000]
         )
         assert SENTINEL not in shown, shown[:2000]
     as_json = caught.value.json()
-    assert str(context.work_dir) in as_json, (
+    # JSON escapes the backslashes of a Windows path.
+    assert json.dumps(str(context.work_dir))[1:-1] in as_json, (
         "control: json() serialized the carried context: " + as_json[:2000]
     )
     assert SENTINEL not in as_json, as_json[:2000]

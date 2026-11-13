@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -398,9 +397,9 @@ class TestADiscoveryFailureOutsideTheSourceErrorIsAnswered:
     cannot load, exit 3: never a raise the generic handler turns into exit 1.
 
     The input that reaches it: a ``.ash`` directory the server may not search.
-    Discovery asks ``Path.is_file`` about each name in it, and on Python 3.10 to
-    3.13 that re-raises the PermissionError from stat; 3.14's answers False, so
-    there the names are skipped as absent (measured on each interpreter).
+    Discovery looks each name in it up with ``os.lstat``
+    (``config_sources._name_exists``), which raises the PermissionError on every
+    interpreter, so the answer is a refusal on each.
     """
 
     @pytest.mark.parametrize(
@@ -441,23 +440,22 @@ class TestADiscoveryFailureOutsideTheSourceErrorIsAnswered:
             ash_dir.chmod(0o755)
 
         assert response.get("exit_code") != 1, response
-        if sys.version_info < (3, 14):
-            # Below 3.14 the walk raises PermissionError on the unsearchable
-            # directory, and the category mapping answers it as the operating
-            # system's refusal, never as a format problem.
-            _refused(response, "permission_denied")
-        else:
-            assert response.get("success") is not False, response
-            assert "project_name" in response, response
+        # Discovery looks each name up with lstat (config_sources._name_exists),
+        # which raises PermissionError on the unsearchable directory on every
+        # interpreter, 3.14 included, and refuses because ASH cannot tell
+        # whether a config is there. The category mapping answers it as the
+        # operating system's refusal, never as a format problem.
+        _refused(response, "permission_denied")
 
 
 @_NEEDS_PERMISSION_BITS
 def test_discovery_over_an_unreadable_pyproject_answers_and_never_raises(root: Path):
     """Discovery reads a pyproject.toml to learn whether it configures ASH. One
-    it cannot read at all is skipped as if absent, and the tool answers the
-    defaults -- measured, and pinned so a change of that contract is visible.
-    What may never happen is the raise reaching the generic handler as exit 1;
-    the discovery site catches the same tuple the resolve step below it does."""
+    it cannot read at all leaves ASH unable to tell whether it holds a
+    [tool.ash] table (config_sources._unreadable_pyproject), so the tool
+    refuses it as a config it cannot load, exit 3, naming the file. What may
+    never happen is the raise reaching the generic handler as exit 1; the
+    discovery site catches the same tuple the resolve step below it does."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     pyproject = root / "pyproject.toml"
@@ -468,9 +466,9 @@ def test_discovery_over_an_unreadable_pyproject_answers_and_never_raises(root: P
     finally:
         pyproject.chmod(0o644)
 
-    assert response.get("success") is not False, response
-    assert response.get("exit_code") != 1, response
-    assert "project_name" in response, response
+    assert response.get("success") is False, response
+    assert response.get("exit_code") == 3, response
+    assert "pyproject.toml" in str(response.get("error") or response), response
 
 
 def _ends_within(call: Callable[[], Any], seconds: float = 5.0) -> Any:

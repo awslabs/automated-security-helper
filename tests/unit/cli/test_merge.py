@@ -30,7 +30,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 from pydantic import ValidationError
@@ -75,6 +75,9 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
     ScannerTargetStatusInfo,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScannerConfig,
+)
 
 # The shard fixtures live in tests/unit/cli/merge_shard_support.py, so a test module
 # that needs shards does not have to import this one. They are imported back here
@@ -88,6 +91,7 @@ from tests.unit.cli.merge_shard_support import (  # noqa: F401
     _sarif_for,
     _sarif_result,
     _skipped_entries,
+    as_loaded,
     build_shard,
     build_shards,
     write_shards,
@@ -98,41 +102,8 @@ pytestmark = pytest.mark.unit
 #: The logger the merge's disclosures are written to.
 ASH_LOGGER_NAME = "ash"
 
-
-@pytest.fixture
-def capture(caplog):
-    """Route the module's logger at WARNING into caplog.
-
-    ASH's configured handler renders to a console and leaves nothing in
-    ``caplog.records``, so its handlers are swapped for pytest's capture handlers
-    for the duration.
-
-    At module scope rather than on one class because two disclosures are asserted
-    from it now: the scanners no shard intended to run, and the never-attempted
-    orphans ``_verify_scanner_union`` exempts from its refusal. A second copy of
-    this handler swap would be two fixtures that have to stay in step.
-    """
-    import logging
-
-    from automated_security_helper.utils.log import ASH_LOGGER
-
-    saved_handlers = ASH_LOGGER.handlers
-    saved_propagate = ASH_LOGGER.propagate
-    capture_handlers = [
-        handler
-        for handler in saved_handlers
-        if isinstance(handler, type(caplog.handler))
-    ]
-    if caplog.handler not in capture_handlers:
-        capture_handlers.append(caplog.handler)
-    ASH_LOGGER.handlers = capture_handlers
-    ASH_LOGGER.propagate = False
-    caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
-    try:
-        yield caplog
-    finally:
-        ASH_LOGGER.handlers = saved_handlers
-        ASH_LOGGER.propagate = saved_propagate
+# The ``capture`` fixture (ASH's logger routed into caplog) lives in
+# tests/unit/conftest.py, so every module under tests/unit gets it by name.
 
 
 def build_unsharded(suppressions=None) -> AshAggregatedResults:
@@ -146,13 +117,6 @@ def build_unsharded(suppressions=None) -> AshAggregatedResults:
     model.metadata.summary_stats.end = "2026-08-28T10:24:00"
     model.metadata.summary_stats.duration = 64.0
     return populate_metrics_from_unified_source(aggregated_results=model)
-
-
-def as_loaded(
-    models: Sequence[AshAggregatedResults],
-) -> List[Tuple[Path, AshAggregatedResults]]:
-    """Pair models with placeholder paths, for tests that skip disk entirely."""
-    return [(Path(f"shard-{index}.json"), model) for index, model in enumerate(models)]
 
 
 def finding_key(result) -> Tuple:
@@ -3511,20 +3475,28 @@ class TestPythonOnlyShardsNameTheFlagThatLeftScannersOut:
             if needle in record.getMessage()
         ]
 
+    # The non-Python set whose members the PLATFORM enables by default.
+    # OpengrepScannerConfig.enabled defaults to False on Windows, and a
+    # default-disabled scanner's skipped reason is the disabled one, never
+    # PYTHON_ONLY_SKIPPED_REASON, so it enters no left-out or owner set there.
     NOT_PYTHON_ONLY = [
-        "actionlint",
-        "cdk-nag",
-        "cfn-guard",
-        "cfn-nag",
-        "ferret-scan",
-        "gitleaks",
-        "grype",
-        "npm-audit",
-        "opengrep",
-        "snyk-code",
-        "syft",
-        "trivy",
-        "trivy-repo",
+        scanner
+        for scanner, enabled_by_default in [
+            ("actionlint", True),
+            ("cdk-nag", True),
+            ("cfn-guard", True),
+            ("cfn-nag", True),
+            ("ferret-scan", True),
+            ("gitleaks", True),
+            ("grype", True),
+            ("npm-audit", True),
+            ("opengrep", OpengrepScannerConfig().enabled),
+            ("snyk-code", True),
+            ("syft", True),
+            ("trivy", True),
+            ("trivy-repo", True),
+        ]
+        if enabled_by_default
     ]
 
     def test_the_scanners_python_only_left_out_are_not_a_hole(self, capture, tmp_path):
@@ -4041,11 +4013,16 @@ class TestShardContributionIsRefused:
     def _entry_with_counts(status, attempted=10, failed=4):
         from types import SimpleNamespace
 
+        # The report names its scanner, as every report ScanResultProcessor writes
+        # does: target_counts reads only the reports that are the scanner's own
+        # (unified_metrics.own_target_reports), so a nameless report counts for
+        # nothing and a fixture without the name measured no partial audit at all.
         return SimpleNamespace(
             scanner_results={"bandit": SimpleNamespace(status=status)},
             additional_reports={
                 "bandit": {
                     "source": {
+                        "scanner_name": "bandit",
                         "targets_attempted": attempted,
                         "targets_failed": failed,
                     }

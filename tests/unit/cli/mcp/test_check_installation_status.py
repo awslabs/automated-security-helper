@@ -251,7 +251,7 @@ async def test_concurrent_checks_do_not_run_their_probes_at_once(monkeypatch):
     active = {"now": 0, "most": 0}
     lock = threading.Lock()
 
-    def describe(provider, concurrent):
+    def describe(provider, concurrent, config=None):
         with lock:
             active["now"] += 1
             active["most"] = max(active["most"], active["now"])
@@ -288,6 +288,11 @@ def own_home(tmp_path, monkeypatch):
     for name in ("home", "config", "cache", "data", "uv-tools", "uv-bin", "uv-cache"):
         (tmp_path / name).mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # On Windows ``Path.home()`` reads USERPROFILE, not HOME, and uv's cache
+    # locations there are LOCALAPPDATA-based, so both are pinned too or the
+    # real probes' cache writes land in the guarded runner home.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -308,6 +313,11 @@ def own_home(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.runs_real_tools(
+    reason="the real installation checks probe whatever this host has installed; "
+    "their --version probes are tool starts by design, so the guard's zero-starts "
+    "teardown is not this test's contract"
+)
 async def test_on_this_host(own_home, monkeypatch):
     """No doubles: the real checks, for the real built-in scanners.
 

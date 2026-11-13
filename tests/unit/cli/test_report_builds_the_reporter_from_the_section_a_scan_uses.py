@@ -168,7 +168,12 @@ def built_with(monkeypatch) -> List[Any]:
     """The ``config`` argument of every S3 reporter the command builds, None for none given.
 
     ``report`` is replaced by a stub, so a reporter that is built and run sends
-    nothing and writes a fixed text.
+    nothing and writes a fixed JSON document. ``ash report`` asks the reporter's
+    ``validate_plugin_dependencies`` before it reports, as a scan does; S3's asks
+    STS and S3, and what it refuses is the subject of
+    ``TestThePreFlightCheckRunsBeforeTheReport`` below, which uses the real one.
+    Here it answers True, so these tests stay about the section the reporter is
+    built from.
     """
     seen: List[Any] = []
     real_init = S3Reporter.__init__
@@ -178,7 +183,8 @@ def built_with(monkeypatch) -> List[Any]:
         real_init(self, **data)
 
     monkeypatch.setattr(S3Reporter, "__init__", recording_init)
-    monkeypatch.setattr(S3Reporter, "report", lambda self, model: "the report")
+    monkeypatch.setattr(S3Reporter, "report", lambda self, model: "{}")
+    monkeypatch.setattr(S3Reporter, "validate_plugin_dependencies", lambda self: True)
     return seen
 
 
@@ -504,3 +510,56 @@ class TestWhereItSendsComesFromTheOverrides:
         assert "inner-file-bucket" not in repr(sections[0])
         assert "operator-file-bucket" not in repr(sections[0])
         assert nothing_is_sent == []
+
+
+class TestThePreFlightCheckRunsBeforeTheReport:
+    """``ash report`` asks the reporter's dependency check first, as a scan does.
+
+    A reporter whose check refuses sends nothing: the command prints that it
+    cannot run and exits 1. These use S3's own check, not the stub the tests
+    above install.
+    """
+
+    #: How the command says the check refused.
+    CANNOT_RUN = "reporter 's3' cannot run: its dependency check refused"
+
+    @pytest.fixture
+    def reports(self, monkeypatch) -> List[str]:
+        ran: List[str] = []
+
+        def recording_report(self, model):
+            ran.append("s3")
+            return "{}"
+
+        monkeypatch.setattr(S3Reporter, "report", recording_report)
+        return ran
+
+    def test_a_reporter_with_no_bucket_or_region_is_refused_before_any_request(
+        self, tmp_path, monkeypatch, nothing_is_sent, reports, capfd
+    ):
+        layout = _layout(tmp_path, None)
+        monkeypatch.chdir(layout.work)
+        overrides = [*_operator_overrides(enabled=False), "reporters.s3.enabled=true"]
+
+        code = _report(layout.output_dir, overrides, None)
+
+        printed = _squeezed("".join(capfd.readouterr()))
+        assert code == 1
+        assert _squeezed(self.CANNOT_RUN) in printed, printed
+        assert reports == []
+        assert nothing_is_sent == []
+
+    def test_a_reporter_whose_identity_lookup_is_refused_is_refused_before_it_reports(
+        self, tmp_path, monkeypatch, nothing_is_sent, reports, capfd
+    ):
+        """Control for the one above: with its destination named, the check asks STS."""
+        layout = _layout(tmp_path, None)
+        monkeypatch.chdir(layout.work)
+
+        code = _report(layout.output_dir, _operator_overrides(), None)
+
+        printed = _squeezed("".join(capfd.readouterr()))
+        assert code == 1
+        assert _squeezed(self.CANNOT_RUN) in printed, printed
+        assert reports == []
+        assert nothing_is_sent == ["sts.GetCallerIdentity"]

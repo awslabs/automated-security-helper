@@ -11,7 +11,6 @@ in both places at once.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 import pytest
 
@@ -204,6 +203,24 @@ def test_fingerprinted_findings_at_one_location_get_no_occurrence():
         assert not {"occurrence", "ordinal", "startLine"} & set(key), key
 
 
+def test_one_fingerprint_at_one_location_twice_gets_occurrences_and_ordinals():
+    """Two results of one scanner and rule carrying the same fingerprint value at
+    the same lines and column: the value is shared only across locations, so it
+    stayed the key of both and they had one finding id and one Security Hub Id."""
+    keys = identity_keys(
+        [
+            _fingerprinted("abc", 10, column=3, message="one"),
+            _fingerprinted("abc", 10, column=3, message="two"),
+            _fingerprinted("abc", 10, column=3, message="two"),
+        ]
+    )
+
+    assert all("fingerprints" in key for key in keys)
+    assert len({canonical(key) for key in keys}) == 3
+    assert [key.get("ordinal") for key in keys] == [None, None, 1]
+    assert keys[0]["occurrence"] != keys[1]["occurrence"]
+
+
 def test_one_fingerprint_at_two_columns_of_a_line_counts_as_absent():
     """A location is the file, the lines and the column."""
     keys = identity_keys(
@@ -343,6 +360,8 @@ def test_paths_are_normalized_the_same_way_everywhere(tmp_path):
     assert relative_path(str(tmp_path / "src" / "app.py"), tmp_path) == "src/app.py"
     assert relative_path(f"{tmp_path}/x/../src/app.py", tmp_path) == "src/app.py"
     assert relative_path("C:\\repo\\src\\app.py", "C:\\repo") == "src/app.py"
-    outside = Path("/elsewhere/app.py")
-    assert relative_path(str(outside), tmp_path) == outside.as_posix()
+    # The POSIX literal itself: str(Path(...)) would respell it with
+    # backslashes on Windows, which the function keeps as POSIX file-name
+    # characters by contract, so the WindowsPath round-trip is not the input.
+    assert relative_path("/elsewhere/app.py", tmp_path) == "/elsewhere/app.py"
     assert relative_path(None) is None

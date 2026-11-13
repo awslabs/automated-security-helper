@@ -7,23 +7,33 @@ WHY THIS EXISTS
 ---------------
 ``tests/conftest.py`` skips anything marked ``integration`` unless ``--run-integration``
 is passed, and separately skips anything marked ``slow`` unless ``--run-slow`` is passed.
-The conftest in this directory adds ``integration`` to everything here, and adds ``slow``
-to any test whose *function name* contains "workflow", "lifecycle" or "end_to_end".
+Each test file in this directory declares its own tier, and the conftest in this
+directory adds ``slow`` to any test whose *function name* contains "workflow",
+"lifecycle" or "end_to_end".
 
-A test that picks up both markers therefore needs both flags, and running with
-``--run-integration`` alone produces a green result that quietly skipped it. That is the
-same failure mode this directory's conftest docstring records twice already: an unscoped
+Today the ``slow`` label does not gate execution. The skip pass in ``tests/conftest.py``
+sits in a ``pytest_collection_modifyitems`` hook registered with ``tryfirst=True``, and
+the hook in this directory's conftest carries no ordering marker, so the skip pass has
+finished before the name rule adds its label. A test picked up by the name rule runs
+under ``--run-integration`` alone and only carries the label.
+
+That is an ordering property of two hooks in two files, and a change to either one
+would turn the label into a second gate: a test that picks up both markers would need
+both flags, and running with ``--run-integration`` alone would produce a green result
+that quietly skipped it. That is the failure mode this directory's conftest docstring
+records twice already, from the time the root hook had no ordering marker: an unscoped
 version of those name rules reached the whole repository and silently skipped a CI gate,
 the scoping fix was applied to the slow rules only, and a unit test named
 ``..._integration.py`` then had all fourteen of its tests skipped in full runs while
 passing in isolation. Both were found by diffing skipped-test ids against a baseline,
 which is the only signal the failure emits.
 
-The MCP modules in this directory are named to avoid those three words for exactly that
-reason -- ``test_mcp_scan_workflow.py`` holds no test function with "workflow" in its
-name -- and this module is what keeps that true. Without it the naming choice is a
-convention in a docstring, and the next person to add
-``test_end_to_end_scan_workflow`` gets a test that never runs and no warning.
+The MCP modules in this directory are named to avoid those three words, so they carry
+no label that could become a gate, and ``test_mcp_scan_workflow.py`` holds no test
+function with "workflow" in its name. This module is what keeps that true. Without it
+the naming choice is a convention in a docstring, and the next person to add
+``test_end_to_end_scan_workflow`` gets a test that would silently cease to run on the
+day the hook ordering changed, with no warning.
 
 HOW THE KEYWORDS ARE DERIVED
 ----------------------------
@@ -67,16 +77,19 @@ KEYWORD_LIST = re.compile(
 
 # Tests that are allowed to need --run-slow as well as --run-integration.
 #
-# Every entry costs something: it is a test that a plain `--run-integration` run reports
-# as green without executing. Each needs a reason, and the reason has to say why the
-# double gate is right rather than merely why it is currently true.
+# Every entry costs something: it is a test that would be reported as green without
+# executing in a plain `--run-integration` run if the hook ordering described in the
+# module docstring were lost. Each needs a reason, and the reason has to say why the
+# slow label is right rather than merely why it is currently true.
 DOUBLE_GATED_EXEMPTIONS: Dict[str, str] = {
     "test_file_based_tracking_workflow": (
-        "Pre-existing. This test calls mcp_get_scan_results(scan_id) while that "
-        "function's parameter is output_dir, so it fails with KeyError: 'scan_id' on "
-        "the error response it gets back. Renaming it to drop the slow gate would turn "
-        "a silent skip into a red test, and repairing it is not part of the change that "
-        "added this guard. Remove this entry when the test is fixed and renamed."
+        "Pre-existing. The name matches the slow keywords, so the conftest here "
+        "labels it slow; the label is applied by name, not by measurement. The test "
+        "executes and passes under a plain --run-integration run today, because the "
+        "root skip pass runs before the label is added, so the exemption records the "
+        "label and does not excuse a skipped test. Renaming it to drop the label is "
+        "not part of the change that added this guard. Remove this entry when the "
+        "test is renamed."
     ),
 }
 
@@ -152,9 +165,10 @@ def test_no_test_here_needs_run_slow_as_well_as_run_integration() -> None:
                 )
 
     assert not offenders, (
-        "These tests will be marked slow by this directory's conftest, so a run with "
-        f"--run-integration but not --run-slow reports green without executing them: "
-        f"{offenders}.\n"
+        "These tests will be marked slow by this directory's conftest. They run under "
+        "--run-integration alone only while the root skip pass keeps running before "
+        "that label is added; if that ordering changes, a run without --run-slow "
+        f"reports green without executing them: {offenders}.\n"
         "Rename the test for the property it checks rather than for the shape of the "
         "flow it exercises, or -- if it genuinely belongs behind the slow gate -- add "
         "it to DOUBLE_GATED_EXEMPTIONS with a reason."

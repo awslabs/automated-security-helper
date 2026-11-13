@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import contextlib
+import json
 import os
+import re
+import stat
 
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
@@ -20,6 +23,8 @@ from automated_security_helper.core.cancellation import (
     CancelEvent,
     ScanCancelled,
     cancel_scope,
+    discard_die_now_message,
+    record_die_now_message,
     shutdown_cancels,
     shutdown_requested,
 )
@@ -44,9 +49,16 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
     WorkspacePathNotUtf8Error,
 )
+from automated_security_helper.cli.params import from_environment as _from_environment
 from automated_security_helper.core.sharding import validate_shard_selection
+from automated_security_helper.interactions.run_ash_container import (
+    OciValueRefused,
+    oci_runner_for_this_run,
+    oci_wrapper_refusal,
+)
 from automated_security_helper.interactions.run_ash_scan import (
     PRECOMMIT_MODE_SCANNERS,
+    refuse_output_dir_links,
     resolve_workspace_execution_config,
     resolved_console_log_level,
     run_ash_scan,
@@ -75,6 +87,13 @@ from automated_security_helper.utils.log import (
     configure_last_resort_level,
     escape_markup,
 )
+from automated_security_helper.utils.output_dir_links import (
+    OUTPUT_GITIGNORE,
+    OUTPUT_GITIGNORE_TEXT,
+    OUTPUT_LOG_FILES,
+    OUTPUT_RESULT_FILES,
+    OUTPUT_WORKING_DIRS,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
@@ -83,10 +102,45 @@ from automated_security_helper.workspace.workspace_file import (
     discover_workspace_file,
 )
 
+#: The only word on how an interrupted scan ended, as exit-codes.md quotes it
+#: (the 130 row). Printed by the scan command's KeyboardInterrupt arm for the
+#: first Ctrl-C, and registered with the die-now ending for the second
+#: (``record_die_now_message``): exit-codes.md says "a second Ctrl-C during the
+#: wait kills it at once" and "A scan prints the interrupted-scan message
+#: above", so both endings say it and both exit 130.
+_SCAN_INTERRUPTED_MESSAGE = (
+    "ASH scan interrupted before it finished: there is no verdict, and the "
+    "output directory may hold partial results."
+)
 
-def _from_environment(ctx: typer.Context, param: str) -> bool:
-    """Whether click took *param*'s value from its ``envvar``."""
-    return getattr(ctx.get_parameter_source(param), "name", None) == "ENVIRONMENT"
+
+def _oci_runner_for_this_run(
+    ctx: typer.Context, oci_runner: Optional[str], mode: RunMode | str | None
+) -> Optional[str]:
+    """The runner ``run_ash_scan`` is given, read only in a mode that starts one.
+
+    Container and nix mode use the runner and the wrapper (nix mode to remove
+    containers an earlier container run left); any other mode never does, so a scan
+    in one reads neither ``OCI_RUNNER`` nor ``OCI_RUNNER_WRAPPER`` and refuses
+    nothing about them, whatever the environment holds. Where they are used their
+    values are read as ``oci_runner_for_this_run`` and ``oci_wrapper_refusal`` read
+    them, and one ASH will not run ends the command with the refusal's usage-error
+    exit, before anything is cleared or started.
+    """
+    if (mode or RunMode.local) not in (RunMode.container, RunMode.nix):
+        return oci_runner
+    try:
+        runner = oci_runner_for_this_run(
+            oci_runner, from_environment=_from_environment(ctx, "oci_runner")
+        )
+    except OciValueRefused as refusal:
+        echo(shown_on_one_line(str(refusal)), err=True)
+        raise typer.Exit(refusal.exit_code) from None
+    wrapper_refusal = oci_wrapper_refusal()
+    if wrapper_refusal is not None:
+        echo(shown_on_one_line(wrapper_refusal[1]), err=True)
+        raise typer.Exit(wrapper_refusal[0])
+    return runner
 
 
 def _fail_config_mark(message: str) -> NoReturn:
@@ -257,6 +311,295 @@ def _fail_state(message: str) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _resolved(path: str | Path) -> Path:
+    """*path* with its links followed and its ``..`` folded, for a comparison.
+
+    Falls back to the absolute spelling when resolving fails: a symbolic link
+    that leads back to itself made ``Path.resolve`` raise (RuntimeError before
+    Python 3.13, OSError in strict mode), which ended ``ash scan`` in a traceback
+    where the output directory refusal below would have named the link. A path
+    the OS cannot take at all (an embedded NUL, from a ``--cli-json-input``
+    document) raises ValueError the same way, and the absolute spelling is pure
+    string work, so the ``is not a valid path`` refusal below names it too.
+    """
+    try:
+        return Path(path).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return Path(path).absolute()
+
+
+#: The most bytes read from a marker file to decide whether ASH wrote it.
+_MARKER_HEAD_BYTES = 64 * 1024
+
+#: The first line of ash.log as utils/log.py writes it: the record's time, level
+#: and source, tab-separated (the TABULAR formatter's fmt).
+_ASH_LOG_FIRST_LINE = re.compile(
+    rb"\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}\t[A-Z]+\t[^\t\n]+:\d+\t"
+)
+
+#: The keys every line of ash.log.jsonl carries (utils/log.py's JsonFormatter).
+_ASH_JSONL_KEYS = frozenset({"timestamp", "level", "message"})
+
+
+def _marker_head(path: Path) -> Optional[bytes]:
+    """The first _MARKER_HEAD_BYTES of *path* when it is a regular file reached
+    without following a link, else None (a link, a directory, nothing there, or
+    an unreadable file is no marker)."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        with open(path, "rb") as handle:
+            return handle.read(_MARKER_HEAD_BYTES)
+    except OSError:
+        return None
+
+
+def _written_by_ash(name: str, head: bytes) -> bool:
+    """Whether the first bytes of the output-directory file *name* are what ASH
+    writes there: the aggregated results, a JSON object with the report's
+    ``metadata`` key in its head; ``ash.log``, whose first line is the tabular
+    record format; ``ash.log.jsonl``, whose first line is a JSON object with the
+    formatter's keys. The two text listings have no shape of ASH's own to read, so
+    they are no marker. A file with the right name and other content is the tree's."""
+    if name == "ash_aggregated_results.json":
+        return head.lstrip().startswith(b"{") and b'"metadata"' in head
+    if name == "ash.log":
+        return _ASH_LOG_FIRST_LINE.match(head) is not None
+    if name == "ash.log.jsonl":
+        first_line = head.split(b"\n", 1)[0]
+        try:
+            record = json.loads(first_line)
+        except ValueError:
+            return False
+        return isinstance(record, dict) and _ASH_JSONL_KEYS <= record.keys()
+    return False
+
+
+def _ash_output_dir(source_dir: str, output_resolved: Path) -> bool:
+    """Whether *output_resolved*, inside the scanned tree, is ASH's own output
+    directory and not a directory of the tree's: the default
+    ``<source_dir>/.ash/ash_output``, or one holding a result, log or ignore file a
+    run of ASH wrote, read by its content and not its name alone (the
+    ``.gitignore`` is written before any scanner starts, so a run that got no
+    further still left it). A tree directory that happens to hold a file named
+    ``ash.log`` is not ASH's; a link at a marker's name counts for nothing."""
+    if output_resolved == _resolved(Path(source_dir).joinpath(".ash", "ash_output")):
+        return True
+    for name in (*OUTPUT_RESULT_FILES, *OUTPUT_LOG_FILES):
+        head = _marker_head(output_resolved.joinpath(name))
+        if head is not None and _written_by_ash(name, head):
+            return True
+    head = _marker_head(output_resolved.joinpath(OUTPUT_GITIGNORE))
+    if head is None:
+        return False
+    # ASH writes the file in text mode (output_dir_links.ignore_output_dir_in_git),
+    # so on Windows its line ends are \r\n; the text is compared, not the bytes.
+    return head.replace(b"\r\n", b"\n") == OUTPUT_GITIGNORE_TEXT.encode("utf-8")
+
+
+def _not_clearable(directory: Path) -> Optional[str]:
+    """Why the scan must not clear *directory*, or None when it may: a directory
+    (not a link) that holds an entry, or one that cannot be read, so whether it
+    holds the tree's files cannot be told. An unreadable one read as empty before,
+    and the refusal was not given; the clear itself then failed on the same
+    permission, deleting nothing, with a traceback instead of the reason."""
+    try:
+        if stat.S_ISLNK(os.lstat(directory).st_mode):
+            return None
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return f"cannot be read ({type(exc).__name__})"
+    if not directory.is_dir():
+        return None
+    try:
+        with os.scandir(directory) as entries:
+            if next(entries, None) is None:
+                return None
+    except OSError as exc:
+        return f"cannot be read ({type(exc).__name__})"
+    return "already holds files that are not ASH's"
+
+
+def _settle_output_dir(
+    source_dir: str,
+    output_dir: str | Path | None,
+    use_existing: bool,
+    ignore_suppressions: bool = False,
+    *,
+    mode: RunMode | str | None = None,
+    workspace: bool = False,
+) -> tuple[str | Path, str | None]:
+    """The output directory the scan writes to, and the existing results it reads.
+
+    Defaults ``output_dir`` to ``<source_dir>/.ash/ash_output``, moves it there when
+    it is the source directory itself, refuses one that is a symlink or is reached
+    through one (exit 3, before anything here writes), refuses one the scan would
+    clear the scanned tree through, refuses one that cannot be written into, refuses
+    ``--use-existing`` together with ``--ignore-suppressions``, and resolves
+    ``--use-existing`` to the results file or refuses when it is not there. Every
+    refusal exits, so the caller gets back only a pair the scan can run with.
+
+    ``mode`` chooses container mode's own wording for the link refusal, and
+    ``workspace`` extends it to the workspace directories; see
+    :func:`refuse_output_dir_links`.
+
+    Called where the real run settles them, and from the workspace dry run before
+    it prints its plan, so a dry run that exits 0 describes a command line the
+    real run accepts.
+
+    The two directories are compared resolved (``Path.resolve``: ``..`` folded and
+    links followed), not as the absolute spellings given. Compared lexically,
+    ``--output-dir src/../src`` and a link to the source directory read as
+    different from it, and the scan then cleared ``reports/``, ``scanners/``,
+    ``converted/`` and ``analysis/`` inside the tree it was scanning. The same
+    resolved reading refuses a source directory that is one of those cleared
+    directories or inside one (``--source-dir reports --output-dir .``): the scan
+    removes each of them before it starts, so it would delete what it was asked
+    to scan and then report a clean tree.
+    """
+    if output_dir is None:
+        # Default output_dir is relative to source_dir, not CWD.
+        # This ensures that when --source-dir points to a different project,
+        # the output (and config resolution) happens in the correct location.
+        output_dir = Path(source_dir).joinpath(".ash", "ash_output").as_posix()
+
+    source_resolved = _resolved(source_dir)
+    if source_resolved == _resolved(output_dir):
+        output_dir = Path(output_dir).joinpath(".ash", "ash_output")
+        print(
+            "[bold yellow]output-dir has been adjusted to the following to avoid "
+            "collisions and potential impact to source code: "
+            f"{escape_markup(Path(output_dir).as_posix())}[/bold yellow]"
+        )
+    # The linked-output refusal, before anything below can write. exit-codes.md
+    # promises a linked output directory is refused in every mode BEFORE the check
+    # that the directory can be written, and output_dir_refusal further down proves
+    # writability by making a file in the directory and removing it, which follows
+    # a link at the output directory, or at a component on the way to it, and moves
+    # the link target's mtime. Every CLI run -- `ash scan`, `ash` with no
+    # subcommand, `--mode container` with and without --no-run, and `--mode nix` --
+    # settles its output directory here before run_ash_scan's own refusal runs, so
+    # this is where the refusal has to come first: exit 3, nothing made, the link's
+    # target keeps its entries and mtime. One implementation, shared with
+    # run_ash_scan (refuse_output_dir_links).
+    #
+    # Not asked of a path that holds a NUL: no link can be on the way to a path
+    # the OS takes no stat of, and the link check words such a path as a link
+    # refusal with exit 3. exit-codes.md gives it exit 5, "Output directory is not
+    # a valid path:", from the usage refusal below, which no probe precedes.
+    if "\x00" not in os.fspath(output_dir):
+        refuse_output_dir_links(
+            source_dir,
+            output_dir,
+            container=mode is not None and RunMode(mode) == RunMode.container,
+            workspace=workspace,
+        )
+    output_resolved = _resolved(output_dir)
+    for working_dir in OUTPUT_WORKING_DIRS:
+        cleared = output_resolved.joinpath(working_dir)
+        if source_resolved == cleared or source_resolved.is_relative_to(cleared):
+            _fail_usage(
+                shown_on_one_line(
+                    f"Source directory {os.fspath(source_dir)} is inside "
+                    f"{cleared.as_posix()}, which the scan removes from the output "
+                    f"directory {os.fspath(output_dir)} before it starts, so the "
+                    "scan would delete the directory it was asked to scan. Point "
+                    "--output-dir at a directory that does not contain the source "
+                    "directory, or scan a directory outside the output directory."
+                )
+            )
+    # A file where the output directory goes ended the run in a FileExistsError
+    # traceback, from the first mkdir of it. A missing one is still made. For a
+    # path that is not a directory that exists, this is asked before the
+    # containment question below: an output path that is a file, or under one, is
+    # refused as that (the refusal every runner prints alike), not as a working
+    # directory "that cannot be read (NotADirectoryError)". For a directory that
+    # exists it is asked after: its write probe makes and removes a file in the
+    # directory, and a directory of the tree's that the scan refuses to clear is
+    # not written into first, not even for a moment.
+    # A directory on the way that cannot be searched: before CPython 3.13,
+    # Path.is_dir() re-raised that PermissionError (3.13 reads it as False), so
+    # the run ended in a traceback where the refusal below names the reason.
+    # ValueError is a path the OS takes no stat of at all (an embedded NUL),
+    # which the refusal below words as "is not a valid path".
+    try:
+        probe_after_containment = output_resolved.is_dir()
+    except (OSError, ValueError):
+        probe_after_containment = False
+    if not probe_after_containment:
+        output_refusal = output_dir_refusal(output_dir)
+        if output_refusal is not None:
+            _fail_usage(shown_on_one_line(output_refusal))
+    # The reverse: an output directory inside the scanned tree whose working
+    # directories already hold something of the tree's. The scan removes each of
+    # them before it starts (the orchestrator's ensure_directories), so
+    # `--source-dir . --output-dir docs` with a real docs/reports/ deleted part of
+    # the tree it was asked to scan. What git tracks at those paths is refused by
+    # the orchestrator (core/committed_output.py); this covers what that does not
+    # see: files git ignores or was never told about, and a tree outside git. An
+    # output directory ASH wrote before is still cleared, as it always was
+    # (_ash_output_dir); so is an empty directory, which is recreated as it was.
+    if (
+        output_resolved != source_resolved
+        and output_resolved.is_relative_to(source_resolved)
+        and not _ash_output_dir(source_dir, output_resolved)
+    ):
+        for working_dir in OUTPUT_WORKING_DIRS:
+            cleared = output_resolved.joinpath(working_dir)
+            reason = _not_clearable(cleared)
+            if reason is not None:
+                _fail_usage(
+                    shown_on_one_line(
+                        f"Output directory {os.fspath(output_dir)} is inside the "
+                        f"source directory {os.fspath(source_dir)}, and "
+                        f"{cleared.as_posix()} {reason}: the scan removes "
+                        f"{working_dir}/ from the output directory before it "
+                        "starts, so it would delete part of the tree it was asked "
+                        "to scan. Point --output-dir at a directory of its own "
+                        "(the default, .ash/ash_output, is one), or move those "
+                        "files out of it."
+                    )
+                )
+    if probe_after_containment:
+        output_refusal = output_dir_refusal(output_dir)
+        if output_refusal is not None:
+            _fail_usage(shown_on_one_line(output_refusal))
+
+    existing_results = None
+    if use_existing:
+        # The stored results were written with ASH's suppressions applied, and a
+        # report made from them cannot lift those suppressions: the scan phase that
+        # --ignore-suppressions changes is the one --use-existing skips. The
+        # combination used to run and keep the stored suppressions while the
+        # command line said they were ignored. A mistake in the command line, so
+        # the usage code, and checked before the on-disk check below: the operator
+        # has to change the command, whatever is in the output directory.
+        if ignore_suppressions:
+            _fail_usage(
+                "--ignore-suppressions cannot be combined with --use-existing: the "
+                "existing results were written with suppressions applied, and a "
+                "report made from them cannot lift those suppressions. Run a new "
+                "scan with --ignore-suppressions, or drop it to report the existing "
+                "results as they are."
+            )
+        poss_existing_results = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if poss_existing_results.exists():
+            existing_results = poss_existing_results.as_posix()
+        else:
+            # A clean refusal, not the uncaught ValueError traceback this was, on one
+            # line: the path is the --output-dir as given.
+            _fail_state(
+                shown_on_one_line(
+                    f"--use-existing was given, but there are no existing results to "
+                    f"use: {poss_existing_results.as_posix()} does not exist. Run a "
+                    "scan first, or point --output-dir at the output of a previous "
+                    "one."
+                )
+            )
+    return output_dir, existing_results
+
+
 def _refuse_sandbox_in_container_mode(
     sandbox: SandboxMode | str | None, mode: RunMode | str | None
 ) -> None:
@@ -360,13 +703,9 @@ def _handle_workspace_mode(
     workspace: str,
     source_dir: str | None,
     allow_missing_projects: bool,
-    dry_run: bool,
     workspace_config: str | None = None,
     config_overrides: tuple[str, ...] = (),
     config: str | None = None,
-    scanners: tuple[str, ...] = (),
-    exclude_scanners: tuple[str, ...] = (),
-    ash_plugin_modules: tuple[str, ...] = (),
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
 
@@ -374,12 +713,16 @@ def _handle_workspace_mode(
     nothing to scan: 4 for a workspace definition or policy problem, 3 for a
     project whose own config is invalid. Never 2 -- that code means a scan ran and
     found actionable findings, which is the opposite of what any exit from here
-    reports. ``--dry-run`` also exits, at 0, after printing the plan.
+    reports.
 
     The success path returns rather than exiting, and the caller runs the scans
     from the same plan object the operator would have inspected. Re-resolving for
     execution would let the two drift, which is exactly what ``--dry-run`` exists
-    to rule out.
+    to rule out. The dry run itself is the caller's (``_exit_with_workspace_dry_run``),
+    after the preflight the real run makes on the plan's root: the source and
+    output directory refusals, ``--use-existing``. Done here, before those, a dry
+    run exited 0 for a command line the run then refused, and the two made their
+    checks in different orders.
 
     Argument validation happens before any filesystem work, so an operator who
     passed a contradictory pair of flags is told that rather than being sent to
@@ -444,78 +787,93 @@ def _handle_workspace_mode(
         # line of the path's choosing inside the refusal.
         _fail_workspace_config(exc)
 
-    if dry_run:
-        # The same selection pre-check the real run makes, with the same code and
-        # text, so the dry run answers for the scan it describes: a dry run that
-        # exits 0 for a selection the real run refuses tells the operator the
-        # command line is good, and the real run then refuses it.
-        from automated_security_helper.core.exceptions import ScannerSelectionError
-        from automated_security_helper.workspace.execution import (
-            ProjectScanSettings,
-            prewarm_plugin_registry,
-            refuse_unresolvable_scanner_selection,
-        )
-
-        selection = ProjectScanSettings(
-            # The pre-check and the prewarm read only the selection and the
-            # plugin modules; nothing is written anywhere. The prewarm imports
-            # the workspace's plugin modules, as the real run does, because the
-            # pre-check judges the selection by the scanners they provide.
-            output_dir=Path(plan.workspace_root),
-            enabled_scanners=tuple(scanners),
-            excluded_scanners=tuple(exclude_scanners),
-            ash_plugin_modules=tuple(ash_plugin_modules),
-        )
-        try:
-            prewarm_plugin_registry(plan, selection)
-            refuse_unresolvable_scanner_selection(plan, selection)
-        except ScannerSelectionError as exc:
-            _fail_workspace(
-                shown_on_one_line(str(exc)), code=WorkspaceExitCode.USAGE_ERROR
-            )
-        except WorkspaceDefinitionError as exc:
-            # The workspace's own refusal, with its code, as the real run
-            # answers one raised while it executes: the generic arm below would
-            # read it as an error nothing expected, exit 1.
-            _fail_workspace_definition(exc)
-        except ASHConfigValidationError as exc:
-            # The prewarm's refusal of a plugin module outside ASH's namespace,
-            # made before anything is imported: an invalid configuration, exit 3,
-            # in the real run, and reported here as the plan's own config
-            # refusal above is. Uncaught, it ended the dry run with exit 1 and
-            # nothing printed.
-            _fail_workspace_config(exc)
-        except Exception as exc:  # noqa: BLE001 -- answered as the real run answers it
-            # A plugin module in the namespace whose top-level code raises
-            # something other than ImportError when the prewarm imports it. The
-            # real run answers that as an unexpected failure, exit 1, naming the
-            # exception; uncaught here, the dry run exited 1 with no reason
-            # printed. The same sentence, so the operator reads one failure.
-            # Redacted as the real run's handler is, with the values the prewarm
-            # recorded on the error, which error_text reads off it; and logged
-            # with its traceback first, as the real run logs it, so the one
-            # printed sentence is not all there is to debug a crashing plugin.
-            from automated_security_helper.utils.error_text import (
-                error_text,
-                log_unexpected_error,
-            )
-            from automated_security_helper.utils.log import ASH_LOGGER
-
-            log_unexpected_error(ASH_LOGGER, exc)
-            _fail_workspace(
-                shown_on_one_line(
-                    "Exiting due to exception during ASH workspace scan: "
-                    f"{error_text(exc)}"
-                ),
-                code=WorkspaceExitCode.INTERNAL_ERROR,
-            )
-        # Line by line: a line can quote a path, whose newline is shown as
-        # \x0a so the path stays on its line of the plan.
-        for line in plan.render_lines():
-            echo(shown_on_one_line(line))
-        raise typer.Exit(WorkspaceExitCode.SUCCESS)
-
     return plan
+
+
+def _exit_with_workspace_dry_run(
+    plan: "WorkspacePlan",
+    scanners: tuple[str, ...],
+    exclude_scanners: tuple[str, ...],
+    ash_plugin_modules: tuple[str, ...],
+) -> None:
+    """Print *plan* and exit 0, the ``--dry-run`` answer, after the real run's own
+    pre-checks.
+
+    Called where the real run would start executing: after ``_handle_workspace_mode``
+    resolved the plan and the shared preflight (the source directory refusal,
+    ``_settle_output_dir``) ran on its root, in that order. So a dry run refuses
+    what the run refuses, with the run's code and text, and refuses it in the
+    run's order: made inside the resolution, before the preflight, a dry run
+    exited 0 for a command line the run then rejected, and with two problems
+    present the two named different first errors.
+
+    The selection pre-check is the one the real run makes, with the same code and
+    text, so the dry run answers for the scan it describes: a dry run that exits 0
+    for a selection the real run refuses tells the operator the command line is
+    good, and the real run then refuses it.
+    """
+    from automated_security_helper.core.exceptions import ScannerSelectionError
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        prewarm_plugin_registry,
+        refuse_unresolvable_scanner_selection,
+    )
+
+    selection = ProjectScanSettings(
+        # The pre-check and the prewarm read only the selection and the
+        # plugin modules; nothing is written anywhere. The prewarm imports
+        # the workspace's plugin modules, as the real run does, because the
+        # pre-check judges the selection by the scanners they provide.
+        output_dir=Path(plan.workspace_root),
+        enabled_scanners=tuple(scanners),
+        excluded_scanners=tuple(exclude_scanners),
+        ash_plugin_modules=tuple(ash_plugin_modules),
+    )
+    try:
+        prewarm_plugin_registry(plan, selection)
+        refuse_unresolvable_scanner_selection(plan, selection)
+    except ScannerSelectionError as exc:
+        _fail_workspace(shown_on_one_line(str(exc)), code=WorkspaceExitCode.USAGE_ERROR)
+    except WorkspaceDefinitionError as exc:
+        # The workspace's own refusal, with its code, as the real run
+        # answers one raised while it executes: the generic arm below would
+        # read it as an error nothing expected, exit 1.
+        _fail_workspace_definition(exc)
+    except ASHConfigValidationError as exc:
+        # The prewarm's refusal of a plugin module outside ASH's namespace,
+        # made before anything is imported: an invalid configuration, exit 3,
+        # in the real run, and reported here as the plan's own config
+        # refusal is. Uncaught, it ended the dry run with exit 1 and
+        # nothing printed.
+        _fail_workspace_config(exc)
+    except Exception as exc:  # noqa: BLE001 -- answered as the real run answers it
+        # A plugin module in the namespace whose top-level code raises
+        # something other than ImportError when the prewarm imports it. The
+        # real run answers that as an unexpected failure, exit 1, naming the
+        # exception; uncaught here, the dry run exited 1 with no reason
+        # printed. The same sentence, so the operator reads one failure.
+        # Redacted as the real run's handler is, with the values the prewarm
+        # recorded on the error, which error_text reads off it; and logged
+        # with its traceback first, as the real run logs it, so the one
+        # printed sentence is not all there is to debug a crashing plugin.
+        from automated_security_helper.utils.error_text import (
+            error_text,
+            log_unexpected_error,
+        )
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        log_unexpected_error(ASH_LOGGER, exc)
+        _fail_workspace(
+            shown_on_one_line(
+                f"Exiting due to exception during ASH workspace scan: {error_text(exc)}"
+            ),
+            code=WorkspaceExitCode.INTERNAL_ERROR,
+        )
+    # Line by line: a line can quote a path, whose newline is shown as
+    # \x0a so the path stays on its line of the plan.
+    for line in plan.render_lines():
+        echo(shown_on_one_line(line))
+    raise typer.Exit(WorkspaceExitCode.SUCCESS)
 
 
 def run_ash_scan_cli_command(
@@ -583,7 +941,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--sandbox",
             rich_help_panel="Execution",
-            help="Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md",
+            help="Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner whose sandbox cannot be set up is graded by the refusal: under 'auto' no working backend is a missing dependency and the scanner is reported MISSING; a named backend that is unavailable, or any other refusal (such as a results path that is a symlink), is reported ERROR. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md",
             case_sensitive=False,
         ),
     ] = None,
@@ -1115,6 +1473,9 @@ def run_ash_scan_cli_command(
         mode,
         from_environment=_from_environment(ctx, "changed_files_only"),
     )
+    # With the other early refusals, so the workspace dry run below refuses what the
+    # run refuses and names the same first problem.
+    runner_for_the_run = _oci_runner_for_this_run(ctx, oci_runner, mode)
 
     # Container mode's marks for the scan inside, which cannot see where the host
     # found the --config it mounted at /ash-config: --config-from-scanned-repository
@@ -1240,13 +1601,27 @@ def run_ash_scan_cli_command(
         # None of these flags mean anything outside workspace mode. Silently
         # ignoring --dry-run would run a full scan for someone who asked for
         # none; silently ignoring --workspace-config would scan with no policy
-        # for someone who believes a severity ceiling is in force.
+        # for someone who believes a severity ceiling is in force. The policy
+        # file is the one option here with an environment variable, so the
+        # refusal names the source the value came from, which click records
+        # (_from_environment): with ASH_WORKSPACE_CONFIG exported, every scan
+        # outside workspace mode was refused for a flag the command line did
+        # not carry, and naming both sources at once told the operator who
+        # passed the flag to look for a variable that was not set.
+        policy_from_environment = _from_environment(ctx, "workspace_config")
         offending = [
             flag
             for flag, given in (
                 ("--dry-run", dry_run),
                 ("--allow-missing-projects", allow_missing_projects),
-                ("--workspace-config", workspace_config is not None),
+                (
+                    "ASH_WORKSPACE_CONFIG in the environment",
+                    workspace_config is not None and policy_from_environment,
+                ),
+                (
+                    "--workspace-config",
+                    workspace_config is not None and not policy_from_environment,
+                ),
             )
             if given
         ]
@@ -1292,19 +1667,32 @@ def run_ash_scan_cli_command(
             f"honor_ignore_files={'true' if honor_ignore_files else 'false'}"
         )
 
+    # Parsed above the workspace block, so a workspace dry run refuses a format the
+    # real run refuses instead of exiting 0 for it. Comma-separated.
+    if output_formats is None:
+        output_formats = []
+    parsed_output_formats = []
+    for item in output_formats:
+        for fmt in item.split(","):
+            fmt = fmt.strip()
+            if fmt:
+                try:
+                    parsed_output_formats.append(ExportFormat(fmt))
+                except ValueError:
+                    valid_formats = [f.value for f in ExportFormat]
+                    raise typer.BadParameter(
+                        f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
+                    )
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
             workspace=workspace,
             source_dir=source_dir,
             allow_missing_projects=allow_missing_projects,
-            dry_run=dry_run,
             workspace_config=workspace_config,
             config_overrides=tuple(config_overrides),
             config=config,
-            scanners=tuple(scanners or ()),
-            exclude_scanners=tuple(exclude_scanners or ()),
-            ash_plugin_modules=tuple(ash_plugin_modules or ()),
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.
@@ -1327,10 +1715,8 @@ def run_ash_scan_cli_command(
     )
 
     ash_plugin_modules = split_plugin_modules(ash_plugin_modules)
-    # config_overrides is normalised above the workspace block; see the comment
-    # there for why it cannot happen here.
-    if output_formats is None:
-        output_formats = []
+    # config_overrides and output_formats are normalised above the workspace
+    # block; see the comments there for why neither can happen here.
     if phases is None:
         phases = [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
     if custom_build_arg is None:
@@ -1348,24 +1734,25 @@ def run_ash_scan_cli_command(
     source_refusal = source_dir_refusal(source_dir)
     if source_refusal is not None:
         _fail_usage(shown_on_one_line(source_refusal))
-    if output_dir is None:
-        # Default output_dir is relative to source_dir, not CWD.
-        # This ensures that when --source-dir points to a different project,
-        # the output (and config resolution) happens in the correct location.
-        output_dir = Path(source_dir).joinpath(".ash", "ash_output").as_posix()
-
-    if Path(source_dir).absolute().as_posix() == Path(output_dir).absolute().as_posix():
-        output_dir = Path(output_dir).joinpath(".ash", "ash_output")
-        print(
-            "[bold yellow]output-dir has been adjusted to the following to avoid "
-            "collisions and potential impact to source code: "
-            f"{escape_markup(Path(output_dir).as_posix())}[/bold yellow]"
+    # The output directory's default, the collision adjustment, its refusals and
+    # --use-existing, in one place for the real run and the workspace dry run.
+    output_dir, existing_results = _settle_output_dir(
+        source_dir,
+        output_dir,
+        use_existing,
+        ignore_suppressions,
+        mode=mode,
+        workspace=workspace_plan is not None,
+    )
+    if workspace_plan is not None and dry_run:
+        # After the preflight above, in the real run's order, so the dry run
+        # refuses what the run refuses and names the same first problem.
+        _exit_with_workspace_dry_run(
+            workspace_plan,
+            scanners=tuple(scanners),
+            exclude_scanners=tuple(exclude_scanners),
+            ash_plugin_modules=tuple(ash_plugin_modules),
         )
-    # A file where the output directory goes ended the run in a FileExistsError
-    # traceback, from the first mkdir of it. A missing one is still made.
-    output_refusal = output_dir_refusal(output_dir)
-    if output_refusal is not None:
-        _fail_usage(shown_on_one_line(output_refusal))
 
     # Apply mode presets if specified (precommit_mode is folded into simple
     # above, before the last-resort gate is set)
@@ -1373,23 +1760,6 @@ def run_ash_scan_cli_command(
         print(
             "[green]-------------- Running ASH in pre-commit mode with minimal output --------------[/green]"
         )
-
-    existing_results = None
-    if use_existing:
-        poss_existing_results = Path(output_dir).joinpath("ash_aggregated_results.json")
-        if poss_existing_results.exists():
-            existing_results = poss_existing_results.as_posix()
-        else:
-            # A clean refusal, not the uncaught ValueError traceback this was, on one
-            # line: the path is the --output-dir as given.
-            _fail_state(
-                shown_on_one_line(
-                    f"--use-existing was given, but there are no existing results to "
-                    f"use: {poss_existing_results.as_posix()} does not exist. Run a "
-                    "scan first, or point --output-dir at the output of a previous "
-                    "one."
-                )
-            )
 
     cli_final_show_progress = (
         progress
@@ -1408,19 +1778,8 @@ def run_ash_scan_cli_command(
     # block, so that workspace resolution sees it. Appending here as well would
     # apply it twice.
 
-    # Parse comma-separated output formats
-    parsed_output_formats = []
-    for item in output_formats:
-        for fmt in item.split(","):
-            fmt = fmt.strip()
-            if fmt:
-                try:
-                    parsed_output_formats.append(ExportFormat(fmt))
-                except ValueError:
-                    valid_formats = [f.value for f in ExportFormat]
-                    raise typer.BadParameter(
-                        f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
-                    )
+    # The output formats were parsed above the workspace block
+    # (parsed_output_formats).
 
     # Call run_ash_scan with all parameters, as a scan the entry point's SIGTERM
     # handler cancels (core/cancellation.py, "SIGTERM on the CLI"). The scope is
@@ -1428,6 +1787,11 @@ def run_ash_scan_cli_command(
     # run_ash_scan inside a scope of its own, whose event its registry stops; a
     # scope installed below the shared frame would shadow it.
     cancel_event = CancelEvent()
+    # A second Ctrl-C takes the die-now ending, which never returns to the
+    # interrupt arm below, so the word on how the run ended is registered with
+    # it: exit-codes.md pins that a second Ctrl-C still prints the
+    # interrupted-scan message and exits 130.
+    record_die_now_message(_SCAN_INTERRUPTED_MESSAGE)
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
             run_ash_scan(
@@ -1468,7 +1832,11 @@ def run_ash_scan_cli_command(
                 build=build,
                 run=run,
                 force=force,
-                oci_runner=oci_runner,
+                # Read only in a mode that starts a runner. A relative path is read
+                # against the working directory where it was typed (the option, or
+                # a --cli-json-input document) and refused when it came from
+                # OCI_RUNNER: oci_runner_for_this_run.
+                oci_runner=runner_for_the_run,
                 build_target=build_target,
                 offline_semgrep_rulesets=offline_semgrep_rulesets,
                 container_uid=container_uid,
@@ -1491,11 +1859,7 @@ def run_ash_scan_cli_command(
         # real set calls are safe here where the signal handler's are not.
         cancel_event.stop_promptly = True
         cancel_event.set()
-        echo(
-            "ASH scan interrupted before it finished: there is no verdict, and the "
-            "output directory may hold partial results.",
-            err=True,
-        )
+        echo(_SCAN_INTERRUPTED_MESSAGE, err=True)
         raise typer.Exit(ASH_EXIT_INTERRUPTED) from None
     except ScanCancelled as error:
         if not shutdown_requested():
@@ -1521,3 +1885,8 @@ def run_ash_scan_cli_command(
             message += f" A tool the stop could not end may still be running: {names}."
         echo(message, err=True)
         raise typer.Exit(ASH_EXIT_TERMINATED) from None
+    finally:
+        # The die-now ending speaks for this run only while this run exists: a
+        # process that goes on living (a test running the command in-process)
+        # must not keep a stale word for a later interrupt.
+        discard_die_now_message()

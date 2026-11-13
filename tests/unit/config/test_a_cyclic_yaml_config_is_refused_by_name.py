@@ -173,7 +173,10 @@ def test_the_suppression_save_refuses_a_recursive_alias_unchanged(
         )
 
     message = str(refused.value)
-    assert "could not be parsed (RecursiveAliasError at line" in message, message
+    # The save's loader now refuses every alias, as the scan's loader does
+    # (ash_config._NoAliasSafeLoader), so the cycle is refused as the first
+    # alias met, a ComposerError, in the same left-unchanged words.
+    assert "could not be parsed (ComposerError at line" in message, message
     assert message.endswith(f"{path} is unchanged"), message
     assert path.read_bytes() == before
 
@@ -327,8 +330,15 @@ def test_mcp_select_profile_binds_a_shared_alias_in_override_yaml(
             mcp_server.select_profile(
                 _context("written-out-override"),
                 profile_name="wide",
+                # An override replaces the profile wholesale, so a field it
+                # leaves out reverts to its default and is gated as a patch op:
+                # it states the profile's own mcp section (always denied to a
+                # client) to change nothing there.
                 override_yaml=(
-                    "project_name: t\nreporters:\n  markdown:\n"
+                    "project_name: t\nglobal_settings:\n  mcp:\n"
+                    "    runtime_overrides:\n      enabled: true\n"
+                    '      allowed_paths: ["/**"]\n'
+                    "reporters:\n  markdown:\n"
                     "    enabled: false\n  text:\n    enabled: false\n"
                 ),
             )

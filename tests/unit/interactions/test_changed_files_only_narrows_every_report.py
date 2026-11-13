@@ -366,15 +366,71 @@ def test_a_stale_ash_sarif_never_decides_the_verdict(
         assert "untouched.py" in on_disk
 
 
+@pytest.mark.parametrize(
+    ("notebook", "kept"),
+    [("changed.ipynb", True), ("untouched.ipynb", False)],
+    ids=["notebook-in-the-diff", "notebook-not-in-the-diff"],
+)
+def test_a_converted_finding_is_placed_by_the_source_the_converter_recorded(
+    tmp_path, monkeypatch, no_aws, notebook, kept
+):
+    """The engine reads the converters' converted-sources.json back and hands it
+    to the filter, so a finding in a converted notebook follows the notebook: kept
+    when the notebook is in the diff, dropped when it is not. Before this the
+    engine passed no mapping, and every such finding was kept whatever changed.
+    """
+    from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+    from automated_security_helper.utils import get_scan_set
+    from automated_security_helper.utils.scan_output_dirs import (
+        CONVERTED_SOURCES_FILE_NAME,
+    )
+
+    repo = tmp_path / "repo"
+    source = repo / "src"
+    source.mkdir(parents=True)
+    monkeypatch.setattr(
+        get_scan_set, "get_changed_files", lambda base_ref, cwd: ["src/changed.ipynb"]
+    )
+    monkeypatch.setattr(
+        get_scan_set, "git_repository_root", lambda path, **kwargs: repo
+    )
+    output = tmp_path / "out"
+    converter_dir = output / ASH_WORK_DIR_NAME / "jupyter"
+    converter_dir.mkdir(parents=True)
+    converted = converter_dir / "nb__ipynb-converted.py"
+    converted.write_text("import os\n", encoding="utf-8")
+    (converter_dir / CONVERTED_SOURCES_FILE_NAME).write_text(
+        json.dumps({"jupyter/nb__ipynb-converted.py": notebook}), encoding="utf-8"
+    )
+    finding = _finding(str(converted), "error", "HIGH")
+    finding["properties"]["converted_path"] = "jupyter/nb__ipynb-converted.py"
+    saved_path = _saved_results(tmp_path, finding)
+
+    exit_code = _report_over_saved_results(
+        source,
+        output,
+        saved_path,
+        changed_files_only=True,
+        output_formats=[ExportFormat.SARIF],
+    )
+
+    on_disk = (output / "reports" / "ash.sarif").read_text(encoding="utf-8")
+    assert ("nb__ipynb-converted.py" in on_disk) is kept
+    # A HIGH finding fails the scan when it is reported.
+    assert exit_code == (2 if kept else 0)
+
+
 @needs_symlinks
-def test_a_link_at_ash_sarif_is_never_read_as_this_runs(tmp_path, monkeypatch, no_aws):
+def test_a_link_at_ash_sarif_is_never_read_as_this_runs(
+    tmp_path, monkeypatch, no_aws, capsys
+):
     """reports/ash.sarif is this run's only as a regular file the run wrote.
 
-    The identity follows no symlink, so a link there to another report this run
-    rewrites (ash.flat.json here) is not read as written this run, and the HIGH
-    finding this run reports fails the scan. A link survives into the run only
-    under --use-existing, as here, or in ``ash merge`` into a reused output
-    directory.
+    A link there to another report (ash.flat.json here) is never read as written
+    this run: ASH does not write a report through a link, so the run is refused
+    with exit 1 and a message naming the link, not graded by the HIGH finding the
+    link's target would show (exit 2). A link survives into the run only under
+    --use-existing, as here, or in ``ash merge`` into a reused output directory.
     """
     source = tmp_path / "repo" / "src"
     source.mkdir(parents=True)
@@ -392,11 +448,11 @@ def test_a_link_at_ash_sarif_is_never_read_as_this_runs(tmp_path, monkeypatch, n
         output_formats=[ExportFormat.MARKDOWN, ExportFormat.FLAT_JSON],
     )
 
-    # The link is still there, and its target was written this run.
+    # The link is still there, and the run is refused over it, not graded by it.
     assert (reports / "ash.sarif").is_symlink()
-    assert "untouched.py" in (reports / "ash.flat.json").read_text(encoding="utf-8")
-    assert exit_code == 2
-    assert told == [False]
+    assert exit_code == 1
+    assert "ash.sarif is a symlink" in capsys.readouterr().out
+    assert True not in told, told
 
 
 @pytest.mark.parametrize(

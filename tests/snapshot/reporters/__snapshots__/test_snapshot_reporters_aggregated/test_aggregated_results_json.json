@@ -31,6 +31,7 @@
     "execution_discrepancy_report": {},
     "shard": null,
     "expected_scanners": [],
+    "requested_scanners_not_run": null,
     "plugin_load_errors": {},
     "ignore_file_exclusions": null,
     "inputs_not_scanned": null
@@ -44,7 +45,7 @@
         {
           "path": "app/app.py",
           "reason": "Fixture placeholder credential, not a real secret",
-          "expiration": null,
+          "expires": null,
           "client_supplied": false,
           "rule_id": "SECRET-SECRET-KEYWORD",
           "line_start": 5,
@@ -52,12 +53,14 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
-          "symbol": null
+          "symbol": null,
+          "scope": null,
+          "resource_id": null
         },
         {
           "path": "infra/main.tf",
           "reason": "Stale suppression for a check that no longer exists",
-          "expiration": "2099-12-31",
+          "expires": "2099-12-31",
           "client_supplied": false,
           "rule_id": "CKV_AWS_999",
           "line_start": null,
@@ -65,7 +68,9 @@
           "package_name": null,
           "package_version": null,
           "package_path": null,
-          "symbol": null
+          "symbol": null,
+          "scope": null,
+          "resource_id": null
         }
       ],
       "mcp": {
@@ -189,13 +194,29 @@
     },
     "fail_on_findings": true,
     "fail_on_incomplete_scanners": true,
+    "fail_on_unknown_keys": false,
     "honor_ignore_files": true,
     "sandbox": {
       "mode": "off",
       "network_scanners": null,
       "extra_read_paths": [],
       "read_path_scanners": [],
-      "env_scanners": []
+      "env_scanners": [],
+      "environment": [
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "all_proxy",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_DIR"
+      ]
     },
     "content_db_staleness": "fail",
     "content_db_staleness_overrides": [],
@@ -248,7 +269,7 @@
           "ignore_nosec": false,
           "excluded_paths": [],
           "additional_formats": [],
-          "tool_version": ">=1.7.0,<2.0.0",
+          "tool_version": ">=1.7.8,<2.0.0",
           "install_timeout": 300
         }
       },
@@ -395,7 +416,7 @@
           "severity": [],
           "metrics": "auto",
           "patterns": [],
-          "version": "v1.30.2",
+          "version": "v1.33.1",
           "sha256": {}
         }
       },
@@ -518,7 +539,8 @@
         "name": "github-ghas",
         "enabled": true,
         "options": {
-          "exclude_suppressed": true
+          "exclude_suppressed": true,
+          "emit_automation_details": false
         },
         "extension": "ghas.sarif"
       },
@@ -631,7 +653,7 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": null,
-      "duration": 0.0,
+      "duration": null,
       "missing_reason": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
       "skipped_reason": null
     },
@@ -651,7 +673,7 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": null,
-      "duration": 0.0,
+      "duration": null,
       "missing_reason": null,
       "skipped_reason": "left out of this run"
     },
@@ -917,10 +939,10 @@
                   "tool_name": "bandit",
                   "tool_version": "1.8.6",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 1.25,
                     "start_time": "2026-01-15T12:00:00+00:00",
-                    "end_time": "2026-01-15T12:00:01.250000+00:00"
+                    "end_time": "2026-01-15T12:00:01.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 1.25
                   }
                 }
               }
@@ -1045,10 +1067,10 @@
                   "tool_name": "checkov",
                   "tool_version": "3.2.469",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 7.5,
                     "start_time": "2026-01-15T12:00:01.250000+00:00",
-                    "end_time": "2026-01-15T12:00:08.750000+00:00"
+                    "end_time": "2026-01-15T12:00:08.750000+00:00",
+                    "exit_code": 0,
+                    "duration": 7.5
                   }
                 }
               }
@@ -1133,10 +1155,10 @@
                   "tool_name": "semgrep",
                   "tool_version": "1.140.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 4.0,
                     "start_time": "2026-01-15T12:00:08.750000+00:00",
-                    "end_time": "2026-01-15T12:00:12.750000+00:00"
+                    "end_time": "2026-01-15T12:00:12.750000+00:00",
+                    "exit_code": 0,
+                    "duration": 4.0
                   }
                 }
               }
@@ -1201,10 +1223,10 @@
                   "tool_name": "detect-secrets",
                   "tool_version": "1.5.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 0.5,
                     "start_time": "2026-01-15T12:00:12.750000+00:00",
-                    "end_time": "2026-01-15T12:00:13.250000+00:00"
+                    "end_time": "2026-01-15T12:00:13.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 0.5
                   }
                 }
               }
@@ -1295,10 +1317,10 @@
                   "tool_name": "grype",
                   "tool_version": "0.100.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 3.0,
                     "start_time": "2026-01-15T12:00:13.250000+00:00",
-                    "end_time": "2026-01-15T12:00:16.250000+00:00"
+                    "end_time": "2026-01-15T12:00:16.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 3.0
                   }
                 }
               }
@@ -1342,10 +1364,10 @@
                   "tool_name": "cfn-nag",
                   "tool_version": "0.8.10",
                   "tool_invocation": {
-                    "exit_code": 1,
-                    "duration": 0.25,
                     "start_time": "2026-01-15T12:00:18.250000+00:00",
-                    "end_time": "2026-01-15T12:00:18.500000+00:00"
+                    "end_time": "2026-01-15T12:00:18.500000+00:00",
+                    "exit_code": 1,
+                    "duration": 0.25
                   }
                 }
               }
@@ -1450,10 +1472,24 @@
                 "tool_name": "bandit",
                 "tool_version": "1.8.6",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.25,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:01.250000+00:00"
+                  "end_time": "2026-01-15T12:00:01.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 1.25
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 0,
+                "component": {
+                  "name": "bandit"
+                },
+                "resolved_rule": {
+                  "id": "B602"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "subprocess call with shell=True identified, security issue."
                 }
               }
             }
@@ -1541,10 +1577,24 @@
                 "tool_name": "bandit",
                 "tool_version": "1.8.6",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.25,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:01.250000+00:00"
+                  "end_time": "2026-01-15T12:00:01.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 1.25
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 1,
+                "component": {
+                  "name": "bandit"
+                },
+                "resolved_rule": {
+                  "id": "B105"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "Possible hardcoded password: 'hu**********************t'"
                 }
               }
             }
@@ -1631,10 +1681,24 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 0,
+                "component": {
+                  "name": "checkov"
+                },
+                "resolved_rule": {
+                  "id": "CKV_AWS_20"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "S3 Bucket has an ACL defined which allows public READ access."
                 }
               }
             }
@@ -1721,10 +1785,24 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 1,
+                "component": {
+                  "name": "checkov"
+                },
+                "resolved_rule": {
+                  "id": "CKV_AWS_18"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "Ensure the S3 bucket has access logging enabled"
                 }
               }
             }
@@ -1811,10 +1889,24 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 2,
+                "component": {
+                  "name": "checkov"
+                },
+                "resolved_rule": {
+                  "id": "CKV_DOCKER_8"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "Ensure the last USER is not root"
                 }
               }
             }
@@ -1901,10 +1993,24 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 3,
+                "component": {
+                  "name": "checkov"
+                },
+                "resolved_rule": {
+                  "id": "CKV_DOCKER_2"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "Ensure that HEALTHCHECK instructions have been added to container images"
                 }
               }
             }
@@ -1991,10 +2097,24 @@
                 "tool_name": "semgrep",
                 "tool_version": "1.140.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 4.0,
                   "start_time": "2026-01-15T12:00:08.750000+00:00",
-                  "end_time": "2026-01-15T12:00:12.750000+00:00"
+                  "end_time": "2026-01-15T12:00:12.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 4.0
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 0,
+                "component": {
+                  "name": "semgrep"
+                },
+                "resolved_rule": {
+                  "id": "dockerfile.security.last-user-is-root.last-user-is-root"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "The last user in the container is 'root'. Switch back to an unprivileged user."
                 }
               }
             }
@@ -2081,10 +2201,24 @@
                 "tool_name": "semgrep",
                 "tool_version": "1.140.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 4.0,
                   "start_time": "2026-01-15T12:00:08.750000+00:00",
-                  "end_time": "2026-01-15T12:00:12.750000+00:00"
+                  "end_time": "2026-01-15T12:00:12.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 4.0
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 1,
+                "component": {
+                  "name": "semgrep"
+                },
+                "resolved_rule": {
+                  "id": "python.lang.best-practice.unpinned-shell-command"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "Command string built with an f-string; prefer an argument list."
                 }
               }
             }
@@ -2156,7 +2290,10 @@
                 "state": null,
                 "justification": "(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret",
                 "location": null,
-                "properties": null
+                "properties": {
+                  "tags": [],
+                  "ashApplied": true
+                }
               }
             ],
             "baselineState": null,
@@ -2180,10 +2317,24 @@
                 "tool_name": "detect-secrets",
                 "tool_version": "1.5.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 0.5,
                   "start_time": "2026-01-15T12:00:12.750000+00:00",
-                  "end_time": "2026-01-15T12:00:13.250000+00:00"
+                  "end_time": "2026-01-15T12:00:13.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 0.5
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 0,
+                "component": {
+                  "name": "detect-secrets"
+                },
+                "resolved_rule": {
+                  "id": "SECRET-SECRET-KEYWORD"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "Secret of type Secret Keyword detected in file app/app.py at line 5"
                 }
               }
             }
@@ -2270,10 +2421,24 @@
                 "tool_name": "grype",
                 "tool_version": "0.100.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 3.0,
                   "start_time": "2026-01-15T12:00:13.250000+00:00",
-                  "end_time": "2026-01-15T12:00:16.250000+00:00"
+                  "end_time": "2026-01-15T12:00:16.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 3.0
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 0,
+                "component": {
+                  "name": "grype"
+                },
+                "resolved_rule": {
+                  "id": "CVE-2018-18074-requests"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt"
                 }
               }
             }
@@ -2360,10 +2525,24 @@
                 "tool_name": "grype",
                 "tool_version": "0.100.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 3.0,
                   "start_time": "2026-01-15T12:00:13.250000+00:00",
-                  "end_time": "2026-01-15T12:00:16.250000+00:00"
+                  "end_time": "2026-01-15T12:00:16.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 3.0
+                }
+              },
+              "ash_occurrence_context": {
+                "version": 1,
+                "rule_index": 1,
+                "component": {
+                  "name": "grype"
+                },
+                "resolved_rule": {
+                  "id": "CVE-2023-32681-requests"
+                },
+                "message": {
+                  "state": "resolved",
+                  "text": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt"
                 }
               }
             }
@@ -2390,7 +2569,8 @@
         "webResponses": [],
         "specialLocations": null,
         "properties": {
-          "tags": []
+          "tags": [],
+          "ash_occurrence_context_version": 1
         }
       }
     ],
@@ -2423,7 +2603,7 @@
             "name": "syft",
             "version": "1.33.0",
             "description": null,
-            "scope": "required",
+            "scope": null,
             "hashes": null,
             "licenses": null,
             "copyright": null,
@@ -2463,7 +2643,7 @@
         "name": "snapshot-fixture",
         "version": null,
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": null,
         "copyright": null,
@@ -2504,12 +2684,19 @@
         "name": "requests",
         "version": "2.19.1",
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": [
           {
             "license": {
-              "id": "Apache-2.0"
+              "bom-ref": null,
+              "id": "Apache-2.0",
+              "name": null,
+              "acknowledgement": null,
+              "text": null,
+              "url": null,
+              "licensing": null,
+              "properties": null
             }
           }
         ],
@@ -2554,7 +2741,7 @@
         "name": "python",
         "version": "3.12-slim",
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": null,
         "copyright": null,

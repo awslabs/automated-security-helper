@@ -86,6 +86,7 @@ def _own_repository(root: Path) -> Path:
 NON_VACUITY_COVERAGE = {
     "Reporter list in docs matches code": "test_reporter_check_can_fail_in_both_directions",
     "Scanner list in docs matches code": "test_scanner_check_can_fail",
+    "Plugin data behind the home page graphics matches code": "test_plugin_data_check_can_fail",
     "MCP tool names in docs match code": "test_mcp_tool_check_can_fail",
     "Version consistency": "test_version_check_can_fail",
     "Config file path consistency": "test_config_path_check_can_fail",
@@ -468,6 +469,182 @@ def test_scanner_check_passes_on_the_generated_page_and_fails_without_a_real_row
     monkeypatch.setattr(gate, "SCANNERS_REFERENCE_MD", doc)
     failures = gate.check_scanners()
     assert any("'trivy-repo'" in f and "no row" in f for f in failures), failures
+
+
+@pytest.mark.unit
+def test_plugin_data_check_can_fail(gate, tmp_path, monkeypatch):
+    """The partial and the prose counts are held to the registry, each way they can drift."""
+    assert gate.check_plugin_data() == [], (
+        "the committed partial and prose were rejected"
+    )
+
+    partial = gate.PLUGIN_DATA_PARTIAL.read_text(encoding="utf-8")
+    how = gate.HOW_ASH_WORKS_MD.read_text(encoding="utf-8")
+    choose = gate.CHOOSE_SCANNERS_MD.read_text(encoding="utf-8")
+    from automated_security_helper.config.ash_config import ScannerConfigSegment
+
+    count = len(gate._segment_names(ScannerConfigSegment))
+
+    real_guides = gate.DOCS_DIR / "content" / "how-to" / "ci"
+    guide_names = [
+        f"{n}{s}" for n in gate.CI_GUIDE_NAMES for s in (".md", ".md.template")
+    ]
+
+    real_content = gate.DOCS_DIR / "content"
+    # The other pages whose --tool runs are held to the same order, as stem + suffix.
+    extra_pages = [
+        f"{stem}{suffix}"
+        for stem, _required in gate.INSTALL_LINE_PAGES
+        for suffix in (".md", ".md.template")
+        if (real_content / f"{stem}{suffix}").exists()
+    ]
+
+    def check(
+        partial_text=partial,
+        how_text=how,
+        choose_text=choose,
+        guides=None,
+        extras=None,
+    ):
+        files = {
+            "PLUGIN_DATA_PARTIAL": partial_text,
+            "HOW_ASH_WORKS_MD": how_text,
+            "CHOOSE_SCANNERS_MD": choose_text,
+        }
+        for name, text in files.items():
+            path = tmp_path / f"{name}.txt"
+            path.write_text(text, encoding="utf-8")
+            monkeypatch.setattr(gate, name, path)
+        # The guides are read from DOCS_DIR/content/how-to/ci; stage copies there.
+        docs = tmp_path / "docs"
+        staged = docs / "content" / "how-to" / "ci"
+        staged.mkdir(parents=True, exist_ok=True)
+        for name in guide_names:
+            text = (guides or {}).get(name)
+            if text is None:
+                text = (real_guides / name).read_text(encoding="utf-8")
+            (staged / name).write_text(text, encoding="utf-8")
+        for name in extra_pages:
+            text = (extras or {}).get(name)
+            if text is None:
+                text = (real_content / name).read_text(encoding="utf-8")
+            target = docs / "content" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        monkeypatch.setattr(gate, "DOCS_DIR", docs)
+        # check_plugin_data reports page paths relative to REPO_ROOT.
+        monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+        return gate.check_plugin_data()
+
+    assert check() == [], "the staged copies of the committed files were rejected"
+
+    # The partial drops a built-in scanner, or invents one.
+    invented = partial.replace('"builtin": [', '"builtin": [\n      "gosec",', 1)
+    assert any("'builtin'" in f for f in check(partial_text=invented))
+    dropped = partial.replace('"all": [\n      "actionlint",\n', '"all": [\n', 1)
+    assert dropped != partial
+    assert any("'all'" in f for f in check(partial_text=dropped))
+    # The partial lists a converter the registry lacks.
+    pdf = partial.replace('"name": "jupyter"', '"name": "pdf"', 1)
+    assert any("converters" in f for f in check(partial_text=pdf))
+    # A link into a reference page whose heading does not exist.
+    link = partial.replace(
+        "reference/scanners/#bandit", "reference/scanners/#bandits", 1
+    )
+    assert any("#bandits" in f for f in check(partial_text=link))
+    # The prose counts and the phases diagram.
+    more = how.replace(f"ASH ships {count} built-in", f"ASH ships {count + 1} built-in")
+    assert more != how
+    assert any("built-in scanners" in f for f in check(how_text=more))
+    fewer = choose.replace(f"all {count} built-in", f"all {count - 1} built-in")
+    assert fewer != choose
+    assert any("built-in scanners" in f for f in check(choose_text=fewer))
+    node = how.replace(
+        "Convert phase<br/>archive, jupyter", "Convert phase<br/>archive"
+    )
+    assert node != how
+    assert any("Convert phase" in f for f in check(how_text=node))
+    # Every mention is checked, not only the first: a second, drifted one goes red.
+    second = how + f"\n\nASH ships {count + 2} built-in scanners.\n"
+    assert any(f"says {count + 2} built-in" in f for f in check(how_text=second))
+    second_node = how + "\n\nconvert[Convert phase<br/>archive]\n"
+    assert any("Convert phase" in f for f in check(how_text=second_node))
+    # A link shape that no longer matches is a failure, not nothing to check.
+    gone = partial.replace('"href": "reference/reporters/#', '"link": "reference/x/#')
+    assert any(
+        "no links into reference/reporters/" in f for f in check(partial_text=gone)
+    )
+    # The managed tools: the partial against the pinned list, and the guides' install
+    # lines (page and template) against the partial.
+    fewer_tools = partial.replace('"cfn-nag",\n    "gitleaks"', '"gitleaks"', 1)
+    assert fewer_tools != partial
+    assert any("MANAGED_TOOLS_PINNED" in f for f in check(partial_text=fewer_tools))
+    for name in guide_names:
+        text = (real_guides / name).read_text(encoding="utf-8")
+        stale = text.replace("--tool cfn-nag --tool gitleaks", "--tool gitleaks", 1)
+        assert stale != text, (
+            f"{name}: cfn-nag and gitleaks are no longer adjacent on one line; "
+            "update this row to the new wrapping"
+        )
+        failures = check(guides={name: stale})
+        assert any("alphabetical order" in f for f in failures), failures
+        assert any(name in f and "install line" in f for f in failures), (
+            name,
+            failures,
+        )
+        bare = "\n".join(line for line in text.splitlines() if "--tool" not in line)
+        failures = check(guides={name: bare})
+        assert any(name in f and "no install line" in f for f in failures), name
+    # The pages that install the set outside the CI guides: the required one must carry
+    # a long run in the registry's order, in the page and its template.
+    required_pages = [
+        name
+        for name in extra_pages
+        if any(name.startswith(stem) for stem, req in gate.INSTALL_LINE_PAGES if req)
+    ]
+    assert required_pages, "no required install-line page is staged"
+    for name in required_pages:
+        text = (real_content / name).read_text(encoding="utf-8")
+        stale = text.replace("--tool cfn-nag", "--tool zzz-first --tool cfn-nag", 1)
+        assert stale != text, f"{name}: no --tool cfn-nag to reorder"
+        failures = check(extras={name: stale})
+        assert any(name in f and "alphabetical order" in f for f in failures), failures
+        bare = "\n".join(line for line in text.splitlines() if "--tool" not in line)
+        failures = check(extras={name: bare})
+        assert any(name in f and "no install line" in f for f in failures), name
+    # The optional pages are held only when a long run appears, and then to an in-order
+    # subset: an out-of-order three-tool run fails, an in-order subset and the full
+    # list pass.
+    optional_pages = [
+        name
+        for name in extra_pages
+        if any(
+            name.startswith(stem) for stem, req in gate.INSTALL_LINE_PAGES if not req
+        )
+    ]
+    assert optional_pages, "no optional install-line page is staged"
+    for name in optional_pages:
+        text = (real_content / name).read_text(encoding="utf-8")
+        full = " ".join(f"--tool {t}" for t in gate.MANAGED_TOOLS_PINNED)
+        subset = "--tool actionlint --tool gitleaks --tool trivy"
+        swapped = "--tool trivy --tool gitleaks --tool actionlint"
+        outside = "--tool actionlint --tool not-managed --tool trivy"
+        cases = ((full, True), (subset, True), (swapped, False), (outside, False))
+        for run, ok in cases:
+            failures = check(
+                extras={name: text + f"\n\nash dependencies install {run}\n"}
+            )
+            mine = [f for f in failures if name in f and "install line" in f]
+            assert bool(mine) is not ok, (name, run, failures)
+            if not ok:
+                assert any("in-order subset" in f for f in mine), mine
+    # A listed stem that matches no file fails, rather than leaving a page unchecked.
+    monkeypatch.setattr(
+        gate,
+        "INSTALL_LINE_PAGES",
+        (*gate.INSTALL_LINE_PAGES, ("reference/no-such-page", False)),
+    )
+    assert any("no-such-page" in f for f in check()), "a missing stem passed"
 
 
 @pytest.mark.unit
@@ -894,6 +1071,10 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
 GATE_WIRING = {
     "Reporter list in docs matches code": ("gate", "check_reporters"),
     "Scanner list in docs matches code": ("gate", "check_scanners"),
+    "Plugin data behind the home page graphics matches code": (
+        "gate",
+        "check_plugin_data",
+    ),
     "MCP tool names in docs match code": ("gate", "check_mcp_tools"),
     "Version consistency": ("gate", "check_version_consistency"),
     "Config file path consistency": ("gate", "check_config_path"),

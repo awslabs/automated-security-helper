@@ -14,7 +14,9 @@ Where git could find a repository, it is still asked for the root:
 
 - a ``.git`` directory in the scanned directory or in a parent;
 - a ``.git`` file there, as a linked worktree has;
-- GIT_DIR or GIT_WORK_TREE in the environment, with no ``.git`` entry;
+- GIT_DIR in the environment, with no ``.git`` entry (GIT_WORK_TREE alone points
+  git at no repository: the root lookup leaves it out and git discovers from the
+  directory, so with no ``.git`` entry git is not started);
 - a ``.git`` entry in a parent that cannot be listed: seeing the entry needs only
   the search permission that reaching the scanned directory needs too;
 - a parent whose ``.git`` entry cannot be checked, which is no proof that there is
@@ -161,6 +163,13 @@ def _scan(
         "utf-8", "backslashreplace"
     )
     started = starts.read_text(encoding="utf-8").splitlines() if starts.exists() else []
+    # On Windows, Python's platform module probes the OS version by running
+    # ``cmd /c ver`` (``cmd /c "ver"`` on some interpreters, and wrapped as
+    # ``... /c "cmd /c ver"`` or ``... /c "command /c ver"`` on others) inside the child. That start is the interpreter's own,
+    # not a program ASH started for the scan, so it is not part of the answer.
+    started = [
+        line for line in started if '/c "ver"' not in line and "/c ver" not in line
+    ]
     return child.returncode, said, output, started
 
 
@@ -176,11 +185,26 @@ def _outside_every_repository(source: Path) -> None:
 
 
 def _root_lookups(started: List[str], source: Path) -> List[str]:
-    """The refused starts of ``git rev-parse --show-toplevel`` in *source*."""
+    """The refused starts of ``git rev-parse --show-toplevel`` in *source*.
+
+    Each line is the repr of the audit event's arguments. On POSIX the argv is
+    a list, so the lookup reads ``'rev-parse', '--show-toplevel'``; on Windows
+    Popen hands the audit hook the joined command line, so the same lookup is a
+    string. The run's directory is a Path, whose repr spells a Windows path
+    with forward slashes, which is why ``as_posix`` is matched alongside
+    ``str``. A directory handed to Popen as a string appears inside the line's
+    repr, which writes each backslash of a Windows path twice, so that
+    spelling is matched too.
+    """
+    spellings = {str(source), source.as_posix(), str(source).replace("\\", "\\\\")}
     return [
         line
         for line in started
-        if "'rev-parse', '--show-toplevel'" in line and str(source) in line
+        if (
+            "'rev-parse', '--show-toplevel'" in line
+            or "rev-parse --show-toplevel" in line
+        )
+        and any(spelling in line for spelling in spellings)
     ]
 
 
@@ -238,19 +262,37 @@ def _assert_git_failure_recorded(output: Path, source: Path, said: str) -> None:
     assert _recorded_scan_source(output) == source.as_posix(), said
 
 
-@pytest.mark.parametrize("variable", ["GIT_DIR", "GIT_WORK_TREE"])
-def test_a_variable_naming_a_repository_still_asks_git_for_the_root(tmp_path, variable):
+def test_git_dir_naming_a_repository_still_asks_git_for_the_root(tmp_path):
     source = _plain_tree(tmp_path / "plain")
     _outside_every_repository(source)
     elsewhere = tmp_path / "elsewhere" / ".git"
 
     code, said, output, started = _scan(
-        tmp_path, source, extra_env={variable: str(elsewhere)}
+        tmp_path, source, extra_env={"GIT_DIR": str(elsewhere)}
     )
 
     assert code == 2, said
     assert _root_lookups(started, source), started
     _assert_git_failure_recorded(output, source, said)
+
+
+def test_git_work_tree_alone_names_no_repository_and_starts_no_program(tmp_path):
+    """GIT_WORK_TREE alone does not point git at a repository: the root lookup
+    leaves it out and git discovers from the scanned directory, so with no
+    ``.git`` entry there is no repository to ask about and git is not started
+    (utils/scan_source.py, ``_a_git_entry_may_exist``). The scan records the
+    absolute path, as for any directory outside a repository."""
+    source = _plain_tree(tmp_path / "plain")
+    _outside_every_repository(source)
+    elsewhere = tmp_path / "elsewhere" / ".git"
+
+    code, said, output, started = _scan(
+        tmp_path, source, extra_env={"GIT_WORK_TREE": str(elsewhere)}
+    )
+
+    assert code == 2, said
+    assert started == [], started
+    assert _recorded_scan_source(output) == source.as_posix(), said
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX directory modes")

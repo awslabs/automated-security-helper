@@ -400,7 +400,9 @@ class TestTheReportCommand:
         monkeypatch.setattr(
             type(report_module.ash_plugin_manager),
             "plugin_modules",
-            lambda self, plugin_type=None, **kwargs: list(reporters),
+            lambda self, plugin_type=None, filter_callback=None, **kwargs: list(
+                reporters
+            ),
         )
         monkeypatch.setattr(report_module, "load_plugins", lambda **kwargs: None)
         return report_module.report_command(
@@ -515,7 +517,9 @@ class TestTheMergeCommand:
         monkeypatch.setattr(
             type(merge_module.ash_plugin_manager),
             "plugin_modules",
-            lambda self, plugin_type=None, **kwargs: list(reporters),
+            lambda self, plugin_type=None, filter_callback=None, **kwargs: list(
+                reporters
+            ),
         )
         monkeypatch.setattr(merge_module, "load_plugins", lambda **kwargs: None)
         # get_logger replaces the ASH logger's handlers, so the command's warnings

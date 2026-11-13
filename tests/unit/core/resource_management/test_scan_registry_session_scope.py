@@ -124,8 +124,10 @@ def test_a_stopping_scan_refusal_tells_only_its_owner_how_it_ended(
     """A cancelled scan still stopping keeps its directory busy.
 
     The refusal says "still stopping (cancelled)" only to the session that owns
-    the scan; any other session is told only that the directory is busy. Like
-    the scan id, the status is for the owner.
+    the scan; any other session is told only that the directory already has an
+    active scan, which is all it needs to know. Telling it the scan is stopping
+    rather than running would say that someone closed it. Like the scan id, the
+    status is for the owner.
     """
     target = tmp_path / "stopping"
     target.mkdir()
@@ -146,12 +148,18 @@ def test_a_stopping_scan_refusal_tells_only_its_owner_how_it_ended(
             directory_path=str(target), output_directory=str(target), session_id="owner"
         )
 
-    assert "still stopping" in str(other.value), other.value
-    assert MCScanStatus.CANCELLED.value not in str(other.value), other.value
-    assert MCScanStatus.CANCELLED.value not in str(other.value.context), (
-        other.value.context
-    )
-    assert MCScanStatus.CANCELLED.value in str(same.value), same.value
+    assert "already has an active scan" in str(other.value), other.value
+    # The refusal quotes the directory path, which here contains the word
+    # "stopping", so the assertion is on the phrase the owner is told.
+    assert "still stopping" not in str(other.value), other.value
+    assert "scan_id" not in other.value.context, other.value.context
+    # Likewise the status is asserted as the owner's "(cancelled)" suffix, since
+    # a directory path can contain the bare word.
+    ended_as = f"({MCScanStatus.CANCELLED.value})"
+    assert ended_as not in str(other.value), other.value
+    assert ended_as not in str(other.value.context), other.value.context
+    assert "still stopping" in str(same.value), same.value
+    assert ended_as in str(same.value), same.value
 
 
 def test_a_limit_refusal_tells_no_session_how_many_scans_are_running(

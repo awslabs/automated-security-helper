@@ -277,7 +277,7 @@ def test_the_scan_tool_refuses_the_client_file_before_the_scan_starts(
 
     started: List[str] = []
 
-    def record(scan_id, coroutine) -> None:
+    def record(scan_id, coroutine, **start_options) -> None:
         coroutine.close()
         started.append(scan_id)
 

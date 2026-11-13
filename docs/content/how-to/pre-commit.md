@@ -16,7 +16,7 @@ Prerequisites:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.8.0
     hooks:
       - id: ash
 ```
@@ -69,7 +69,7 @@ on every commit. To run without Node.js there, exclude the two scanners:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.8.0
     hooks:
       - id: ash
         args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
@@ -96,7 +96,7 @@ The hook has no `stages` setting, so it runs on every commit. To run it less oft
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.8.0
     hooks:
       - id: ash
         stages: [pre-push]
@@ -119,6 +119,38 @@ Measured on a repository of three files:
 checkov is the slowest scanner. Scan time grows with the size of the repository, because
 every run scans all of it. The hook environment takes about 650 MB under
 `~/.cache/pre-commit`, and bandit and checkov about 240 MB under `~/.local/share/uv`.
+
+## Pre-commit and CI together {#with-ci}
+
+The pre-commit hook and a CI scan answer different questions, so most repositories run
+both.
+
+| | Pre-commit hook (`ash`) | CI scan |
+|---|---|---|
+| Mode | `--mode precommit` | `local` by default, or `container` |
+| Scanners | The five in [What the hook runs](#behavior), plus any you add with `--scanners` | Every scanner your configuration enables, including the ones precommit mode leaves out, such as semgrep, opengrep, grype, trivy, and gitleaks |
+| Runs | On the developer's machine, per commit or push | On a clean runner, per pull request or push |
+| Output | Simplified, no progress display | The full summary and report files, for upload as artifacts or SARIF |
+| Cost | 11 to 15 seconds after the first run ([What it costs](#cost)) | Installs the scanner tools each build, or uses an image you prepared |
+
+[Scanner coverage](../reference/coverage.md#by-scanner) lists which scanners each mode
+runs. A scanner that precommit mode skips is not run by the `ash` hook at all, so a clean
+commit does not mean a clean CI scan. To get the container image's full scanner set
+before pushing, use the [`ash-full-scan` hook](#full-scan).
+
+The CI pages run ASH directly rather than through the hook, and use its exit code as the
+gate:
+
+- [GitHub Actions](ci/github-actions.md)
+- [GitLab CI](ci/gitlab-ci.md)
+- [Jenkins, CodeBuild, Azure Pipelines, CircleCI, and other systems](ci/other-ci.md)
+
+If you want CI to enforce the same hook configuration, `pre-commit run ash --all-files`
+works on a runner that has pre-commit, Python 3.10 to 3.14, and network access to GitHub
+and PyPI. If the repository has CloudFormation templates or a `package.json` with a
+lockfile, the runner also needs Node.js and npm, or the hook exits 1 on every run (see
+[Behavior](#behavior) for the `--exclude-scanners` alternative). It runs only the precommit scanner set, so keep a direct ASH scan in the
+pipeline as well; the hook does not replace it.
 
 ## Use an ASH you already installed {#local-hook}
 
@@ -168,7 +200,7 @@ Or point the hook at a newer Python that is on your `PATH`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.8.0
     hooks:
       - id: ash
         language_version: python3.12
@@ -209,7 +241,7 @@ in that order. The first run builds the image and takes several minutes, so give
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.8.0
     hooks:
       - id: ash-full-scan
         stages: [manual]
@@ -221,3 +253,42 @@ pre-commit run --hook-stage manual ash-full-scan --all-files
 ```
 
 [Run ASH in a container](run-in-a-container.md) covers container mode.
+
+## Run the hook in Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`. This recipe works with an
+    ASH installed from `main` or from a source checkout, not with a released `rev`.
+
+`.pre-commit-hooks.yaml` defines no Nix hook: `ash` and `ash-simple-scan` run precommit
+mode and `ash-full-scan` runs container mode, and ASH takes one `--mode` per run. To scan
+with the scanners that ASH's `flake.nix` supplies, add a `local` hook that calls
+`ash scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
+`ash-full-scan`:
+
+<!-- doctest: config kind=pre-commit -->
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: ash-nix
+        name: ASH scan in Nix mode
+        entry: env ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main ash scan --mode nix --no-progress
+        language: system
+        pass_filenames: false
+        stages: [manual]
+```
+
+<!-- doctest: illustrative reason="runs ASH in Nix mode, which needs Nix, an ASH from main and the network" -->
+```bash
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+pre-commit run --hook-stage manual ash-nix --all-files
+```
+
+This is a different hook from `ash`: it runs the scanners of a normal scan, not the five
+of precommit mode, so it takes longer and belongs on `manual` or `pre-push`. It uses the
+installation on `PATH`, so install ASH with the `cdk` extra for cdk-nag. A `main` install
+cannot find a release tag that contains `flake.nix`, so the hook's `entry` sets
+`ASH_NIX_FLAKE_REF` itself through `env`. The hook then finds `flake.nix` on a `pre-push`
+or from an IDE or GUI client as well, where a variable exported in your shell may not be set.
+[Install ASH](install.md#nix-mode) covers Nix mode's requirements.

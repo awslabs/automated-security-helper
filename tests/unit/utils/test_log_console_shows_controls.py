@@ -25,6 +25,7 @@ from __future__ import annotations
 import builtins
 import itertools
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -149,30 +150,27 @@ def test_a_path_with_a_lone_surrogate_is_logged_once(tmp_path, monkeypatch):
         assert "\\\\udce9" not in written, ascii(written)
 
 
-def _windows_filter_on(logger) -> bool:
-    from automated_security_helper.utils.log import WindowsSafeFilter
-
-    return any(isinstance(f, WindowsSafeFilter) and f._active for f in logger.filters)
-
-
 @pytest.mark.unit
 @pytest.mark.parametrize("console_logger", ["native", "windows-ci"], indirect=True)
 @pytest.mark.parametrize("text, shown", OBEYED)
 def test_the_console_shows_a_control_sequence(console_logger, capsys, text, shown):
-    """On Windows CI, WindowsSafeFilter drops every non-ASCII character first, C1
-    included, so a C1 sequence never reaches the console handler to be shown."""
+    """On Windows CI too: WindowsSafeFilter shows the message first and writes
+    what is still outside ASCII as its escape, so a C1 sequence or a format
+    character reaches the console as the same escape the native console shows
+    (it used to be dropped, which hid it and mangled the text around it)."""
     console_logger.warning(f"unknown key '{text}'")
 
     out = capsys.readouterr().out
-    if _windows_filter_on(console_logger) and not text.isascii():
-        shown = text.encode("ascii", errors="ignore").decode("ascii")
     assert shown in out, repr(out)
     assert not re.search(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", out), repr(out)
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("console_logger", ["native", "windows-ci"], indirect=True)
 @pytest.mark.parametrize("text", COMMANDS)
 def test_no_line_of_the_console_is_a_workflow_command(console_logger, capsys, text):
+    """On Windows CI too, where WindowsSafeFilter leaves an all-ASCII message as
+    it was logged: the console's own show breaks the command."""
     console_logger.warning(text)
 
     out = capsys.readouterr().out
@@ -383,7 +381,13 @@ def _ash_log(tmp_path, log) -> str:
             handler.close()
         logger.handlers = []
     # Its bytes: reading it as text would turn a bare carriage return into "\n".
-    return (tmp_path / f"{name}.log").read_bytes().decode("utf-8")
+    written = (tmp_path / f"{name}.log").read_bytes().decode("utf-8")
+    if sys.platform == "win32":
+        # The file is opened in text mode, so Windows writes every line break as
+        # CRLF: that CR is the platform's line terminator, not a control the
+        # message carried (a carried CR is shown as \x0d and is checked for).
+        written = written.replace("\r\n", "\n")
+    return written
 
 
 @pytest.mark.unit
@@ -677,7 +681,9 @@ def test_a_warning_logged_before_the_logger_is_set_up_is_shown(case):
     file name through it, with its OSC 52 sequence shown and its "::add-mask::"
     broken: the stand-in shows each control and breaks each command, as the
     console does."""
-    stderr = _fresh_process_stderr(case)
+    # The child's text-mode stderr writes the platform line ending for "\n"; that
+    # terminator is not a control the message carried.
+    stderr = _fresh_process_stderr(case).replace(os.linesep, "\n")
 
     assert "add-mask" in stderr, repr(stderr)
     assert not _RAW_CONTROL.search(stderr), repr(stderr)
@@ -701,7 +707,9 @@ def test_a_warning_no_handler_takes_is_shown_once_however_it_got_there(case):
     removes: a record no handler takes goes to it, as to logging's last resort,
     so a warning from an MCP server's get_config is still shown. A logger under
     "ash" that does not propagate, and a reload of utils/log.py, reach it too."""
-    stderr = _fresh_process_stderr(case)
+    # The child's text-mode stderr writes the platform line ending for "\n"; that
+    # terminator is not a control the message carried.
+    stderr = _fresh_process_stderr(case).replace(os.linesep, "\n")
 
     assert stderr.count("add-mask") == 1, repr(stderr)
     assert not _RAW_CONTROL.search(stderr), repr(stderr)
@@ -715,7 +723,9 @@ def test_a_warning_of_an_ash_logger_of_another_class_is_shown(case):
     "ash" made before utils/log.py set it, or after a library set its own: those
     would go to logging's last resort and write the file name raw. logging's last
     resort hands every record of "ash" and the loggers under it to the stand-in."""
-    stderr = _fresh_process_stderr(case)
+    # The child's text-mode stderr writes the platform line ending for "\n"; that
+    # terminator is not a control the message carried.
+    stderr = _fresh_process_stderr(case).replace(os.linesep, "\n")
 
     assert stderr.count("add-mask") == 1, repr(stderr)
     assert not _RAW_CONTROL.search(stderr), repr(stderr)
@@ -724,10 +734,12 @@ def test_a_warning_of_an_ash_logger_of_another_class_is_shown(case):
 
 @pytest.mark.integration
 def test_any_other_logger_keeps_logging_last_resort():
-    assert _fresh_process_stderr("not-ash") == "plain text\n"
+    # The child's text-mode stderr writes the platform line ending for "\n".
+    assert _fresh_process_stderr("not-ash") == f"plain text{os.linesep}"
 
 
 @pytest.mark.integration
 def test_a_child_logger_with_its_own_handler_is_printed_once():
     """Its own handler takes the record, so the stand-in does not write it too."""
-    assert _fresh_process_stderr("child-with-a-handler") == "child: plain\n"
+    # The child's text-mode stderr writes the platform line ending for "\n".
+    assert _fresh_process_stderr("child-with-a-handler") == f"child: plain{os.linesep}"

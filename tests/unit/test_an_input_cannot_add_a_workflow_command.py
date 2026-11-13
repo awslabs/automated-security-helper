@@ -360,6 +360,14 @@ RAW_REFERENCES_KEPT = {
     # Reads only whether config-ref is empty; the check refuses a lone line feed, so
     # that answer is the same for the checked value.
     ("jobs/ash/env/ASH_DEPENDENCIES_UNKNOWN_TOOLS", "config-ref"),
+    # The runner label of the scan job and of the report job. `runs-on` is resolved
+    # before any step exists, so it cannot read the check's output. It is not a
+    # command sink: GitHub reads the value as a runner label and never gives it to a
+    # shell, a step's stdout or the log as text of ours. The input check still
+    # refuses a control character or `##[` in it (INPUT_RUNNER), so no value that
+    # could start a workflow command is accepted anywhere else the label is shown.
+    ("jobs/ash/runs-on", "runner"),
+    ("jobs/report/runs-on", "runner"),
 }
 
 

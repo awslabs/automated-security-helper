@@ -13,18 +13,18 @@ step 3 creates a small repository to test the gate on.
 
 ## 1. Build the image and push it to your registry
 
-ASH publishes no prebuilt image. Build one from `v3.7.0`, name it for your registry,
+ASH publishes no prebuilt image. Build one from `v3.8.0`, name it for your registry,
 and push it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.0
-ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.0 \
+export ASH_IMAGE_NAME=registry.example.com/security/ash:3.8.0
+ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.8.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
 
-You should see `Building image registry.example.com/security/ash:3.7.0`, a few minutes
+You should see `Building image registry.example.com/security/ash:3.8.0`, a few minutes
 of build output, and then the push. `--oci-runner docker` builds with the runtime you push
 with; without it, ASH uses finch when finch is installed. The image holds every scanner
 tool and runs as a non-root user with the UID and GID you passed; use the ones your CI
@@ -181,7 +181,7 @@ docker run --rm \
   --mount type=bind,source="$PWD/../ash-results",destination=/out \
   --mount type=bind,source=/etc/ash/ash.yaml,destination=/etc/ash/ash.yaml,readonly \
   --env ASH_CONFIG=/etc/ash/ash.yaml \
-  registry.example.com/security/ash:3.7.0 \
+  registry.example.com/security/ash:3.8.0 \
   ash scan --source-dir /src --output-dir /out
 ```
 
@@ -198,6 +198,32 @@ Container mode mounts your `--config` file read-only for the scan inside the con
 setup for each service: [Run ASH in GitHub Actions](../how-to/ci/github-actions.md),
 [Run ASH in GitLab CI](../how-to/ci/gitlab-ci.md), and
 [Run ASH in Jenkins, CodeBuild, Azure Pipelines, CircleCI, and other CI systems](../how-to/ci/other-ci.md).
+
+### Pin ASH with uv instead of an image {#uv-rollout}
+
+If your CI runners cannot run containers, or you would rather not maintain an image, roll
+out a pinned ASH with uv. The operator config from step 2 and the gate check from step 3
+work the same way; only the way ASH reaches the runner changes. Install it at a pinned tag
+on each runner image or in each job:
+
+<!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
+```bash
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
+ASH_CONFIG=/etc/ash/ash.yaml ash scan --source-dir . --output-dir ../ash-results
+```
+
+Pin to a release tag, or to a full commit SHA for a reference that cannot move; do not
+use `@v3`, which moves with each release ([Choose a version to pin](../how-to/install.md#choose-a-version-to-pin)).
+To roll out a new version, change the tag in one place and run the same command with
+`--force`. Without the image, the scanners' tools come from the runner and from ASH's own
+environment instead of from one artifact, so keep the runner images that hold them on the
+same schedule as the ASH tag; the image route keeps both in one artifact. For one-off
+jobs, `uvx` runs the same pinned reference without installing it; the
+[GitHub Actions reusable workflow](../how-to/ci/github-actions.md) does this.
+
+Nix mode (`ash --mode nix`) is not in any release: v3.7.x rejects `--mode nix`, and it
+exists on `main` only. Do not plan a fleet rollout on it until a release contains it. See
+[Nix mode](../how-to/install.md#nix-mode).
 
 ## 5. Plan content database refresh
 
@@ -221,7 +247,7 @@ rebuild the image on a schedule with it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v3.7.0 \
+ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v3.8.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -254,9 +280,11 @@ place your team works:
       "s3://example-security-scan-results/$REPOSITORY_NAME/$(date -u +%Y%m%dT%H%M%SZ).ocsf.json"
     ```
 
-- AWS services: ASH's AWS reporters are loaded by the operator only. The S3 and CloudWatch
-  Logs reporters send the scan summary and configuration, not individual findings; read
-  [AWS reporters](../plugins/aws.md) for what each one sends before you turn it on.
+- AWS services: ASH's AWS reporters are loaded by the operator only. The CloudWatch Logs
+  reporter sends the scan summary and configuration, not individual findings. The S3
+  reporter sends the same two, and it sends the findings as the SARIF report inside its
+  object. Read [AWS reporters](../plugins/aws.md) for what each one sends before you turn
+  it on.
 
 Next, set the threshold and failure rules for your organization in
 [Set the gate](../how-to/set-the-gate.md).

@@ -13,13 +13,13 @@ offline. It now holds the variable (utils/process_env.hold_environ), as
 from __future__ import annotations
 
 import asyncio
-import os
 import threading
 from types import SimpleNamespace
 
 import pytest
 
 from automated_security_helper.cli.mcp import workspace as workspace_module
+from tests.utils.env_assertions import environ_names, environ_value
 
 pytestmark = pytest.mark.unit
 
@@ -75,11 +75,11 @@ def test_the_second_session_stays_offline_after_the_first_ends(blockers):
     blockers.release[first_plan].set()
     first.join(WAIT)
 
-    assert os.environ.get("ASH_OFFLINE") == "YES", (
+    assert environ_value("ASH_OFFLINE") == "YES", (
         "the first session's scan took offline mode away from the second's"
     )
 
     blockers.release[second_plan].set()
     second.join(WAIT)
 
-    assert "ASH_OFFLINE" not in os.environ, "the server stayed offline afterwards"
+    assert "ASH_OFFLINE" not in environ_names(), "the server stayed offline afterwards"

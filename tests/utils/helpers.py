@@ -112,10 +112,12 @@ class KillAfter:
 
 
 def bound_run_command(monkeypatch, seconds: float = CHILD_TIMEOUT_SECONDS) -> None:
-    """Give ``subprocess_utils.run_command`` a timeout when its caller passes none.
+    """Cap ``subprocess_utils.run_command``'s timeout at ``seconds``.
 
-    For a test that reaches a child through ASH code with no timeout argument of its
-    own, such as the installer's ``dependencies.run_command``. A child still running
+    For a test that reaches a child through ASH code whose own timeout is absent or
+    far larger than a test should wait, such as the installer's
+    ``dependencies.run_command`` (which passes its 3600 s install timeout
+    explicitly, so a none-only override never applied). A child still running
     after ``seconds`` is killed and the test fails naming it. ``pytest.fail``, not an
     ``AssertionError``, because the installer catches ``Exception`` and would report
     the timeout as one more failed command.
@@ -127,8 +129,10 @@ def bound_run_command(monkeypatch, seconds: float = CHILD_TIMEOUT_SECONDS) -> No
     original = subprocess_utils.run_command
 
     def run_command(*args, **kwargs):
-        if kwargs.get("timeout") is None:
-            kwargs["timeout"] = seconds
+        caller_timeout = kwargs.get("timeout")
+        kwargs["timeout"] = (
+            seconds if caller_timeout is None else min(seconds, caller_timeout)
+        )
         result = original(*args, **kwargs)
         if isinstance(result, subprocess_utils.TimedOutProcess):
             pytest.fail(
@@ -139,7 +143,7 @@ def bound_run_command(monkeypatch, seconds: float = CHILD_TIMEOUT_SECONDS) -> No
     monkeypatch.setattr(subprocess_utils, "run_command", run_command)
 
 
-def importing_this_checkout(driver: str) -> str:
+def importing_this_checkout(driver: str, root: Optional[Path] = None) -> str:
     """``driver``, preceded by code that has it import ASH from this checkout.
 
     For a child started with ``python -I``. ``-I`` leaves the current directory and
@@ -148,8 +152,12 @@ def importing_this_checkout(driver: str) -> str:
     test: an editable install points at the tree it was installed from. This puts the
     checkout first on ``sys.path``, and the child exits 86 before running ``driver``
     if ``automated_security_helper`` still comes from somewhere else.
+
+    ``root`` names another tree to import from, for a test written to run against
+    the package its parent process imported (a cross-tree run) rather than the
+    checkout the test file sits in.
     """
-    root = str(REPO_ROOT)
+    root = str(REPO_ROOT if root is None else root)
     return (
         "import sys\n"
         f"sys.path.insert(0, {root!r})\n"
@@ -398,7 +406,7 @@ def get_ash_temp_path():
     return temp_dir
 
 
-def module_from_this_checkout(module: str) -> str:
+def module_from_this_checkout(module: str, root: Optional[Path] = None) -> str:
     """Code that runs ``module`` as ``python -m`` would, importing ASH from this
     checkout (``importing_this_checkout``).
 
@@ -410,11 +418,12 @@ def module_from_this_checkout(module: str) -> str:
     """
     return importing_this_checkout(
         "import runpy\n"
-        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)\n"
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)\n",
+        root,
     )
 
 
-def checkout_env(env: Optional[dict] = None) -> dict:
+def checkout_env(env: Optional[dict] = None, root: Optional[Path] = None) -> dict:
     """``env`` (os.environ when None), with this checkout first on ``PYTHONPATH``.
 
     For a child Python that is not started with ``-I`` or ``-E``: a
@@ -423,14 +432,20 @@ def checkout_env(env: Optional[dict] = None) -> dict:
     installed copy points unless ``PYTHONPATH`` names the checkout: an editable
     install points at the tree it was installed from, which need not be this one.
 
+    ``root`` names another tree, for a test written to run against the package its
+    parent imported (a cross-tree run). Applying it again to its own result adds
+    nothing: a ``PYTHONPATH`` that already starts with the root is left as it is.
+
     A ``NamesOnlyEnvironment``, so a failure whose traceback passes through a frame
     given it shows its names, not their values.
     """
     given = NamesOnlyEnvironment(os.environ if env is None else env)
-    parts = [str(REPO_ROOT)]
-    if given.get("PYTHONPATH"):
-        parts.append(given["PYTHONPATH"])
-    given["PYTHONPATH"] = os.pathsep.join(parts)
+    first = str(REPO_ROOT if root is None else root)
+    existing = given.get("PYTHONPATH") or ""
+    if existing.split(os.pathsep, 1)[0] != first:
+        given["PYTHONPATH"] = os.pathsep.join(
+            [first, existing] if existing else [first]
+        )
     return given
 
 
@@ -648,6 +663,17 @@ def link_walk_cannot_examine(monkeypatch, component: Path) -> ExaminationRefused
     refused = ExaminationRefused(component)
     real = os.lstat
 
+    def same_component(path) -> bool:
+        # Windows reads a link's target back in its extended-length spelling
+        # (a ``\\?\`` prefix) and compares names without case, so the walk reaches
+        # the component by a spelling that differs from the one this shim was
+        # given. Both are compared as the same name.
+        def plain(value) -> str:
+            text = os.fspath(value).removeprefix("\\\\?\\")
+            return os.path.normcase(text)
+
+        return plain(path) == plain(refused.component)
+
     def asked_by_the_link_walk() -> bool:
         frame = sys._getframe(2)
         for _ in range(4):
@@ -659,7 +685,7 @@ def link_walk_cannot_examine(monkeypatch, component: Path) -> ExaminationRefused
         return False
 
     def guarded(path, *args, **kwargs):
-        if os.fspath(path) == refused.component and asked_by_the_link_walk():
+        if same_component(path) and asked_by_the_link_walk():
             refused.asked += 1
             raise PermissionError(13, "Permission denied", refused.component)
         return real(path, *args, **kwargs)

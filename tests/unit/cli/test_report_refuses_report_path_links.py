@@ -23,9 +23,12 @@ import pytest
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.utils.helpers import importing_this_checkout
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    ),
+    pytest.mark.usefixtures("own_environment"),
+]
 
 # From this checkout, which `-I` alone would not import; see importing_this_checkout.
 DRIVER = importing_this_checkout(
@@ -125,10 +128,14 @@ def test_a_companion_name_outside_reports_refuses_the_command(
     output = _output_with_results(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(report_cli, "load_plugins", lambda **kwargs: None)
+    # On the class: monkeypatch undoes an instance patch by setting the bound
+    # method back as an instance attribute, which then hides every later class
+    # patch of plugin_modules in the same worker process.
     monkeypatch.setattr(
-        report_cli.ash_plugin_manager,
+        type(report_cli.ash_plugin_manager),
         "plugin_modules",
-        lambda plugin_type=None, **kwargs: [_Escaper],
+        # The name check passes the type and the filter positionally.
+        lambda self, plugin_type=None, *args, **kwargs: [_Escaper],
     )
 
     with pytest.raises(typer.Exit) as exited:

@@ -126,8 +126,15 @@ def test_a_streamed_tool_output_is_shown(capsys):
         run_command_stream_output,
     )
 
+    # Bytes, not sys.stdout.write: on Windows the child's stdout is a pipe in the
+    # ANSI code page, which cannot encode the override character, and the child
+    # died with a UnicodeEncodeError before writing. ASH reads the pipe as UTF-8.
     code = run_command_stream_output(
-        [sys.executable, "-c", f"import sys; sys.stdout.write({HOSTILE!r} + '\\n')"]
+        [
+            sys.executable,
+            "-c",
+            f"import sys; sys.stdout.buffer.write(({HOSTILE!r} + '\\n').encode('utf-8'))",
+        ]
     )
 
     out = capsys.readouterr().out
@@ -172,7 +179,9 @@ def test_container_mode_relays_text_the_inner_scan_already_showed_as_is(capsys):
         "see \\x1b]52;c;ZXZpbA==\\x07 in C:\\\\x1b\\out\n"
         "\\x3a:add-mask::hidden and \\x23#vso[task.complete]x\n"
     )
-    script = f"import sys; sys.stdout.write({shown!r})"
+    # Bytes, so the child's "\n" stays one on Windows, where a text-mode stdout
+    # writes "\r\n" and the relay passes the "\r" on as the child's own.
+    script = f"import sys; sys.stdout.buffer.write({shown!r}.encode('utf-8'))"
 
     result = run_cmd_direct([sys.executable, "-c", script], check=False)
 
@@ -217,7 +226,11 @@ def test_a_summary_line_shows_the_path_it_quotes(monkeypatch, errors):
 
     from automated_security_helper.interactions import run_ash_scan
 
-    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors=errors)
+    # newline="\n": a text stream translates "\n" to os.linesep on Windows, and
+    # the CR of that terminator is the platform's, not a control the product left raw.
+    stream = io.TextIOWrapper(
+        io.BytesIO(), encoding="utf-8", errors=errors, newline="\n"
+    )
     monkeypatch.setattr(sys, "stdout", stream)
     path = "out" + chr(0xDC80) + HOSTILE
 
@@ -258,7 +271,14 @@ def _assert_shown_once(text: str) -> None:
     """HOSTILE's controls are each shown once: it holds no backslash of its own."""
     _assert_shown(text)
     assert "\\x1b]52;c;ZXZpbA==\\x07\\x9b2K" in text, text
-    assert "\\\\x" not in text, text
+    # Traceback frame lines quote the interpreter's own file names, and a Windows
+    # one ("...\Python\3.12\x64\Lib\...") gets its backslash doubled before the "x"
+    # by design (see test_terminal_text's windows-x64 case). They carry none of
+    # HOSTILE, so the check reads the rest.
+    rest = "\n".join(
+        line for line in text.splitlines() if not line.startswith('  File "')
+    )
+    assert "\\\\x" not in rest, text
 
 
 @pytest.mark.unit
@@ -1171,6 +1191,10 @@ _HANDLERS_THAT_DO_NOT_REPORT = {
     ("utils/cdk_nag_worker.py", "_RecordCollector"): (
         "its emit only appends to a list, and never calls handleError"
     ),
+    ("utils/download_utils.py", "_HttpsOnlyRedirects"): (
+        "a urllib.request redirect handler, not a log handler: it has no "
+        "handleError and writes no record"
+    ),
 }
 
 
@@ -1346,3 +1370,23 @@ def test_the_handler_guard_passes_a_handler_with_the_mix_in():
     source = "class H(ShownHandlerErrors, logging.Handler):\n    pass\n"
 
     assert _handler_offenders(source, "fixture.py") == []
+
+
+_REDIRECT_HANDLER = (
+    "import urllib.request\n"
+    "class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):\n"
+    "    pass\n"
+)
+
+
+@pytest.mark.unit
+def test_the_handler_guard_passes_the_download_redirect_handler_by_name():
+    assert _handler_offenders(_REDIRECT_HANDLER, "utils/download_utils.py") == []
+
+
+@pytest.mark.unit
+def test_the_handler_guard_still_finds_a_redirect_handler_anywhere_else():
+    """The exemption is for one class in one module, not for the base."""
+    offenders = _handler_offenders(_REDIRECT_HANDLER, "utils/other_module.py")
+
+    assert any(o.startswith("utils/other_module.py:2 ") for o in offenders), offenders

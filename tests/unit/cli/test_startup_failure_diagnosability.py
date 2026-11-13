@@ -570,13 +570,21 @@ def _run_child_on_a_pty(body: str, tmp_path: Path) -> tuple[int, str]:
     """Run *body* as :func:`_run_child` does, with stdin, stdout and stderr on a
     pseudo-terminal: (exit code, what it wrote)."""
     import pty
+    import select
+    import time
 
     script = tmp_path / "child.py"
     script.write_text(body)
     env = dict(os.environ)
     env.pop("PYTHONIOENCODING", None)
     primary, secondary = pty.openpty()
+    chunks = []
     try:
+        # The parent keeps its own slave fd open until the read loop is over.
+        # On macOS/BSD the parent's read gets EIO as soon as the last slave fd
+        # closes, and bytes still buffered in the line discipline can be
+        # dropped; with a slave end held here the buffer is never discarded and
+        # the loop ends on the child's exit plus a quiet window instead.
         child = subprocess.Popen(
             [sys.executable, str(script)],
             stdin=secondary,
@@ -585,21 +593,33 @@ def _run_child_on_a_pty(body: str, tmp_path: Path) -> tuple[int, str]:
             env=checkout_env(env),
             cwd=str(tmp_path),
         )
+        deadline = time.monotonic() + 300
+        quiet_window = 1.0
+        quiet_since = None
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select([primary], [], [], 0.1)
+            if readable:
+                try:
+                    data = os.read(primary, 65536)
+                except OSError:
+                    # EIO: only a normal end of stream once the child is gone.
+                    if child.poll() is not None:
+                        break
+                    data = b""
+                if data:
+                    chunks.append(data)
+                    quiet_since = None
+                    continue
+            if child.poll() is not None:
+                if quiet_since is None:
+                    quiet_since = time.monotonic()
+                elif time.monotonic() - quiet_since >= quiet_window:
+                    break
     finally:
         os.close(secondary)
-    chunks = []
-    try:
-        while True:
-            try:
-                data = os.read(primary, 65536)
-            except OSError:  # EIO once the child has closed its side
-                break
-            if not data:
-                break
-            chunks.append(data)
-    finally:
         os.close(primary)
-    return child.wait(timeout=300), b"".join(chunks).decode("utf-8", "replace")
+    remaining = max(deadline - time.monotonic(), 1)
+    return child.wait(timeout=remaining), b"".join(chunks).decode("utf-8", "replace")
 
 
 @pytest.mark.parametrize("stream", ["pipe", "pty"])

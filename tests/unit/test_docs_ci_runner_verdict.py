@@ -258,6 +258,19 @@ def test_act_results_must_match_what_the_page_says_each_job_does():
     assert check(one_shard, {"shard": "success", "merge": "failure"}), (
         "every matrix run of a job must have the job's expected result"
     )
+    # A job the plan left out must not have run: act reporting a result for it means
+    # the plan read its `if` wrongly, and a failure there would go unchecked.
+    unplanned = check(ACT_LOG, {"ash": "failure"})
+    assert unplanned and all("sarif" in p for p in unplanned), unplanned
+    assert any("expected act not to run it" in p for p in unplanned), unplanned
+    skipped = ACT_LOG.replace(
+        _act_line("sarif", "🏁  Job succeeded", jobResult="success"),
+        _act_line("sarif", "🏁  Job skipped", jobResult="skipped"),
+    )
+    assert skipped != ACT_LOG, "the sarif result line was replaced"
+    assert check(skipped, {"ash": "failure"}) == [], (
+        "a job the plan left out that act reports skipped is what the plan said"
+    )
 
 
 @pytest.mark.parametrize("shape", sorted(CODEBUILD_SHAPES))

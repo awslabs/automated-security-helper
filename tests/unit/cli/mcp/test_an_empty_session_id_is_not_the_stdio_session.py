@@ -71,9 +71,15 @@ def test_the_config_path_of_an_empty_id_is_not_the_stdio_sessions(tmp_path) -> N
 
 
 def test_the_trusted_path_of_an_empty_id_is_not_the_stdio_sessions(tmp_path) -> None:
+    # config_path is bound beside the trusted path: a binding without a
+    # materialized config_path reads as unbound (_bound_config_paths answers
+    # (None, None) when state.config_path is None), the pairing the registry
+    # documents as deliberate.
+    config_file = tmp_path / "stdio.yaml"
+    config_file.write_text("{}\n", encoding="utf-8")
     trusted_file = tmp_path / "trusted.yaml"
     trusted_file.write_text("{}\n", encoding="utf-8")
-    _bind_stdio(trusted_config_path=str(trusted_file))
+    _bind_stdio(config_path=str(config_file), trusted_config_path=str(trusted_file))
 
     assert profile_registry.resolve_session_trusted_config_path("") is None
     assert profile_registry.resolve_session_trusted_config_path(None) == str(

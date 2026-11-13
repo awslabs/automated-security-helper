@@ -6,21 +6,26 @@
 from __future__ import annotations
 
 import fnmatch
+import warnings
 from typing import (
     Any,
     ClassVar,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Annotated,
     Optional,
+    Set,
     Tuple,
     TYPE_CHECKING,
 )
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -32,10 +37,16 @@ from automated_security_helper.utils.path_matching import (
     ignore_path_pattern,
 )
 from automated_security_helper.utils.redacted_model import RedactedSection
+from automated_security_helper.utils.suppression_scope_registry import (
+    engine_hooks_for,
+    split_rule_qualifier_for,
+    warn_once_unmatched_engine,
+)
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
     tolerated_notes,
+    warned_notes,
 )
 
 if TYPE_CHECKING:
@@ -43,10 +54,57 @@ if TYPE_CHECKING:
     from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 
+#: What an entry setting both expiration spellings to different values records
+#: under TOLERATE_STORED_CONFIG (IgnorePathWithReason._one_expiration_spelling).
+BOTH_EXPIRATION_SPELLINGS_NOTE = "both expiration spellings, disagreeing"
+
+#: The deprecation a config read under the ``expiration`` spelling gets.
+#: ``expires`` is the canonical spelling; ``expiration`` is the accepted
+#: alternative until ASH v4 removes it.
+EXPIRATION_SPELLING_DEPRECATION = (
+    "The 'expiration' key is a deprecated spelling of 'expires' and will be "
+    "removed in ASH v4; write 'expires'."
+)
+
+
+def _warn_expiration_spelling() -> None:
+    """One ``DeprecationWarning`` per read of the ``expiration`` spelling.
+
+    A Python warning, not an ``ASH_LOGGER`` line: entries are validated
+    wherever a config or an override is read, so a logger line would land in
+    every command's output (and in the committed CLI snapshots) for a spelling
+    that still works. The schema, the reference docs and the validator wording
+    all name the deprecation too; the v4 removal turns the alias into the
+    ordinary unknown-key refusal. ``stacklevel`` is left at the default: the
+    caller is pydantic's validator machinery, so no user frame is nearer.
+    """
+    warnings.warn(EXPIRATION_SPELLING_DEPRECATION, DeprecationWarning)
+
+
 #: What an entry's expiration that is not a YYYY-MM-DD date records under
 #: TOLERATE_STORED_CONFIG. No value: the reader of a results file names where the
 #: entry is (models/asharp_model.py), since the value is the file's data.
 UNREADABLE_EXPIRATION_NOTE = "an expiration that is not a YYYY-MM-DD date"
+#: The note a results file's kept suppression gets when its ``symbol`` is the
+#: environment reference the config wrote (``${VAR}``), which the scan read and the
+#: record stores as written. The entry is kept, and never applied.
+UNREADABLE_SYMBOL_NOTE = "a symbol that is a reference to the environment"
+#: The note a results file's kept suppression gets when its ``rule_id`` is blank,
+#: which a scan of an earlier version accepted and recorded. The entry is kept, and
+#: never applied: a blank rule id once covered every rule in the entry's path.
+BLANK_RULE_ID_NOTE = "a rule_id that is blank"
+
+
+def _is_environment_reference(value: Any) -> bool:
+    """Whether ``value`` is the text of an environment reference as a config
+    writes it (``${VAR}``, with or without the ``!ENV`` tag), the form a results
+    file records for a value the scan read from the environment."""
+    # Lazy: config.ash_config imports this module.
+    from automated_security_helper.config.ash_config import ENV_REFERENCE_PATTERN
+
+    if not isinstance(value, str):
+        return False
+    return ENV_REFERENCE_PATTERN.match(value.removeprefix("!ENV ")) is not None
 
 
 class ToolExtraArg(BaseModel):
@@ -151,6 +209,16 @@ IGNORE_PATH_LISTS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
 )
 
 
+#: The lists of ``IGNORE_PATH_LISTS`` that ``--ignore-suppressions`` lifts, by
+#: their keys: the global ignore paths. A scanner's own option list (bandit
+#: ``excluded_paths``, checkov ``skip_path``, syft ``exclude``) reaches the tool as
+#: its argument whether or not the flag is set, so the flag leaves it alone. The
+#: scan-start expiry check read this from the first key being ``scanners``.
+IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS: FrozenSet[Tuple[str, ...]] = frozenset(
+    {("global_settings", "ignore_paths")}
+)
+
+
 def value_at(container: Any, keys: Tuple[str, ...]) -> Any:
     """The value at ``keys`` in a config mapping or a loaded config, or None."""
     value = container
@@ -164,7 +232,34 @@ def value_at(container: Any, keys: Tuple[str, ...]) -> Any:
     return value
 
 
-# ``expiration`` means the same here and on ``AshSuppression``, which inherits
+def _entry_schema_admits_expiration(schema: Dict[str, Any]) -> None:
+    """The entry models' published schema: closed, and with the ``expiration`` alias.
+
+    ``additionalProperties: false`` says what a config file may contain (the
+    results schema reopens it for the stored-config tolerance,
+    ``schemas/generate_schemas.py``). The loader also accepts ``expiration`` as
+    a deprecated alias of ``expires`` (``AliasChoices`` on the field, removed in
+    ASH v4), which pydantic publishes nowhere in the schema, so a
+    schema-validating surface (an editor bound to the published schema, a CI
+    check, an MCP client reading the served copy) would flag the documented
+    alias as an unknown property while ASH loaded it. The alias is published
+    here as its own property, mirroring ``expires``'s shape, with a description
+    that names it deprecated and its removal.
+    """
+    schema["additionalProperties"] = False
+    properties = schema.get("properties")
+    if isinstance(properties, dict) and "expires" in properties:
+        expiration = dict(properties["expires"])
+        expiration["title"] = "Expiration"
+        expiration["description"] = (
+            "(Optional) Deprecated alias of 'expires', accepted when a config "
+            "is read and removed in ASH v4; the entry is written and stored "
+            "as 'expires'."
+        )
+        properties["expiration"] = expiration
+
+
+# ``expires`` means the same here and on ``AshSuppression``, which inherits
 # it: a YYYY-MM-DD date compared with ``current_date()``. The entry stops applying
 # at the start of that day, so on the expiration date itself it no longer applies.
 # ``utils/suppression_matcher.py`` enforces it for both. (A comment rather than
@@ -176,11 +271,12 @@ class IgnorePathWithReason(RedactedSection):
     # be a secret, and an error's text goes wherever the error is shown.
     # Unknown keys are refused by _refuse_unknown_keys below. Extras are allowed
     # only so that a results file holding one (utils/unknown_keys.py) keeps it,
-    # and the schema says what a config file may contain.
+    # and the schema says what a config file may contain -- including the
+    # deprecated ``expiration`` alias (_entry_schema_admits_expiration).
     model_config = ConfigDict(
         extra="allow",
         hide_input_in_errors=True,
-        json_schema_extra={"additionalProperties": False},
+        json_schema_extra=_entry_schema_admits_expiration,
     )
 
     # How errors and warnings name an entry of this kind.
@@ -188,13 +284,21 @@ class IgnorePathWithReason(RedactedSection):
 
     path: Annotated[str, Field(..., description="Path or pattern to exclude")]
     reason: Annotated[str, Field(..., description="Reason for exclusion")]
-    expiration: Annotated[
+    expires: Annotated[
         str | None,
         Field(
             None,
+            # "expires" is the canonical spelling (the one written, stored and
+            # documented); "expiration", the field's earlier name, is accepted
+            # as a deprecated alias until ASH v4 removes it
+            # (_warn_expiration_spelling). The name itself is the first choice,
+            # so no populate_by_name is needed.
+            validation_alias=AliasChoices("expires", "expiration"),
             description=(
                 "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying "
-                "on this date, by the local clock of the host running the scan."
+                "on this date, by the local clock of the host running the scan. "
+                "'expiration' is accepted as a deprecated alias when a config is "
+                "read; the alias is removed in ASH v4."
             ),
         ),
     ] = None
@@ -222,13 +326,72 @@ class IgnorePathWithReason(RedactedSection):
         """
         return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
 
-    @field_validator("expiration", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _expiration_is_text(cls, v: Any) -> Any:
-        """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``)."""
+    def _one_expiration_spelling(cls, data: Any, info: ValidationInfo) -> Any:
+        """An entry sets ``expires`` or its deprecated alias ``expiration``, not both.
+
+        Both set, pydantic would take ``expires`` and keep ``expiration`` as an
+        extra, so a shorter ``expiration`` the author meant would be silently
+        ignored or the entry silently inert. A disagreement is refused with
+        which key to keep (as resource_id / scope.resource_id disagreements
+        are); an equal duplicate is accepted, with the alias dropped so it does
+        not land in the extras. Under TOLERATE_STORED_CONFIG a disagreement is
+        recorded and kept; the extra then marks the entry as one never applied.
+
+        Reading the ``expiration`` spelling at all is deprecated
+        (``_warn_expiration_spelling``): ``expires`` is canonical and the alias
+        is removed in ASH v4.
+        """
+        if not isinstance(data, dict) or "expiration" not in data:
+            return data
+        if tolerated_notes(info) is None:
+            # A config an author wrote, not a stored results file (which this
+            # version and earlier ones wrote under the old spelling themselves).
+            _warn_expiration_spelling()
+            # The Python warning is dropped by the default filters outside
+            # __main__, so an `ash` run never showed it. A config load binds
+            # the warn-unknown-keys list (resolve_config), whose contents land
+            # on the config's _resolution_warnings and are printed at scan
+            # start, so the operator sees the deprecation once per entry; the
+            # rebuild-after-overrides dedup subtracts repeats by count there.
+            warned = warned_notes(info)
+            if warned is not None:
+                warned.append(f"In {cls.ENTRY_KIND}: {EXPIRATION_SPELLING_DEPRECATION}")
+        if "expires" not in data:
+            return data
+        if data["expiration"] == data["expires"]:
+            kept = dict(data)
+            del kept["expiration"]
+            return kept
+        notes = tolerated_notes(info)
+        if notes is not None:
+            notes.append(BOTH_EXPIRATION_SPELLINGS_NOTE)
+            return data
+        raise ValueError(
+            "expires and expiration are two spellings of one field and "
+            "disagree; keep one"
+        )
+
+    @field_validator("expires", mode="before")
+    @classmethod
+    def _expiration_is_text(cls, v: Any, info: ValidationInfo) -> Any:
+        """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``).
+
+        Under the TOLERATE_STORED_CONFIG context a stored value that is not text
+        is kept as its text, which ``validate_expiration_date`` then records as an
+        unreadable date like a malformed string, instead of refusing the whole
+        results file.
+        """
+        if (
+            v is not None
+            and not isinstance(v, str)
+            and tolerated_notes(info) is not None
+        ):
+            return str(v)
         return refuse_an_expiration_that_is_not_text(v)
 
-    @field_validator("expiration")
+    @field_validator("expires")
     @classmethod
     def validate_expiration_date(cls, v, info: ValidationInfo):
         """Validate that expiration date is in YYYY-MM-DD format.
@@ -259,6 +422,30 @@ class IgnorePathWithReason(RedactedSection):
         return bool(self.model_extra)
 
     @property
+    def expiration(self) -> Optional[str]:
+        """``expires`` under its deprecated name, for code written against it.
+
+        The configuration spelling ``expiration`` is deprecated and removed in
+        ASH v4; this attribute keeps a caller that still reads
+        ``entry.expiration`` (a plugin, a script over results models) working
+        until then. New code reads ``expires``.
+        """
+        return self.expires
+
+    @expiration.setter
+    def expiration(self, value: Optional[str]) -> None:
+        """Assignment under the deprecated name writes the ``expires`` field.
+
+        Before the rename, ``entry.expiration = x`` set the field; a read-only
+        property turned that into ``AttributeError``. Note that
+        ``model_copy(update={"expiration": ...})`` does NOT go through this
+        setter: pydantic writes update keys directly, and with ``extra="allow"``
+        an ``expiration`` update key lands as an extra (marking the entry
+        ``has_unknown_keys``); such callers pass ``expires`` instead.
+        """
+        self.expires = value
+
+    @property
     def is_expired(self) -> bool:
         """Return True if this entry's expiration date has been reached.
 
@@ -267,11 +454,16 @@ class IgnorePathWithReason(RedactedSection):
         ``active_ignore_paths`` and ``should_suppress_finding`` already leave
         such an entry out: an unreadable date gives no assurance the entry still
         applies. Returning False here made ``AshSuppression.matches`` apply it.
+
+        Only None is "no expiration". An empty string is kept from a results
+        file as an unreadable date (``validate_expiration_date`` records it so),
+        and reading it as no expiration applied the entry permanently while the
+        load warning said it did not apply.
         """
-        if not self.expiration:
+        if self.expires is None:
             return False
         try:
-            return expiration_has_passed(self.expiration)
+            return expiration_has_passed(self.expires)
         except ValueError:
             return True
 
@@ -281,10 +473,10 @@ class IgnorePathWithReason(RedactedSection):
 
         A negative value indicates the entry has already expired.
         """
-        if not self.expiration:
+        if not self.expires:
             return None
         try:
-            expiration_date = datetime.strptime(self.expiration, "%Y-%m-%d").date()
+            expiration_date = datetime.strptime(self.expires, "%Y-%m-%d").date()
         except ValueError:
             return None
         return (expiration_date - current_date()).days
@@ -493,6 +685,11 @@ def merged_honoring(records: Iterable[IgnoreFileExclusions]) -> Dict[str, Any]:
     disagree. A record that is itself merged counts as the scans it stands for
     (``IgnoreFileExclusions.scan_counts``), so merging merged records keeps their
     counts. ``ash merge`` and a workspace scan's merged results both use this.
+
+    A merged record whose scans all agreed carries no counts
+    (``_drop_counts_that_agree_with_honored``), so merging it with others counts
+    it as one scan, however many it covered. "honored by H of N" can then read H
+    or N smaller than the number of scans merged; ``honored`` itself stays right.
     """
     honoring = total = 0
     for record in records:
@@ -547,32 +744,272 @@ class ToolArgs(BaseModel):
 PACKAGE_SUPPRESSION_FIELDS = ("package_name", "package_version", "package_path")
 
 
+def scope_value_matches(value: str, pattern: str, *, case_sensitive: bool) -> bool:
+    """Whether a scope pattern covers a finding's value: literal first, then glob.
+
+    Literal equality is checked before any glob reading, and the glob escapes
+    ``[`` first, so a cdk-nag construct path or another value that contains
+    brackets is matched as written rather than read as a character class that
+    matches nothing. Not used for cdk-nag ``applies_to``, which is exact
+    string membership (the scanner's module).
+    """
+    if not case_sensitive:
+        value = value.lower()
+        pattern = pattern.lower()
+    if value == pattern:
+        return True
+    return fnmatch.fnmatchcase(value, pattern.replace("[", "[[]"))
+
+
+def _scope_id_part(suppression: Dict[str, Any]) -> Optional[str]:
+    """The canonical scope part of a suppression's id, or None without a scope.
+
+    Reads the raw dict shapes the id is built from: a model dump (sugar folded,
+    ``scope`` a nested dict) and the linter's raw YAML (possibly sugar only).
+    The top-level ``resource_id`` is preferred over ``scope.resource_id``: the
+    fold keeps them equal, the linter's raw dict may hold only the top-level
+    one, and a written-form copy (``written_suppression_id``) rewrites the
+    top-level field to the reference the file wrote, which the id must carry
+    rather than the resolved value. Engine blocks contribute their NAMES only:
+    two entries that differ only inside one engine's block share an id, a
+    known limit.
+    """
+    scope = suppression.get("scope")
+    if not isinstance(scope, dict):
+        scope = {}
+    resource_id = suppression.get("resource_id") or scope.get("resource_id")
+    resource_type = scope.get("resource_type")
+    engines = scope.get("engines")
+    # str() on every piece: the linter hands this RAW YAML, where resource_id
+    # can be an unquoted number and engine keys can be of mixed types; without
+    # the coercion "@".join raises and sorted() can refuse to compare, a
+    # traceback where the lint should report a finding.
+    engine_names = (
+        sorted(str(name) for name in engines)
+        if isinstance(engines, dict) and engines
+        else []
+    )
+    if not (resource_id or resource_type or engine_names):
+        return None
+    return "scope=" + "@".join(
+        [
+            str(resource_id) if resource_id else "*",
+            str(resource_type) if resource_type else "*",
+            ",".join(engine_names) or "*",
+        ]
+    )
+
+
 def suppression_id(suppression: Dict[str, Any]) -> str:
     """Identifier for a suppression given as a dict of its fields.
 
     Shared by ``AshSuppression.id`` and the config linter, which reads raw YAML
     dicts, so the unused-suppressions report and the linter's fixer agree.
     """
+    # Every part is text. The linter reads raw YAML dicts, where a rule id or a
+    # package version can arrive as a number (``rule_id: 1234``,
+    # ``package_version: 2.0``), and joining a number raised TypeError out of
+    # ``ash config lint --fix-unused``. ``str()`` of a value is what the config's
+    # own text form would have been.
+
+    def _text(value: Any, absent: str) -> str:
+        if value is None or value == "":
+            return absent
+        return value if isinstance(value, str) else str(value)
+
     line_start = suppression.get("line_start")
     line_end = suppression.get("line_end")
     line_end_val = line_end if line_end is not None else line_start
+    # str() on every raw piece, as in _scope_id_part: the linter hands this
+    # raw YAML, where an unquoted package_version: 1.2 is a float (the common
+    # spelling for versions) and a path or rule_id can be a bare number;
+    # without the coercion "|".join or "@".join raises a TypeError where the
+    # lint should report a finding.
     parts = [
-        suppression.get("path") or "",
-        suppression.get("rule_id") or "*",
+        _text(suppression.get("path"), ""),
+        _text(suppression.get("rule_id"), "*"),
         str(line_start) if line_start is not None else "*",
         str(line_end_val) if line_end_val is not None else "*",
     ]
     symbol = suppression.get("symbol")
     if symbol or any(suppression.get(f) for f in PACKAGE_SUPPRESSION_FIELDS):
         parts.append(
-            "@".join(suppression.get(f) or "*" for f in PACKAGE_SUPPRESSION_FIELDS)
+            "@".join(_text(suppression.get(f), "*") for f in PACKAGE_SUPPRESSION_FIELDS)
         )
-    # A symbol is a sixth part, and its presence always brings the fifth, so an
-    # id's part count says which fields it carries and a symbol can never be
-    # read as a package.
+    # A symbol is a sixth part, and its presence always brings the fifth, so a
+    # symbol can never be read as a package. With the scope part below, a part
+    # COUNT alone no longer says which fields an id carries (five parts is
+    # package-scoped OR scope-only; six is package+symbol OR package+scope): a
+    # reader telling them apart must check the "scope=" prefix on the LAST
+    # part, never split by position. No consumer in this repository parses an
+    # id by position; the linter and the reports compare ids whole.
     if symbol:
-        parts.append(symbol)
+        parts.append(_text(symbol, "*"))
+    # A scoped entry gets a last part so two entries that differ only by scope
+    # (the demo shape: one rule, one path, 26 resource_ids) do not share an id,
+    # which collapsed them in the unused-suppressions report and the linter.
+    # The part starts "scope=", which no symbol can ('=' is not a dotted name
+    # character) and no package part can hold at that position. Entries
+    # without a scope keep the id they always had.
+    scope_part = _scope_id_part(suppression)
+    if scope_part is not None:
+        parts.append(scope_part)
     return "|".join(parts)
+
+
+#: What a disagreeing resource_id / scope.resource_id pair records under
+#: TOLERATE_STORED_CONFIG. The entry is kept but never applies
+#: (AshSuppression._scope_conflict): which value was meant cannot be known.
+RESOURCE_ID_CONFLICT_NOTE = "a resource_id that disagrees with its scope"
+
+#: What an empty scope, an empty ``engines`` map or an empty engine block
+#: records under TOLERATE_STORED_CONFIG. The matcher never applies a scope
+#: that selects nothing, so a stored results file keeps loading.
+EMPTY_SCOPE_NOTE = "an empty suppression scope"
+
+#: The one wording for a scope shape that selects nothing. A suppression is a
+#: security-relevant widening, so match-all must be the ABSENCE of the field,
+#: never an empty dict (the k8s empty-selector-matches-all semantics are
+#: deliberately not followed).
+EMPTY_SCOPE_RULE = "an empty {what} selects nothing; omit {omit} instead"
+
+
+class SuppressionScope(RedactedSection):
+    """What a suppression is scoped to beyond path, lines and package fields.
+
+    The universal keys (``resource_id``, ``resource_type``) are evaluated by
+    ASH's own matcher against the resource identity a finding carries, whatever
+    engine produced it. ``engines`` carries per-engine blocks, keyed by scanner
+    name, whose contents are opaque to ASH's core and owned by the named
+    scanner plugin (the way a k8s object carries per-controller blocks under
+    one metadata envelope).
+    """
+
+    # Extras allowed only so a results file written by another ASH version
+    # keeps its keys (utils/unknown_keys.py); a config file refuses them
+    # through _refuse_unknown_keys, and the schema forbids them.
+    model_config = ConfigDict(
+        extra="allow",
+        hide_input_in_errors=True,
+        json_schema_extra={"additionalProperties": False},
+    )
+
+    ENTRY_KIND: ClassVar[str] = "a suppression scope"
+
+    resource_id: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only suppress findings about the resource with this "
+                "identity, as the producing engine reports it (for cdk-nag, the "
+                "CDK construct path). Literal match first, then glob; "
+                "case-sensitive. Findings that carry no resource identity never "
+                "match."
+            ),
+        ),
+    ] = None
+    resource_type: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only suppress findings about resources of this type "
+                "(e.g. 'AWS::IAM::Policy'). Literal match first, then glob; "
+                "case-insensitive. Findings that carry no resource type never "
+                "match."
+            ),
+        ),
+    ] = None
+    engines: Annotated[
+        Dict[str, Dict[str, Any]] | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Per-engine blocks, keyed by scanner name (e.g. "
+                "'cdk-nag'). Listing engines ENUMERATES the engines the entry "
+                "covers: a finding from a scanner not listed here does not match "
+                "this entry, and a listed scanner's finding matches only when "
+                "that scanner's plugin accepts its block. A listed scanner whose "
+                "plugin is not installed or enabled suppresses nothing (fail "
+                "closed). The block's keys belong to the named plugin."
+            ),
+        ),
+    ] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unknown_keys(cls, data: Any, info: ValidationInfo) -> Any:
+        """Refuse a key the scope does not declare; see IgnorePathWithReason."""
+        return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
+
+    @model_validator(mode="after")
+    def _refuse_a_scope_that_selects_nothing(self, info: ValidationInfo):
+        """Refuse an empty scope, an empty ``engines`` map and an empty block.
+
+        Under TOLERATE_STORED_CONFIG (a results file written by another ASH
+        version) the shape is recorded instead and the entry kept; the matcher
+        never applies a scope that selects nothing, so keeping it loses no
+        safety.
+        """
+        problem = None
+        if (
+            self.resource_id is None
+            and self.resource_type is None
+            and self.engines is None
+            and not self.model_extra
+        ):
+            problem = EMPTY_SCOPE_RULE.format(what="scope", omit="scope")
+        for key in ("resource_id", "resource_type"):
+            value = getattr(self, key)
+            if problem is None and value is not None and not value.strip():
+                problem = EMPTY_SCOPE_RULE.format(what=f"scope.{key}", omit="the key")
+        if problem is None and self.engines is not None:
+            if not self.engines:
+                problem = EMPTY_SCOPE_RULE.format(what="scope.engines", omit="engines")
+            else:
+                for name, block in self.engines.items():
+                    if not block:
+                        problem = EMPTY_SCOPE_RULE.format(
+                            what=f"engine block under scope.engines ('{name}')",
+                            omit="the block",
+                        )
+                        break
+        if problem is None:
+            return self
+        notes = tolerated_notes(info)
+        if notes is not None:
+            notes.append(EMPTY_SCOPE_NOTE)
+            return self
+        raise ValueError(problem)
+
+    @property
+    def has_unknown_keys(self) -> bool:
+        """True for a scope kept from a results file with a key it does not declare."""
+        return bool(self.model_extra)
+
+    @property
+    def selects_nothing(self) -> bool:
+        """True for a scope shape a config refuses, kept from a results file.
+
+        The matcher reads it to fail closed: such a scope matches no finding.
+        """
+        if (
+            self.resource_id is None
+            and self.resource_type is None
+            and self.engines is None
+            and not self.model_extra
+        ):
+            return True
+        for key in ("resource_id", "resource_type"):
+            value = getattr(self, key)
+            if value is not None and not value.strip():
+                return True
+        if self.engines is not None and (
+            not self.engines or any(not block for block in self.engines.values())
+        ):
+            return True
+        return False
 
 
 class AshSuppression(IgnorePathWithReason):
@@ -647,6 +1084,82 @@ class AshSuppression(IgnorePathWithReason):
             ),
         ),
     ] = None
+    scope: Annotated[
+        SuppressionScope | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Scope the suppression to a resource identity, a "
+                "resource type, or named engines' findings; see "
+                "SuppressionScope. Omit it to keep today's matching. An empty "
+                "scope is refused: match-all is the absence of the field."
+            ),
+        ),
+    ] = None
+    resource_id: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Sugar for scope.resource_id: the entry-level "
+                "spelling users reach for on their own. Folded into scope at "
+                "validation; setting both to different values is an error."
+            ),
+        ),
+    ] = None
+
+    #: A conflicting resource_id pair kept from a results file written by
+    #: another version (TOLERATE_STORED_CONFIG): which value was meant cannot
+    #: be known, so the entry never applies (checked by _scope_matches).
+    _scope_conflict: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def _fold_resource_id_sugar(self, info: ValidationInfo):
+        """Fold entry-level ``resource_id`` into ``scope.resource_id``.
+
+        An equal duplicate is accepted; a disagreement is refused with which
+        key to keep. Under TOLERATE_STORED_CONFIG a disagreement is recorded
+        and the entry kept but never applied, as every other unreadable stored
+        entry is.
+
+        The fold runs under the SAME context the outer validation carries: a
+        plain attribute write skips SuppressionScope's validators
+        (validate_assignment is not set), and a bare constructor call carries
+        no context, so a stored file's tolerance would be lost and the whole
+        file refused. An empty value is checked here first, so the refusal
+        names the sugar field the author wrote, not scope.resource_id.
+        """
+        if self.resource_id is None:
+            return self
+        empty = not self.resource_id.strip()
+        if empty and tolerated_notes(info) is None:
+            raise ValueError(
+                EMPTY_SCOPE_RULE.format(what="resource_id", omit="the key")
+            )
+        if self.scope is None:
+            self.scope = SuppressionScope.model_validate(
+                {"resource_id": self.resource_id}, context=info.context
+            )
+        elif self.scope.resource_id is None:
+            if empty:
+                # The scope was validated before the fold wrote into it, so
+                # its own validator never sees the empty value: record the
+                # note it would have recorded. selects_nothing keeps the
+                # entry inert at match time. The empty check above raised
+                # unless the tolerance is present, so the list is never None
+                # on a reachable path; the narrowing satisfies the checker.
+                notes = tolerated_notes(info)
+                if notes is not None:
+                    notes.append(EMPTY_SCOPE_NOTE)
+            self.scope.resource_id = self.resource_id
+        elif self.scope.resource_id != self.resource_id:
+            notes = tolerated_notes(info)
+            if notes is not None:
+                notes.append(RESOURCE_ID_CONFLICT_NOTE)
+                self._scope_conflict = True
+                return self
+            raise ValueError("resource_id and scope.resource_id disagree; keep one")
+        return self
 
     @field_validator("line_end")
     @classmethod
@@ -673,18 +1186,58 @@ class AshSuppression(IgnorePathWithReason):
             )
         return v
 
+    @field_validator("rule_id")
+    @classmethod
+    def validate_rule_id_not_blank(cls, v, info: ValidationInfo):
+        """Reject a blank rule_id.
+
+        An omitted ``rule_id`` matches every rule in the suppression's path, as the
+        suppressions guide says. A blank one was accepted and read the same way
+        by ``matches`` (an empty string is false there), so a suppression whose
+        rule id was left empty by mistake silently covered every rule in its
+        path; a whitespace-only one matched nothing at all. Both are refused
+        with what to write, as the package fields are.
+
+        Under the TOLERATE_STORED_CONFIG context (utils/unknown_keys.py) a blank
+        rule id a results file recorded, written before this check, is kept and
+        noted rather than refused: refusing it made the whole results file
+        unreadable to ``ash report``, ``ash merge`` and ``--existing-results``.
+        ``matches`` never applies such an entry.
+        """
+        if v is not None and not v.strip():
+            notes = tolerated_notes(info)
+            if notes is not None:
+                notes.append(BLANK_RULE_ID_NOTE)
+                return v
+            raise ValueError(
+                "rule_id must be omitted rather than left blank: a suppression "
+                "with no rule_id covers every rule in its path"
+            )
+        return v
+
     @field_validator("symbol", mode="before")
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol(cls, v, info: ValidationInfo):
         """Reject a symbol that is not a dotted qualified name.
 
         A malformed name could never equal a parsed definition's name, so the
         entry would silently match nothing. Before the field's own ``str`` check,
         so a number gets this message too, not pydantic's string error. The rule
         alone, for text and for anything else: the value is not quoted.
+
+        Under the TOLERATE_STORED_CONFIG context (utils/unknown_keys.py) a
+        symbol a results file recorded as the environment reference its config
+        wrote (``${VAR}``) is kept and noted rather than refused: the scan read
+        the reference, the record stores it, and refusing it made the scan's
+        own results file unreadable. ``matches`` never applies such an entry.
         """
         if v is None:
             return v
+        if isinstance(v, str) and not is_valid_symbol(v):
+            notes = tolerated_notes(info)
+            if notes is not None and _is_environment_reference(v):
+                notes.append(UNREADABLE_SYMBOL_NOTE)
+                return v
         if not isinstance(v, str) or not is_valid_symbol(v):
             raise ValueError(SYMBOL_RULE)
         return v
@@ -720,6 +1273,7 @@ class AshSuppression(IgnorePathWithReason):
         self,
         finding: "FlatVulnerability",
         symbol_resolver: "SymbolResolver | None" = None,
+        warned_engines: Optional[Set[str]] = None,
     ) -> bool:
         """Return True if ``finding`` is covered by this suppression rule.
 
@@ -740,13 +1294,43 @@ class AshSuppression(IgnorePathWithReason):
         """
         if self.is_expired or self.has_unknown_keys:
             return False
+        # A symbol kept from a results file as the environment reference its
+        # config wrote (validate_symbol under the tolerance) names no definition,
+        # so the entry does not apply, as the load warning says.
+        if self.symbol is not None and not is_valid_symbol(self.symbol):
+            return False
+        # A blank rule id kept from a results file (validate_rule_id_not_blank
+        # under the tolerance) names no rule and is not "any rule" either: the
+        # entry does not apply, as the load warning says.
+        if self.rule_id is not None and not self.rule_id.strip():
+            return False
 
         if self.rule_id:
             if finding.rule_id is None:
                 return False
-            # Case-insensitive glob match for OS portability
-            if not fnmatch.fnmatch(finding.rule_id.lower(), self.rule_id.lower()):
-                return False
+            # The finding's exact rule id first, then the case-insensitive glob.
+            # fnmatch reads '[' as a character class, so a suppression saved
+            # for a rule id that holds glob characters (cdk-nag's granular
+            # 'Rule[Resource::*]' ids, as the TUI saves them) never matched the
+            # finding it was saved for through the glob alone.
+            if finding.rule_id.lower() != self.rule_id.lower() and not fnmatch.fnmatch(
+                finding.rule_id.lower(), self.rule_id.lower()
+            ):
+                # A scoped entry also matches on the engine's BASE rule id
+                # (split_rule_qualifier), so `rule_id: AwsSolutions-IAM5` plus
+                # a scope covers the granular `AwsSolutions-IAM5[Resource::..]`
+                # finding without a hand-written bracket-escaped glob. Only
+                # with a scope: an unscoped entry keeps today's comparison.
+                if self.scope is None:
+                    return False
+                base, qualifier = split_rule_qualifier_for(
+                    finding.scanner, finding.rule_id
+                )
+                if qualifier is None or (
+                    base.lower() != self.rule_id.lower()
+                    and not fnmatch.fnmatch(base.lower(), self.rule_id.lower())
+                ):
+                    return False
 
         if not _path_pattern_matches(finding.file_path, self.path):
             return False
@@ -757,6 +1341,9 @@ class AshSuppression(IgnorePathWithReason):
         if not self._package_matches(finding):
             return False
 
+        if not self._scope_matches(finding, warned_engines):
+            return False
+
         if self.symbol is not None:
             if symbol_resolver is None:
                 return False
@@ -765,6 +1352,78 @@ class AshSuppression(IgnorePathWithReason):
             )
 
         return True
+
+    def _scope_matches(
+        self,
+        finding: "FlatVulnerability",
+        warned_engines: Optional[Set[str]] = None,
+    ) -> bool:
+        """Whether this suppression's ``scope`` covers ``finding``.
+
+        No scope: today's behavior, unchanged. A scope fails closed on every
+        gap: a scope that selects nothing or kept unknown keys from a results
+        file matches nothing; a resource-scoped entry never matches a finding
+        that carries no resource identity (the same safe direction as "a
+        finding with no line never matches a line-scoped suppression"); and
+        ``engines`` ENUMERATES the engines the entry covers, so a finding from
+        a scanner not listed, or one whose listed plugin does not accept its
+        block, does not match. ``resource_id`` is case-sensitive,
+        ``resource_type`` case-insensitive; both are literal-first, then glob
+        with brackets escaped (``scope_value_matches``).
+        """
+        if self._scope_conflict:
+            return False
+        scope = self.scope
+        if scope is None:
+            return True
+        if scope.selects_nothing or scope.has_unknown_keys:
+            return False
+        if scope.resource_id is not None:
+            if finding.resource_id is None:
+                return False
+            if not scope_value_matches(
+                finding.resource_id, scope.resource_id, case_sensitive=True
+            ):
+                return False
+        if scope.resource_type is not None:
+            if finding.resource_type is None:
+                return False
+            if not scope_value_matches(
+                finding.resource_type, scope.resource_type, case_sensitive=False
+            ):
+                return False
+        if scope.engines is not None:
+            if finding.scanner is None or finding.scanner not in scope.engines:
+                return False
+            if not self._engine_block_matches(
+                finding.scanner,
+                scope.engines[finding.scanner],
+                finding,
+                warned_engines,
+            ):
+                return False
+        return True
+
+    def _engine_block_matches(
+        self,
+        scanner_name: str,
+        block: Dict[str, Any],
+        finding: "FlatVulnerability",
+        warned_engines: Optional[Set[str]] = None,
+    ) -> bool:
+        """Whether the named scanner's plugin accepts ``block`` for ``finding``.
+
+        Dispatched through the suppression-scope registry
+        (utils/suppression_scope_registry.py). Fails closed, with a warn-once
+        note naming the engine: with no plugin registered for ``scanner_name``
+        (not installed, not enabled, or one that does not support engine-scoped
+        suppressions), the block matches nothing.
+        """
+        hooks = engine_hooks_for(scanner_name)
+        if hooks is None:
+            warn_once_unmatched_engine(scanner_name, warned_engines)
+            return False
+        return hooks.suppression_scope_matches(block, finding)
 
     def _package_matches(self, finding: "FlatVulnerability") -> bool:
         """Return True if every package field set here matches ``finding``."""

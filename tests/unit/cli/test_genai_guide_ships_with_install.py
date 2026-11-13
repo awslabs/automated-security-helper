@@ -41,7 +41,7 @@ import requests
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import main as cli_main
-from tests.utils.helpers import checkout_env
+from tests.utils.helpers import checkout_env, iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCS_GUIDE = REPO_ROOT / "docs" / "content" / "docs" / "genai-steering-guide.md"
@@ -217,15 +217,18 @@ class TestTheInstalledGuideIsUsed:
         ]
 
 
-CLI_REFERENCE = REPO_ROOT / "docs" / "content" / "docs" / "cli-reference.md"
+# The docs restructure moved the hand-written cli-reference.md to the generated
+# reference/cli.md (docs/redirects.yml), which embeds the command's docstring,
+# so the reference's section list is the docstring's.
+CLI_REFERENCE = REPO_ROOT / "docs" / "content" / "reference" / "cli.md"
 
 # Each line that says what the guide covers, and the heading of the guide section it
 # stands for (without the "1. " a numbered heading carries, since removing a section
 # renumbers the ones after it). The lines are in the command's docstring, which is
-# `ash get-genai-guide --help` and the generated CLI reference; in the summary the
-# command prints after writing the guide; and in the "Purpose" list of the hand-written
-# CLI reference. A line missing from this table fails, and so does a line whose
-# heading the guide does not have: the claim and the guide have to change together.
+# `ash get-genai-guide --help` and the generated CLI reference; and in the summary
+# the command prints after writing the guide. A line missing from this table fails,
+# and so does a line whose heading the guide does not have: the claim and the guide
+# have to change together.
 # The "Severity Discrepancies" section left the guide when every report started
 # grading a finding the same way, and its lines are why this exists.
 COVERED_SECTIONS = {
@@ -244,20 +247,6 @@ COVERED_SECTIONS = {
     "Create suppressions correctly": "Creating Suppressions Properly",
     "Analyze dependencies using CycloneDX SBOM": "Working with CycloneDX SBOM",
     "Avoid common pitfalls and known issues": "Common Pitfalls and Known Issues",
-    # The CLI reference.
-    "Instructions on using correct output formats (JSON vs HTML)": (
-        "Always Use JSON Formats for Machine Processing"
-    ),
-    "Proper suppression creation with correct YAML syntax": (
-        "Creating Suppressions Properly"
-    ),
-    "Working with CycloneDX SBOM for dependency analysis": (
-        "Working with CycloneDX SBOM"
-    ),
-    "Configuration file schema and structure": "Configuration File Schema",
-    "Common pitfalls and known issues": "Common Pitfalls and Known Issues",
-    "Integration patterns and examples": "Integration Patterns",
-    "Pre-tested jq queries for efficient result querying": "Efficient Querying",
 }
 
 
@@ -326,8 +315,10 @@ class TestTheCommandListsOnlySectionsTheGuideHas:
         assert _sections_the_guide_lacks(listed) == []
 
     def test_the_cli_reference(self):
+        # The generated reference embeds the command's docstring, so the list
+        # follows the docstring's own lead line.
         text = CLI_REFERENCE.read_text(encoding="utf-8")
-        listed = _bullets_after(text, "This guide provides AI assistants with:")
+        listed = _bullets_after(text, "including:")
         assert _sections_the_guide_lacks(listed) == []
 
 
@@ -585,8 +576,10 @@ def test_the_wheel_built_from_the_image_build_context_carries_the_guide(tmp_path
     for top in ("automated_security_helper", "docs"):
         files += [
             path
-            for path in (REPO_ROOT / top).rglob("*")
-            if path.is_file() and "__pycache__" not in path.parts
+            for path in iter_repo_files(
+                REPO_ROOT / top, skip_dirs=frozenset({"node_modules", "__pycache__"})
+            )
+            if path.is_file()
         ]
     for path in files:
         relative = path.relative_to(REPO_ROOT).as_posix()

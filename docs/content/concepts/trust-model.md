@@ -75,7 +75,7 @@ Settings not listed here can be set from any tier. The repository tier's limits 
 
 | Kind of setting | From the operator | From a repository file |
 |---|---|---|
-| Sandbox grants: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, and `sandbox.env_scanners` | Honored | Ignored. A `network_scanners` list is kept as a limit: scanners it does not name get no network. |
+| Sandbox grants: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners`, and `sandbox.environment` | Honored | Ignored. A `network_scanners` list is kept as a limit: scanners it does not name get no network. |
 | The sandbox mode, `sandbox.mode` | Honored. A mode in `ASH_CONFIG`'s file, or in the `--config` file of a workspace scan, counts even when that file is inside a git checkout or the scanned directory, because a mode other than `off` grants nothing. | Applies only when no operator source turns the sandbox on. It cannot turn off, or switch away from, a mode the operator chose. In workspace mode this includes a project's own config file. |
 | Plugin module lists, `ash_plugin_modules` | Honored | Only ASH's own plugin modules and modules installed outside every git checkout and the scanned directory. A third-party package in a virtual environment inside a checkout counts as inside it. Never `ash_aws_plugins` or `ash_snyk_plugins`, or any module inside either, whose plugins send findings or source off the host. |
 | Where the AWS reporters send results, and with which credentials: the region, profile, and account of `aws-security-hub`; the region, profile, model, and output files of `bedrock-summary-reporter`; the region, log group, and stream of `cloudwatch-logs`; the region, profile, bucket, and key prefix of `s3`; and whether each of these reporters runs | Honored | Replaced by the trusted value. |
@@ -94,7 +94,7 @@ Settings not listed here can be set from any tier. The repository tier's limits 
 From a repository file, ASH ignores the value, uses the trusted one, logs a warning that names the settings and the file and says how to keep them, and runs the scan. For example:
 
 ```text
-Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
+Ignoring sandbox.network_scanners, sandbox.extra_read_paths from /work/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. A network_scanners list there still removes network from scanners it does not name, and a sandbox mode there still applies when nothing else turns the sandbox on. To keep a setting, move the file outside every git checkout, or pass the setting with --config-overrides. A file inside the scanned directory has to move out of it as well.
 ```
 
 Here the repository's config gave grype a network and a read path. To give grype a network yourself, pass `--config-overrides 'sandbox.network_scanners=[grype]'`.

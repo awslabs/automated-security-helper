@@ -41,7 +41,7 @@ def layout(tmp_path, monkeypatch):
     source = repo / "src"
     source.mkdir()
     (source / "a.py").write_text("x = 1\n", encoding="utf-8")
-    for name in (REFUSED_VAR, OPERATOR_VAR, "ASH_EXTENDS_CELL_KEY"):
+    for name in (REFUSED_VAR, OPERATOR_VAR, "ASH_EXTENDS_CELL_SPELLING"):
         monkeypatch.delenv(name, raising=False)
     return {"w": tmp_path, "source": source}
 
@@ -126,11 +126,11 @@ def test_an_extends_key_the_environment_spells_names_its_variable(layout, monkey
     written and resolved lists differ in length and carry no pairing. The
     entry names no variable itself; the variable that spells the key is still
     passed, through the references the document records."""
-    monkeypatch.setenv("ASH_EXTENDS_CELL_KEY", "extends")
+    monkeypatch.setenv("ASH_EXTENDS_CELL_SPELLING", "extends")
     _write(layout["w"] / "b.yaml", "project_name: b\n")
-    config = _write(layout["w"] / "ash.yaml", "${ASH_EXTENDS_CELL_KEY}: b.yaml\n")
+    config = _write(layout["w"] / "ash.yaml", "${ASH_EXTENDS_CELL_SPELLING}: b.yaml\n")
 
-    assert _names(layout, config) == ["ASH_EXTENDS_CELL_KEY"]
+    assert _names(layout, config) == ["ASH_EXTENDS_CELL_SPELLING"]
 
 
 def test_a_key_the_environment_spells_as_extends_is_not_paired_by_position(
@@ -143,12 +143,12 @@ def test_a_key_the_environment_spells_as_extends_is_not_paired_by_position(
         ENVIRONMENT_VALUE_SHOWN,
     )
 
-    monkeypatch.setenv("ASH_EXTENDS_CELL_KEY", "extends")
+    monkeypatch.setenv("ASH_EXTENDS_CELL_SPELLING", "extends")
     _write(layout["w"] / "a.yaml", "project_name: a\n")
     _write(layout["w"] / "b.yaml", "project_name: b\n")
     config = _write(
         layout["w"] / "ash.yaml",
-        "extends: a.yaml\n${ASH_EXTENDS_CELL_KEY}: b.yaml\n",
+        "extends: a.yaml\n${ASH_EXTENDS_CELL_SPELLING}: b.yaml\n",
     )
 
     entries = rac._extends_refs_shown(config)
@@ -162,11 +162,11 @@ def test_a_reference_spelled_key_in_a_format_that_never_interpolates_is_text(
     """The must-not twin: in JSON the resolution leaves every key alone, so a
     key that looks like a reference changes nothing and the entries still pair
     by position."""
-    monkeypatch.setenv("ASH_EXTENDS_CELL_KEY", "extends")
+    monkeypatch.setenv("ASH_EXTENDS_CELL_SPELLING", "extends")
     _write(layout["w"] / "a.yaml", "project_name: a\n")
     config = _write(
         layout["w"] / "ash.json",
-        '{"${ASH_EXTENDS_CELL_KEY}": "x", "extends": ["a.yaml"]}',
+        '{"${ASH_EXTENDS_CELL_SPELLING}": "x", "extends": ["a.yaml"]}',
     )
 
     assert rac._extends_refs_shown(config) == [("a.yaml", "a.yaml", False)]

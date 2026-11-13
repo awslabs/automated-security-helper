@@ -12,15 +12,17 @@ inside the container refused that flag, so in workspace mode the host passed the
 config unmarked, and the scan inside, which sees ``/ash-config`` in no checkout,
 gave it the operator's grants (``sandbox.extra_read_paths`` and the rest).
 
-In workspace mode the host now marks each file of a config chain that is in another
-git checkout with ``--config-file-from-another-checkout``, and the workspace scan
-inside accepts the mark and limits those files for every project, as a local
-workspace scan does (``sandbox_grants.marked_files_in_another_checkout``; the
-settings that come out are compared with a local workspace scan's in
-test_container_workspace_config_parity.py). A file there cannot grant and is not a
-member of the workspace's tree, so the chain mark, which keeps nothing, is not
-passed for it. The workspace scan inside accepts the chain mark as well
-(``sandbox_grants.marked_repository_written``). A config in the checkout around the
+In workspace mode the host marks a config chain whose root is in another git
+checkout with the chain mark, ``--config-from-scanned-repository``, each base
+listed on its own with ``--config-file-from-scanned-repository``, as
+run-in-a-container.md (The config file) and scale-large-repos.md (Workspaces) say:
+a workspace spans checkouts, so a ``--config`` from another one is a repository's
+for the scan inside, which accepts the mark
+(``sandbox_grants.marked_repository_written``). A chain whose root is outside
+every checkout keeps ``--config-file-from-another-checkout`` for any base of it
+that is in one (``sandbox_grants.marked_files_in_another_checkout``; the settings
+that come out are compared with a local workspace scan's in
+test_container_workspace_config_parity.py). A config in the checkout around the
 workspace root, or reached through a link there, is refused with exit 3 before
 anything is built, mounted or cleared, judged by the files it would mount (a file
 it extends stays inside the config's own directory;
@@ -149,10 +151,10 @@ def test_a_config_in_the_workspaces_own_checkout_is_refused(
     assert result.returncode == 3, result.stderr
     assert not rac.container_was_started(result)
     assert commands == []
-    # The refusal names --config as written, through repr (run_ash_container.py,
-    # the "is the scanned repository's" message), so a Windows path shows each
-    # backslash doubled.
-    assert repr(str(config)) in result.stderr
+    # The refusal names --config as written, between quotes (run_ash_container.py,
+    # the "is the scanned repository's" message), so a Windows path keeps its
+    # backslashes single.
+    assert f"'{config}'" in result.stderr
     assert FIX in result.stderr
 
 
@@ -167,8 +169,12 @@ def test_a_config_in_the_workspaces_own_checkout_is_refused(
 def test_a_config_in_another_checkout_is_marked_for_the_scan_inside(
     where, checkout, commands, tmp_path
 ):
-    """Not the workspace's own checkout: mounted at /ash-config and marked as in
-    another checkout, so the scan inside limits it as a local workspace scan does."""
+    """Not the workspace's own checkout: mounted at /ash-config and marked with
+    the chain mark, so the scan inside limits it as a local workspace scan does
+    (run-in-a-container.md, The config file: "A workspace scan does the same with
+    a `--config` from another git checkout"; pinned by
+    tests/unit/docs/test_page_claims.py,
+    test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is)."""
     elsewhere = tmp_path / "elsewhere"
     mark_git_checkout(elsewhere)
     if where == "the-config-in-another-checkout":
@@ -188,17 +194,19 @@ def test_a_config_in_another_checkout_is_marked_for_the_scan_inside(
     assert result.returncode != 3, result.stderr
     run = _run_command(commands)
     assert run[run.index("--config") + 1] == "/ash-config/ash-config.yaml"
-    # Not the workspace's tree: the chain mark, which keeps nothing, is not used.
-    assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG not in run
+    # A repository's for the workspace scan inside, whole chain.
+    assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG in run
     other = rac.CONFIG_FILE_FROM_ANOTHER_CHECKOUT_FLAG
-    marked = [run[i + 1] for i, arg in enumerate(run[:-1]) if arg == other]
-    assert "/ash-config/ash-config.yaml" in marked
+    assert [run[i + 1] for i, arg in enumerate(run[:-1]) if arg == other] == []
+    file_flag = rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG
+    marked = [run[i + 1] for i, arg in enumerate(run[:-1]) if arg == file_flag]
     if where == "a-config-extending-a-base-in-another-checkout":
-        # The base is mounted at its own container path and needs its own mark: a
-        # scan inside that learned only the root's would read the base as the
-        # operator's.
-        assert "/ash-config/base.yaml" in marked
-    assert len(marked) == len(set(marked))
+        # The base is mounted at its own container path and listed on its own: a
+        # scan inside that judged only the mounted base alone still reads it as
+        # marked.
+        assert marked == ["/ash-config/base.yaml"]
+    else:
+        assert marked == []
 
 
 def test_the_inner_workspace_scan_accepts_the_mark(monkeypatch, tmp_path):

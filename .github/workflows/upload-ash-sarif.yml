@@ -87,6 +87,13 @@ on:
         required: false
         default: "ash_output"
         type: string
+      runner:
+        description: >-
+          Runner label for the upload job. Defaults to ubuntu-latest; pass the
+          label the scan ran on to keep both jobs in one runner pool.
+        required: false
+        default: "ubuntu-latest"
+        type: string
 
 jobs:
   upload-sarif:
@@ -97,7 +104,7 @@ jobs:
     # pull request's own run uploads the same report. Every other event uploads
     # here, unlike the scan workflow's own step, which runs on pull_request only.
     if: github.event_name != 'merge_group'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -138,7 +145,7 @@ jobs:
           path: ${{ runner.temp }}/ash_output
 
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: ${{ runner.temp }}/ash_output/reports/ash.ghas.sarif
           wait-for-processing: true

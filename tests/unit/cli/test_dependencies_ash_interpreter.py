@@ -40,6 +40,7 @@ from tests.snapshot.dependencies.test_snapshot_dependencies_install import (
     _fake_machine,
 )
 from tests.snapshot.support.cli import LINUX_AMD64, run_cli, simulated_host
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 pytestmark = pytest.mark.unit
 
@@ -76,6 +77,9 @@ def python3_only(tmp_path, monkeypatch):
         lambda: [d for d in real_dirs() if d != Path("/usr/local/bin")],
     )
     monkeypatch.setattr(sys, "executable", str(interpreter))
+    # The lookup's own candidate list: on Windows the unit tests' tool guard
+    # narrows "node" to its .bat stand-in, and this layout's fake node is node.exe.
+    use_the_real_candidate_names(monkeypatch)
     subprocess_utils.clear_find_executable_cache()
     assert REAL_FIND_EXECUTABLE("python") is None, "the layout has a python"
     assert REAL_FIND_EXECUTABLE("node") is not None

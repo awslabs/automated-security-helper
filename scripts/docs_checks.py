@@ -103,7 +103,16 @@ SHIPPED_DOCKERFILES = ("Dockerfile",)
 
 #: Pages for contributors. Variables only the test suite and CI read are documented
 #: here and nowhere else (a path ending in "/" is a directory).
-CONTRIBUTOR_PAGES = ("docs/content/contributing/", "CONTRIBUTING.md", "DEVELOPMENT.md")
+#: Pages written for contributors, where a variable only the test suite or CI
+#: reads may be documented. A trailing slash names a directory prefix; a document
+#: under tests/ (tests/NAMING_CONVENTIONS.md names the tier and shard variables)
+#: is contributor material by its location.
+CONTRIBUTOR_PAGES = (
+    "docs/content/contributing/",
+    "CONTRIBUTING.md",
+    "DEVELOPMENT.md",
+    "tests/",
+)
 
 #: Where the test suite and CI live in the code tree, for those test-only variables.
 TEST_SOURCES = "tests"
@@ -138,6 +147,20 @@ GITHUB_REPO_SLUG = "awslabs/automated-security-helper"
 #: then, so the checks that compare against today's code skip them; markers, config,
 #: python and link checks still apply.
 HISTORICAL_DOCS = frozenset({"CHANGELOG.md"})
+
+#: Directories of such records, one file per release. The curated notes of a release
+#: (.github/release-notes/<tag>.md) are the changelog's ``## Unreleased`` body moved
+#: into a file at the release bump, where they name options, variables and files of
+#: the code at that release and of the programs ASH wraps. They are held to the same
+#: checks as the changelog they came from: the 3.8.0 bump moved them out of a skipped
+#: file into an unskipped one and failed lint on text that had not changed.
+HISTORICAL_DOC_DIRS = (".github/release-notes/",)
+
+
+def is_historical_doc(rel: str) -> bool:
+    """Whether ``rel`` (a repository-relative path) is a record of a past release."""
+    return rel in HISTORICAL_DOCS or rel.startswith(HISTORICAL_DOC_DIRS)
+
 
 #: Template placeholder the version manager renders (scripts/version_template_manager.py).
 VERSION_PLACEHOLDER = "{{VERSION}}"
@@ -1969,7 +1992,9 @@ def check_session_variables(
 # The CLI model
 # ---------------------------------------------------------------------------
 
-ASH_PROGRAMS = frozenset({"ash", "ashv3", "automated-security-helper"})
+ASH_PROGRAMS = frozenset(
+    {"ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
+)
 ASH_PACKAGE = "automated-security-helper"
 ASH_MODULE = "automated_security_helper"
 CONTAINER_RUNTIMES = frozenset({"docker", "podman", "finch", "nerdctl"})
@@ -3316,6 +3341,42 @@ def shows_a_refusal(block: Block) -> bool:
     )
 
 
+def bad_selection_exit() -> int | None:
+    """The exit code of a selection ASH refuses: an unknown ``--tool`` name of
+    ``ash dependencies install`` (``core.constants.ASH_EXIT_BAD_SELECTION``).
+
+    The number is also a scan's actionable-findings code, so unlike
+    ``usage_error_exit`` this code proves a refusal only for a command that never
+    scans; ``shows_a_selection_refusal``'s caller gates on the command.
+    """
+    try:
+        from automated_security_helper.core import constants
+    except ImportError:
+        return None
+    code = getattr(constants, "ASH_EXIT_BAD_SELECTION", None)
+    return code if isinstance(code, int) else None
+
+
+def shows_a_selection_refusal(block: Block) -> bool:
+    """Whether a block runs a refused selection on purpose, to show ASH refusing it.
+
+    ``ash dependencies install`` refuses an unknown ``--tool`` name with the
+    bad-selection code (``cli/dependencies.py``), not the usage-error code, and it
+    never scans, so on that command the code cannot mean actionable findings. A run
+    block whose expect-exit is that code proves such a refusal, which the runner
+    then checks; the exemption applies only to ``dependencies`` invocations
+    (``_block_cli_findings``), so a scan in the same block keeps its value checks:
+    its exit 2 would mean findings, and a typo there would pass unproven.
+    """
+    selection = bad_selection_exit()
+    return (
+        selection is not None
+        and block.marker is not None
+        and block.mode == "run"
+        and str(block.marker.keys.get("expect-exit")) == str(selection)
+    )
+
+
 def output_samples(page: Page) -> dict[int, Block]:
     """id() of each block marked output that directly follows a block the runner runs,
     mapped to that block.
@@ -3351,18 +3412,25 @@ def _block_cli_findings(
     # A block runs under set -e, so it ends at its first refused command, and that
     # command alone is shown refusing. A refused value in any other is reported.
     refusal_shown = not shows_a_refusal(block)
+    # The bad-selection code proves a refusal only on a command that never scans
+    # (shows_a_selection_refusal), so only a ``dependencies`` invocation may claim it.
+    selection_shown = not shows_a_selection_refusal(block)
     metavars = reads_ash_lines(block, output_sample)
     for invocation in invocations:
         line = _invocation_line(block, invocation)
         if invocation.problem:
             findings.append(Finding("cli", rel, line, invocation.problem))
         problems = ash_args_problems(invocation.args, cli, metavars=metavars)
-        if not refusal_shown:
+        exempt = not refusal_shown or (
+            not selection_shown and invocation.args[:1] == ["dependencies"]
+        )
+        if exempt:
             without_values = ash_args_problems(
                 invocation.args, cli, check_values=False, metavars=metavars
             )
             if without_values != problems:
-                problems, refusal_shown = without_values, True
+                problems = without_values
+                refusal_shown = selection_shown = True
         for problem in problems:
             findings.append(Finding("cli", rel, line, problem))
     return findings
@@ -3432,7 +3500,7 @@ def check_cli(
     every_option = all_option_names(cli)
     findings: list[Finding] = []
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         plugin_rows = plugin_written_rows(page)
         samples = output_samples(page)
@@ -4354,7 +4422,7 @@ def check_env_vars(
     )
 
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         via_config = {
             name
@@ -5814,7 +5882,8 @@ UNREAD_RESPONSE_EXPLAINED = (
         "get_config",
         "automated_security_helper/config/environment_record.py",
         "_Index._string",
-        "text = text.replace(reference.value, self.mark(reference.written))",
+        # The statement spans three lines; the reader records its first.
+        "text = text.replace(",
         "2026-12-31",
         "a string-shaping helper of the same dump.",
     ),
@@ -5916,6 +5985,26 @@ UNREAD_RESPONSE_EXPLAINED = (
         "2026-12-31",
         "the summary view is built from the reshaped results.",
     ),
+    # The coverage keys (_COVERAGE_KEYS: coverage_complete and the gap lists)
+    # are copied from the loaded results document onto the filtered view by a
+    # comprehension keyed by the loop's name, which the reader cannot read;
+    # none of those names is an error_type.
+    (
+        "get_scan_results",
+        "automated_security_helper/core/resource_management/result_filters.py",
+        "_coverage_fields",
+        "return {key: results[key] for key in _COVERAGE_KEYS if key in results}",
+        "2026-12-31",
+        "the coverage keys copied from the loaded results file onto the view.",
+    ),
+    (
+        "get_scan_summary",
+        "automated_security_helper/core/resource_management/result_filters.py",
+        "_coverage_fields",
+        "return {key: results[key] for key in _COVERAGE_KEYS if key in results}",
+        "2026-12-31",
+        "the coverage keys copied from the loaded results file onto the view.",
+    ),
     (
         "get_scan_progress",
         "automated_security_helper/core/resource_management/scan_registry.py",
@@ -5926,6 +6015,21 @@ UNREAD_RESPONSE_EXPLAINED = (
             "the progress record's keys come from the registry entry, whose"
             " failure field is error_message; the tool's refusals are separate"
             " dict literals the reader follows."
+        ),
+    ),
+    # The remote read copies the entry's stored coverage with the process ids
+    # of the tools a cancel could not end taken out of their reasons. The helper
+    # takes the payload as a parameter, which the reader cannot follow back to
+    # the entry; the copy adds no key of its own but could_not_stop.
+    (
+        "get_scan_progress",
+        "automated_security_helper/core/resource_management/scan_registry.py",
+        "_coverage_without_process_ids",
+        "def _coverage_without_process_ids(",
+        "2026-12-31",
+        (
+            "the payload is the entry's stored coverage, whose keys the response"
+            " already lists; the copy changes only the could_not_stop reasons."
         ),
     ),
 )
@@ -6121,7 +6225,7 @@ def check_mcp_contract(
     bad: dict[str, str] = {}
     seen: set[tuple[str, int, str]] = set()
     for page in pages:
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         for span in error_type_spans(page, is_mcp_page(page.rel), contract.tools):
             spans_checked += 1
@@ -6401,6 +6505,24 @@ def _resolve_from(
                     config_cls = _model_of(current.model_fields[field_name].annotation)[
                         1
                     ]
+            if config_cls is None:
+                # A key reaches a plugin's section the way a section's name is
+                # matched (AshConfig.get_plugin_config): `reporters.CSV.enabled`
+                # sets the `csv` section's (docs/content/how-to/configure.md).
+                # Only a spelling exactly one shipped plugin's name reduces to
+                # resolves; anything else still fails with the message below.
+                from automated_security_helper.config.ash_config import (
+                    reduced_plugin_name,
+                )
+
+                wanted = reduced_plugin_name(segment)
+                reduced = [
+                    cls
+                    for name, cls in models.plugin_configs.get(section, {}).items()
+                    if reduced_plugin_name(name) == wanted
+                ]
+                if len(reduced) == 1:
+                    config_cls = reduced[0]
             if config_cls is None:
                 known = sorted(models.plugin_configs.get(section, {}))
                 close = difflib.get_close_matches(segment, known, n=1)
@@ -7762,7 +7884,7 @@ def check_option_tables(
     keys: frozenset[str] | None = None
     findings: list[Finding] = []
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         for table in page.tables:
             if table.marker is None:
@@ -8316,7 +8438,7 @@ def check_report_files(
     known = output_files(code, models)
     findings: list[Finding] = []
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         own = page_reporter_files(page) | documented_plugin_files(page, known.plugins)
         for number, line in page.prose:
@@ -8398,7 +8520,7 @@ def check_scanner_names(
     findings: list[Finding] = []
     column_count = cell_count = name_count = other_count = 0
     for page in load_pages(files, root):
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         for table in page.tables:
             headers = _header_cells(table)
@@ -10109,7 +10231,7 @@ def check_install_commands(
     findings: list[Finding] = []
     pages = load_pages(files, root)
     for page in pages:
-        if page.rel in HISTORICAL_DOCS:
+        if is_historical_doc(page.rel):
             continue
         rules = InstallRules(root, code, page, forms, version, counts)
         located: list[tuple[int, str]] = []

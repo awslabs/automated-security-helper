@@ -88,7 +88,14 @@ def _row(context, responses):
             return_value=True,
         ),
         patch(f"{_MOD}.cloudformation_candidate_files", return_value=candidates),
-        patch(f"{_MOD}.cdk_nag_worker_batch", return_value=nullcontext()),
+        # The batch's two records, empty: the scanner reads them directly after the
+        # loop, and a bare ``nullcontext()`` yields None.
+        patch(
+            f"{_MOD}.cdk_nag_worker_batch",
+            return_value=nullcontext(
+                SimpleNamespace(failed_child_responses=[], could_not_stop_response=None)
+            ),
+        ),
         patch(f"{_MOD}.run_cdk_nag_against_cfn_template", side_effect=wrapper),
     ):
         executor = ScannerExecutor(

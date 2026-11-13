@@ -15,10 +15,6 @@
     {
       "project": "web",
       "path": "projects/web/reports/ash.unused-suppressions.json"
-    },
-    {
-      "project": "docs",
-      "path": "projects/docs/reports/ash.unused-suppressions.json"
     }
   ]
 }

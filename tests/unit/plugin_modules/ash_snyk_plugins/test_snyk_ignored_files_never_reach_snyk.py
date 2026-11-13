@@ -58,6 +58,7 @@ from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner
 from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
 from automated_security_helper.utils.output_dir_links import ignore_output_dir_in_git
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from tests.utils.tool_guard import use_the_real_candidate_names
 
 CANARY = "snyk-canary-4b1f0e9d7c"
 
@@ -101,17 +102,24 @@ def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     stand_in = _STAND_IN.format(python=sys.executable, record=str(record))
     if sys.platform == "win32":
         # CreateProcess starts no shebang script. ASH looks for snyk.exe, snyk.bat
-        # and snyk.cmd before the bare name, so the program is a .cmd that runs the
-        # same script (its shebang line is only a comment to Python).
+        # and snyk.cmd before the bare name, so the program is a .bat that runs the
+        # same script (its shebang line is only a comment to Python). It is a .bat,
+        # not a .cmd, because the lookup tries each candidate name across the whole
+        # PATH in turn: the tool guard's own snyk.bat further along PATH would be
+        # found before a snyk.cmd here, and its stand-in would run in this one's place.
         script = binary.parent / "snyk_stand_in.py"
         script.write_text(stand_in, encoding="utf-8")
-        binary.parent.joinpath("snyk.cmd").write_text(
+        binary.parent.joinpath("snyk.bat").write_text(
             f'@"{sys.executable}" -I "{script}" %*\r\n', encoding="utf-8"
         )
     else:
         binary.write_text(stand_in, encoding="utf-8")
         binary.chmod(0o755)
     monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
+    # On Windows the unit tool guard makes "snyk" resolve to its own snyk.bat
+    # alone; with the lookup's own names back, this directory's snyk.bat comes
+    # first on PATH and is the one found. The program here is this test's own.
+    use_the_real_candidate_names(monkeypatch)
     monkeypatch.setenv("SNYK_TOKEN", "placeholder-token")
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     return record
@@ -214,7 +222,10 @@ def _findings_step_drops(context: PluginContext, uri: str) -> bool:
 
 
 class TestTheSourceTarget:
-    @pytest.mark.unit
+    # The refusal tests are integration like the tests that run snyk: each drives
+    # the scanner's scan(), which starts the stand-in snyk on any path the refusal
+    # does not take, so a regression in the refusal would start a process here.
+    @pytest.mark.integration
     def test_a_source_target_holding_an_ignored_file_never_starts_snyk(
         self, tmp_path, record
     ):
@@ -260,7 +271,7 @@ class TestTheSourceTarget:
         assert _canary_in(received) == ["thirdparty/zz-canary.js"]
 
     @pytest.mark.parametrize("gitignored", [True, False])
-    @pytest.mark.unit
+    @pytest.mark.integration
     def test_a_source_target_holding_the_output_dir_is_refused(
         self, tmp_path, record, gitignored
     ):
@@ -326,7 +337,7 @@ class TestTheSourceTarget:
         sys.platform == "win32",
         reason="Windows file names cannot hold a newline or an escape character",
     )
-    @pytest.mark.unit
+    @pytest.mark.integration
     def test_the_first_path_is_shown_with_its_controls_escaped(self, tmp_path, record):
         context = _context(tmp_path, ["thirdparty/**"])
         name = "a\nb\x1b[31m.js"
@@ -343,7 +354,7 @@ class TestTheSourceTarget:
 
 
 class TestTheConvertedTarget:
-    @pytest.mark.unit
+    @pytest.mark.integration
     def test_an_ignored_member_of_a_work_dir_outside_the_source_is_refused(
         self, tmp_path, record
     ):

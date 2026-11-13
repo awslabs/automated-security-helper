@@ -75,7 +75,7 @@ def test_should_suppress_finding_with_invalid_expiration():
         mock_suppression = MagicMock()
         mock_suppression.rule_id = "TEST-001"
         mock_suppression.file_path = "src/file.py"
-        mock_suppression.expiration = "invalid-date"
+        mock_suppression.expires = "invalid-date"
         mock_suppression.line_start = None
         mock_suppression.line_end = None
 
@@ -96,7 +96,7 @@ def test_check_for_expiring_suppressions_with_invalid_date():
         mock_instance = MagicMock()
         mock_instance.rule_id = "TEST-001"
         mock_instance.file_path = "src/file.py"
-        mock_instance.expiration = "invalid-date"
+        mock_instance.expires = "invalid-date"
 
         # Mock the logger
         with patch(

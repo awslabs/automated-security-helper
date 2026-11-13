@@ -48,6 +48,24 @@ on:
         required: false
         default: "local"
         type: string
+      runner:
+        description: >-
+          Runner label for the scan job and the reporting job. The default,
+          ubuntu-latest, is what every caller has always got. A caller whose
+          repository has the capacity can pass ubuntu-24.04-arm, whose hosted queue
+          is much shorter; this repository's own callers do.
+        type: string
+        required: false
+        default: "ubuntu-latest"
+      scan-timeout-minutes:
+        description: >-
+          Minutes the scan job may run before it is cancelled. The default matches
+          the bound the gating scan has always had; the informational head scan,
+          which runs verbose and renders every suppressed finding in its report
+          phase, passes a higher bound.
+        type: number
+        required: false
+        default: 30
       config:
         description: "Path to the ASH config file, if any"
         required: false
@@ -323,8 +341,8 @@ env:
 jobs:
   ash:
     name: SAST, SCA, and IaC Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ fromJSON(inputs.scan-timeout-minutes) }}
     outputs:
       # Empty when nothing was uploaded; the report job and the caller's SARIF job
       # start only when it is set.
@@ -421,6 +439,7 @@ jobs:
           INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
           INPUT_BASE_REF: ${{ inputs.base-ref }}
           INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          INPUT_RUNNER: ${{ inputs.runner }}
         run: |
           set -euo pipefail
           # Byte by byte, so the answer is the same whatever locale the runner has: in
@@ -547,10 +566,14 @@ jobs:
             __wcs_interrupted="$2"
           }
           __wcs_exec() {
+            # The background launch leaves SIGINT and SIGQUIT ignored in the child (bash 3.2 on macOS), and an ignored signal survives exec, so the command is started with both at their default.
             if command -v setsid >/dev/null 2>&1; then
+              if command -v perl >/dev/null 2>&1; then
+                exec setsid -w perl -e '$SIG{INT} = "DEFAULT"; $SIG{QUIT} = "DEFAULT"; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+              fi
               exec setsid -w "$@"
             fi
-            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
+            exec perl -MPOSIX -e 'my $s = POSIX::setsid(); exit 127 unless defined $s && $s >= 0; $SIG{INT} = "DEFAULT"; $SIG{QUIT} = "DEFAULT"; exec { $ARGV[0] } @ARGV; exit 127' -- "$@"
           }
           with_commands_stopped() {
             if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
@@ -1104,7 +1127,7 @@ jobs:
 
       - name: Install uv
         id: setup-uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # Named here, because with no `version` setup-uv installs the uv that the
           # checkout's pyproject.toml or uv.toml asks for (`required-version`), and
@@ -1639,12 +1662,21 @@ jobs:
       # them would mean interpolating booleans into shell to rebuild the condition.
       # The second `uvx` call reuses the environment the first one resolved.
       #
-      # Both run from RUNNER_TEMP with ASH_CONFIG unset, as Install OpenGrep below
-      # does. `ash dependencies install` takes its source directory from the working
-      # directory, resolves its config from ASH_CONFIG or by discovery there, and
-      # imports every plugin module that config names. Run from the checkout with
-      # the caller's config, the scanned repository chose what this step installed
-      # and what code ran while installing it.
+      # Both run from an empty directory under RUNNER_TEMP with ASH_CONFIG unset, as
+      # Install OpenGrep below does. `ash dependencies install` takes its source
+      # directory from the working directory, resolves its config from ASH_CONFIG or
+      # by discovery there, and imports every plugin module that config names. Run
+      # from the checkout with the caller's config, the scanned repository chose what
+      # this step installed and what code ran while installing it.
+      #
+      # An empty subdirectory, not RUNNER_TEMP itself: the install's in-tree tool
+      # guard treats the working directory as the scanned tree and refuses a tool
+      # under it, and ASH_TOOL_BIN sits under RUNNER_TEMP. Run from RUNNER_TEMP, the
+      # install wrote grype to the --bin-path it was given and then refused to find
+      # it there ("Not running grype from inside the scanned tree
+      # /home/runner/work/_temp"), failing every pull request's scan job at this
+      # step. From the subdirectory, ash-tools is a sibling, outside the registered
+      # tree, and nothing in the subdirectory can steer the install.
       #
       # ASH_TOOL_BIN is added to PATH the same way the OpenGrep step below does it.
       # The previous form installed into /usr/local/bin, which is already on PATH, so
@@ -1656,7 +1688,7 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+          (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
             uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
               --tool grype \
               --bin-path "${ASH_TOOL_BIN}")
@@ -1694,7 +1726,7 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+          (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
             uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
               --tool syft \
               --bin-path "${ASH_TOOL_BIN}")
@@ -1734,7 +1766,7 @@ jobs:
             if [ -n "${tool}" ]; then tools+=("${tool}"); fi
           done
           install_tools() {
-            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
               uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
                 "$@" \
                 --bin-path "${ASH_TOOL_BIN}")
@@ -1830,7 +1862,7 @@ jobs:
             # .ash.yaml is not loaded. This step installs the version ASH pins and
             # checks it against that pin below; a config naming another opengrep
             # version would install that one instead and fail the check.
-            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            (mkdir -p "${RUNNER_TEMP}/ash-install-cwd" && cd "${RUNNER_TEMP}/ash-install-cwd" && env -u ASH_CONFIG \
               uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
                 --tool opengrep \
                 --bin-path "$INSTALL_DIR")
@@ -1883,7 +1915,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@26e5b7d197ebf60545ee9667bcbace0be11ccaec # v1.334.0
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
           ruby-version: "3.3"
           # Neither from the checkout. The action's default `bundler: Gemfile.lock`
@@ -2313,7 +2345,7 @@ jobs:
       && (needs.ash.result == 'success' || needs.ash.result == 'failure')
       && needs.ash.outputs.artifact-id != ''
       && (inputs.post-pr-comment || inputs.collect-junit-xml-report || inputs.collect-sarif-report)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -2412,7 +2444,7 @@ jobs:
       # check for the first time. That is intended, and the trade-off plus the
       # opt-out are written out at the `collect-junit-xml-report` input above.
       - name: Publish JUnit Test Report
-        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6.7.1
         if: >-
           inputs.collect-junit-xml-report
           && (github.event_name != 'pull_request'
@@ -2482,7 +2514,7 @@ jobs:
       # `collect-sarif-report: false` so a pull request does not upload the same
       # report twice.
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         if: >-
           inputs.collect-sarif-report
           && github.event_name == 'pull_request'

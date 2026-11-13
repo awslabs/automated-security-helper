@@ -188,15 +188,18 @@ describe('AgentCore: the platform checks Host and issues the session header', ()
     expect(run.argv).not.toContain('--trust-upstream-host-check');
   });
 
-  test('control: the shipped defaults still start on a release ASH (the stateful fallback)', () => {
-    // A release ASH has neither trust flag and no Host check to opt out of, so the
-    // opt-out has nothing to pass. This is the one-click default today.
+  test('control: a pre-3.8 ASH refuses the shipped defaults (exit 65) instead of starting stateful', () => {
+    // v3.8.0's `ash mcp` has --stateless-http, so the shipped defaults dropped
+    // ASH_MCP_STATELESS_FALLBACK=warn at that bump (the tripwire test asked for
+    // it). An adopter who pins AshVersion to v3.7.x gets the stateless refusal,
+    // which names the ways out, instead of a silently stateful server.
     const run = runEntrypoint(agentCoreEnvironment(), 'release');
 
-    expect(run.status).toBe(0);
-    expect(run.argv).toContain('mcp');
-    expect(run.argv).not.toContain('--trust-upstream-host-check');
-    expect(run.argv).not.toContain('--trust-upstream-session-id');
+    expect({ started: run.argv.length > 0, status: run.status }).toEqual({
+      started: false,
+      status: 65,
+    });
+    expect(run.stderr).toContain('--stateless-http');
   });
 });
 

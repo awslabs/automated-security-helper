@@ -113,4 +113,10 @@ def test_debug_shows_a_reporter_section_without_its_env_value(tmp_path, monkeypa
     # from the environment would be.
     assert "Found config for reporter plugin gitlab-cyclonedx" in printed, printed
     assert "'language_override': '<value>'" in " ".join(printed.split()), printed
-    assert CANARY not in printed, printed
+    # The report itself is the reporter's output and states the language the
+    # operator's override names (gitlab:dependency_scanning:language:name), so the
+    # document is set apart: this is about what --debug logs.
+    document = [line for line in printed.splitlines() if line.startswith("{")]
+    assert len(document) == 1 and CANARY in document[0], printed
+    logged = "\n".join(line for line in printed.splitlines() if line not in document)
+    assert CANARY not in logged, logged

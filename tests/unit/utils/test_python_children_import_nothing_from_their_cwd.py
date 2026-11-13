@@ -44,7 +44,11 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.rules_bundles import (
     create_rules_bundle_install_command,
 )
-from tests.utils.helpers import bound_run_command
+from tests.utils.helpers import (
+    bound_run_command,
+    checkout_env,
+    importing_this_checkout,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = REPO_ROOT / "automated_security_helper"
@@ -140,7 +144,7 @@ def test_control_the_detect_secrets_worker_imports_the_planted_package(tmp_path)
     subprocess.run(
         [sys.executable, "-m", DETECT_SECRETS_WORKER, "request.json", "out.json"],
         cwd=repo,
-        env=_child_env(),
+        env=checkout_env(_child_env()),
         capture_output=True,
         check=False,
         timeout=120,
@@ -184,26 +188,42 @@ def test_the_detect_secrets_worker_imports_nothing_from_the_tree_or_its_results(
 
 
 @pytest.mark.unit
-def test_a_relative_bin_path_is_made_absolute_where_it_is_read(tmp_path, monkeypatch):
+def test_a_relative_bin_path_is_warned_about_and_not_searched(tmp_path, monkeypatch):
+    """A relative ASH_BIN_PATH is not used: tool lookup warns once per value and
+    searches ``~/.ash/bin`` instead (``_bin_path``). ``current_bin_path`` is the
+    installer's reader, absolutized at the caller's working directory, where
+    the caller named it."""
+    from automated_security_helper.core.constants import home_bin_path
     from automated_security_helper.utils import subprocess_utils
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_BIN_PATH", "rel/bin")
     assert current_bin_path() == tmp_path / "rel" / "bin"
-    assert subprocess_utils._bin_path() == tmp_path / "rel" / "bin"
-    assert subprocess_utils.path_independent_dirs()[0].is_absolute()
+    # The warning is keyed by the path as the OS spells it (Path turns "rel/bin"
+    # into "rel\\bin" on Windows).
+    spelled = str(Path("rel/bin"))
+    subprocess_utils._warned_relative_bin_paths.discard(spelled)
+    assert subprocess_utils._bin_path() == home_bin_path()
+    assert spelled in subprocess_utils._warned_relative_bin_paths
+    assert subprocess_utils.path_independent_dirs()[0] == home_bin_path()
 
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("rel/bin", "{cwd}/rel/bin"), ("", "{home}/.ash/bin")],
+    [("rel/bin", "rel/bin"), ("", "{home}/.ash/bin")],
     ids=["relative", "empty"],
 )
 @pytest.mark.integration
-def test_the_bin_path_constant_is_absolute(tmp_path, value, expected):
+def test_the_bin_path_constant_follows_the_documented_contract(
+    tmp_path, value, expected
+):
     """``core.constants.ASH_BIN_PATH`` is computed at import, so it is read in a child.
 
-    An empty value used to become ``Path("")``, the current directory.
+    An empty value used to become ``Path("")``, the current directory; it is
+    the home fallback now. A relative value is kept as written
+    (``_bin_path_at_import``), under the documented contract that tool lookup
+    does not search a relative ASH_BIN_PATH and only ``ash dependencies
+    install`` makes one absolute (core/constants.py).
     """
     home = tmp_path / "home"
     home.mkdir()
@@ -218,7 +238,7 @@ def test_the_bin_path_constant_is_absolute(tmp_path, value, expected):
         [
             sys.executable,
             "-c",
-            (
+            importing_this_checkout(
                 "from automated_security_helper.core.constants import ASH_BIN_PATH; "
                 "print(ASH_BIN_PATH)"
             ),
@@ -244,7 +264,11 @@ def test_the_installer_exports_an_absolute_bin_path(tmp_path, monkeypatch):
         ["--bin-path", "rel/bin", "--tool", "no-such-tool"],
     )
     assert os.environ["ASH_BIN_PATH"] == str(tmp_path / "rel" / "bin")
-    assert (tmp_path / "rel" / "bin").is_dir()
+    # The unknown tool is refused before the bin directory is made: the command
+    # creates it just before the installs run, after every refusal of its own
+    # (tests/unit/cli/test_dependencies_refuses_before_creating.py), so the
+    # export is this run's only effect.
+    assert not (tmp_path / "rel").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +324,9 @@ def test_the_helper_adds_no_directory_of_the_child_to_sys_path(tmp_path):
 #: ``refusing_install_command``.
 #:
 #: ``_ash_environment_install`` compares an install command's prefix with this
-#: list and starts nothing.
+#: list and starts nothing. ``_with_path_imported`` rebuilds a declared opengrep
+#: download command with ``Path`` imported and returns it; the rebuilt argv runs
+#: through ``run_command`` like the one it replaces.
 #:
 #: The cdk-nag worker: its ``-c`` source drops ``sys.path[0]`` before importing
 #: anything, and it starts in a directory it has just created; see
@@ -316,7 +342,7 @@ RAW_PYTHON_ARGV_ALLOWED = {
         "plugin_modules/ash_builtin/scanners/opengrep_scanner.py",
         "_refuse_unverified_install_command",
     ),
-    ("cli/dependencies.py", "install_dependencies"),
+    ("cli/dependencies.py", "_with_path_imported"),
     ("utils/cdk_nag_worker.py", "_run_child"),
 }
 

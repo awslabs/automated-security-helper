@@ -6,22 +6,50 @@ fail the build. This page gives that recipe as plain shell, then shows it in Jen
 CodeBuild, Azure Pipelines, and CircleCI. GitHub Actions and GitLab CI have their own pages:
 [Run ASH in GitHub Actions](github-actions.md) and [Run ASH in GitLab CI](gitlab-ci.md).
 
+If developers also run the pre-commit hook, it covers only five scanners; a CI scan runs
+the full set. See [Pre-commit and CI together](../pre-commit.md#with-ci).
+
 ## The recipe {#recipe}
 
 <!-- doctest: illustrative reason="installs ASH and scanner tools from the network" -->
 ```bash
 python3 -m venv "$HOME/ash-venv"
 "$HOME/ash-venv/bin/pip" install --quiet \
-  "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+  "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
 export PATH="$HOME/ash-venv/bin:$PATH"
 (cd "$(mktemp -d)" && ash dependencies install \
-  --tool grype --tool syft --tool opengrep --tool cfn-nag \
-  --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+  --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+  --tool grype --tool opengrep --tool syft --tool trivy)
 ash scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
 
 Run it from the root of the checkout. The reports land in `.ash/ash_output/reports/`.
+
+To use [uv](https://docs.astral.sh/uv/) instead of a virtual environment, replace the first
+three lines with a function that runs ASH through `uvx`, using the specification from
+[Run without installing: uvx](../install.md#run-without-installing-uvx). The rest of the
+recipe is unchanged. A shell function lasts only as long as the shell that defines it, so
+this form works where the commands share one shell: the generic shell step, Jenkins, and
+CodeBuild below. Azure Pipelines and CircleCI start a new shell for each step, and keep
+the virtual environment form unless you take the extra step in their sections:
+
+<!-- doctest: illustrative reason="installs ASH and scanner tools from the network" -->
+```bash
+ash() {
+  uvx --python 3.12 --from \
+    'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0' \
+    ash "$@"
+}
+(cd "$(mktemp -d)" && ash dependencies install \
+  --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
+  --tool grype --tool opengrep --tool syft --tool trivy)
+ash scan --mode local --no-progress \
+  --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+```
+
+This needs `uv` on the build host's `PATH`. `uvx` builds the environment on the first call
+and reuses it for later calls.
 
 - Keep the virtual environment outside the checkout. ASH does not run tools it finds inside
   the directory it scans, and the virtual environment's `bin` holds the `uv` that ASH uses to
@@ -84,13 +112,56 @@ tool. Two more things differ in CI:
 - A job that runs as root, as AWS CodeBuild and container-based jobs do, needs
   `--build-target ci`: ASH refuses to build the non-root image, whose user would get
   UID 0.
-- `--changed-files-only` is not supported in container mode: the scan stops with exit code 5
-  before anything is built or run, also when `ASH_CHANGED_FILES_ONLY` sets it.
+- `--changed-files-only` is not supported in container mode. Releases through v3.7.1
+  ignore it with a warning and report the findings in every file; later builds refuse it
+  with exit code 5 before anything is built or run, also when `ASH_CHANGED_FILES_ONLY` sets it.
+  The GitHub Actions workflow does not leave this to ASH: it stops the job with its own
+  error before ASH runs ([Run ASH in GitHub Actions](github-actions.md)).
 
 For many repositories, build the image once, push it to your registry, and use it as the
 build image, running `ash scan --mode local` inside it. Nothing is installed per build. See
 [Run ASH in a container](../run-in-a-container.md) and
 [Roll out ASH across repositories](../../getting-started/platform-teams.md).
+
+## Nix mode {#nix}
+
+!!! warning "Nix mode is on `main` only"
+    Nix mode is not in any release: v3.7.x rejects `--mode nix`. Install ASH from `main`, as
+    below, or from a source checkout. Pin a commit SHA instead of `main` when you need to
+    know which code ran.
+
+Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
+ASH's `flake.nix`, so the build host does not need the `ash dependencies install` step or
+the Ruby packages the [recipe](#recipe) uses for cfn-nag. The host needs:
+
+- Nix, on Linux or macOS. ASH passes `nix-command` and `flakes` on each invocation, so
+  you do not have to enable them in `nix.conf`.
+- ASH itself, installed with the `cdk` extra. Nix mode does not install ASH, and cdk-nag
+  runs on the Python environment ASH is installed in, not in the Nix shell.
+- Node.js is supplied by the flake. Network access is still needed for the scanners'
+  databases and rules.
+
+An install of `main` looks for `flake.nix` at the release tag that matches its version
+number, and no release has one, so set `ASH_NIX_FLAKE_REF` to a flake reference that does:
+
+<!-- doctest: illustrative reason="installs ASH from main and needs Nix and the network" -->
+```bash
+uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main'
+export ASH_NIX_FLAKE_REF=github:awslabs/automated-security-helper/main
+ash_exit=0
+ash scan --mode nix --no-progress \
+  --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
+  || ash_exit=$?
+tar -czf ash-output.tar.gz .ash/ash_output
+exit "$ash_exit"
+```
+
+From a source checkout of ASH, leave `ASH_NIX_FLAKE_REF` unset: ASH uses that checkout's
+`flake.nix`. The exit codes and the output directory are the same as in local mode, so
+every gate and artifact step in the sections below applies unchanged. The Nix shell
+supplies the tools of every built-in scanner except cdk-nag; it does not supply
+ferret-scan or the Snyk CLI. [Install ASH](../install.md#nix-mode) has the full list of
+what Nix mode needs and which config file the scan reads.
 
 ## Use the exit code as the gate {#exit-codes}
 
@@ -123,7 +194,7 @@ Ruby:
 pipeline {
   agent { label 'linux' }
   environment {
-    INSTALL_SPEC = 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+    INSTALL_SPEC = 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0'
   }
   stages {
     stage('ASH') {
@@ -133,7 +204,7 @@ pipeline {
           python3 -m venv "$WORKSPACE_TMP/ash"
           "$WORKSPACE_TMP/ash/bin/pip" install --quiet "$INSTALL_SPEC"
           export PATH="$WORKSPACE_TMP/ash/bin:$PATH"
-          (cd "$WORKSPACE_TMP/tools" && ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+          (cd "$WORKSPACE_TMP/tools" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
           ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
         '''
       }
@@ -168,7 +239,7 @@ A `buildspec.yml` for a standard Linux image, for example
 version: 0.2
 env:
   variables:
-    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
 phases:
   install:
     runtime-versions:
@@ -179,7 +250,7 @@ phases:
       - python -m venv /opt/ash
       - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
       - export PATH="/opt/ash/bin:$PATH"
-      - (cd "$(mktemp -d)" && ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+      - (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
   build:
     commands:
       - ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
@@ -211,18 +282,18 @@ An `azure-pipelines.yml` for a Microsoft-hosted Ubuntu agent:
 pool:
   vmImage: ubuntu-latest
 variables:
-  INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+  INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
 steps:
   - task: UsePythonVersion@0
     inputs:
       versionSpec: "3.12"
   - script: |
-      sudo apt-get update && sudo apt-get install -y --no-install-recommends ruby-dev libyaml-dev
+      sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends ruby-dev libyaml-dev
       python -m venv "$(Agent.TempDirectory)/ash"
       "$(Agent.TempDirectory)/ash/bin/pip" install --quiet "$INSTALL_SPEC"
       echo "##vso[task.prependpath]$(Agent.TempDirectory)/ash/bin"
     displayName: Install ASH
-  - script: ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy
+  - script: ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy
     workingDirectory: $(Agent.TempDirectory)
     displayName: Install scanner tools
   - script: ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
@@ -257,6 +328,12 @@ steps:
   from Microsoft DevLabs reads. With the extension installed in your organization, the run
   shows the SARIF findings in a tab of its own.
 - The `apt-get` line adds the Ruby headers and libyaml that building cfn-nag's gems needs.
+- Each `script` step is a new shell, so the `ash()` function from the [recipe](#recipe) is
+  gone by the next step and the call fails with exit status 127. To run ASH through `uvx`
+  here, have the install step write an executable `ash` wrapper script that runs
+  `uvx ... ash "$@"` into a directory outside the checkout, and add that directory to the
+  `PATH` with `##vso[task.prependpath]`, as the install step does for the virtual
+  environment's `bin`. Otherwise keep the virtual environment form above.
 
 ## CircleCI {#circleci}
 
@@ -270,23 +347,23 @@ jobs:
     docker:
       - image: cimg/python:3.12-node
     environment:
-      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.8.0"
     steps:
       - checkout
       - run:
           name: Install ASH
           command: |
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends ruby ruby-dev libyaml-dev
+            sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends ruby ruby-dev libyaml-dev
             python3 -m venv "$HOME/ash-venv"
             "$HOME/ash-venv/bin/pip" install --quiet "$INSTALL_SPEC"
             echo 'export PATH="$HOME/ash-venv/bin:$PATH"' >> "$BASH_ENV"
       - restore_cache:
-          key: ash-tools-v3.7.0-{{ arch }}
+          key: ash-tools-v3.8.0-{{ arch }}
       - run:
           name: Install scanner tools
-          command: (cd "$(mktemp -d)" && ash dependencies install --tool grype --tool syft --tool opengrep --tool cfn-nag --tool actionlint --tool cfn-guard --tool gitleaks --tool trivy)
+          command: (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
       - save_cache:
-          key: ash-tools-v3.7.0-{{ arch }}
+          key: ash-tools-v3.8.0-{{ arch }}
           paths:
             - ~/.ash/bin
       - run:
@@ -318,6 +395,10 @@ workflows:
 - Each `run` step starts a new shell. The line that appends to `$BASH_ENV` puts the
   virtual environment's `bin` on `PATH` for every later step. The virtual environment is
   in the home directory, outside the checkout in `~/project`.
+- A shell function from the [recipe](#recipe) does not carry from one `run` step to the
+  next either. To run ASH through `uvx` here, append the `ash()` function to `$BASH_ENV` in
+  the install step in place of the `PATH` line, so that each later step's shell defines it.
+  The image needs `uv` on its `PATH`. Otherwise keep the virtual environment form above.
 - `save_cache` comes before the scan because, by default, it runs only when every step
   before it succeeded, and a scan with findings fails its step. CircleCI never overwrites
   a saved key, so key the cache on the ASH version, as above: each version pins its own

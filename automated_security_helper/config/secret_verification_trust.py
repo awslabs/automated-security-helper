@@ -36,7 +36,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, FrozenSet, Iterable, List, Optional, Sequence
 
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
-from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    ASHRespelledOverrideError,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -76,10 +79,13 @@ def is_verification_filter(path: object) -> bool:
     Matched on the function, so both spellings count: the module path
     (``detect_secrets.filters.common.<function>``) and a ``file://<file>::<function>``
     entry, where a file outside the scanned tree can provide the same function.
+    The scheme is read the way ``is_file_entry`` reads it, ignoring surrounding
+    space and case, so an entry that counts as a file to import is also recognized as
+    the verification filter when it names that function.
     """
     if not isinstance(path, str):
         return False
-    if path.startswith("file://"):
+    if path.strip().lower().startswith("file://"):
         function = path.partition("::")[2]
     else:
         function = path.rpartition(".")[2]
@@ -122,13 +128,67 @@ def same_baseline(
 
 
 def _detect_secrets_overrides(config_overrides: Optional[Sequence[str]]) -> List[str]:
-    """The ``--config-overrides`` entries that can change detect-secrets' settings."""
+    """The ``--config-overrides`` entries that can change detect-secrets' settings.
+
+    An entry at ``scanners`` whole, or one whose section segment is any spelling
+    the apply folds onto the declared ``detect-secrets`` section
+    (``DetectSecrets``, ``detectsecrets``, ``Detect-Secrets``;
+    ``plugin_section_names.plugin_key_in``): an entry the apply lands on the
+    section is replayed, so what the operator asked for is kept as the
+    operator's under every spelling the config accepts.
+    """
+    from automated_security_helper.config.plugin_section_names import (
+        folded_section_name,
+    )
+
+    wanted = folded_section_name("detect_secrets")
     selected: List[str] = []
     for override in config_overrides or []:
-        key = override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
-        if key == "scanners" or key.startswith("scanners.detect_secrets"):
+        key = override.partition("=")[0].removesuffix("+").strip()
+        parts = [part.strip() for part in key.split(".")]
+        if parts[0] != "scanners":
+            continue
+        if len(parts) == 1 or folded_section_name(parts[1]) == wanted:
             selected.append(override)
     return selected
+
+
+def _replayed(trusted_config: "AshConfig", overrides: List[str]) -> "AshConfig":
+    """``trusted_config`` with the detect-secrets ``overrides`` applied to it.
+
+    Together first, as the scan's own apply takes them, so entries that are valid only
+    as a set all land. When the set does not apply, each entry is applied on its own,
+    in order, and one that does not apply drops only itself: it turns nothing on, and
+    the entries that do apply still count as the operator's. This is the replay the
+    reporters overrides get (``resolve_config._with_reporter_overrides``), including
+    its one refusal: a respelled section (``ASHRespelledOverrideError``) is raised,
+    not dropped.
+    """
+    if not overrides:
+        return trusted_config
+    from automated_security_helper.config.resolve_config import (
+        apply_config_overrides,
+    )
+
+    try:
+        return apply_config_overrides(trusted_config, overrides)
+    except ASHRespelledOverrideError:
+        raise
+    except ASHConfigValidationError:
+        # One of them does not apply to the trusted base. They are applied again
+        # one at a time below.
+        pass
+    replayed = trusted_config
+    for override in overrides:
+        try:
+            replayed = apply_config_overrides(replayed, [override])
+        except ASHRespelledOverrideError:
+            raise
+        except ASHConfigValidationError:
+            # They applied to the resolved config already; one that does not apply
+            # to the trusted base turns nothing on.
+            continue
+    return replayed
 
 
 def confine_detect_secrets_settings(
@@ -156,18 +216,9 @@ def confine_detect_secrets_settings(
     # detect-secrets scanner, which imports this module.
     from automated_security_helper.config.config_sources import describe_config_path
 
-    overrides = _detect_secrets_overrides(config_overrides)
-    if overrides:
-        from automated_security_helper.config.resolve_config import (
-            apply_config_overrides,
-        )
-
-        try:
-            trusted_config = apply_config_overrides(trusted_config, overrides)
-        except ASHConfigValidationError:
-            # They applied to the resolved config already; one that does not apply
-            # to the trusted base turns nothing on.
-            pass
+    trusted_config = _replayed(
+        trusted_config, _detect_secrets_overrides(config_overrides)
+    )
     trusted_options = trusted_config.scanners.detect_secrets.options
     trusted_settings = trusted_options.scan_settings
     files = ", ".join(describe_config_path(path) for path in in_tree) or "a config file"

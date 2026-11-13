@@ -100,10 +100,14 @@ Limits
   putting the previous results back, which replaces every result the scan wrote;
   its logs (``ash.log``, ``ash.log.jsonl``) stay, as they are not among
   ``previous_results.RESULT_ENTRIES``.
-- The report phase removes the reports it wrote, by path. A reporter that
-  writes a file of its own (``unused_suppressions_reporter`` writes its markdown
-  beside the JSON the phase writes) leaves that file behind, unless previous
-  results are put back over it.
+- The report phase removes the reports it wrote, by path, and every other entry
+  that appeared under the reports directory while it ran: a reporter that writes
+  a file of its own (``unused_suppressions_reporter`` writes its markdown beside
+  the JSON the phase writes) has it removed too. That second removal needs a
+  listing of the directory taken before the reporters ran; when that listing did
+  not complete, only the files written by path are removed and such a file
+  stays, unless previous results are put back over it. Files a reporter that sends findings off
+  the host left are kept, as the record of what it sent.
 - A workspace scan has an event per project, which its project's worker sets as
   its scope, and one for the run (workspace/execution.py). The run checks its own
   before writing the unified results and before the workspace reports, not while
@@ -118,7 +122,8 @@ import os
 import signal
 import threading
 import time
-from typing import Iterator, Optional, Tuple
+from types import FrameType
+from typing import Any, Iterator, Optional, Tuple, cast
 
 
 class ScanCancelled(BaseException):
@@ -180,8 +185,9 @@ class _ChainedPrompt(threading.Event):
     """A CancelEvent's prompt, answering for the event's ancestors too.
 
     ``is_set`` reads this event's own flag OR the SIGTERM handler's lock-free
-    latch on the owner OR the owner's parent's ``stop_promptly``, so the grace
-    wait's per-tick ``prompt.is_set()`` read
+    latch on the owner OR the same two on each ancestor, walked here with a seen
+    set rather than through the parent's ``stop_promptly`` (which recursed up the
+    chain), so the grace wait's per-tick ``prompt.is_set()`` read
     (utils/subprocess_utils._wait_out_grace) sees any of them within one grace
     poll tick. ``wait`` polls the same read in slices (:func:`_poll_wait`):
     the plain event's wait blocked on the OWN flag only, so a wait already in
@@ -196,8 +202,24 @@ class _ChainedPrompt(threading.Event):
     def is_set(self) -> bool:
         if super().is_set() or self._owner._signalled:
             return True
+        # Walk the ancestors here, with the seen set CancelEvent.is_set keeps,
+        # and not by reading each parent's stop_promptly: that read recurses up
+        # the chain, and two links made at once can close a cycle that the
+        # unlocked cycle checks missed, which made it a RecursionError.
+        seen = {id(self._owner)}
         parent = self._owner._parent
-        return parent is not None and bool(getattr(parent, "stop_promptly", False))
+        while parent is not None and id(parent) not in seen:
+            seen.add(id(parent))
+            prompt = getattr(parent, "prompt", None)
+            if not isinstance(prompt, _ChainedPrompt):
+                # Not a CancelEvent: its own answer ends the climb.
+                return bool(getattr(parent, "stop_promptly", False))
+            # A parent whose prompt is a chained prompt is a CancelEvent.
+            chained = cast("CancelEvent", parent)
+            if threading.Event.is_set(prompt) or chained._signalled:
+                return True
+            parent = chained._parent
+        return False
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         return _poll_wait(self, timeout)
@@ -321,6 +343,20 @@ def _chains_to(event: threading.Event, target: threading.Event) -> bool:
     return False
 
 
+#: Orders the cycle check and the parent store of the two linking paths
+#: (:func:`cancel_scope`, :func:`link_parent`). Unlocked, two threads linking
+#: two events to each other each saw no cycle and each stored its link, closing
+#: one. Only normal thread frames take it; the signal handlers never do.
+_PARENT_LINK_LOCK = threading.Lock()
+
+
+def _link_if_unlinked(event: "CancelEvent", parent: threading.Event) -> None:
+    """Chain *event* to *parent* when it has no parent and no cycle would close."""
+    with _PARENT_LINK_LOCK:
+        if event._parent is None and not _chains_to(parent, event):
+            event._parent = parent
+
+
 _CANCEL_EVENT: contextvars.ContextVar[Optional[threading.Event]] = (
     contextvars.ContextVar("ash_scan_cancel_event", default=None)
 )
@@ -337,8 +373,8 @@ def cancel_scope(event: threading.Event) -> Iterator[None]:
     """
     if isinstance(event, CancelEvent) and event._parent is None:
         ambient = _CANCEL_EVENT.get()
-        if ambient is not None and not _chains_to(ambient, event):
-            event._parent = ambient
+        if ambient is not None:
+            _link_if_unlinked(event, ambient)
     token = _CANCEL_EVENT.set(event)
     try:
         yield
@@ -362,11 +398,9 @@ def link_parent(event: threading.Event, parent: Optional[threading.Event]) -> No
     that would close a cycle (*parent* already chains to *event*) is
     refused. A link is never removed (see :class:`CancelEvent`).
     """
-    if not isinstance(event, CancelEvent) or event._parent is not None:
+    if not isinstance(event, CancelEvent) or parent is None:
         return
-    if parent is None or _chains_to(parent, event):
-        return
-    event._parent = parent
+    _link_if_unlinked(event, parent)
 
 
 def current_cancel_event() -> Optional[threading.Event]:
@@ -399,7 +433,8 @@ _SIGTERM_SEEN = False
 #: so the handler reads a consistent snapshot without taking a lock.
 _SHUTDOWN_SCOPES: Tuple[CancelEvent, ...] = ()
 
-#: Set once the handler has cancelled the registered scopes: a plain bool,
+#: Set by the handler before it reads the registered scopes, on a first Ctrl-C
+#: or a SIGTERM and whether or not any scan is registered: a plain bool,
 #: not an Event, because the handler writes it with the interrupted frame's
 #: locks unknowable and ``Event.set`` takes one. Read by
 #: :func:`shutdown_requested` and by :func:`shutdown_cancels`, so a scope
@@ -540,6 +575,80 @@ def discard_die_now_cleanup(path: "str | os.PathLike[str]") -> None:
             _CLEANUP_FILES = tuple(p for p in _CLEANUP_FILES if p != name)
 
 
+#: What the die-now SIGINT ending writes to standard error before it exits, as
+#: pre-encoded bytes so the signal frame only loads one reference and makes one
+#: ``os.write`` -- no logger, no lock, no encoding work (the same rules as
+#: ``_TOOL_GROUPS``). None, the default, keeps the SIG_DFL re-raise for a
+#: command that registered nothing. Registered by the commands whose
+#: interrupted ending the docs pin (``record_die_now_message``): exit-codes.md
+#: says of the 130 row that "a second Ctrl-C during the wait kills it at once"
+#: and "A scan prints the interrupted-scan message above", so the die-now
+#: ending of such a command has to say how the run ended and exit 130, not die
+#: of raw SIGINT with nothing printed.
+_DIE_NOW_MESSAGE: Optional[bytes] = None
+
+#: The exit status of a die-now ending that prints a recorded message: the 130
+#: a shell reports for an interrupted process, and the status exit-codes.md
+#: pins for Ctrl-C in every mode (core/constants.ASH_EXIT_INTERRUPTED; not
+#: imported here, so this module keeps its no-ASH-imports rule for code the
+#: signal frame runs).
+_DIE_NOW_EXIT = 130
+
+
+def record_die_now_message(text: str) -> None:
+    """Record what the die-now SIGINT ending says on stderr before exiting 130.
+
+    For a command whose interrupted ending the docs pin (``ash scan``'s
+    "ASH scan interrupted before it finished: ...", ``ash build-image``'s own
+    line): its first Ctrl-C unwinds to the command's interrupt arm, which
+    prints the message and exits 130, but a second Ctrl-C lands in the
+    handler's die-now arm, which never returns to that arm. With a message
+    recorded, that arm writes it to stderr and exits 130
+    (``os._exit``: no ``finally`` runs, as under the SIG_DFL re-raise it
+    replaces); with none, the arm re-raises under SIG_DFL as before. The text
+    is encoded here, with a trailing newline added when it has none, so the
+    handler does no string work.
+    """
+    global _DIE_NOW_MESSAGE
+    data = text.encode("utf-8", "backslashreplace")
+    if not data.endswith(b"\n"):
+        data += b"\n"
+    with _TOOL_GROUPS_WRITE_LOCK:
+        _DIE_NOW_MESSAGE = data
+
+
+def discard_die_now_message() -> None:
+    """Forget the recorded die-now message once the command's run is over.
+
+    The registrar's ``finally``: in a process that goes on living after the
+    command returns (a test that runs the command in-process, a caller using
+    the CLI as a library), a stale message would turn a later die-now into
+    this command's ending, and would print a word about a run that is not the
+    one being interrupted.
+    """
+    global _DIE_NOW_MESSAGE
+    with _TOOL_GROUPS_WRITE_LOCK:
+        _DIE_NOW_MESSAGE = None
+
+
+def _exit_with_die_now_message(message: bytes) -> None:
+    """Say how the run ended and exit 130, for the die-now SIGINT ending.
+
+    One ``os.write`` to fd 2 and one ``os._exit``, both single syscalls the
+    signal frame may make: no logger, no lock, no stream object, whose locks
+    the interrupted frame may hold. ``os._exit`` runs no ``finally`` and no
+    ``atexit``, so everything the SIG_DFL death was chosen for still holds
+    (the cleanup the operator gave up on by pressing Ctrl-C twice stays
+    skipped); what changes is the word on stderr and the exit status, which
+    exit-codes.md pins as the interrupted-scan message and 130.
+    """
+    try:
+        os.write(2, message)
+    except OSError:
+        pass
+    os._exit(_DIE_NOW_EXIT)
+
+
 def _remove_die_now_cleanups() -> None:
     """Remove the recorded values-holding files, for the default-kill endings.
 
@@ -560,6 +669,41 @@ def _remove_die_now_cleanups() -> None:
             os.rmdir(os.path.dirname(name))
         except OSError:
             pass
+
+
+def _is_live_child(pid: int) -> bool:
+    """Whether *pid* is a child of this process that has not exited.
+
+    ``waitid(P_PID, pid, WEXITED | WNOHANG | WNOWAIT)`` answers in one syscall:
+    ``None`` for a running child, a result for one that exited, and ECHILD for
+    a pid that is not this process's child, which is what a reaped child's pid
+    becomes once another process holds it. ``WNOWAIT`` leaves an exited child
+    unreaped, so the exit status stays for the ``Popen`` that owns it. Reaping
+    it here with ``waitpid`` left that ``Popen`` a later wait that failed with
+    ECHILD, which it reads as a return code of 0 (a failed tool reads as
+    success), and that is what happens when this process is its container's
+    init and the signal it sent itself was dropped.
+
+    A platform with no ``waitid`` (CPython leaves it out on macOS) asks
+    ``waitpid(pid, WNOHANG)`` instead, which does reap an exited child. Anything
+    else, including a platform with neither, reads as not a live child, so no
+    signal is sent on a guess.
+    """
+    waitid = getattr(os, "waitid", None)
+    if waitid is not None:
+        try:
+            exited = waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except OSError:
+            return False
+        return exited is None
+    flag = getattr(os, "WNOHANG", None)
+    if flag is None:
+        return False
+    try:
+        reaped, _status = os.waitpid(pid, flag)
+    except OSError:
+        return False
+    return reaped == 0
 
 
 def _kill_recorded_groups() -> None:
@@ -592,15 +736,127 @@ def _kill_recorded_groups() -> None:
             # setsid leads no group of its own, so the group kill is ESRCH
             # while the child lives; one os.kill at the pid reaches it, as
             # the subprocess layer's _kill_group falls back for that child.
-            try:
-                os.kill(pgid, signal.SIGKILL)
-            except OSError:
-                pass
+            # Only while that pid is still a live child of this process: a
+            # group id left recorded after its child was reaped (the discard
+            # never ran) is a pid another process can hold by now, and the
+            # fallback kill landed on it. _is_live_child tells the two apart in
+            # one syscall, as the signal frame allows (waitid with WNOWAIT, which
+            # leaves an exited child unreaped for the Popen that owns it).
+            if _is_live_child(pgid):
+                try:
+                    os.kill(pgid, signal.SIGKILL)
+                except OSError:
+                    pass
     for pid in _TOOL_PIDS:
         try:
             os.kill(pid, signal.SIGINT)
         except OSError:
             pass
+
+
+#: How many stops are waiting out a tool's grace period right now (SIGTERM sent,
+#: SIGKILL to follow when the grace ends). Written under its lock by
+#: :func:`stop_grace_in_progress` on normal thread frames; read without the lock
+#: by the SIGINT handler, one integer load, as the signal frame allows.
+_GRACE_WAITS = 0
+_GRACE_WAITS_WRITE_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def stop_grace_in_progress() -> Iterator[None]:
+    """While inside, a first Ctrl-C latches the cancel but does not interrupt.
+
+    For the subprocess layer's grace wait (``utils/subprocess_utils
+    ._wait_out_grace``): a stop a TIMEOUT began (SIGTERM sent, the grace being
+    waited out, SIGKILL to follow) is not a signal, so a first Ctrl-C during it
+    found neither latch set and chained the default handler, which raised
+    KeyboardInterrupt in the main thread's grace wait and aborted the SIGKILL
+    escalation the second-signal branch protects: a SIGTERM-ignoring tool then
+    outlived the exit. Inside this context the first Ctrl-C still latches every
+    registered scan's cancel (the scan unwinds through the same checks a cancel
+    uses once the stop returns), and the stop completes its escalation. The
+    interrupt is held back only while a scan is registered
+    (``shutdown_cancels``): with none, nothing would unwind on the latch, so the
+    first Ctrl-C stays an interrupt. The count is process-wide, as the handler
+    is.
+    """
+    global _GRACE_WAITS
+    entered = False
+    # The count is raised inside the try, so an interrupt that lands while the
+    # lock is being taken or released cannot leave a raised count with no
+    # finally to lower it. That narrows the window to one boundary rather than
+    # closing it: an interrupt delivered between the store that raises the
+    # count and the store that sets ``entered`` reaches the finally with
+    # ``entered`` False, so the count stays one too high for the rest of the
+    # process. No test can reach it, and no guard is added around it.
+    try:
+        with _GRACE_WAITS_WRITE_LOCK:
+            _GRACE_WAITS += 1
+            entered = True
+        yield
+    finally:
+        if entered:
+            with _GRACE_WAITS_WRITE_LOCK:
+                _GRACE_WAITS -= 1
+
+
+#: How many interrupt stops are passing a Ctrl-C on and waiting the child out
+#: right now (``utils/subprocess_utils.stop_after_interrupt``). Written under
+#: its lock on normal thread frames; read without the lock by the SIGINT
+#: handler, one integer load, as the signal frame allows. While it is raised, a
+#: second Ctrl-C chains the interrupt instead of taking the die-now death:
+#: ``stop_after_interrupt``'s KeyboardInterrupt arm is what kills the waited-out
+#: child at once, which is the behavior exit-codes.md pins for a second Ctrl-C
+#: during the wait, and the unwinding then prints the interrupted-scan message
+#: and exits 130 at the command's own arm.
+_INTERRUPT_STOP_WAITS = 0
+_INTERRUPT_STOP_WAITS_WRITE_LOCK = threading.Lock()
+#: The child processes those waits are waiting out, as a snapshot tuple. A
+#: writer replaces the whole tuple under the same lock; the SIGINT handler
+#: reads the name once and never takes the lock, as it does for the counter.
+_INTERRUPT_STOP_PROCESSES: tuple[Any, ...] = ()
+
+
+@contextlib.contextmanager
+def interrupt_stop_in_progress(process: Optional[Any] = None) -> Iterator[None]:
+    """While inside, a second Ctrl-C stays an interrupt instead of dying now.
+
+    With a *process*, the registration has a second role: it hands the
+    dispatcher the child being waited out, so the second Ctrl-C stops it from
+    the handler itself, whichever frame the chained interrupt then lands in.
+
+    For the subprocess layer's interrupt stop
+    (``utils/subprocess_utils.stop_after_interrupt``): the first Ctrl-C has
+    unwound to the arm that passes the interrupt on and waits the child out,
+    and that wait's own ``except KeyboardInterrupt`` is the documented second
+    Ctrl-C ("a second Ctrl-C during the wait kills it at once",
+    exit-codes.md): it kills the child, with no second interrupt delivered to
+    it, and re-raises, so the command's interrupt arm still prints the
+    interrupted-scan message and exits 130. The die-now branch would instead
+    interrupt the child once more and leave one that ignores it running. The
+    same raise-inside-the-try shape, with the same one-boundary window, as
+    :func:`stop_grace_in_progress`.
+    """
+    global _INTERRUPT_STOP_WAITS, _INTERRUPT_STOP_PROCESSES
+    entered = False
+    try:
+        with _INTERRUPT_STOP_WAITS_WRITE_LOCK:
+            if process is not None:
+                _INTERRUPT_STOP_PROCESSES = (*_INTERRUPT_STOP_PROCESSES, process)
+            _INTERRUPT_STOP_WAITS += 1
+            entered = True
+        yield
+    finally:
+        if entered:
+            with _INTERRUPT_STOP_WAITS_WRITE_LOCK:
+                _INTERRUPT_STOP_WAITS -= 1
+                if process is not None:
+                    remaining = list(_INTERRUPT_STOP_PROCESSES)
+                    for index, registered in enumerate(remaining):
+                        if registered is process:
+                            del remaining[index]
+                            break
+                    _INTERRUPT_STOP_PROCESSES = tuple(remaining)
 
 
 def shutdown_requested() -> bool:
@@ -611,6 +867,18 @@ def shutdown_requested() -> bool:
     signal is cancelled at once (:func:`shutdown_cancels`).
     """
     return _SHUTDOWN_REQUESTED
+
+
+def sigint_seen() -> bool:
+    """Whether a SIGINT has reached this process's Ctrl-C handler.
+
+    One boolean load of the latch :func:`_handle_sigint` sets, for a caller
+    that has to tell what an exception that lost its type on the way means:
+    the MCP stdio server reads it when a bare cancellation escapes the
+    serving, because on Windows under Python 3.10 that is how asyncio hands
+    back the Ctrl-C the handler chained (cli/mcp_server._interrupted).
+    """
+    return _SIGINT_SEEN
 
 
 def shutdown_scopes_registered() -> bool:
@@ -660,6 +928,12 @@ def _handle_sigterm(signum: int, frame: object) -> None:
         signal.raise_signal(signal.SIGTERM)
         return
     _SIGTERM_SEEN = True
+    # Published BEFORE the scopes are read. shutdown_cancels appends its event
+    # and then reads this flag, so with the flag first, a registration is seen
+    # by one side or the other: either the append is in the snapshot below, or
+    # the registrar's read finds the flag set. Read in the other order, an
+    # append between the snapshot and the store was seen by neither.
+    _SHUTDOWN_REQUESTED = True
     scopes = _SHUTDOWN_SCOPES
     if not scopes:
         # No scan to stop cooperatively: keep SIGTERM's kill semantics rather
@@ -671,7 +945,6 @@ def _handle_sigterm(signum: int, frame: object) -> None:
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         signal.raise_signal(signal.SIGTERM)
         return
-    _SHUTDOWN_REQUESTED = True
     for event in scopes:
         # The process is going away: the running tool gets the short grace a
         # stdio shutdown gets (subprocess_utils._stop_grace). The flag covers
@@ -682,7 +955,7 @@ def _handle_sigterm(signum: int, frame: object) -> None:
         previous(signum, frame)
 
 
-def _handle_sigint(signum: int, frame: object) -> None:
+def _handle_sigint(signum: int, frame: FrameType | None) -> None:
     """Latch the registered scans on the first Ctrl-C; die now on the second.
 
     The same no-lock rules as :func:`_handle_sigterm`: the latch is one plain
@@ -695,19 +968,84 @@ def _handle_sigint(signum: int, frame: object) -> None:
     scan registered kills nothing: ``KeyboardInterrupt`` unwinds and the
     cleanup runs.
 
+    One exception to "stays an interrupt": inside :func:`stop_grace_in_progress`
+    (the shutdown of a tool that a timeout began is waiting out its grace), a
+    first Ctrl-C with a scan registered latches the cancel and returns without
+    chaining, since the interrupt would land in the grace wait and end the
+    escalation before its kill. With no scan registered nothing reads the latch,
+    so the interrupt is chained there as everywhere else.
+
     A second shutdown signal of either kind -- another Ctrl-C, or a Ctrl-C
     after a SIGTERM already started the cooperative stop -- means the
-    operator wants the process gone more than they want the cleanup. The recorded
-    tool groups are killed -- each scanner tool leads a session and group of
-    its own, so another interrupt alone would orphan the tool the first stop
-    was still waiting out -- and the recorded launcher children are
+    operator wants the process gone more than they want the cleanup. While an
+    interrupt stop is waiting its child out
+    (:func:`interrupt_stop_in_progress`), the signal is chained instead: that
+    wait's own KeyboardInterrupt arm is the documented second Ctrl-C, which
+    kills the child at once and re-raises, and the command's interrupt arm
+    then says how the run ended and exits 130 (exit-codes.md). Otherwise the
+    recorded tool groups are killed -- each scanner tool leads a session and
+    group of its own, so another interrupt alone would orphan the tool the
+    first stop was still waiting out -- and the recorded launcher children are
     interrupted, which is the second interrupt of the inner ASH they run and
-    so ends its own tools. The process then dies as an interrupted process
-    does, by SIGINT under the default disposition, which a shell reports as
-    130.
+    so ends its own tools. A command that recorded its interrupted ending
+    (:func:`record_die_now_message`) then says it on stderr and exits 130
+    without running any cleanup (``os._exit``); any other process dies as an
+    interrupted one does, by SIGINT under the default disposition, which a
+    shell reports as 130.
     """
     global _SIGINT_SEEN, _SHUTDOWN_REQUESTED
     if _SIGINT_SEEN or _SIGTERM_SEEN:
+        if _INTERRUPT_STOP_WAITS > 0:
+            # An interrupt stop is passing the Ctrl-C on and waiting the child
+            # out (stop_after_interrupt): its own KeyboardInterrupt arm is the
+            # documented second Ctrl-C, which kills that child at once with no
+            # further interrupt delivered to it, and re-raises so the
+            # command's interrupt arm prints the interrupted-scan message and
+            # exits 130 (exit-codes.md, the Ctrl-C rows). The die-now kills
+            # below would interrupt the child once more and leave one that
+            # ignores it running, so the interrupt is chained instead. The
+            # registered waited children are stopped here as well, one syscall
+            # each as the die-now kills are, so the documented kill-at-once
+            # does not depend on where the chained interrupt lands; the armed
+            # arm in stop_after_interrupt stays and reaps. On POSIX the kill is
+            # reap-free: Popen.kill polls first, which reaps a child that has
+            # already exited, and a reaped pid whose die-now record is still
+            # recorded can be reused and then killed by a later sweep. So the
+            # child is checked with waitid, which leaves it reapable, and
+            # signaled by pid only while it still runs. A child this process
+            # has already reaped (returncode set) is skipped first: its pid may
+            # have been reused by another child. Windows has no die-now
+            # record to protect and no waitid, so it keeps Popen.kill. macOS has
+            # no waitid either; there a child Popen has not yet seen exit is
+            # signaled by pid, which reaps nothing (a child that exited and is
+            # not reaped yet is only a zombie, and the signal does nothing).
+            for waited in _INTERRUPT_STOP_PROCESSES:
+                try:
+                    if os.name == "nt":
+                        waited.kill()
+                    elif waited.returncode is not None:
+                        # Already reaped by this process: the pid is free and
+                        # may name a different child now, so nothing is sent.
+                        continue
+                    elif hasattr(os, "waitid"):
+                        if (
+                            os.waitid(
+                                os.P_PID,
+                                waited.pid,
+                                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                            )
+                            is None
+                        ):
+                            os.kill(waited.pid, signal.SIGKILL)
+                    else:
+                        os.kill(waited.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            previous = _PREVIOUS_SIGINT
+            if not callable(previous):
+                previous = signal.default_int_handler
+            previous(signum, frame)
+            return
         # Either latch: a Ctrl-C inside a SIGTERM stop's grace is the
         # operator's second shutdown signal, and chaining the interrupt
         # instead would land KeyboardInterrupt in the main thread's grace
@@ -717,20 +1055,47 @@ def _handle_sigint(signum: int, frame: object) -> None:
         # SIG_DFL, so the launcher's own removal never would.
         _kill_recorded_groups()
         _remove_die_now_cleanups()
+        message = _DIE_NOW_MESSAGE
+        if message is not None:
+            # A command that recorded its interrupted ending still says how the
+            # run ended and exits 130, as exit-codes.md pins for a second
+            # Ctrl-C ("a second Ctrl-C during the wait kills it at once" ...
+            # "A scan prints the interrupted-scan message above"); os._exit
+            # keeps the no-cleanup property of the SIG_DFL death it replaces.
+            _exit_with_die_now_message(message)
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.raise_signal(signal.SIGINT)
         return
     _SIGINT_SEEN = True
+    # Published before the scopes are read and whether or not any is
+    # registered, as shutdown_requested() promises: a scope that registers
+    # after this Ctrl-C is cancelled at once, and one that registers while
+    # this runs is seen by the snapshot or by its own read of the flag (see
+    # _handle_sigterm).
+    _SHUTDOWN_REQUESTED = True
     scopes = _SHUTDOWN_SCOPES
-    if scopes:
-        _SHUTDOWN_REQUESTED = True
-        for event in scopes:
-            # The same plain store as the SIGTERM handler's, for the same
-            # deadlock reason; it covers cancel and prompt both.
-            event._signalled = True
+    for event in scopes:
+        # The same plain store as the SIGTERM handler's, for the same
+        # deadlock reason; it covers cancel and prompt both.
+        event._signalled = True
+    if _GRACE_WAITS > 0 and scopes:
+        # A stop is waiting out a tool's grace (stop_grace_in_progress) and a
+        # scan is registered to unwind on the latch above: the latch is what
+        # this Ctrl-C asks for, and chaining the default handler would raise
+        # KeyboardInterrupt inside that wait and abort the SIGKILL escalation.
+        # The stop completes; the scan unwinds after it. With no scan
+        # registered nothing reads the latch, so swallowing the interrupt
+        # here would leave the Ctrl-C without any effect: it stays an
+        # interrupt, as below.
+        return
+    # The first interrupt stays an interrupt. A previous disposition that is
+    # not a Python callable (SIG_DFL, or a handler set in C) has nothing to
+    # chain to, and skipping it left the Ctrl-C without any effect, so the
+    # interpreter's own handler raises KeyboardInterrupt in its place.
     previous = _PREVIOUS_SIGINT
-    if callable(previous):
-        previous(signum, frame)
+    if not callable(previous):
+        previous = signal.default_int_handler
+    previous(signum, frame)
 
 
 @contextlib.contextmanager
@@ -758,12 +1123,17 @@ def shutdown_cancels(event: CancelEvent) -> Iterator[None]:
     # store erases the first thread's registration. The handlers keep
     # reading the tuple lock-free, so a signal landing while the lock is
     # held cannot deadlock on it.
+    registered = False
     try:
         # The append sits inside the try so an interrupt delivered at the
         # lock's exit, after the store has landed, still reaches the finally
-        # and unregisters the event. The removal there is an identity filter,
-        # so it is also safe when the append never happened.
+        # and unregisters the event. The same event can be registered more than
+        # once (an inner scope around an outer one), so the finally removes one
+        # copy, and only if this call reached the store: the flag is set just
+        # before it, so an interrupt in between removes a copy at worst and
+        # never leaves a registration behind.
         with _TOOL_GROUPS_WRITE_LOCK:
+            registered = True
             _SHUTDOWN_SCOPES = _SHUTDOWN_SCOPES + (event,)
         # After the append, so a signal between the two lines is seen by one
         # side or the other, never neither. This arm runs on a normal thread
@@ -774,8 +1144,14 @@ def shutdown_cancels(event: CancelEvent) -> Iterator[None]:
             event.set()
         yield
     finally:
-        with _TOOL_GROUPS_WRITE_LOCK:
-            _SHUTDOWN_SCOPES = tuple(e for e in _SHUTDOWN_SCOPES if e is not event)
+        if registered:
+            with _TOOL_GROUPS_WRITE_LOCK:
+                scopes = list(_SHUTDOWN_SCOPES)
+                for index in range(len(scopes) - 1, -1, -1):
+                    if scopes[index] is event:
+                        del scopes[index]
+                        break
+                _SHUTDOWN_SCOPES = tuple(scopes)
 
 
 def install_sigterm_shutdown() -> None:

@@ -106,6 +106,8 @@ def _ash(base: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
         [sys.executable, "-I", "-c", DRIVER, *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         env=_env(base / "home"),
         cwd=cwd,

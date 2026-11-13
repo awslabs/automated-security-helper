@@ -26,12 +26,14 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
+from tests.utils.helpers import checkout_env
 
 pytestmark = pytest.mark.integration
 
@@ -96,14 +98,19 @@ def _rules(tmp_path: Path, content: str) -> Path:
     rules = tmp_path / "rule-cache"
     rules.mkdir()
     (rules / "rules.yml").write_text(content)
-    (rules / ".ash-rules-fetched-at").write_text("2026-10-10T00:00:00Z\n")
+    # The download time is derived from the run's clock: an absolute date ages past the
+    # content database's staleness bound and the scan then refuses before it scans.
+    fetched = datetime.now(timezone.utc) - timedelta(hours=1)
+    (rules / ".ash-rules-fetched-at").write_text(
+        fetched.strftime("%Y-%m-%dT%H:%M:%SZ") + "\n"
+    )
     return rules
 
 
 def _scan(tmp_path: Path, sandbox: str, *, scanners: str, env_extra: dict, extra=()):
     source = tmp_path / "src"
     output = tmp_path / "out"
-    env = {**os.environ, **env_extra}
+    env = checkout_env({**os.environ, **env_extra})
     command = [
         _ash_executable(),
         "scan",

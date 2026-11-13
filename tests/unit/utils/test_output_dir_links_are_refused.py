@@ -15,6 +15,7 @@ outside every output directory, which is opened as ``open()`` would.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -401,18 +402,39 @@ def _detect_secrets_row(context: PluginContext):
 class TestDetectSecretsWrites:
     @pytest.mark.parametrize("mode", ["off", "bwrap"])
     @pytest.mark.parametrize("write", sorted(DETECT_SECRETS_WRITES))
-    def test_a_link_at_the_path_is_refused(self, layout, mode, write):
+    def test_a_link_at_the_path_is_refused(self, layout, mode, write, caplog):
         source, output, target = layout
         context = _context(source, output, mode)
         planted = output / "scanners" / "detect-secrets" / DETECT_SECRETS_WRITES[write]
         planted.parent.mkdir(parents=True)
         planted.symlink_to(target)
 
-        _scanner, row = _detect_secrets_row(context)
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            _scanner, row = _detect_secrets_row(context)
 
         assert target.read_text() == ORIGINAL, (
             f"the {write} file was written through a link with --sandbox {mode}"
         )
+        if write == "worker request" and mode == "off":
+            # Without a sandbox nothing checks the results directory before the
+            # scan; the scanner removes its own exchange names first, beneath the
+            # directory without following a link (unlink_beneath), writes the
+            # request fresh, and its finally removes both names again. So the
+            # planted link is gone, not followed, and the scan is graded by what
+            # it found. Under a sandbox refuse_links_below refuses it before the
+            # scan starts (the other branch). The removal is not silent: the
+            # CHANGELOG names this one exception to the refusal, and a warning
+            # names the entry removed.
+            assert not planted.is_symlink() and not planted.exists(), (
+                "the planted link at the worker request name was not removed"
+            )
+            removed = f"Removed the symlink at {planted.name} instead of following it"
+            assert any(removed in r.getMessage() for r in caplog.records), [
+                r.getMessage() for r in caplog.records
+            ]
+            assert row.status != ScannerStatus.ERROR, row.errors
+            assert not any(REFUSAL in str(error) for error in row.errors), row.errors
+            return
         assert row.status == ScannerStatus.ERROR, (
             f"--sandbox {mode}: the row was graded {row.status.value}"
         )
@@ -420,18 +442,41 @@ class TestDetectSecretsWrites:
 
     @pytest.mark.parametrize("mode", ["off", "bwrap"])
     @pytest.mark.parametrize("write", sorted(DETECT_SECRETS_WRITES))
-    def test_a_file_another_name_refers_to_is_refused(self, layout, mode, write):
+    def test_a_file_another_name_refers_to_is_refused(
+        self, layout, mode, write, caplog
+    ):
         source, output, target = layout
         context = _context(source, output, mode)
         planted = output / "scanners" / "detect-secrets" / DETECT_SECRETS_WRITES[write]
         planted.parent.mkdir(parents=True)
         os.link(target, planted)
 
-        _scanner, row = _detect_secrets_row(context)
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            _scanner, row = _detect_secrets_row(context)
 
         assert target.read_bytes() == ORIGINAL.encode(), (
             f"the {write} file was written through a hard link with --sandbox {mode}"
         )
+        if write == "worker request" and mode == "off":
+            # As for the symlink above: without a sandbox the scanner's own
+            # cleanup unlinks the planted name before the request is written, so
+            # the file the other name refers to keeps its bytes and is the only
+            # name left, and the scan is graded by what it found.
+            assert not planted.exists(), (
+                "the planted hard link at the worker request name was not removed"
+            )
+            assert os.stat(target).st_nlink == 1
+            removed = (
+                f"Removed {planted.name}, a file that 1 other name(s) also refer to"
+            )
+            assert any(removed in r.getMessage() for r in caplog.records), [
+                r.getMessage() for r in caplog.records
+            ]
+            assert row.status != ScannerStatus.ERROR, row.errors
+            assert not any(HARD_LINK_REFUSAL in str(error) for error in row.errors), (
+                row.errors
+            )
+            return
         assert row.status == ScannerStatus.ERROR, (
             f"--sandbox {mode}: the row was graded {row.status.value}"
         )

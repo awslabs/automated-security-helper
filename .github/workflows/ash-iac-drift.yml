@@ -138,7 +138,8 @@ jobs:
   # ---------------------------------------------------------------------------
   discover:
     name: discover generated artifacts
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 14s on 4-vCPU ubuntu-latest (run 41722066858) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: read
@@ -272,8 +273,18 @@ jobs:
     name: cdk template drift
     needs: discover
     if: needs.discover.outputs.cdk == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # ubuntu-slim, not ubuntu-latest: queue waves on the ubuntu-latest x64 pool
+    # read a median 4,310 s at peak against 21 s on this pool, and this job runs 0.4
+    # min. Measured peak memory (MemTotal-MemAvailable, sampled every 2 s on a 16 GB
+    # runner) is 2,435,928 kB (about 2.33 GB), under the slim runner's 5 GB; slim is
+    # 1 CPU with a 15-minute job cap, hence the timeout below. Rejected: a 4-CPU arm
+    # runner, which the measured peak and wall time do not need. Every step is
+    # arch-neutral: npm ci takes its native optional packages from package-lock.json
+    # (linux-arm64 and linux-x64 are both locked), synth hashes asset SOURCE and reads
+    # no host architecture, and the committed templates carry no platform. The
+    # buildspec and cdk-nag jobs share this reasoning.
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -485,7 +496,9 @@ jobs:
     name: generated buildspec drift
     needs: discover
     if: needs.discover.outputs.constructs == 'true'
-    runs-on: ubuntu-latest
+    # ubuntu-slim: see the cdk-template-drift job for why. Measured peak 1,870,616 kB
+    # (about 1.79 GB) against the slim runner's 5 GB, wall 0.4 min.
+    runs-on: ubuntu-slim
     timeout-minutes: 15
     permissions:
       contents: read
@@ -727,7 +740,16 @@ jobs:
     name: terraform hygiene
     needs: discover
     if: needs.discover.outputs.terraform == 'true'
-    runs-on: ubuntu-latest
+    # ubuntu-24.04-arm, not ubuntu-slim: peak memory is only 1.79 GB, but the job
+    # takes 4.8 min on 4 CPUs, and a 1-CPU stretch risks the slim runner's 15-minute
+    # cap. See the cdk-template-drift job for the queue figures. The
+    # terraform-specific reading: hashicorp/setup-terraform downloads the binary for
+    # the runner's architecture, and every provider entry in the ten committed
+    # .terraform.lock.hcl files lists five h1 hashes (one per published platform,
+    # linux_arm64 included) plus zh hashes, so init -backend=false does not trip a lock
+    # mismatch on arm. The modules pin hashicorp/aws ~> 6.62; the tests use mock
+    # providers.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read
@@ -754,7 +776,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # -printf is GNU find, which is what ubuntu-latest ships. %h is the
+          # -printf is GNU find, which every Ubuntu runner image ships. %h is the
           # containing directory, so this yields every directory holding at
           # least one .tf file, modules and examples alike.
           #
@@ -1069,8 +1091,10 @@ jobs:
     name: cdk-nag
     needs: discover
     if: needs.discover.outputs.cdk == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # ubuntu-slim: see the cdk-template-drift job for why. Measured peak 2,575,460 kB
+    # (about 2.46 GB) against the slim runner's 5 GB, wall 0.4 min.
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -1523,7 +1547,8 @@ jobs:
       - generated-buildspec-drift
       - terraform-hygiene
       - cdk-nag
-    runs-on: ubuntu-latest
+    # ubuntu-slim: 1 CPU / 5 GB, 15-min cap; this job measured 4s on 4-vCPU ubuntu-latest (run 41722066858) and uses no container, sudo or CPU fan-out.
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: read

@@ -17,6 +17,11 @@ doing, not a broken probe.
 A backend that is not available on the machine is skipped, unless it is named in
 ASH_REQUIRE_SANDBOX_BACKENDS (comma separated), which CI sets so a runner that lost
 bubblewrap fails instead of skipping.
+
+Every backend is Linux or macOS, so on Windows the tests that need one skip, and the
+sandbox-off tests and the unavailable-backend refusal still run. Windows CPython has
+no ``socket.AF_UNIX``, so the Unix-socket listeners, and the probe's attempts at
+them, are left out there.
 """
 
 from __future__ import annotations
@@ -44,6 +49,10 @@ pytestmark = pytest.mark.integration
 FIXTURE = Path(__file__).resolve().parents[2] / "test_data" / "sandbox_escape"
 CANARY = "ash-sandbox-canary-7b9e2f"
 BACKENDS = ["bwrap", "firejail", "landlock", "sandbox-exec"]
+#: Windows CPython has no socket.AF_UNIX. The Unix listeners, and the probe's attempts
+#: at them, exist only where the family does. Every backend runs on Linux or macOS,
+#: which have it, so no sandbox is scored on a platform without it.
+HAS_AF_UNIX = hasattr(socket, "AF_UNIX")
 
 
 def _required() -> set:
@@ -75,6 +84,10 @@ class _Listeners:
     bwrap does mount (the Nix daemon's, under /nix) stayed reachable. On Linux
     there is also an abstract stream socket, which has no path at all, and a
     datagram socket, which a datagram socketpair can reach without socket().
+
+    Windows CPython has no ``socket.AF_UNIX``: there none of the Unix listeners is
+    built (``HAS_AF_UNIX``), their paths stay unset, and the probe is given nothing
+    to try.
     """
 
     def __init__(self, directory: Path) -> None:
@@ -85,22 +98,26 @@ class _Listeners:
         self.tcp.listen(8)
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.bind(("127.0.0.1", 0))
-        self.unix_path = directory / "ipc.sock"
-        self.unix = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.unix.bind(str(self.unix_path))
-        self.unix.listen(8)
         #: (listener, data) for everything any listener received.
         self.received: list = []
         self._stop = False
-        self._sockets = [self.tcp, self.udp, self.unix]
+        self._sockets = [self.tcp, self.udp]
         servers = [
             lambda: self._serve_stream("tcp", self.tcp),
             lambda: self._serve_datagram("udp", self.udp, reply=True),
-            lambda: self._serve_stream("unix", self.unix),
         ]
-        self.kinds = {"tcp", "udp", "unix"}
+        self.kinds = {"tcp", "udp"}
+        self.unix_path: Path | None = None
         self.abstract_name = ""
         self.datagram_path: Path | None = None
+        if HAS_AF_UNIX:
+            self.unix_path = directory / "ipc.sock"
+            unix = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            unix.bind(str(self.unix_path))
+            unix.listen(8)
+            self._sockets.append(unix)
+            servers.append(lambda: self._serve_stream("unix", unix))
+            self.kinds.add("unix")
         if sys.platform.startswith("linux"):
             self.abstract_name = f"ash-sbx-{uuid.uuid4().hex[:12]}"
             abstract = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -284,7 +301,7 @@ def _scan(
         "tcp_port": listeners.tcp.getsockname()[1],
         "udp_port": listeners.udp.getsockname()[1],
         "host_ip": host_ip or "127.0.0.1",
-        "unix_socket": str(listeners.unix_path),
+        "unix_socket": str(listeners.unix_path or ""),
         "unix_abstract": listeners.abstract_name,
         "unix_datagram_socket": str(listeners.datagram_path or ""),
         "ipc_env": _ipc_environment(listeners),
@@ -353,6 +370,8 @@ def _scan(
         env=checkout_env(env),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         check=False,
     )
@@ -542,6 +561,10 @@ def test_every_attempt_is_blocked_by_the_sandbox(
     assert not listeners.received, f"{backend} let data reach a listener"
 
 
+@pytest.mark.skipif(
+    not HAS_AF_UNIX,
+    reason="no socket.AF_UNIX (Windows), so no Unix-socket IPC endpoint to reach",
+)
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_no_local_ipc_endpoint_is_reachable_with_a_network(
     tmp_path, tmp_path_factory, listeners, backend
@@ -608,7 +631,8 @@ def test_an_output_directory_reached_through_a_link_in_the_tree_is_refused(
         ),
     )
     # Whitespace collapsed: the console wraps long lines at the terminal width.
-    output = " ".join((result.stdout + result.stderr).split())
+    # None-safe: on Windows result.stdout can be None here.
+    output = " ".join(((result.stdout or "") + (result.stderr or "")).split())
     assert outcomes is None, (
         f"the scanner ran with a linked output directory: {outcomes}"
     )
@@ -640,7 +664,8 @@ def test_with_the_sandbox_off_a_linked_output_directory_in_the_tree_is_refused_t
             target, target_is_directory=True
         ),
     )
-    output = " ".join((result.stdout + result.stderr).split())
+    # None-safe: on Windows result.stdout can be None here.
+    output = " ".join(((result.stdout or "") + (result.stderr or "")).split())
     assert result.returncode == 3, output[-4000:]
     assert "is a symlink" in output, output[-4000:]
     assert _snapshot(target) == before, "the scan changed the link's target"
@@ -675,13 +700,14 @@ def test_an_unavailable_named_sandbox_is_an_error_and_never_runs_the_scanner(
     unavailable = "bwrap" if sys.platform == "darwin" else "sandbox-exec"
     outcomes, _, result = _scan(tmp_path, listeners, unavailable)
     # Whitespace collapsed: the console wraps long log lines at the terminal width.
-    output = " ".join((result.stdout + result.stderr).split())
+    # None-safe: on Windows result.stdout can be None here.
+    output = " ".join(((result.stdout or "") + (result.stderr or "")).split())
     assert outcomes is None, f"the scanner ran under an unavailable sandbox: {outcomes}"
     assert result.returncode == 1, output[-4000:]
     assert "sandbox-escape: ERROR" in output, output[-4000:]
-    assert f"could not start its tool: {unavailable} is not available on" in output, (
-        output[-4000:]
-    )
+    # The line names the target, the shape concepts/sandbox.md documents.
+    assert "could not start its tool on" in output, output[-4000:]
+    assert f"{unavailable} is not available on" in output, output[-4000:]
     results = json.loads((tmp_path / "out" / "ash_aggregated_results.json").read_text())
     row = results["scanner_results"]["sandbox-escape"]
     assert row["status"] == "ERROR"

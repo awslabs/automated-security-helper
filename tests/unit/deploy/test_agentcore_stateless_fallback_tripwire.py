@@ -5,12 +5,13 @@
 
 Why this file exists
 --------------------
-The AgentCore stack sets ASH_MCP_STATELESS_FALLBACK=warn on its runtime. It resolves
-the contradiction between two of the stack's own defaults: `AshVersion` defaults to
-DEFAULT_ASH_VERSION, and the `ash mcp` of v3.7.0 and v3.7.1 has no
+Through v3.7.1 the AgentCore stack set ASH_MCP_STATELESS_FALLBACK=warn on its runtime.
+It resolved the contradiction between two of the stack's own defaults: `AshVersion`
+defaults to DEFAULT_ASH_VERSION, and the `ash mcp` of v3.7.0 and v3.7.1 has no
 `--stateless-http`, while `McpStatelessHttp` defaults to true. Without the fallback the
-entrypoint refuses that pair and exits 65, so the one-click template could not deploy
-with the values it ships. With it, the server starts stateful and warns.
+entrypoint refused that pair and exited 65, so the one-click template could not deploy
+with the values it shipped. With it, the server started stateful and warned. The
+fallback was removed at 3.8.0, and this file now guards against it returning.
 
 The fallback goes as soon as
 DEFAULT_ASH_VERSION names a release whose `ash mcp` has `--stateless-http`. From then
@@ -60,19 +61,20 @@ AGENTCORE_TEMPLATE = CDK / "templates" / "AshAgentCore.template.json"
 LAST_RELEASE_WITHOUT_STATELESS_HTTP = (3, 7, 1)
 FALLBACK = "ASH_MCP_STATELESS_FALLBACK"
 
-#: The jest tests that hold the fallback today, so the removal also has to move them.
+#: The jest tests that held the fallback until it was removed at 3.8.0. They now hold
+#: its absence, and a change that brings the fallback back has to move them again.
 JEST_TESTS_ON_THE_FALLBACK = (
     (
-        "deploy/cdk/test/ash-agentcore-stack.test.ts: 'the runtime resolves the "
-        "contradiction between its own two defaults'"
+        "deploy/cdk/test/ash-agentcore-stack.test.ts: 'the runtime sets no "
+        "stateless fallback'"
     ),
     (
         "deploy/cdk/test/ash-container-scripts.test.ts: 'the AgentCore stack ships a "
         "default combination that starts'"
     ),
     (
-        "deploy/cdk/test/ash-container-scripts.test.ts: 'taking the fallback back out "
-        "of that environment restores exit 65'"
+        "deploy/cdk/test/ash-container-scripts.test.ts: 'an ASH without the "
+        "stateless flag still exits 65 on the shipped defaults'"
     ),
 )
 
@@ -133,8 +135,10 @@ def _check(
         f"Drop the fallback: delete {FALLBACK} from the runtime's environmentVariables "
         "in deploy/cdk/lib/ash-agentcore-stack.ts and re-synthesize "
         "(deploy/cdk/scripts/synth-templates.sh). The fallback "
-        "goes at the first release that has the flag. These jest tests hold the "
-        "fallback and change with it: " + "; ".join(JEST_TESTS_ON_THE_FALLBACK) + "."
+        "went at the first release that has the flag and must not come back. These "
+        "jest tests assert its absence and change with it: "
+        + "; ".join(JEST_TESTS_ON_THE_FALLBACK)
+        + "."
     )
     assert FALLBACK not in environment, (
         f"DEFAULT_ASH_VERSION is {default_ash_version}, whose `ash mcp` has "

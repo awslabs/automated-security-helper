@@ -246,12 +246,21 @@ def _storm(tmp_path, source, config, scoped):
             work = output / ASH_WORK_DIR_NAME
             work.mkdir(parents=True)
             directories[index].append((output, work))
-    start_together = threading.Barrier(STORM_THREADS)
+    # The barrier's action applies the switch-interval shrink in the last
+    # arriving thread, right before every thread is released: the interleaving
+    # the test measures happens in the build loops, while the race to REACH
+    # the barrier crawls under a 1 microsecond interval on a loaded runner.
+    # The wait bound matches the test's own 120 s join bound; a 30 s bound
+    # broke the barrier for all eight threads on loaded macOS runners (one
+    # timeout breaks it for every waiter), which never exercises the product.
+    start_together = threading.Barrier(
+        STORM_THREADS, action=lambda: sys.setswitchinterval(1e-6)
+    )
     failures = []
 
     def build(index):
         try:
-            start_together.wait(30)
+            start_together.wait(120)
             for output, work in directories[index]:
                 if scoped:
                     with path_trust.derived_roots_scope(f"run-{index}"):
@@ -275,7 +284,6 @@ def _storm(tmp_path, source, config, scoped):
         threading.Thread(target=build, args=(index,)) for index in range(STORM_THREADS)
     ]
     previous_interval = sys.getswitchinterval()
-    sys.setswitchinterval(1e-6)
     try:
         for thread in threads:
             thread.start()
@@ -317,3 +325,47 @@ def test_writers_outside_every_run_at_once_keep_every_root(tmp_path, source):
             assert _resolved(output) in recorded, (index, output)
             assert _resolved(work) in recorded, (index, work)
     assert config._run_derived_roots == {}
+
+
+class _Warnings:
+    """A logger that keeps the warnings and drops every other record."""
+
+    def __init__(self):
+        self.messages = []
+
+    def warning(self, message, *args, **kwargs):
+        self.messages.append(message)
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+def test_a_later_run_logs_a_refusal_an_earlier_run_already_logged(
+    tmp_path, source, monkeypatch
+):
+    """The warning is once per run: the same option and path refused in a
+    second run of one long-lived process (the MCP server) is logged again,
+    and refused twice inside one run it is logged once."""
+    config = AshConfig()
+    output, product = _output(tmp_path, "out")
+    logger = _Warnings()
+    monkeypatch.setattr(path_trust, "ASH_LOGGER", logger)
+    run = ["first-run"]
+    monkeypatch.setattr(path_trust, "current_run_log_scope", lambda: run[0])
+
+    def refuse():
+        return path_trust.refused_derived_product(
+            product,
+            source_dir=source,
+            key="config_file",
+            config=config,
+            derived_dirs=[output],
+        )
+
+    assert refuse() is True
+    assert refuse() is True
+    assert len(logger.messages) == 1, logger.messages
+
+    run[0] = "second-run"
+    assert refuse() is True
+    assert len(logger.messages) == 2, logger.messages

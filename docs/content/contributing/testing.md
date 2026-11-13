@@ -48,8 +48,8 @@ when no test file differs. Its functions can also be imported, for example
 
 ## Measure coverage
 
-CI runs the suite by tier, selected by marker. The unit-test job runs `-m unit` once per
-operating system and Python version, unsharded, and measures coverage of
+CI runs the suite by tier, selected by marker. The unit-test jobs run `-m unit` in four
+shards per operating system and Python version and measure coverage of
 `automated_security_helper/` without a threshold. The `unit-coverage` job then combines
 the unit tier's coverage data of each operating system family at Python 3.12 and fails
 when total coverage is under 80%. The integration-test jobs run `-m integration` in
@@ -215,7 +215,7 @@ when `CI` or `GITHUB_ACTIONS` is exactly `true`, and `tests/snapshot/test_snapsh
 fails if any workflow, action, script, or pytest configuration passes it. A missing
 snapshot fails, and so does a snapshot that no test asserts any more in a whole-suite run,
 which is syrupy's default and what a local `pytest` does. CI's tier runs and integration
-shards pass `--snapshot-warn-unused`, because each sees only part of the suite, so there
+shards pass `pytest --snapshot-warn-unused`, because each sees only part of the suite, so there
 an unused snapshot is reported as a warning in the run's snapshot summary and does not
 fail the leg. syrupy cannot see the snapshots of a test module you deleted or renamed,
 so `check-snapshot-trailers.py --orphans`, which still fails CI, checks that every file under a

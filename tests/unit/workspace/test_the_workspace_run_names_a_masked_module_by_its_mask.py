@@ -63,6 +63,15 @@ def _recording(monkeypatch, method: str, name: str, seen: List[str]) -> None:
         without_masked_modules,
     )
 
+    from automated_security_helper.plugins import ash_plugin_manager
+
+    # An earlier test that patched the method on the manager instance leaves
+    # the bound method behind as an instance attribute when its patch is
+    # undone, and that hides this patch of the class: the call is never seen.
+    assert method not in vars(ash_plugin_manager), (
+        f"an earlier test patched {method} on the plugin manager instance; "
+        "patch type(ash_plugin_manager) instead"
+    )
     original = getattr(AshPluginManager, method)
 
     def recorder(self, *args, **kwargs):
@@ -87,7 +96,10 @@ def test_the_prewarm_resolves_every_plugin_kind_inside_the_scope(tmp_path, monke
     finally:
         sys.modules.pop(package, None)
 
-    assert seen == [MASK, MASK, MASK], seen
+    # The prewarm resolves each plugin kind (three reads) and then reads each kind
+    # again for the name-clash refusal (refuse_plugin_name_clashes), all inside the
+    # run's scope. What is pinned is that no read happens outside it.
+    assert len(seen) >= 3 and set(seen) == {MASK}, seen
 
 
 def test_the_reporter_step_resolves_and_filters_inside_the_scope(tmp_path, monkeypatch):

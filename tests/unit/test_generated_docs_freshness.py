@@ -219,6 +219,10 @@ def _planted_tools(directory: Path) -> Path:
 def _planted_environment(root: Path, seed: str, home: str | None) -> tuple[dict, Path]:
     """The environment of one planted run, and the home it uses."""
     home_dir = Path(home) if home else root / "home"
+    if os.name == "nt" and home is not None:
+        # "/d" names no drive on Windows, so ASH reads it as a relative home, has no
+        # bin directory, and the scanner page lists "custom command" installs.
+        home_dir = Path(root.drive + home)
     if home is None:
         home_dir.mkdir(parents=True)
     tmp = root / "planted-tmp"
@@ -1761,7 +1765,14 @@ def _mcp_reference_module():
 
 
 def _progress_keys() -> set[str]:
-    """The keys of the get_scan_progress response that carries the most of them."""
+    """The keys of the widest get_scan_progress ANSWER the server returns.
+
+    The tool's refusals (a scan id never issued, a session that cannot read the
+    scan) are response dicts too, and each carries an exit code, an error
+    category, a context and the operation, so a refusal can hold more keys than
+    the answer itself. The answer is the shape that carries ``is_complete``;
+    the widest dict of that shape is the one the page's example is held to.
+    """
     import importlib.util
 
     sys.path.insert(0, str(SCRIPTS))
@@ -1773,7 +1784,13 @@ def _progress_keys() -> set[str]:
     assert spec is not None and spec.origin
     contracts = _mcp_contract.tool_contracts(Path(spec.origin).resolve().parent)
     response = contracts["get_scan_progress"].response
-    return max(({key for key, _ in each.keys} for each in response.dicts()), key=len)
+    answers = [
+        {key for key, _ in each.keys}
+        for each in response.dicts()
+        if any(key == "is_complete" for key, _ in each.keys)
+    ]
+    assert answers, "no get_scan_progress response dict carries is_complete"
+    return max(answers, key=len)
 
 
 @pytest.mark.unit
@@ -1969,17 +1986,19 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
             prepare_environment()
             names = json.loads(sys.argv[2])
             proxy = os.environ.get("https_proxy") or ""
-            refused = None
+            outcome = None
             if proxy:
                 host, port = proxy.rsplit("/", 1)[-1].rsplit(":", 1)
                 try:
                     socket.create_connection((host, int(port)), timeout=5).close()
-                    refused = False
+                    outcome = "connected"
                 except ConnectionRefusedError:
-                    refused = True
+                    outcome = "refused"
+                except TimeoutError:
+                    outcome = "dropped"
             print(json.dumps({
                 "env": {n: os.environ.get(n) for n in names},
-                "refused": refused,
+                "outcome": outcome,
                 "dirs": [os.path.isdir(os.environ.get(n) or "") for n in names[:5]],
             }))
             """
@@ -2010,14 +2029,17 @@ def test_prepare_environment_keeps_a_run_off_the_network_and_out_of_home(
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     values = report["env"]
-    assert values["UV_OFFLINE"] == "1" and values["PIP_NO_INDEX"] == "1", values
-    assert values["NO_PROXY"] is None and values["no_proxy"] is None, values
+    assert values["UV_OFFLINE"] == "1" and values["PIP_NO_INDEX"] == "1"
+    assert values["NO_PROXY"] is None and values["no_proxy"] is None
     proxies = {values[n] for n in PROXY_VARIABLES}
     assert len(proxies) == 1 and next(iter(proxies)).startswith("http://127.0.0.1:")
-    assert report["refused"] is True
+    # The port is held by the run and never listened on: Linux and Windows refuse a
+    # connection to it, macOS drops it. Neither ever connects.
+    allowed = {"refused", "dropped"} if sys.platform == "darwin" else {"refused"}
+    assert report["outcome"] in allowed, report["outcome"]
     assert report["dirs"] == [True] * len(ISOLATED_DIRECTORIES)
     roots = {Path(values[n]).parent for n in ISOLATED_DIRECTORIES}
-    assert len(roots) == 1, values
+    assert len(roots) == 1, f"{len(roots)} roots hold the isolated directories"
     root = next(iter(roots))
     assert str(tmp_path) not in str(root), "the planted UV_CACHE_DIR was kept"
     assert not root.exists(), f"{root} was left behind after the run"
@@ -2110,3 +2132,268 @@ def test_a_hidden_option_in_ash_changes_the_cli_page(tmp_path: Path) -> None:
         'id="scan--progress"' in ln and "This option is hidden from `--help`" in ln
         for ln in added
     ), checked.stderr
+
+
+# ---------------------------------------------------------------------------
+# The plugin data partial the home page graphics read
+# ---------------------------------------------------------------------------
+#
+# scripts/generate_plugin_data_partial.py writes one Jinja template, not a
+# reference page, so it is not in REFERENCE_PAGES (the page-shaped tests above
+# read markers and tables it does not have). It gets the same four gates.
+
+PLUGIN_DATA_GENERATOR = "generate_plugin_data_partial.py"
+PLUGIN_DATA_PARTIAL = (
+    REPO_ROOT / "docs" / "overrides" / "partials" / "generated" / "plugin-data.html"
+)
+
+
+@pytest.mark.integration
+def test_plugin_data_partial_is_current(tmp_path: Path) -> None:
+    """The committed partial equals what its generator emits now, twice (see above)."""
+    assert PLUGIN_DATA_PARTIAL.is_file(), "the plugin data partial is missing"
+    for seed, home in PLANTED_RUNS:
+        env, home_dir = _planted_environment(tmp_path / f"run-{seed}", seed, home)
+        result = _run_generator(PLUGIN_DATA_GENERATOR, "--check", env=env)
+        assert result.returncode == 0, (
+            f"{PLUGIN_DATA_PARTIAL.relative_to(REPO_ROOT)} is stale "
+            f"(PYTHONHASHSEED={seed}, HOME={home_dir}).\n"
+            f"Regenerate with: uv run python scripts/{PLUGIN_DATA_GENERATOR}\n\n"
+            + result.stdout
+            + result.stderr
+        )
+        if home is None:
+            written = sorted(p.name for p in home_dir.iterdir())
+            assert written == [], (
+                f"{PLUGIN_DATA_GENERATOR} wrote under HOME: {written[:10]}"
+            )
+
+
+@pytest.mark.unit
+def test_plugin_data_partial_names_its_generator() -> None:
+    head = PLUGIN_DATA_PARTIAL.read_text(encoding="utf-8")[:900]
+    assert f"Generated by scripts/{PLUGIN_DATA_GENERATOR}" in head
+    assert f"uv run python scripts/{PLUGIN_DATA_GENERATOR}" in head
+
+
+@pytest.mark.integration
+def test_plugin_data_check_refuses_stdout() -> None:
+    result = _run_generator(PLUGIN_DATA_GENERATOR, "--check", "--output", "-")
+    assert result.returncode != 0, "accepted --check --output -"
+    assert "--output -" in result.stderr, result.stderr
+    assert result.stdout == "", "a refused run must not print the partial"
+
+
+@pytest.mark.integration
+def test_plugin_data_check_compares_the_output_file(tmp_path: Path) -> None:
+    stale = tmp_path / "stale.html"
+    stale.write_text("stale\n", encoding="utf-8")
+    result = _run_generator(PLUGIN_DATA_GENERATOR, "--check", "--output", str(stale))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert stale.read_text(encoding="utf-8") == "stale\n"
+
+
+def _plugin_data_module():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import generate_plugin_data_partial
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    return generate_plugin_data_partial
+
+
+def _registry_matching_the_maps(module) -> tuple[dict, set, set]:
+    """A registry the curated maps are complete for: built-ins, tool types, reporters."""
+    featured = {
+        "bandit": "SAST",
+        "semgrep": "SAST",
+        "opengrep": "SAST",
+        "checkov": "IAC",
+        "cdk-nag": "IAC",
+        "cfn-nag": "IAC",
+        "detect-secrets": "SECRETS",  # pragma: allowlist secret - a tool type name
+        "grype": "SCA",
+        "npm-audit": "SCA",
+        "syft": "SBOM",
+    }
+    assert set(featured) == set(module.SCANNER_DOCS), (
+        "update this test's tool types with the featured scanners"
+    )
+    scanners: dict[str, str | None] = {
+        **featured,
+        **dict.fromkeys(module.HOME_GRID_OMITTED, "SAST"),
+    }
+    reporters = {reporter for reporter, _label, _key in module.SCAN_FORMATS}
+    return scanners, set(scanners), reporters
+
+
+def _class_docs(scanners: dict) -> dict[str, dict]:
+    """What the scanner classes declare, for a registry that names every scanner."""
+    return {
+        name: {"display_name": name, "docs_summary": "Checks", "covers": ("Files",)}
+        for name in scanners
+    }
+
+
+@pytest.mark.unit
+def test_plugin_data_maps_are_complete_for_a_matching_registry() -> None:
+    module = _plugin_data_module()
+    scanners, builtin, reporters = _registry_matching_the_maps(module)
+    docs = _class_docs(scanners)
+    assert module.editorial_problems(scanners, builtin, reporters, docs) == []
+
+
+@pytest.mark.unit
+def test_plugin_data_maps_fail_on_an_unknown_or_missing_plugin() -> None:
+    """Each way the curated maps and the registry can disagree is an error."""
+    module = _plugin_data_module()
+    scanners, builtin, reporters = _registry_matching_the_maps(module)
+
+    # A built-in scanner nobody decided about.
+    grown = {**scanners, "brand-new-scanner": "SAST"}
+    problems = module.editorial_problems(
+        grown, builtin | {"brand-new-scanner"}, reporters, _class_docs(grown)
+    )
+    assert any("brand-new-scanner" in p and "HOME_GRID_OMITTED" in p for p in problems)
+
+    # A featured scanner the registry no longer has.
+    shrunk = {k: v for k, v in scanners.items() if k != "bandit"}
+    problems = module.editorial_problems(
+        shrunk, builtin - {"bandit"}, reporters, _class_docs(shrunk)
+    )
+    assert any("SCANNER_DOCS names 'bandit'" in p for p in problems)
+
+    docs = _class_docs(scanners)
+
+    # A tool type no category covers.
+    odd = {**scanners, "grype": "CONTAINER"}
+    problems = module.editorial_problems(odd, builtin, reporters, docs)
+    assert any("grype" in p and "tool type" in p for p in problems)
+
+    # An engine whose tool type puts it under another category than its track.
+    moved = {**scanners, "bandit": "SECRETS"}
+    problems = module.editorial_problems(moved, builtin, reporters, docs)
+    assert any("bandit" in p and "category" in p for p in problems)
+
+    # A report format whose reporter was removed.
+    problems = module.editorial_problems(scanners, builtin, reporters - {"sarif"}, docs)
+    assert any("SCAN_FORMATS names 'sarif'" in p for p in problems)
+
+    # A featured scanner whose class declares no summary or coverage, or is not read.
+    bare = {**docs, "bandit": {"display_name": "Bandit"}}
+    problems = module.editorial_problems(scanners, builtin, reporters, bare)
+    assert any("'bandit' declares no docs_summary" in p for p in problems)
+    assert any("'bandit' declares no covers" in p for p in problems)
+    unread = {k: v for k, v in docs.items() if k != "bandit"}
+    problems = module.editorial_problems(scanners, builtin, reporters, unread)
+    assert any("'bandit' has no class docs" in p for p in problems)
+
+
+@pytest.mark.unit
+def test_plugin_data_managed_tools_do_not_depend_on_the_machine() -> None:
+    """Every built-in scanner is accountable, so a failed build cannot drop a tool."""
+    module = _plugin_data_module()
+    declared = {"actionlint": True, "gitleaks": True}
+    unmanaged = dict.fromkeys(module.NOT_MANAGED, False)
+    extras = dict.fromkeys(module.MANAGED_TOOL_EXTRAS, False)
+    sound = {**declared, **unmanaged, **extras}
+    assert module.managed_problems(sound) == []
+
+    # A scanner whose instance could not be built (cfn-nag's RubyGems case, in general).
+    broken = {**sound, "gitleaks": None}
+    assert any(
+        "gitleaks" in p and "could not be built" in p
+        for p in module.managed_problems(broken)
+    )
+    # An extra whose instance could not be built is no exemption.
+    extra = module.MANAGED_TOOL_EXTRAS[0]
+    assert any(extra in p for p in module.managed_problems({**sound, extra: None}))
+    # A built-in that is neither declared, extra nor listed as not managed.
+    unknown = {**sound, "brand-new": False}
+    assert any(
+        "brand-new" in p and "say which" in p for p in module.managed_problems(unknown)
+    )
+    # A not-managed scanner that now declares install commands.
+    flipped = {**sound, module.NOT_MANAGED[0]: True}
+    assert any(
+        module.NOT_MANAGED[0] in p and "NOT_MANAGED" in p
+        for p in module.managed_problems(flipped)
+    )
+    # A list entry for a scanner that is gone.
+    gone = {k: v for k, v in sound.items() if k != module.NOT_MANAGED[0]}
+    assert any(
+        module.NOT_MANAGED[0] in p and "not a built-in" in p
+        for p in module.managed_problems(gone)
+    )
+
+
+@pytest.mark.unit
+def test_plugin_data_converter_docs_are_complete() -> None:
+    module = _plugin_data_module()
+    commands = {"archive": None, "jupyter": "jupyter-nbconvert"}
+    summaries = {"archive": "extracts archives", "jupyter": "converts notebooks"}
+    none = frozenset()
+    assert module.converter_problems(commands, none, summaries) == []
+    # A converter whose class declares no summary (the deleted "no entry" case).
+    for missing in (None, ""):
+        problems = module.converter_problems(
+            {**commands, "pdf": None}, none, {**summaries, "pdf": missing}
+        )
+        assert any("pdf" in p and "declares no docs_summary" in p for p in problems)
+    # A converter the summaries do not mention at all is the same error.
+    problems = module.converter_problems({**commands, "pdf": None}, none, summaries)
+    assert any("pdf" in p and "declares no docs_summary" in p for p in problems)
+    # A converter that could not be built is its own error and nothing else.
+    for name in ("archive", "jupyter"):
+        problems = module.converter_problems(
+            {**commands, name: None}, frozenset({name}), summaries
+        )
+        assert any(name in p and "could not be built" in p for p in problems), problems
+        assert len(problems) == 1, problems
+
+
+@pytest.mark.integration
+def test_plugin_data_refuses_a_docs_root_that_is_not_the_checkout(
+    tmp_path: Path,
+) -> None:
+    """``--docs-root docs`` would write docs/docs/overrides/...; it is refused instead."""
+    result = _run_generator(
+        PLUGIN_DATA_GENERATOR, "--docs-root", str(REPO_ROOT / "docs")
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "checkout root" in result.stderr, result.stderr
+    assert not (REPO_ROOT / "docs" / "docs").exists()
+
+
+@pytest.mark.unit
+def test_plugin_data_render_is_readable_by_jinja() -> None:
+    """The text the generator writes sets ``plugin_data`` for ``{% from ... import %}``.
+
+    ``include`` would not export it (a ``{% set %}`` in an included template stays
+    in that template), which is why the generated header and the theme templates
+    import it. Both halves are pinned here against Jinja itself.
+    """
+    jinja2 = pytest.importorskip("jinja2")
+    module = _plugin_data_module()
+    data = {
+        "scanners": {"home_count": 2, "all": ["a", "b"]},
+        "converters": [{"name": "archive", "command": None}],
+        "flag": True,
+        "note": 'quote " and \\ and ' + chr(233),
+    }
+    loader = jinja2.DictLoader(
+        {
+            "partials/generated/plugin-data.html": module.render(data),
+            "imports.html": '{% from "partials/generated/plugin-data.html" import plugin_data %}'
+            "{{ plugin_data.scanners.home_count }}|{{ plugin_data.converters[0].command is none }}"
+            "|{{ plugin_data.flag }}|{{ plugin_data.note }}",
+            "includes.html": '{% include "partials/generated/plugin-data.html" %}[{{ plugin_data }}]',
+        }
+    )
+    env = jinja2.Environment(loader=loader)  # nosec B701 -- renders plain text, not HTML
+    assert env.get_template("imports.html").render() == (
+        '2|True|True|quote " and \\ and ' + chr(233)
+    )
+    assert env.get_template("includes.html").render() == "[]"
+    with pytest.raises(ValueError, match="would be read as Jinja"):
+        module.render({"bad": "{{ boom }}"})

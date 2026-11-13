@@ -32,6 +32,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanne
 )
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from tests.utils.helpers import checkout_env
 
 pytestmark = pytest.mark.integration
 
@@ -355,7 +356,7 @@ def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
         encoding="utf-8",
         errors="replace",
         timeout=600,
-        env={**os.environ, "ASH_OFFLINE": "true"},
+        env=checkout_env({**os.environ, "ASH_OFFLINE": "true"}),
     )
 
     console = result.stdout + result.stderr
