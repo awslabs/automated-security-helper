@@ -1364,6 +1364,15 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         error_lines: List[Any] = []
         for index, batch in enumerate(batches):
             self._inputs = batch
+            # Each batch runs the template's own dependency check afresh: this
+            # loop's decline contract (below) is that a check which STOPS
+            # passing mid-run declines the remaining batches with every input
+            # accounted for, and the memoized verdict
+            # (validate_plugin_dependencies_once) would otherwise answer every
+            # later batch from the first one's True. The re-check is cheap
+            # here: zizmor's validation re-decides from its own memoized
+            # probes, not a fresh spawn per batch.
+            self._dependencies_validated = None
             result = super().scan(
                 target, target_type, global_ignore_paths, config, *args, **kwargs
             )

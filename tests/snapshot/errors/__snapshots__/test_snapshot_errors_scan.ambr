@@ -203,7 +203,7 @@
     'stderr': '''
       Usage: ash scan [OPTIONS]
       Try 'ash scan --help' for help.
-      Error: --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names source_dir, output_dir, scanners, exclude_scanners, ash_plugin_modules, config_overrides, offline, sandbox, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners, allow_stale_content_db, simple, ignore_suppressions, honor_ignore_files, min_severity, compact_report, changed_files_only, base_ref, allow_in_tree_tools, shard_index, shard_count, workspace, workspace_config, allow_missing_projects, dry_run, build, run, force, oci_runner, build_target, container_uid, container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg; each option's long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.
+      Error: --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names source_dir, output_dir, scanners, exclude_scanners, only_scanners, add_scanners, ash_plugin_modules, config_overrides, offline, sandbox, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners, allow_stale_content_db, simple, ignore_suppressions, honor_ignore_files, min_severity, compact_report, changed_files_only, base_ref, staged, allow_in_tree_tools, shard_index, shard_count, workspace, workspace_config, allow_missing_projects, dry_run, build, run, force, oci_runner, build_target, container_uid, container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg; each option's long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.
   
     ''',
     'stdout': '',
@@ -324,7 +324,10 @@
 # name: TestScanFailures.test_selection_cancels_itself
   dict({
     'exit_code': 5,
-    'stderr': '',
+    'stderr': '''
+      DeprecationWarning: --scanners (and ASH_SCANNERS) is deprecated. Use --only-scanners to state the whole scanner selection, or --add-scanners to add scanners to the mode's default set. --scanners keeps its current behavior.
+  
+    ''',
     'stdout': '''
       INFO     Initializing ASH v<ASH_VERSION>
       INFO     Initializing execution engine
@@ -350,7 +353,10 @@
 # name: TestScanFailures.test_unknown_scanner
   dict({
     'exit_code': 5,
-    'stderr': '',
+    'stderr': '''
+      DeprecationWarning: --scanners (and ASH_SCANNERS) is deprecated. Use --only-scanners to state the whole scanner selection, or --add-scanners to add scanners to the mode's default set. --scanners keeps its current behavior.
+  
+    ''',
     'stdout': '''
       INFO     Initializing ASH v<ASH_VERSION>
       INFO     Initializing execution engine

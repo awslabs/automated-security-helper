@@ -11,21 +11,25 @@ expensive tier. Every test carries one of ``unit``, ``integration`` or ``e2e``, 
 three families of jobs, one job per runner pool so that each pool carries its own
 ``max-parallel`` cap, run one tier each:
 
-* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit`` in four shards per
-  OS and Python version. The Linux and macOS pools ran unsharded for a time, on the
-  maintainer's word ("i get shards for integration/e2e tests but for unit they
-  shouldn't be needed", 2026-11-03); pull-request run 43285884861 then measured their
+* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit`` in six shards per
+  OS and Python version on Linux and eight on macOS and Windows. The Linux and macOS
+  pools ran unsharded for a time, on the maintainer's word ("i get shards for
+  integration/e2e tests but for unit they shouldn't be needed", 2026-11-03);
+  pull-request run 43285884861 then measured their
   unsharded legs at 37 to 45 minutes and more, the critical path of the workflow, so
-  they take the integration tier's shard axis again with a 45-minute timeout sized from
+  they took the integration tier's four-shard axis with a 45-minute timeout sized from
   the per-shard walls (the note above unit-test-linux in the workflow). The Windows
   pool was sharded first, on a measurement: its unsharded py3.10 leg was cancelled at
-  212.6 minutes against a 210-minute timeout (pull-request run 41949551817), so it takes
-  the same axis and a 90-minute timeout (the note on the job);
+  212.6 minutes against a 210-minute timeout (pull-request run 41949551817). Run
+  43449176506 then measured the four-shard walls as the next limiter (the worst Windows
+  unit cell summed 88.3 minutes of pytest, 30.4 in its worst shard, against 38.6 for
+  the same suite on arm), so the slow pools run eight shards and Linux six; the
+  timeouts, sized at four shards, are upper bounds and keep their values;
 * ``integration-test-linux``, ``-macos`` and ``-windows`` run ``-m integration`` in
-  four shards per OS and Python version, because the tests that start real tools carry
+  the same per-pool shard counts, because the tests that start real tools carry
   about 6,300 serial seconds by the classification and the per-file medians of one run
-  of the earlier layout, which the hash split puts at about 16 minutes (ubuntu) and 19
-  (Windows) in the worst shard against the 30-minute timeout;
+  of the earlier layout, and run 43449176506 measured the worst four-shard cells at
+  16.4 minutes (arm) and 24.9 (Windows) against the 30-minute timeout;
 * ``e2e-test-linux``, ``-macos`` and ``-windows`` run ``-m e2e`` once per runner image
   on one Python version, unsharded.
 
@@ -33,7 +37,8 @@ Four things have to agree for the integration tier to run every test exactly onc
 for the unit tier to stay whole:
 
 * the ``shard`` axis in each of the three integration jobs and the three unit jobs,
-  one literal list whose entries each carry the total they were cut for (``3of4``);
+  one literal list per pool (shared by the pool's unit and integration jobs) whose
+  entries each carry the total they were cut for (``3of8``);
 * ``tests/utils/sharding.py``, a ``pytest_ignore_collect`` hook that ignores the test
   modules another shard owns, so pytest's own ``testpaths``, ``python_files`` and ignore
   rules still decide what is collected;
@@ -42,8 +47,8 @@ for the unit tier to stay whole:
 * the ``unit-coverage`` job, which downloads the unit tier's artifacts of one OS family
   and applies the 80% gate to their data, failing when a shard is missing or
   unreadable. (An unsharded unit run uploads one artifact, ``shard1of1``, which the
-  gate admits as a complete set of one; the Windows unit set is four artifacts,
-  ``shard1of4`` to ``shard4of4``, and a sharded set is admitted only whole.)
+  gate admits as a complete set of one; the Windows unit set is eight artifacts,
+  ``shard1of8`` to ``shard8of8``, and a sharded set is admitted only whole.)
 
 A shard dropped from the integration axis would silently stop running its slice of the
 suite, and every remaining shard would still pass. The first test below is that guard,
@@ -146,12 +151,28 @@ def _assert_only_the_pull_request_cover(job_id: str, matrix: dict[str, Any]) -> 
             )
 
 
-#: The shard axis of the integration tier. Four is a reading from the real
-#: classification and the per-file medians of one run of the earlier layout (eight was
-#: the figure before the tests were classified). The list is written out here so that
-#: moving it is a change to this file in the same diff. All three unit jobs take this
-#: same axis (SHARDED_UNIT_JOB_IDS below).
-INTEGRATION_SHARDS = ["1of4", "2of4", "3of4", "4of4"]
+#: The shard axis of each runner pool, shared by the pool's unit and integration jobs.
+#: Six on Linux and eight on the slow pools: run 43449176506 measured the same shard
+#: running 1.5-2.3x longer on windows/macos than on arm (the worst Windows unit cell
+#: summed 88.3 minutes of pytest over four shards, 30.4 in the worst shard), so the
+#: slow pools take eight shards and Linux six. The lists are written out here so that
+#: moving one is a change to this file in the same diff.
+POOL_SHARDS = {
+    "linux": ["1of6", "2of6", "3of6", "4of6", "5of6", "6of6"],
+    "macos": ["1of8", "2of8", "3of8", "4of8", "5of8", "6of8", "7of8", "8of8"],
+    "windows": ["1of8", "2of8", "3of8", "4of8", "5of8", "6of8", "7of8", "8of8"],
+}
+#: The distinct shard counts of the pools, for the filter tests below.
+POOL_SHARD_COUNTS = sorted(
+    {sharding.parse_shard(axis[0])[1] for axis in POOL_SHARDS.values()}
+)
+
+
+def _pool_of(job_id: str) -> str:
+    """``unit-test-linux`` -> ``linux``: the pool suffix every tier job id carries."""
+    return job_id.rsplit("-", 1)[1]
+
+
 #: The unit jobs that are sharded: all three. Windows went first, on a measurement (the
 #: unsharded py3.10 leg of pull-request run 41949551817 was cancelled at 212.6 minutes
 #: against its 210-minute bound); Linux and macOS followed on run 43285884861, where the
@@ -166,7 +187,9 @@ SHARDED_TIER_JOB_IDS = (*INTEGRATION_TEST_JOB_IDS, *SHARDED_UNIT_JOB_IDS)
 #: ubuntu-latest py3.10, 3547 s for macos-latest py3.12, so about 17 and 15 minutes a
 #: shard with its own install), rounded to 45. Windows: ceil(212.6 / 4) = 54 minutes, the
 #: worst measured unsharded leg split four ways, with about 60% margin (54 x 1.6 = 86.4)
-#: rounded up to 90. Written out here so that moving a timeout is a change to this file
+#: rounded up to 90. The move to six and eight shards (POOL_SHARDS) only lowers the
+#: per-shard walls, so these bounds hold a fortiori and keep their sized values. Written
+#: out here so that moving a timeout is a change to this file
 #: in the same diff, as the shard axis is.
 UNIT_TIMEOUT_MINUTES = {
     "unit-test-linux": 45,
@@ -213,14 +236,16 @@ def _shard_axes() -> dict[str, list[str]]:
     return axes
 
 
-def _shard_axis() -> list[str]:
-    """The one shard axis the four sharded tier jobs share; they must not differ."""
+def _pool_axis(pool: str) -> list[str]:
+    """The one shard axis a pool's unit and integration jobs share; they must not differ."""
     axes = _shard_axes()
-    first = axes[SHARDED_TIER_JOB_IDS[0]]
-    assert all(axis == first for axis in axes.values()), (
-        f"the unit-test and integration-test jobs disagree on the shard axis: {axes}"
+    unit = axes[f"unit-test-{pool}"]
+    integration = axes[f"integration-test-{pool}"]
+    assert unit == integration, (
+        f"the {pool} unit and integration jobs disagree on the shard axis: "
+        f"{unit} != {integration}"
     )
-    return first
+    return unit
 
 
 def _uses_the_action(job_id: str) -> dict[str, Any]:
@@ -291,8 +316,9 @@ class TestTheShardAxis:
             "the tests of the missing shard run nowhere"
         )
 
-    def test_the_axis_is_the_four_shards_the_timeout_arithmetic_assumes(self):
-        assert _shard_axis() == INTEGRATION_SHARDS
+    @pytest.mark.parametrize("pool", POOLS)
+    def test_each_pools_axis_is_the_pinned_count_the_arithmetic_assumes(self, pool):
+        assert _pool_axis(pool) == POOL_SHARDS[pool]
 
     @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
     def test_the_job_hands_its_shard_and_its_tier_to_the_action(self, job_id):
@@ -313,7 +339,7 @@ class TestTheShardAxis:
         uses = _uses_the_action(job_id)
         assert uses["with"]["shard"] == "${{ matrix.shard }}"
         assert uses["with"]["marker"] == "unit"
-        assert _shard_axes()[job_id] == INTEGRATION_SHARDS
+        assert _shard_axes()[job_id] == POOL_SHARDS[_pool_of(job_id)]
 
     @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
     def test_every_unit_job_is_sharded(self, job_id):
@@ -325,7 +351,7 @@ class TestTheShardAxis:
         """
         job = _workflow_job(job_id)
         assert "shard" in job["strategy"]["matrix"], (
-            f"{job_id} carries no shard axis; the unit tier runs in four shards"
+            f"{job_id} carries no shard axis; every unit pool is sharded (POOL_SHARDS)"
         )
         assert "matrix.shard" in job["name"], job["name"]
         assert _uses_the_action(job_id)["with"]["shard"] == "${{ matrix.shard }}"
@@ -359,8 +385,8 @@ class TestTheShardAxis:
 
 @pytest.mark.unit
 class TestTheShardFilter:
-    def test_a_module_belongs_to_exactly_one_shard(self):
-        count = sharding.parse_shard(_shard_axis()[0])[1]
+    @pytest.mark.parametrize("count", POOL_SHARD_COUNTS)
+    def test_a_module_belongs_to_exactly_one_shard(self, count):
         modules = [f"tests/unit/pkg{i % 7}/test_module_{i:04d}.py" for i in range(1000)]
         patterns = _pytest_ini_patterns("python_files")
         root = Path("/rootdir")
@@ -374,8 +400,8 @@ class TestTheShardFilter:
             ]
             assert len(keepers) == 1, (module, keepers)
 
-    def test_the_shards_are_not_all_one_big_shard(self):
-        count = sharding.parse_shard(_shard_axis()[0])[1]
+    @pytest.mark.parametrize("count", POOL_SHARD_COUNTS)
+    def test_the_shards_are_not_all_one_big_shard(self, count):
         owners = [
             sharding.owner(f"tests/unit/test_module_{i:04d}.py", count)
             for i in range(1000)
@@ -384,7 +410,8 @@ class TestTheShardFilter:
         assert min(sizes) > 0.5 * (1000 / count), sizes
         assert max(sizes) < 1.5 * (1000 / count), sizes
 
-    def test_the_real_module_list_splits_about_evenly(self):
+    @pytest.mark.parametrize("count", POOL_SHARD_COUNTS)
+    def test_the_real_module_list_splits_about_evenly(self, count):
         """The crc32 split is about even in module count over the real module paths.
 
         ``owner`` assigns a module to a shard by a hash of its path, so evenness is a
@@ -398,7 +425,6 @@ class TestTheShardFilter:
         leg slower than the others; a check weighted by runtime would be a different
         test. The bounds are 0.75 and 1.25 times the mean module count per shard, so
         they leave room for growth; the failure message prints the current sizes."""
-        count = sharding.parse_shard(_shard_axis()[0])[1]
         patterns = _pytest_ini_patterns("python_files")
         modules = sorted(
             path.relative_to(REPO_ROOT).as_posix()
@@ -2410,8 +2436,8 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
         prefix = COMBINE.artifact_prefix(os_name, COVERAGE_PYTHON, arch, "unit")
         assert COMBINE.check_shards(self._names(os_name, arch, ["1of1"]), prefix) == []
 
-    def test_it_takes_the_windows_unit_jobs_four_shards_whole_and_not_in_part(self):
-        """The Windows unit pool uploads shard1of4 to shard4of4, as the workflow cuts it."""
+    def test_it_takes_the_windows_unit_jobs_eight_shards_whole_and_not_in_part(self):
+        """The Windows unit pool uploads shard1of8 to shard8of8, as the workflow cuts it."""
         prefix = COMBINE.artifact_prefix(
             "windows-latest", COVERAGE_PYTHON, "X64", "unit"
         )
@@ -2422,7 +2448,7 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
             )
             for shard in axis
         ]
-        assert len(names) == 4
+        assert len(names) == len(POOL_SHARDS["windows"]) == 8
         assert COMBINE.check_shards(names, prefix) == []
         for missing in range(len(names)):
             kept = names[:missing] + names[missing + 1 :]
@@ -2500,10 +2526,10 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
     def test_it_downloads_and_combines_its_family(self):
         job = _workflow_job("unit-coverage")
         assert isinstance(job["needs"], list), job["needs"]
-        # ensure-cache is here because the job calls setup-ash, as every job that
-        # restores the uv cache lists the job that writes it. The three unit-test jobs
-        # need it too, so it adds no wait.
-        assert sorted(job["needs"]) == sorted([*UNIT_TEST_JOB_IDS, "ensure-cache"]), (
+        # The three unit-test jobs and nothing else: ensure-cache left every `needs`
+        # list but required-checks' when its serial link was dropped (the note above
+        # the integration tier in the workflow); a restore tolerates a miss.
+        assert sorted(job["needs"]) == sorted(UNIT_TEST_JOB_IDS), (
             "the coverage gate must wait for all three unit-test jobs, or it combines "
             "the runs of an OS family that is still running"
         )
@@ -2778,13 +2804,14 @@ class TestTheIntegrationAndE2eFamiliesMirrorTheUnitFamily:
         Nothing is saved by it either: a failed unit leg must not skip the other tiers'
         results, so the tiers would run after it whatever it reported.
         """
-        needs = _workflow_job(job_id)["needs"]
+        needs = _workflow_job(job_id).get("needs") or []
         assert not set(needs) & set(UNIT_TEST_JOB_IDS), (job_id, needs)
 
     @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
     def test_the_unit_jobs_carry_no_condition(self, job_id):
-        """A unit job is skipped only behind a failed ensure-cache, which the gate reads."""
+        """A unit job waits for nothing and carries no `if:`: it starts at run creation."""
         assert "if" not in _workflow_job(job_id)
+        assert "needs" not in _workflow_job(job_id)
 
     @pytest.mark.parametrize("pool", POOLS)
     def test_each_job_runs_on_the_runner_images_of_its_unit_job(self, pool):
@@ -2804,12 +2831,13 @@ class TestTheIntegrationAndE2eFamiliesMirrorTheUnitFamily:
             job["strategy"]["matrix"]["python-version"]
             == unit["strategy"]["matrix"]["python-version"]
         )
-        # The caps are pinned as (unit, integration) pairs. They match in every pool
-        # but macOS: the unit job's cap is 12 so that the 3 Python versions x 4
-        # shards of a pull request start together, while the integration job keeps
-        # its cap of 10 (it is not sharded, and the macOS pool is the smallest). A
+        # The caps are pinned as (unit, integration) pairs. 24 on the sharded slow
+        # pools so that the 3 Python versions x 8 shards of a pull request start
+        # together (run 43449176506 measured the macOS integration cap of 10 holding
+        # THE run-ending cell for 11.6 minutes); the Linux pull-request matrix is 18
+        # cells, inside its cap of 24. A
         # pool missing here, or a cap moved in either job, fails this test.
-        caps = {"linux": (24, 24), "macos": (12, 10), "windows": (12, 12)}
+        caps = {"linux": (24, 24), "macos": (24, 24), "windows": (24, 24)}
         assert (
             unit["strategy"]["max-parallel"],
             job["strategy"]["max-parallel"],

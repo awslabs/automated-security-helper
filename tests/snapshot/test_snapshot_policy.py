@@ -162,6 +162,39 @@ def test_no_ci_file_passes_snapshot_update_or_warn_unused() -> None:
 
 
 @pytest.mark.unit
+def test_the_sharded_integration_suite_holds_no_snapshot() -> None:
+    """No syrupy snapshot lives under tests/integration, the one sharded suite that
+    runs without ``-m``.
+
+    The standalone integration-test job runs tests/integration in ASH_TEST_SHARD
+    shards with no marker expression, so a shard selects every test it collects --
+    the case where syrupy reports the other shards' snapshot files as unused and
+    fails a leg whose tests all passed (the admitted flag's rationale, the module
+    docstring). That job passes no ``--snapshot-warn-unused``: this policy admits
+    exactly one such flag, in the "Run PyTest" step of run-unit-tests, and a second
+    un-audited site would be the thing the scan above exists to refuse. The suite
+    stays safe by holding no snapshots instead. If this fails because a snapshot
+    was added under tests/integration, do not add the flag to the workflow: give
+    the test to a tier that runs through the admitted step (the unit or snapshot
+    suites), or widen ``_ADMITTED_FILE``/``_ADMITTED_STEP`` deliberately, here,
+    with the same audit the existing exception carries.
+    """
+    integration = REPO_ROOT / "tests" / "integration"
+    found = sorted(
+        p.relative_to(REPO_ROOT).as_posix()
+        for p in integration.rglob("*")
+        if p.name == "__snapshots__" or p.suffix == ".ambr"
+    )
+    assert found == [], (
+        "a syrupy snapshot under tests/integration would be reported unused by the "
+        f"standalone job's other shards; see this test's docstring. Found: {found}"
+    )
+    # Positive control: the same scan finds the snapshot tier's directories.
+    control = list((REPO_ROOT / "tests" / "snapshot").rglob("__snapshots__"))
+    assert control, "the scan found no snapshot directory anywhere: scanner is blind"
+
+
+@pytest.mark.unit
 def test_the_one_admitted_flag_is_admitted_in_one_step_of_one_file_only() -> None:
     real = (REPO_ROOT / _ADMITTED_FILE).read_text(encoding="utf-8")
     # The scanner sees the real flag, and the exception takes exactly that one away.

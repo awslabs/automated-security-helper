@@ -1,5 +1,11 @@
 nav:
   - Home: index.md
+  - Who uses ASH:
+      - Personas: personas/index.md
+      - ASH for developers: personas/developer.md
+      - ASH for security reviewers: personas/security-reviewer.md
+      - ASH for security analysts: personas/security-analyst.md
+      - ASH across the SDLC and AI-DLC: personas/sdlc-aidlc.md
   - Getting started:
       - Choose a path: getting-started/index.md
       - Scan on your machine: getting-started/local.md
@@ -27,6 +33,7 @@ nav:
       - Scale to large repositories: how-to/scale-large-repos.md
       - Run the MCP server: how-to/mcp-server.md
       - Install an agent plugin: how-to/agent-plugins.md
+      - Use ASH with AI-DLC workflows: how-to/aidlc-workflows.md
       - ASH GenAI integration guide: docs/genai-steering-guide.md
       - Deploy on AWS: how-to/deploy-on-aws.md
       - Troubleshoot: how-to/troubleshoot.md

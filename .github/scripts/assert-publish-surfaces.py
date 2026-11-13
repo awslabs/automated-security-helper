@@ -516,8 +516,14 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-unified-ci.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
-        publishes="name=integration-suite-report path=test-results/integration.junit.xml",
-        reason="One JUnit XML report from the integration suite.",
+        publishes=(
+            "name=integration-suite-report-${{ matrix.shard }} "
+            "path=test-results/integration.junit.xml"
+        ),
+        reason=(
+            "One JUnit XML report per integration-suite shard; the shard is in the "
+            "name because two failing shards may not upload under one name."
+        ),
     ),
     Entry(
         file=".github/workflows/ash-unified-ci.yml",

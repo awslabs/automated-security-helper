@@ -273,7 +273,7 @@ def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
 
 
 #: Jobs that carry the docs gates, and the commands that are the gate in each: lint
-#: runs scripts/verify_docs_freshness.py, integration-test runs the docs examples, and
+#: runs scripts/verify_docs_freshness.py, docs-examples runs the docs examples, and
 #: build-docs runs the strict site build and the versioned-site check. Each must run on
 #: every pull request, be in required-checks' needs, and report its own exit status.
 #: The census above lets a gated job carry `${{ !cancelled() }}` or `${{ always() }}`;
@@ -281,7 +281,7 @@ def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
 #: requests.
 _UNCONDITIONAL_JOBS: dict[str, tuple[str, ...]] = {
     "lint": ("scripts/verify_docs_freshness.py",),
-    "integration-test": ("tests/integration/docs",),
+    "docs-examples": ("tests/integration/docs",),
     "build-docs": ("mkdocs build", "scripts/docs_versions.py check"),
 }
 #: (job, command) for every docs gate, for the parametrized tests below.
@@ -689,32 +689,28 @@ class TestTheGateActuallyRunsTheScript:
         )
 
     @pytest.mark.parametrize("name", TIER_JOB_IDS)
-    def test_a_tier_job_waits_only_for_ensure_cache_and_is_skipped_only_with_it(
-        self, name
-    ):
-        """The one place the tier jobs' `needs:` are pinned, with no `if:` beside them.
+    def test_a_tier_job_waits_for_nothing_and_carries_no_condition(self, name):
+        """The one place the tier jobs' `needs:` are pinned: there are none.
 
         The integration-test and e2e-test jobs run beside the unit-test jobs, not after
         them: a wait on the unit jobs would add their slowest leg to the critical path
         and save nothing, since a failed unit leg must not skip the other tiers' signal.
-        What does save runners is skipping the tiers when ensure-cache failed, and
-        `needs` alone does that: a job with `needs` and no status function in its `if:`
-        is skipped when a dependency fails. The gate sees that skip through ensure-cache,
-        which is in its own `needs`. An `if:` spelling the same rule out
-        (`!cancelled() && needs.ensure-cache.result == 'success'`) is what the unit jobs
-        never carried and these six jobs carried for a while; it is refused here as it
-        is for the unit jobs, so the census does not learn a second spelling of the
-        default.
+        They waited for ensure-cache for a while; that edge was the one serial link
+        under every test and scan job (52 s on run 43449176506) and was dropped, because
+        every tier job only restores the uv cache and a restore tolerates a miss, while
+        ensure-cache's own failure still fails the run through the gate's `needs` (the
+        note above the integration tier in the workflow). A job-level `if:` is refused
+        here as it is for the unit jobs, so the census does not learn a second spelling
+        of the default.
         """
         jobs = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"]
         assert name in _needs_of(UNIFIED_CI, GATE_JOB), (
             f"{GATE_JOB} does not wait for {name}"
         )
-        assert jobs[name]["needs"] == ["ensure-cache"], jobs[name]["needs"]
+        assert "needs" not in jobs[name], jobs[name]["needs"]
         assert "if" not in jobs[name], (
-            f"{name} has if: {jobs[name]['if']!r}; `needs: [ensure-cache]` alone skips it "
-            "when the cache warm-up failed, so a job-level condition is a second spelling "
-            "of the default"
+            f"{name} has if: {jobs[name]['if']!r}; a job with no `needs` runs on every "
+            "event, so a job-level condition would only add a way to skip it unseen"
         )
 
     def test_a_job_that_waits_on_an_always_running_gated_job_may_skip_with_it(self):

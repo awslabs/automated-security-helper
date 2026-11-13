@@ -482,6 +482,8 @@ _FORWARDED = {
     "config_overrides",
     "scanners",
     "excluded_scanners",
+    "only_scanners",
+    "add_scanners",
     "ash_plugin_modules",
     "output_formats",
     "phases",
@@ -520,6 +522,10 @@ _REFUSED_FOR_THE_MODE = {
     "severity_threshold_restriction": "HIGH",
     "keep_previous_results": True,
     "trusted_config_path": "/elsewhere/ash.yaml",
+    # The precommit staged scope: no other mode reads it, so a scan in this
+    # mode would silently cover the whole tree against what the caller asked.
+    "staged": True,
+    "staged_files": ["app.py"],
 }
 #: Each field the inner scan is not given, and why that loses nothing.
 _NOT_FORWARDED_ON_PURPOSE = {
@@ -577,6 +583,8 @@ _VARIED = {
     "config_overrides": ({}, ["a=1"]),
     "scanners": ({}, ["bandit"]),
     "excluded_scanners": ({}, ["grype"]),
+    "only_scanners": ({}, ["bandit"]),
+    "add_scanners": ({}, ["grype"]),
     "ash_plugin_modules": ({}, ["my.plugins"]),
     "output_formats": ({}, [ExportFormat.SARIF]),
     "phases": ({}, [ExecutionPhase.SCAN]),
@@ -786,6 +794,8 @@ def _refusal_opening(name: str, mode: str) -> str:
     """How run_ash_scan words the refusal of *name* for a mode that re-executes ASH."""
     if name == "config_base_gate":
         return f"config_base_gate is applied only to a scan in local mode, not to mode={mode!r}"
+    if name in ("staged", "staged_files"):
+        return f"{name} is supported only with mode=precommit"
     return (
         f"{name} is applied only to a single-directory scan in local mode, "
         f"not to mode={mode!r}"
@@ -799,6 +809,8 @@ _ALSO_REFUSED_FOR_CONTAINER = (
     "severity_threshold_restriction",
     "keep_previous_results",
     "trusted_config_path",
+    "staged",
+    "staged_files",
 )
 
 

@@ -1,0 +1,178 @@
+name: ASH - Dependabot Auto-Merge
+# Approves a dependabot dependency bump and enables native auto-merge on it, so a
+# patch or minor update lands once the merge queue's required checks pass, with no
+# human click on a PR whose whole content is a version number.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# The repository already has everything else: auto-merge is enabled in the repo
+# settings, main's ruleset requires the full status-check set on the queued commit
+# (native auto-merge waits for all of it), and dependabot.yml soaks routine bumps
+# before a PR is even opened. The two missing pieces for a dependabot PR were the
+# ruleset's one approving review and the auto-merge enablement call itself. This
+# workflow supplies exactly those two, and nothing else: it changes no repository
+# settings and weakens no required check.
+#
+# THE SCOPE SPLIT, AND WHY
+#
+# Auto-merge is enabled only for version-update:semver-patch and
+# version-update:semver-minor, and never for the github_actions ecosystem
+# (.github/dependabot.yml's ecosystems are github_actions, docker, and uv twice --
+# the root project and the transpiler; docker and uv bumps are in scope).
+#
+#   * Majors stay manual because dependabot.yml already files every major in a
+#     group of its own so that a human reads the upstream changelog before merge;
+#     auto-merging them would undo that file's point.
+#   * github_actions bumps stay manual because an action bump changes what code
+#     runs INSIDE workflows that hold this repository's tokens. The refs are
+#     pinned to commit shas (ash-actions-pinned.yml), so the bump itself is the
+#     one moment a human compares the new sha against the upstream tag.
+#   * An update dependabot computed no semver level for (dependabot.yml documents
+#     the extras-requirement shape that arrives with no from/to version) has an
+#     empty update-type, matches neither allowed value, and stays manual too.
+#
+# Everything out of scope is simply left alone: the job's filter step skips
+# without approving and without commenting, so the PR looks exactly like it did
+# before this workflow existed.
+#
+# WHAT PATTERN THIS FOLLOWS
+#
+# GitHub's documented dependabot auto-merge recipe ("Automating Dependabot with
+# GitHub Actions", the "Enable auto-merge on a pull request" example): trigger on
+# `pull_request`, gate the job on the actor being dependabot[bot], read the
+# update's facts from dependabot/fetch-metadata, then approve and
+# `gh pr merge --auto`. The recipe's one departure here is the token the two gh
+# calls use, and it exists because of the merge queue (next section).
+#
+# The trigger lists its types explicitly because `synchronize` is load-bearing:
+# main's ruleset dismisses stale reviews on push, so every dependabot rebase
+# throws away the previous approval, and this workflow's run on the new head is
+# what re-approves it. The default types for `pull_request` are exactly these
+# three; spelling them out keeps the dependency on `synchronize` visible. The
+# approval lands as ash-automations[bot], an actor this job's own gate never
+# matches (the gate reads the PR AUTHOR, which stays dependabot[bot]), and an
+# approval or an auto-merge enablement raises no opened/synchronize/reopened
+# event, so the app's actions cannot re-trigger this workflow.
+#
+# WHY AN APP TOKEN AND NOT GITHUB_TOKEN
+#
+# The same GitHub page warns that where the target branch uses a merge queue --
+# this repository's case -- the built-in GITHUB_TOKEN cannot add pull requests
+# to the queue, so `gh pr merge --auto` under GITHUB_TOKEN leaves a PR that can
+# never enqueue. The two gh calls therefore run under a short-lived installation
+# token for ash-automations, the team-managed GitHub App installed on this
+# repository (pull-requests: write plus metadata: read), minted by the pinned
+# create-github-app-token step from the two repository secrets and scoped to
+# this one repository and to pull-requests: write only (the permission-* input;
+# a mint with no such input inherits every permission the installation holds,
+# which zizmor's github-app audit rightly flags). GITHUB_TOKEN's only remaining
+# job is fetch-metadata's read, so the job's permissions block grants
+# pull-requests: read and nothing else: no step of this workflow holds a
+# long-lived write token, and the workflow level stays `{}` like
+# ash-tag-on-merge.yml (zizmor's excessive-permissions audit flags
+# workflow-level grants).
+#
+# One residual to verify on the first in-scope dependabot PR: if GitHub turns
+# out to require contents: write on the App for the queue-entry step itself,
+# the failure is the same safe shape as before (the PR sits approved with
+# auto-merge requested and a human click is the fallback). The fix is then two
+# small grants, both named here so neither is hunted for later: the repository
+# team adds contents: write to the ash-automations registration (the App
+# Manager page), and the mint below adds `permission-contents: write` so the
+# downscoped token carries it.
+#
+# WHY THERE IS NO CHECKOUT
+#
+# Nothing here reads the tree. Not checking out means no code from the PR -- or
+# from anywhere -- executes in a job that holds a write token: the steps are a
+# token mint, a metadata read (from the PR's branch name and commit message, via
+# the pinned fetch-metadata action) and two gh calls against the API.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# No workflow-level grant: the one job asks for what it uses (see above).
+permissions: {}
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, so every PR gets its own
+  # group. A superseded run's approval would be dismissed by the newer push
+  # anyway (dismiss_stale_reviews_on_push), so there is nothing worth letting it
+  # finish for.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer run on any ref other than main or a tag supersedes the one in
+  # progress; this workflow has no push trigger, so the main and tag clauses are
+  # the repository-wide spelling rather than live paths here
+  # (tests/unit/test_workflows_cancel_superseded_runs_outside_main.py pins the
+  # one expression for every superseding workflow).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  auto-merge:
+    name: Approve and enable auto-merge for a patch or minor dependency bump
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # dependabot[bot] is the PR author on every PR dependabot opens; the
+    # repository guard keeps the job skipped in forks, where the same workflow
+    # file would otherwise approve PRs with the fork's token (the shape every
+    # guard in GitHub's documented recipe carries).
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.repository == 'awslabs/automated-security-helper'
+    permissions:
+      # fetch-metadata's read is the only use GITHUB_TOKEN has left; the approve
+      # and the auto-merge enablement run under the app token minted below.
+      pull-requests: read
+    steps:
+      # Minted fresh per run, expires on its own, and scoped twice: to this one
+      # repository whatever else the installation covers, and to the one
+      # permission the two gh calls use, whatever else the App's registration
+      # grants now or gains later. Without the permission-* line the token
+      # would inherit the installation's full permission set, which is zizmor's
+      # github-app finding (this repository's own scan gates on it). The two
+      # secrets are the ash-automations App's id and private key.
+      - name: Mint an installation token for the automation app
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.ASH_AUTOMATIONS_APP_ID }}
+          private-key: ${{ secrets.ASH_AUTOMATIONS_PRIVATE_KEY }}
+          owner: awslabs
+          repositories: automated-security-helper
+          permission-pull-requests: write
+
+      - name: Read the update's metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      # update-type is the highest semver change in the PR, so a grouped PR
+      # qualifies only when every member is patch or minor. The step's own if:
+      # is the whole scope filter; a PR outside it runs the job as a visible
+      # skip and no more.
+      - name: Approve the PR and enable auto-merge
+        if: >-
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-minor') &&
+          steps.metadata.outputs.package-ecosystem != 'github_actions'
+        env:
+          # The app token, not GITHUB_TOKEN: only it can enter the merge queue
+          # (the header's token section). It makes ash-automations[bot] the
+          # reviewer and the auto-merge enabler.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Taken from the event rather than interpolated into the script, so no
+          # PR-controlled text is ever shell syntax (html_url is server-built,
+          # but the env route keeps that a fact about GitHub, not a load-bearing
+          # assumption of this file).
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Approve first: the ruleset's one required review is what native
+          # auto-merge waits for besides the required checks. Re-runs re-approve
+          # after a rebase dismissed the stale review. --squash matches the
+          # merge queue's configured method.
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"

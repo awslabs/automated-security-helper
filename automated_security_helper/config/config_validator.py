@@ -3862,6 +3862,8 @@ class ConfigValidator:
         # internal-only, because an operator scanning a multi-project workspace
         # sets max_parallel_projects and project_timeout by hand.
         "workspace",
+        # Scanner selection for --mode precommit (only_scanners, add_scanners).
+        "precommit",
         # Loader directives (#289), resolved before the config is validated.
         EXTENDS_KEY,
         PATCH_KEY,

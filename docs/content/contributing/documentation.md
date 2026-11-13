@@ -12,7 +12,7 @@ There are three layers:
   and compare it with the code: the CLI, the config models, the environment variables
   ASH reads, the navigation, and the link targets. They also check the docs URLs and
   paths that ASH's own source names. They run in about ten seconds.
-- The docs-example runner, in the `integration-test` job. It runs every runnable
+- The docs-example runner, in the `docs-examples` job. It runs every runnable
   shell and Python block, page by page, and fails when a block exits with the wrong
   code.
 - The site build, in the `build-docs` job. It runs `mkdocs build --strict` with link
@@ -759,7 +759,8 @@ branch lists them for the version selector in the site header.
   patch release for an older line is published without moving `latest`.
 - A page of a release that is not the latest shows a notice saying so, with a link to
   the latest release.
-- Any other tag, such as the floating `v3` or a prerelease, publishes nothing.
+- Any other tag, such as a prerelease or the retired floating `v3` (frozen at
+  v3.8.0), publishes nothing.
 
 The deploy also manages the root of the branch. The root `index.html` redirects to
 `latest/`, or to `main/` until a release has been published, and every page path of

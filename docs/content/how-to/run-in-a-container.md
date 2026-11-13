@@ -118,9 +118,10 @@ slashes. Run from the top directory of a checkout of ASH, `ash build-image` and
 container-mode scans build that checkout whatever the revision says; to build another
 revision, run them from another directory.
 
-A branch, or the floating `v3` tag, is cloned again on every build, because it can have
-moved since the last one. A release tag or a commit ID is cloned once, and later builds
-take that clone from the build cache.
+A branch, or a tag that is not a release tag (such as the retired floating `v3`), is
+cloned again on every build, because it can have moved since the last one. A release
+tag or a commit ID is cloned once, and later builds take that clone from the build
+cache.
 
 ## Mounts and network {#mounts}
 

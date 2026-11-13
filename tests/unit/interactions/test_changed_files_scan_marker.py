@@ -117,6 +117,28 @@ def test_a_changed_files_scan_is_marked(tmp_path, monkeypatch):
     }
 
 
+def test_a_staged_scan_is_marked_as_filtered(tmp_path, monkeypatch):
+    """--staged filters the results through the same engine filter, so the
+    marker must say so: a reporter that reads "not reported" as "fixed"
+    (aws-security-hub archives such findings) would otherwise archive the
+    findings the staged scope dropped. The staged list is handed in, so no git
+    runs and no --changed-files-only set exists; the marker still reads True."""
+    from automated_security_helper.core.enums import RunMode
+
+    source = _repository_at(tmp_path / "repo")
+    opts = ScanOptions(
+        source_dir=source,
+        output_dir=tmp_path / "out",
+        mode=RunMode.precommit,
+        staged=True,
+        staged_files=["app.py"],
+    )
+
+    metadata = _orchestrator_metadata(opts)
+
+    assert metadata["changed_files_only"] is True
+
+
 def test_a_full_scan_is_marked_as_not_filtered(tmp_path, monkeypatch):
     """Explicit False, so a consumer can tell a full scan from results that
     predate the marker."""

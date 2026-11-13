@@ -811,6 +811,12 @@
       }),
       'output_formats': list([
       ]),
+      'precommit': dict({
+        'add_scanners': list([
+        ]),
+        'only_scanners': list([
+        ]),
+      }),
       'project_name': 'snapshot-project',
       'reporters': dict({
         'csv': dict({
@@ -1417,6 +1423,12 @@
       }),
       'output_formats': list([
       ]),
+      'precommit': dict({
+        'add_scanners': list([
+        ]),
+        'only_scanners': list([
+        ]),
+      }),
       'project_name': 'ash-scan',
       'reporters': dict({
         'csv': dict({
