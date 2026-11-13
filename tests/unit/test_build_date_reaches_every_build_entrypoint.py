@@ -75,6 +75,7 @@ import yaml
 
 from automated_security_helper.interactions import run_ash_container
 from tests.unit.test_base_image_override_reaches_every_build_entrypoint import (
+    _REQUIRES_ASH_SCRIPT,
     _REQUIRES_BASH,
 )
 from tests.utils.host_ids import with_fixed_ids
@@ -419,7 +420,7 @@ tail -n +2 "$DATE_TIMES" > "$DATE_TIMES.rest" && mv "$DATE_TIMES.rest" "$DATE_TI
 class TestTheBashEntrypoint:
     """``./ash``, which is what the ``bash`` scan legs and bash users run."""
 
-    pytestmark = _REQUIRES_BASH
+    pytestmark = _REQUIRES_ASH_SCRIPT
 
     def _builds(self, tmp_path: Path, offline: bool, times: List[int]) -> List[str]:
         bin_dir = tmp_path / "bin"

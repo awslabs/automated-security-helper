@@ -55,7 +55,7 @@ import pytest
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.unit.test_base_image_override_reaches_every_build_entrypoint import (
-    _REQUIRES_BASH,
+    _REQUIRES_ASH_SCRIPT,
 )
 from tests.unit.test_build_date_reaches_every_build_entrypoint import (
     _PYTHON_RECORDER,
@@ -361,7 +361,7 @@ def _assert_sandbox_off(run_argv: List[str], is_a_scan: bool) -> None:
 
 @pytest.mark.integration
 class TestTheBashEntrypoint:
-    pytestmark = _REQUIRES_BASH
+    pytestmark = _REQUIRES_ASH_SCRIPT
 
     @pytest.mark.parametrize("flags", _REFUSED, ids=" ".join)
     def test_refused_before_the_image_is_built(self, tmp_path, flags):
@@ -2390,11 +2390,19 @@ class TestTheWrappersListsAreTheClis:
         return typer.main.get_command(app)
 
     @staticmethod
-    def _bash_list(name: str) -> set:
+    def _bash_list(name: str, expected: set) -> None:
+        """Assert the root bash script's list equals ``expected``.
+
+        The script was deleted by a533dd6531a (absorbed into the ash CLI), so on this
+        branch there is nothing to compare and only the PowerShell wrapper is checked.
+        If the script returns, the comparison runs again.
+        """
+        if not ASH_SCRIPT.is_file():
+            return
         script = ASH_SCRIPT.read_text(encoding="utf-8")
         found = re.findall(rf'^\s*{name}="([^"]*)"$', script, re.MULTILINE)
         assert len(found) == 1, (name, found)
-        return set(found[0].split())
+        assert set(found[0].split()) == expected
 
     @staticmethod
     def _ps1_list(name: str) -> set:
@@ -2406,7 +2414,7 @@ class TestTheWrappersListsAreTheClis:
     def test_the_commands_are_the_roots(self):
         commands = set(self._root().commands)
 
-        assert self._bash_list("ASH_SUBCOMMANDS") == commands
+        self._bash_list("ASH_SUBCOMMANDS", commands)
         assert self._ps1_list("ashSubcommands") == commands
 
     def test_the_options_that_take_a_value_are_the_roots(self):
@@ -2418,7 +2426,7 @@ class TestTheWrappersListsAreTheClis:
             for spelling in option.opts
         }
 
-        assert self._bash_list("ASH_ROOT_VALUE_OPTIONS") == takes_a_value
+        self._bash_list("ASH_ROOT_VALUE_OPTIONS", takes_a_value)
         assert self._ps1_list("ashRootValueOptions") == takes_a_value
         # The wrappers skip one word after each of them.
         assert all(option.nargs == 1 for option in options)
@@ -2431,7 +2439,7 @@ class TestTheWrappersListsAreTheClis:
             if "sandbox" in {param.name for param in command.params}
         }
 
-        assert self._bash_list("ASH_TAKES_SANDBOX") == takes_it
+        self._bash_list("ASH_TAKES_SANDBOX", takes_it)
         assert self._ps1_list("ashTakesSandbox") == takes_it
         # With no command named, ash scans, and takes --sandbox there too.
         assert "sandbox" in {param.name for param in root.params}
@@ -2464,9 +2472,7 @@ class TestTheWrappersListsAreTheClis:
             )
         }
 
-        assert (
-            self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS") == dash_o_is_the_commands
-        )
+        self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS", dash_o_is_the_commands)
         # The runner's side of the rule: scan's own -o is the runtime alias.
         scan_dash_o = [
             option
