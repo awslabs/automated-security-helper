@@ -111,8 +111,14 @@ CHECK_OLDER = "0.0.0"
 CHECK_STALE_FILES = ("assets/stale.css", "sitemap.xml", "stale-page/index.html")
 
 #: The attributes docs/overrides/main.html puts on each notice.
+#: The unreleased notice no longer exists: a page of main carries no notice, and the
+#: attribute is kept here only so that `check` can fail if one comes back.
 UNRELEASED_NOTICE = 'data-ash-notice="unreleased"'
 OUTDATED_NOTICE = 'data-ash-notice="outdated"'
+#: Material's announce banner, which is what any text in the template's announce
+#: block renders as. Its warning variant (md-banner--warning) is the outdated
+#: component and is not matched.
+ANNOUNCE_BANNER = re.compile(r'<aside\s+class="md-banner"')
 
 PROXY_VARIABLES = (
     "HTTP_PROXY",
@@ -793,8 +799,12 @@ def _version_problems(
         has_unreleased = UNRELEASED_NOTICE in text
         if release and (not has_outdated or has_unreleased):
             wrong_notice.append(path)
+        # A page of main carries no notice: neither of ours, and no announce banner.
         if not release and (
-            has_outdated or OUTDATED_NOTICE in text or not has_unreleased
+            has_outdated
+            or OUTDATED_NOTICE in text
+            or has_unreleased
+            or ANNOUNCE_BANNER.search(text)
         ):
             wrong_notice.append(path)
     if wrong_config:
@@ -805,12 +815,12 @@ def _version_problems(
         )
     if wrong_notice:
         wanted = (
-            "the outdated notice and not the unreleased one"
+            "do not carry the outdated notice and not the unreleased one"
             if release
-            else "the unreleased notice and not the outdated one"
+            else "carry a notice or an announce banner, and main has none"
         )
         problems.append(
-            f"{len(wrong_notice)} page(s) of {directory}/ do not carry {wanted} "
+            f"{len(wrong_notice)} page(s) of {directory}/ {wanted} "
             f"(docs/overrides/main.html, extra.docs_version), first {wrong_notice[0]}"
         )
     home = pages[f"{prefix}index.html"].decode("utf-8", "replace")
