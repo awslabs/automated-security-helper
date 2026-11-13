@@ -175,19 +175,19 @@ the install needs a C compiler.
 
 | Reference | What you get |
 |---|---|
-| `@v3.8.0` | That release. The release process creates each version tag once and moves only the `v3` tag. |
+| `@v3.8.0` | That release. The release process creates each version tag once and never moves it. |
 | a full commit SHA | That commit. The only reference that cannot change. |
-| `@v3` | The latest 3.x release. It moves with each release. |
+| `@v3` | v3.8.0, forever. The retired floating tag: frozen there, it no longer moves with releases. |
 | `@main` | The current development state. |
 
 Release tags are lightweight and unsigned, and releases have no signed artifacts. If
 you need a reference that cannot change, pin a commit SHA.
 
-The `v3` tag moves to each new 3.x release, and a release is not always made from
-`main`: v3.7.1 is a backport made on a separate branch, outside `main`'s history. While
-`v3` points at a release like that, it lacks features of `main` that these docs
-describe. A 3.x release can also include breaking changes, so read the release notes
-before upgrading a `v3` or `<4` pin.
+Floating major tags are retired: the `v3` tag used to move to each new 3.x release
+and is now frozen at v3.8.0, so a `v3` pin never receives updates again -- pin a
+release tag instead. A release is not always made from `main`: v3.7.1 is a backport
+made on a separate branch, outside `main`'s history. A 3.x release can also include
+breaking changes, so read the release notes before upgrading a `<4` pin.
 
 ### Install from main
 

@@ -47,7 +47,7 @@ jobs:
       contents: write
     # A push to main publishes the version main; a release tag vX.Y.Z publishes X.Y.Z
     # (scripts/docs_versions.py decides, and publishes nothing for any other tag, such
-    # as the floating v3). A tag push never reaches this job: the push trigger has no
+    # as the retired floating v3). A tag push never reaches this job: the push trigger has no
     # tags filter, and this condition admits a push only on main, so a tag trigger
     # added later would still start no deploy. A release is published by running
     # this workflow with workflow_dispatch on the tag, or by a workflow_call that
@@ -203,9 +203,9 @@ jobs:
           EOF
 
       # A call names the tag it publishes, so check its shape before anything is
-      # checked out or pushed. This is the rule the floating-tag step in
-      # ash-tag-on-merge.yml applies to the version: a release version, with a
-      # prerelease suffix accepted. The input reaches the script only through env.
+      # checked out or pushed. The shape is the one every tag the release workflow
+      # creates has: a release version after a `v`, with a prerelease suffix
+      # accepted. The input reaches the script only through env.
       - name: Check the release tag
         if: ${{ inputs.ref != '' }}
         run: |

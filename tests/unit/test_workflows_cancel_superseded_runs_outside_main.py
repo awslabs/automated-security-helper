@@ -88,10 +88,10 @@ QUEUEING = {
     ),
 }
 
-#: Fires on the pull_request `closed` event and writes the release tags. Its
+#: Fires on the pull_request `closed` event and writes the release tag. Its
 #: concurrency lives on the job (group ash-release-tag, never cancelled), which
-#: test_floating_major_tag_workflow.py pins; a workflow-level block would add a
-#: second, ref-keyed group on top of it.
+#: test_the_tagging_workflow_keeps_its_job_level_queue below pins; a workflow-level
+#: block would add a second, ref-keyed group on top of it.
 TAGGING = {"ash-tag-on-merge.yml"}
 
 
@@ -191,11 +191,19 @@ def test_a_queueing_workflow_never_cancels(name: str):
 
 @pytest.mark.parametrize("name", sorted(TAGGING))
 def test_the_tagging_workflow_keeps_its_job_level_queue(name: str):
+    """Release runs queue behind one shared job-level group and are never cancelled.
+
+    The group is the one literal shared by every release run: a group built from the
+    pull request number or the version would still be truthy and would turn
+    serialization off. cancel-in-progress must be false because a release run must
+    finish once started. (Pinned here since the floating-major-tag suite, which held
+    this pin, was removed with that tag's step.)
+    """
     workflow = _load(WORKFLOWS / name)
     assert "concurrency" not in workflow, (
         f"{name} gained a workflow-level concurrency block on top of the job's "
         "ash-release-tag group; two groups on one release run is not the shape "
-        "test_floating_major_tag_workflow.py pins"
+        "this test pins"
     )
     jobs = workflow["jobs"]
     job_groups = {
@@ -203,6 +211,12 @@ def test_the_tagging_workflow_keeps_its_job_level_queue(name: str):
         for job_id, job in jobs.items()
     }
     assert job_groups == {"tag-and-release": False}, job_groups
+    group = jobs["tag-and-release"]["concurrency"].get("group")
+    assert group == "ash-release-tag", (
+        f"the concurrency group is {group!r}; it must be the one literal shared by "
+        "every release run, with no ${{ }} expression in it"
+    )
+    assert "${{" not in group
 
 
 def test_the_pinned_expression_names_both_protected_refs():

@@ -137,7 +137,8 @@ request whose title starts with `chore(release):`, does the rest:
   refuses to publish otherwise.
 - It creates the tag `v<version>` and a GitHub Release at the head of `main`, with the
   version's changelog entry followed by GitHub's generated notes.
-- It moves the floating major tag (see [Tags](#tags)).
+
+It no longer moves a floating major tag: floating tags are retired (see [Tags](#tags)).
 
 It does not start the docs workflow. See [The documentation site](#the-documentation-site)
 for how a release's docs version is published.
@@ -176,16 +177,15 @@ Every release has an exact tag, `v<version>`, which the release workflows create
 never move. To install the same ASH every time, pin a git URL or a GitHub Actions
 reference to an exact tag, or to a commit SHA, which cannot move at all.
 
-The floating major tag, `v3` for the 3.x releases, points at the newest release of that
-major version. The tag workflow moves it with the GitHub API to the commit it
-tagged, creating it if it does not exist yet. A reference to `@v3` therefore picks up
-every 3.x release, including the minor releases that carry breaking changes under the
-release line above.
+Floating major tags are retired. The `v3` tag used to be moved to the newest 3.x
+release by the tag workflow; it is now frozen at v3.8.0 and will not move again, and
+no floating tag is created for v4 or later majors. A reference to `@v3` still
+resolves, to v3.8.0, so existing consumers keep working, but it never picks up a
+newer release: pin a release tag, from the GitHub releases page, instead.
 
 The tag workflow only tags `main`. A patch release for an older version is built on a
 branch from that version's tag, outside the workflow: 3.7.1, for example, was built on
-3.7.0, and its tag is not in `main`'s history. When such a release is the newest one, `v3`
-points at it, so `v3` can name a commit that is not on `main`. Until its bump is brought
+3.7.0, and its tag is not in `main`'s history. Until its bump is brought
 back to `main`, the version that `main` reports is lower than the newest tag and `main`'s
 `CHANGELOG.md` has no entry for it; 3.7.1's bump, changelog entry and install pins were
 brought back after the fact, so that an install of `main` reports the newest release.
@@ -202,7 +202,7 @@ The newest release also moves the `latest` alias, which is where the site root a
 search engines send readers, so a release changes what most readers see. A patch
 release for an older line, built outside the workflow as described under
 [Tags](#tags), publishes its version when the docs workflow is run on its tag and
-leaves `latest` where it is. The floating major tag publishes nothing. How the
+leaves `latest` where it is. The frozen `v3` major tag publishes nothing. How the
 versions are built and checked is in
 [Testing the documentation](documentation.md#versioned-docs).
 
@@ -217,7 +217,7 @@ A tag pushed by hand runs the docs workflow as it is at the tagged commit. For a
 a commit from before the site was versioned, that is the old workflow, whose
 `mkdocs gh-deploy --force` force-pushes a single unversioned build as a commit with no
 parent, so every published version disappears from `gh-pages` along with its history.
-That applies to pushing the floating `v3` by hand while it points at such a commit,
+That applies to any tag pushed by hand while it points at such a commit,
 and to a patch release built on a release from before versioning. A ruleset on `gh-pages` that blocks force
 pushes stops it; the versioned deploy only ever fast-forwards the branch. Without one,
 recover by running the docs workflow again on `main` and on each release tag whose

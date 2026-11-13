@@ -189,9 +189,10 @@ _CASE_WRONG_PATTERNS = (_CASE_WRONG_V_REF, _CASE_WRONG_FLAKE_REF)
 # A release pin: exactly three numeric components.
 _SEMVER_PIN = re.compile(r"^\d+\.\d+\.\d+$")
 
-# The documented floating major tag. README.md offers `@v3` as the deliberate
-# alternative to a pinned release ("always points to the latest stable v3.x"), so it
-# is a correct pin rather than a truncated one.
+# A bare-major pin, the shape of the retired floating tag. `v3` is frozen at v3.8.0
+# and the docs now say so rather than offer it, but the tag still resolves and the
+# docs name it while explaining the retirement, so a bare major is a deliberate pin
+# shape rather than a truncated version.
 _FLOATING_MAJOR_PIN = re.compile(r"^\d+$")
 
 # The pin shapes that are not versions and are not meant to be. Each is matched by an

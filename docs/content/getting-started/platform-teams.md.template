@@ -213,7 +213,8 @@ ASH_CONFIG=/etc/ash/ash.yaml ash scan --source-dir . --output-dir ../ash-results
 ```
 
 Pin to a release tag, or to a full commit SHA for a reference that cannot move; do not
-use `@v3`, which moves with each release ([Choose a version to pin](../how-to/install.md#choose-a-version-to-pin)).
+use `@v3`, the retired floating tag, which is frozen at v3.8.0 and never moves to a
+newer release ([Choose a version to pin](../how-to/install.md#choose-a-version-to-pin)).
 To roll out a new version, change the tag in one place and run the same command with
 `--force`. Without the image, the scanners' tools come from the runner and from ASH's own
 environment instead of from one artifact, so keep the runner images that hold them on the

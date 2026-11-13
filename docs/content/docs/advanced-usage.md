@@ -713,7 +713,7 @@ logging.getLogger("ash").addHandler(handler)
 
 ## CI/CD Integration
 
-> **Tip**: The examples below use pinned versions (`@v3.8.0`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
+> **Tip**: The examples below use pinned versions (`@v3.8.0`) for reproducibility. The `v3` floating tag is frozen at v3.8.0 and no longer moves to new releases, so pin a release tag in CI/CD.
 
 ### GitHub Actions
 

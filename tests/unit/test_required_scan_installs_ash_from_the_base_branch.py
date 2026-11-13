@@ -76,7 +76,7 @@ import pytest
 from tests.utils import github_actions as ga
 
 # The cfn-nag tests run the step's bash. Same idiom and reasons as
-# tests/unit/test_floating_major_tag_workflow.py: on a Windows runner `bash` is the WSL
+# tests/unit/test_ash_bash_entrypoint_build_failure.py: on a Windows runner `bash` is the WSL
 # launcher stub, and the step only ever runs on ubuntu-latest.
 _REQUIRES_BASH = pytest.mark.skipif(
     os.name == "nt" or shutil.which("bash") is None,

@@ -92,9 +92,10 @@ jobs:
               # Highest semver release tag that is an ancestor of HEAD.
               #
               # Deliberately not `git describe --tags`: that picks the nearest tag
-              # by commit distance, which here returns the floating major-version
-              # tag `v3`. `v3` gets reattached over time, so upgrading "from v3"
-              # would mean upgrading from an unpredictable commit. Sorting by
+              # by commit distance, which here returns the bare major-version
+              # tag `v3`. `v3` is not a release tag -- it is the retired floating
+              # tag, moved across 3.x releases before it was frozen -- so "from v3"
+              # names no particular release. Sorting by
               # version and filtering to vX.Y.Z pins the arm to a real release.
               ref=$(git tag --sort=-v:refname \
                     | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
