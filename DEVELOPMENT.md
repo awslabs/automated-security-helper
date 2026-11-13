@@ -437,7 +437,8 @@ Releases are cut by maintainers via **Actions > ASH - Create Release > Run workf
 After merging the release PR, a second workflow automatically:
 - Creates the git tag (`v{version}`)
 - Publishes a GitHub Release whose body is the version's `CHANGELOG.md` entry followed by GitHub's auto-generated notes
-- Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
+
+Floating major tags are retired: the `v3` tag is frozen at v3.8.0 and the workflow no longer moves it, and no floating tag is created for later majors. Consumers pin a release tag.
 
 The documentation site is published by the `deploy-docs` job of `.github/workflows/ash-repo-docs.yml`, the only job there with `contents: write`, from every push to `main`. The release PR's merge publishes the release's docs that way. No tag push publishes them, and a hand-pushed release tag no longer republishes the site: the workflow has no tag trigger, and the job's `if:` admits only `refs/heads/main`. That holds for commits that carry the current workflow file. A tag pushed on an older commit runs that commit's copy, which still triggers on every tag, so tag creation and updates should be limited to the release path by a tag ruleset; nothing in a workflow file can cover those commits.
 

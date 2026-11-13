@@ -1203,10 +1203,12 @@ def test_the_docs_dir_named_here_is_the_sites():
 
 @pytest.mark.unit
 def test_the_site_targets_leave_out_the_pages_the_build_skips():
-    """README.md and the example's README are version-pinned and have templates, but
-    the build never renders them, so the check never reads them."""
+    """README.md, the examples' READMEs and the GitHub Actions example workflow are
+    version-pinned and have templates, but none of them lives under the site's
+    docs_dir, so the build never renders them and the check never reads them."""
     assert set(REAL_TARGETS) - set(SITE_TARGETS) == {
         "README.md",
+        "examples/GitHubActions/ash-repo-scan.yml",
         "examples/streamlit_ui/README.md",
     }, SITE_TARGETS
 

@@ -378,6 +378,7 @@ class VersionTemplateManager:
             "docs/content/how-to/run-in-a-container.md",
             "docs/content/how-to/scale-large-repos.md",
             "docs/content/how-to/suppress-findings.md",
+            "examples/GitHubActions/ash-repo-scan.yml",
             "examples/streamlit_ui/README.md",
         ]
 

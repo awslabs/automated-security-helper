@@ -518,7 +518,8 @@ def _unresolved_revision_message() -> str:
 _COMMIT_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 #: The shape of ASH's release tags (v3.7.0, v3.0.0-beta), which are never moved. The
-#: floating major-version tag (v3) is not in it: it moves with every release.
+#: retired floating major tag (v3) is not in it: it is not a release tag, and it was
+#: moved between releases before it was frozen.
 _RELEASE_TAG_PATTERN = re.compile(r"^v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z][0-9A-Za-z.-]*)?$")
 
 #: The Dockerfile ARG declared directly above the clone step of its uv-reqs stage.

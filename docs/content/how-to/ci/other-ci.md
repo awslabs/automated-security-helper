@@ -456,9 +456,9 @@ exit "$ash_exit"
   `sarif` job's `if:` has no status function, so that job is skipped when the scan fails;
   [Upload SARIF](github-actions.md#sarif) shows the condition to use instead.
 - [examples/GitHubActions/ash-repo-scan.yml](https://github.com/awslabs/automated-security-helper/blob/main/examples/GitHubActions/ash-repo-scan.yml)
-  calls the reusable workflow at the floating `v3` tag, with `ash-version: v3`, and uploads
-  SARIF from the scan job on pull requests only. To pin a release, upload SARIF on every
-  event, and install every default scanner's tool, follow
+  calls the reusable workflow at a pinned release tag, with `ash-version` naming the
+  same tag, and uploads SARIF from the scan job on pull requests only. To upload SARIF
+  on every event and install every default scanner's tool, follow
   [Run ASH in GitHub Actions](github-actions.md).
 - [examples/AWSCodeBuild/](https://github.com/awslabs/automated-security-helper/tree/main/examples/AWSCodeBuild)
   installs the ASH release it ships in and scans in container mode, which needs
