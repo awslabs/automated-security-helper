@@ -20,7 +20,7 @@ The Environment variable column names the variable click reads for the option; a
 
 | Command | Description |
 |---------|-------------|
-| [`ash`](#ash) | Automated Security Helper · one workflow for your security scanners. |
+| [`ash`](#ash) | Automated Security Helper, the agentic security harness · one workflow for your scanners. |
 | [`ash build-image`](#build-image) | Builds the ASH container image, then scans the current directory with it unless --no-run is given. |
 | [`ash config`](#config) | ASH configuration management |
 | [`ash config get`](#config-get) | Print the resolved configuration: the file's settings over the defaults. |
@@ -45,7 +45,7 @@ The Environment variable column names the variable click reads for the option; a
 
 ## `ash`
 
-Automated Security Helper · one workflow for your security scanners.
+Automated Security Helper, the agentic security harness · one workflow for your scanners.
 
 ```text
 ash [OPTIONS] COMMAND [ARGS]...

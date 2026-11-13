@@ -801,7 +801,8 @@ def _emit(text: str, stream) -> None:
 
 
 def main() -> None:
-    """Entry point for the ``ash``, ``ashv3`` and ``automated-security-helper`` scripts.
+    """Entry point for the ``ash``, ``ashv3``, ``automated-security-helper`` and
+    ``agentic-security-harness`` scripts.
 
     Shutdown contract: this is the one place that installs ASH's SIGTERM and
     SIGINT handlers (core/cancellation.install_sigterm_shutdown and

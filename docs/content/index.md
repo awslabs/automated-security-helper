@@ -1,7 +1,7 @@
 ---
 template: home.html
 title: Overview
-description: Security scanning for code, infrastructure, secrets, and dependencies.
+description: "Automated Security Helper, the agentic security harness: security scanning for code, infrastructure, secrets, and dependencies."
 ash_version: "3.8.0"
 hide:
   - navigation
@@ -11,7 +11,7 @@ hide:
 
 # Automated Security Helper
 
-ASH runs open-source security scanners and aggregates their findings. AWS Labs project. Apache 2.0 license.
+ASH is Automated Security Helper, the agentic security harness: it runs open-source security scanners and aggregates their findings. AWS Labs project. Apache 2.0 license.
 
 ## Scanning
 
