@@ -391,13 +391,19 @@ def _holds_an_entry(directory: Path) -> bool:
     never landed, was scanned and reported clean. The walk now stops at the first
     regular file, skips ``.git`` at every level, and follows no symbolic link. A
     directory whose listing fails is read as holding nothing, so the caller
-    refuses it as it refuses one that cannot be read.
+    refuses it as it refuses one that cannot be read. That is judged per
+    directory: one subdirectory that cannot be listed holds nothing, and the
+    walk goes on through the others, so a delivered tree with a readable file
+    is not read as empty for it.
     """
     try:
         if not directory.is_dir():
             return False
-        pending = [directory]
-        while pending:
+    except OSError:
+        return False
+    pending = [directory]
+    while pending:
+        try:
             with os.scandir(pending.pop()) as entries:
                 for entry in entries:
                     if entry.name == ".git":
@@ -406,9 +412,9 @@ def _holds_an_entry(directory: Path) -> bool:
                         return True
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(Path(entry.path))
-        return False
-    except OSError:
-        return False
+        except OSError:
+            continue
+    return False
 
 
 def _entries_of(directory: Path) -> List[Path]:
@@ -1611,9 +1617,20 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                             if counts_from_files and isinstance(
                                 result_data.get("severity_counts"), dict
                             ):
+                                # This file's counts are gathered apart and
+                                # merged once every one is a number, so a bad
+                                # count leaves the totals as they were.
+                                contribution: Dict[str, int] = {}
                                 for severity, count in result_data[
                                     "severity_counts"
                                 ].items():
+                                    # bool is an int; a count is not a flag.
+                                    if not isinstance(count, int) or isinstance(
+                                        count, bool
+                                    ):
+                                        raise ValueError(
+                                            "a severity count is not an integer"
+                                        )
                                     # A count under a key off the ladder is a
                                     # finding too: it goes to the catch-all
                                     # bucket, never nowhere.
@@ -1622,6 +1639,10 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                                         if severity in severity_counts
                                         else UNKNOWN_SEVERITY
                                     )
+                                    contribution[bucket] = (
+                                        contribution.get(bucket, 0) + count
+                                    )
+                                for bucket, count in contribution.items():
                                     severity_counts[bucket] += count
                         except Exception as e:
                             await _tell_client(
@@ -3397,11 +3418,18 @@ async def _stop_on_signal(signals: Optional[Iterable[int]] = None) -> None:
             name = signal.Signals(signum).name
             logger.warning(f"{name} received: stopping the scans and the server")
             with anyio.CancelScope(shield=True):
+                # The source clones and deliveries stop in the same window as
+                # the scans, as the lifespan stops them: exit_at_once removes
+                # the stdio session workspace, which a delivery still writing
+                # into it would leave as a partial tree for the next server.
+                deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
+                joiner = _begin_stopping_source_jobs()
                 await stop_running_scans(
                     f"the server received {name}",
                     timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
                     promptly=True,
                 )
+                await _wait_for_source_jobs(joiner, deadline)
             exit_at_once(_STOP_SIGNALS[signum])
 
 

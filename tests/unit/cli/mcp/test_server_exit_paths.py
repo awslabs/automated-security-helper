@@ -627,6 +627,42 @@ def test_a_signal_while_serving_stops_the_scans_promptly_then_exits(
 
 
 @pytest.mark.unit
+def test_a_signal_while_serving_stops_the_source_jobs_before_it_exits(
+    monkeypatch, stops, recorded_group, stop_signals_put_back
+):
+    """exit_at_once removes the stdio session workspace, so a clone or delivery
+    still writing into it would leave the next server a partial tree: the signal
+    path begins stopping the source jobs and waits for them, as the lifespan does,
+    before it exits."""
+    events: List[str] = []
+    joiner = object()
+
+    def begin():
+        events.append("begin")
+        return joiner
+
+    async def wait(given, deadline):
+        events.append("wait" if given is joiner else "wait on another joiner")
+        return False
+
+    monkeypatch.setattr(mcp_server, "_begin_stopping_source_jobs", begin)
+    monkeypatch.setattr(mcp_server, "_wait_for_source_jobs", wait)
+    monkeypatch.setattr(
+        mcp_server.anyio,
+        "open_signal_receiver",
+        _receiver_delivering(signal.SIGTERM, []),
+    )
+    monkeypatch.setattr(mcp_server.mcp, "run_stdio_async", _a_transport_that_yields)
+    monkeypatch.setattr(mcp_server, "_stdout_is_fd_1", lambda: False)
+    monkeypatch.setattr(mcp_server.os, "_exit", lambda status: events.append("exit"))
+    monkeypatch.setattr(mcp_server.logging, "shutdown", lambda: None)
+
+    asyncio.run(mcp_server._serve_stdio())
+
+    assert events == ["begin", "wait", "exit"], events
+
+
+@pytest.mark.unit
 def test_a_sigint_ignored_at_start_stays_ignored(monkeypatch, stop_signals_put_back):
     """A shell starts a background job with SIGINT ignored, so that Ctrl-C reaches
     only the job in the foreground. The server leaves it ignored, as Python and

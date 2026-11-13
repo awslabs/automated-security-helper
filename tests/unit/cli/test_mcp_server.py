@@ -550,6 +550,48 @@ class TestGetScanProgress:
         assert "bandit" in result["scanners"]
 
     @pytest.mark.asyncio
+    async def test_a_non_numeric_count_leaves_the_totals_as_they_were(
+        self, mock_ctx, mock_scan_registry_entry, tmp_path
+    ):
+        """One file with a bad count adds none of its counts, warns, and the
+        files after it still count (it used to leave the totals half-added)."""
+        from automated_security_helper.cli.mcp_server import get_scan_progress
+
+        for scanner, counts in (
+            # Listed first (sorted), with a good count before the bad one.
+            ("bandit", {"critical": 5, "high": "many"}),
+            ("checkov", {"critical": 2, "medium": 1}),
+        ):
+            target = tmp_path / "scanners" / scanner / "source"
+            target.mkdir(parents=True)
+            (target / "ASH.ScanResults.json").write_text(
+                json.dumps({"severity_counts": counts})
+            )
+
+        mock_registry = MagicMock()
+        mock_scan_registry_entry.output_directory = str(tmp_path)
+        mock_registry.get_scan.return_value = mock_scan_registry_entry
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+                new_callable=AsyncMock,
+                return_value={"status": "running"},
+            ),
+            patch(
+                "automated_security_helper.cli.mcp_server.get_scan_registry",
+                return_value=mock_registry,
+            ),
+        ):
+            result = await get_scan_progress(ctx=mock_ctx, scan_id="test-scan-123")
+
+        assert result["severity_counts"]["critical"] == 2
+        assert result["severity_counts"]["medium"] == 1
+        assert result["severity_counts"]["high"] == 0
+        warned = [call.args[0] for call in mock_ctx.warning.await_args_list]
+        assert any("bandit" in message for message in warned), warned
+
+    @pytest.mark.asyncio
     async def test_progress_exception_handling(self, mock_ctx):
         """Exceptions produce a structured error response."""
         from automated_security_helper.cli.mcp_server import get_scan_progress
