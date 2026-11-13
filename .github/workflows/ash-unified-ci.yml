@@ -54,7 +54,7 @@ on:
   # longest pull-request leg near the ~10.5-minute floor the longest scan leg sets. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 291-job push figure is
+  # count rises faster than the test time does. The 455-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -1079,10 +1079,18 @@ jobs:
   # 43449176506, set by its windows cell -- and it bought nothing a miss does not: every
   # job here only restores the uv cache, a restore tolerates a miss, and an unchanged
   # lock file reads main's entry by exact key (the note on ensure-cache). What the drop
-  # gives up is the skip that `needs` alone used to give: a run whose ensure-cache leg
-  # failed used to skip these legs (GitHub applies `success()` to a job with no status
-  # function in its `if:`) and now runs them, each paying its own fetch -- a rare failure
-  # against a serial link paid on every run. ensure-cache's failure still fails the run,
+  # gives up, honestly: a run whose ensure-cache leg failed used to skip these legs
+  # (GitHub applies `success()` to a job with no status function in its `if:`) and now
+  # runs them; and a run that CHANGES the dependency files -- a dependabot lock bump is
+  # a routine pull request -- starts every leg against a cold key instead of one warm
+  # entry per image, so each leg's uv sync fetches what the entry would have held. The
+  # cost per leg is bounded by what the entry holds: setup-uv prunes pre-built wheels
+  # before saving (the note on ensure-cache), so the entry is about 14 MB on x86_64
+  # Linux and macOS and nearly empty elsewhere, and the wheels, the bulk of the install,
+  # come from the index on a hit and a miss alike -- the measured ~26 s warm setup
+  # already includes those fetches. A conditional wait was considered and is not
+  # expressible: `needs` is static, and `hashFiles` cannot compare against the base
+  # without the base checked out. ensure-cache's failure still fails the run,
   # through required-checks, whose `needs` lists it. Like the unit jobs, these carry no
   # job-level `if:`. The per-job
   # `max-parallel` caps below stay per job, so the macOS pool can see up to 49 legs
@@ -2351,10 +2359,18 @@ jobs:
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           export ASH_CFN_GUARD_RULES_DIR="$HOME/.ash/share/cfn-guard-rules"
+          # --snapshot-warn-unused, as run-unit-tests passes it to every sharded leg
+          # (the note on its pytest step): this run has no -m expression, so a shard
+          # selects every test it collects, and syrupy would then fail the leg over
+          # the other shards' snapshot files, unused by construction. Today no
+          # __snapshots__ directory sits under tests/integration, so the flag changes
+          # nothing; it is here so the first snapshot a test adds does not turn the
+          # shards red with no failing test.
           uv run pytest \
             tests/integration \
             --ignore=tests/integration/docs \
             --run-integration --run-slow \
+            --snapshot-warn-unused \
             --no-cov -p no:randomly -n 0 \
             --junit-xml=test-results/integration.junit.xml
       # A red run leaves per-test evidence rather than only the summary line. The shard

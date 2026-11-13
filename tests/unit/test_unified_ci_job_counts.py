@@ -344,7 +344,8 @@ class TestThePullRequestCover:
         assert PR_PYTEST_CHECK_RUNS == unit + 66 + 3
 
     def test_ensure_cache_runs_on_the_two_labels_with_headroom_on_a_pull_request(self):
-        """The fan-out waits for this job, so on a pull request it must not touch a saturated label."""
+        """Nothing waits for this job any more, but its save should still land while the
+        first wave runs, so on a pull request it must not touch a saturated label."""
         images = {c["os"] for c in _cells(JOBS["ensure-cache"], "pull_request")}
         assert images == {"ubuntu-24.04-arm", "windows-latest"}
         # Every pull-request leg of a tier still runs on an image the job covers, or on
@@ -524,8 +525,9 @@ class TestTheCommentsMatchTheWorkflow:
             "137 on a pull request",
             "contributes 212 check",
             "212 is this",
-            # (The four-shard unit tier's figures, 291 / 211 / 136, are the current ones
-            # again now that all three unit pools are sharded, so they left this list.)
+            # (The four-shard unit tier's figures, 291 / 211 / 136, were the current ones
+            # for a while; since the slow pools took eight shards they are stale again
+            # and sit at the end of this list.)
             # Before the Windows unit pool was sharded four ways (unit-test 25 -> 40).
             # ("109 on a pull request" is not in this list: the history sentence in the
             # required-checks note still states it as the superseded figure.)
@@ -537,6 +539,7 @@ class TestTheCommentsMatchTheWorkflow:
             # run 43449176506; the standalone integration-test job sharded, docs-examples
             # split out, the ensure-cache needs edge dropped).
             "expands to 291 jobs",
+            "291-job",
             "contributes 211 check",
             "211 is this",
             "~592 runner jobs",
@@ -623,7 +626,10 @@ class TestEnsureCache:
 
     def test_it_runs_on_every_event_and_reads_only_the_repository(self):
         job = JOBS[ENSURE_CACHE]
-        assert "if" not in job, "a skipped ensure-cache would skip its dependents"
+        assert "if" not in job, (
+            "a conditional ensure-cache would stop saving the cache on some events, "
+            "and its failure would stop reaching the gate there"
+        )
         assert "needs" not in job
         assert "continue-on-error" not in job
         assert job["permissions"] == {"contents": "read"}
