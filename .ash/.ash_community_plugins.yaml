@@ -525,8 +525,8 @@ global_settings:
         a version bump that moves them fails a test instead of drifting.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 907
-      line_end: 933
+      line_start: 906
+      line_end: 929
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of

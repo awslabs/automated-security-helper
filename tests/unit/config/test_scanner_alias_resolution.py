@@ -36,6 +36,8 @@ from automated_security_helper.utils.scanner_names import (
     canonical_scanner_name,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def ash_log():
