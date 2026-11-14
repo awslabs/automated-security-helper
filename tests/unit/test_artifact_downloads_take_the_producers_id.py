@@ -25,6 +25,10 @@ assets. This reads every workflow and composite action and refuses:
 * a download by ``name:`` of an artifact a job in the same workflow uploads;
 * an ``artifact-ids`` that is not one ``${{ needs.<job>.outputs.<name> }}`` of a job
   in the step's ``needs``;
+* an ``artifact-ids`` that reads a ``workflow_call`` input
+  (``${{ inputs.<name> }}``, as upload-ash-sarif.yml does) unless the workflow
+  declares the input and every workflow that calls it and passes it feeds it one
+  ``${{ needs.<job>.outputs.<name> }}`` of a job in the caller's ``needs``;
 * an ``artifact-ids`` with no earlier step in the job holding that same expression to
   a number. download-artifact reads an empty ``artifact-ids`` as no filter and
   downloads every artifact of the run, each into its own subdirectory.
@@ -35,6 +39,7 @@ here is one the producer declares.
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import shutil
@@ -57,6 +62,7 @@ RUN_ATTEMPT = re.compile(r"\$\{\{[^}]*\bgithub\.run_attempt\b[^}]*\}\}")
 NEEDS_OUTPUT = re.compile(
     r"^\$\{\{\s*needs\.([A-Za-z_][A-Za-z0-9_-]*)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}$"
 )
+INPUT_EXPR = re.compile(r"^\$\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}$")
 NUMBER_CHECK = "^[0-9]+$"
 
 
@@ -79,8 +85,52 @@ def _needs(job: dict) -> list[str]:
     return [needs] if isinstance(needs, str) else list(needs)
 
 
-def violations(doc: dict) -> list[str]:
-    """What is wrong with each artifact download in one workflow or action."""
+def _input_findings(
+    doc: dict, docs: dict[str, dict] | None, rel: str | None, where: str, name: str
+) -> list[str]:
+    """What is wrong with an artifact-ids read from the workflow_call input NAME."""
+    on = doc.get("on", doc.get(True)) or {}
+    call = (on.get("workflow_call") or {}) if isinstance(on, dict) else {}
+    if name not in (call.get("inputs") or {}):
+        return [f"{where}: inputs.{name} is not a workflow_call input of this workflow"]
+    if docs is None or rel is None:
+        message = (
+            f"{where}: artifact-ids reads inputs.{name}, and no caller list was "
+            "given to check that each caller feeds it a needs output"
+        )
+        return [message]
+    callee = Path(rel).name
+    found = []
+    for caller_rel, caller_doc in docs.items():
+        for job_id, job in (caller_doc.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            if not str(job.get("uses", "")).endswith(f"/.github/workflows/{callee}"):
+                continue
+            given = (job.get("with") or {}).get(name)
+            if given is None:
+                continue  # the input defaults to empty: no download by ID at all
+            fed = NEEDS_OUTPUT.match(str(given).strip())
+            if not fed:
+                found.append(
+                    f"{where}: {caller_rel} job {job_id} passes {name} as {given!r}, "
+                    "not one ${{ needs.<job>.outputs.<name> }}"
+                )
+            elif fed.group(1) not in _needs(job):
+                found.append(
+                    f"{where}: {caller_rel} job {job_id} passes {name} from "
+                    f"{fed.group(1)!r}, which is not in its needs"
+                )
+    return found
+
+
+def violations(
+    doc: dict, docs: dict[str, dict] | None = None, rel: str | None = None
+) -> list[str]:
+    """What is wrong with each artifact download in one workflow or action.
+
+    DOCS maps each workflow path to its document and REL is this document's path;
+    they are needed only to check a download that reads a workflow_call input."""
     uploaded = {
         str(step["with"]["name"])
         for _, _, steps in _steps(doc)
@@ -112,13 +162,19 @@ def violations(doc: dict) -> list[str]:
             if ids is None:
                 continue
             match = NEEDS_OUTPUT.match(ids.strip())
-            if not match:
+            passed = INPUT_EXPR.match(ids.strip())
+            if passed and not match:
+                # A reusable workflow takes the producer's id as a workflow_call
+                # input. That is the same hand-over one call away, so every
+                # caller that passes the input has to feed it a needs output.
+                found.extend(_input_findings(doc, docs, rel, where, passed.group(1)))
+            elif not match:
                 found.append(
                     f"{where}: artifact-ids {ids!r} is not one "
                     "${{ needs.<job>.outputs.<name> }}"
                 )
                 continue
-            if match.group(1) not in _needs(job):
+            elif match.group(1) not in _needs(job):
                 found.append(f"{where}: {match.group(1)!r} is not in this job's needs")
             checked = any(
                 ids.strip()
@@ -159,8 +215,60 @@ def test_the_walk_reads_every_download():
 
 
 def test_every_download_takes_the_producers_id():
-    found = [f"{rel}: {v}" for rel, doc in _documents() for v in violations(doc)]
+    documents = _documents()
+    docs = dict(documents)
+    found = [
+        f"{rel}: {v}" for rel, doc in documents for v in violations(doc, docs, rel)
+    ]
     assert not found, "\n".join(found)
+
+
+SARIF = ".github/workflows/upload-ash-sarif.yml"
+
+
+def _sarif_docs() -> tuple[dict[str, dict], dict]:
+    docs = copy.deepcopy(dict(_documents()))
+    for doc in docs.values():
+        if True in doc:  # PyYAML reads the bare `on:` key as the boolean True
+            doc["on"] = doc.pop(True)
+    return docs, docs[SARIF]
+
+
+def test_a_download_of_a_workflow_input_follows_the_input_to_its_callers():
+    docs, doc = _sarif_docs()
+    assert any(
+        (s.get("with") or {}).get("artifact-ids") == "${{ inputs.artifact-id }}"
+        for _, _, steps in _steps(doc)
+        for s in steps
+        if _uses(s, DOWNLOAD)
+    )
+    assert violations(doc, docs, SARIF) == []
+
+
+def test_a_caller_feeding_the_input_something_else_is_reported():
+    docs, doc = _sarif_docs()
+    caller = docs[".github/workflows/ash-repo-scan.yml"]["jobs"]["sarif"]
+    caller["with"]["artifact-id"] = "${{ github.run_id }}"
+    assert any("passes artifact-id as" in f for f in violations(doc, docs, SARIF))
+
+
+def test_a_caller_feeding_the_input_from_a_job_it_does_not_need_is_reported():
+    docs, doc = _sarif_docs()
+    docs[".github/workflows/ash-repo-scan.yml"]["jobs"]["sarif"]["needs"] = []
+    assert any("is not in its needs" in f for f in violations(doc, docs, SARIF))
+
+
+def test_a_workflow_input_with_no_caller_list_is_reported():
+    _, doc = _sarif_docs()
+    assert any("no caller list" in f for f in violations(doc))
+
+
+def test_an_input_the_workflow_does_not_declare_is_reported():
+    docs, doc = _sarif_docs()
+    doc["on"]["workflow_call"]["inputs"].pop("artifact-id")
+    assert any(
+        "is not a workflow_call input" in f for f in violations(doc, docs, SARIF)
+    )
 
 
 GOOD = """
