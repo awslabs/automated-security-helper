@@ -356,11 +356,14 @@ def test_the_committed_templates_carry_exactly_the_approved_list(
 
 
 def test_without_the_list_every_guard_suppression_is_reported(
-    gate: ModuleType,
+    gate: ModuleType, approved: list
 ) -> None:
     # Non-vacuity: the committed templates do carry guard metadata, so the test above
-    # passing means each entry matched the list.
-    assert len(_flagged(gate, _committed(gate), [])) == 13
+    # passing means each entry matched the list. With no list, every one of them is
+    # reported: exactly as many as the approved list holds (14, the EKS installer's
+    # opt-in VPC placement being the fourteenth), no more and no fewer.
+    flagged = _flagged(gate, _committed(gate), [])
+    assert len(flagged) == len(approved) == 14
 
 
 def test_a_fourteenth_suppression_on_another_resource_fails(
