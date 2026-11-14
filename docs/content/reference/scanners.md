@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 19 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 18 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -29,7 +29,6 @@ ASH ships 19 scanners. The built-in ones are loaded on every scan. The others ar
 | [`grype`](#grype) | SCA | yes | built in | `grype` | no |
 | [`npm-audit`](#npm-audit) | SCA | yes | built in | `npm` | no |
 | [`opengrep`](#opengrep) | SAST | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
-| [`semgrep`](#semgrep) | SAST | yes on Linux and macOS; no on Windows | built in | `semgrep` | yes |
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
@@ -362,35 +361,6 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 | <a id="scanners.opengrep.options.patterns"></a>`patterns` | list of string | `[]` | Patterns to search for with OpenGrep. |
 | <a id="scanners.opengrep.options.version"></a>`version` | string | `v1.33.1` | Version of OpenGrep to use. |
 | <a id="scanners.opengrep.options.sha256"></a>`sha256` | mapping of one of `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64` to string | `{}` | SHA256 of the OpenGrep release asset for a custom `version`, keyed by platform/arch (e.g. linux/amd64). Required for any version other than the one ASH pins; ignored for the pinned version, whose digests ship with ASH. Get it from GitHub's per-asset digest for the release, or by running sha256sum on the downloaded asset. |
-
-## `semgrep`
-
-- Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScanner`
-- Provided by: built in, loaded on every scan
-- Enabled by default: yes on Linux and macOS; no on Windows
-- Tool type: SAST
-- Command: `semgrep`
-- Install: `uv tool install` on first use (`semgrep>=1.125.0,<2.0.0`)
-- Offline strategy: `cache_flags`
-- Network in the sandbox, by default: yes, unless the scan is offline
-- Environment passed into the sandbox: `SEMGREP_*`
-- Environment set under sandbox-exec: none
-
-Options, under `scanners.semgrep.options`. An option not listed here refuses the configuration.
-
-<!-- doctest: options of=scanners.semgrep -->
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| <a id="scanners.semgrep.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
-| <a id="scanners.semgrep.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
-| <a id="scanners.semgrep.options.offline"></a>`offline` | boolean | `false` | Run in offline mode, using locally cached rules. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it. |
-| <a id="scanners.semgrep.options.config"></a>`config` | string | `p/ci` | YAML configuration file, directory of YAML files ending in .yml\|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes. |
-| <a id="scanners.semgrep.options.exclude"></a>`exclude` | list of string | `["*-converted.py", "*_report_result.txt"]` | Skip any file or directory whose path matches the pattern. |
-| <a id="scanners.semgrep.options.exclude_rule"></a>`exclude_rule` | list of string | `[]` | Skip any rule with the given id. |
-| <a id="scanners.semgrep.options.severity"></a>`severity` | list of one of `INFO`, `WARNING`, `ERROR` | `[]` | Report findings only from rules matching the supplied severity level. |
-| <a id="scanners.semgrep.options.metrics"></a>`metrics` | one of `auto`, `on`, `off` | `auto` | Configures how usage metrics are sent to the Semgrep server. |
-| <a id="scanners.semgrep.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for semgrep installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint. |
-| <a id="scanners.semgrep.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
 
 ## `syft`
 
