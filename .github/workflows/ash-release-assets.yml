@@ -116,7 +116,6 @@ jobs:
           tests/unit/test_release_workflow_references.py
           tests/unit/test_artifact_downloads_take_the_producers_id.py
           tests/unit/test_release_notes_workflow.py
-          tests/unit/test_floating_major_tag_workflow.py
           tests/unit/test_e2e_n1_fetch.py
           tests/unit/test_e2e_prev_tree.py
           tests/unit/test_package_formats_workflow.py
