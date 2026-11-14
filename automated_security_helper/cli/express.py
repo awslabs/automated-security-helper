@@ -62,7 +62,9 @@ def _become_a_daemon_environment() -> None:
 
     current = snapshot_environ()
     kept = runtime.scrubbed_daemon_environment(current)
-    overrides = {name: None for name in current if name not in kept}
+    overrides: dict[str, Optional[str]] = {
+        name: None for name in current if name not in kept
+    }
     overrides.update(kept)
     apply_environ_overrides(overrides)
     for name in ("SIGINT", "SIGTERM", "SIGHUP", "SIGPIPE"):
