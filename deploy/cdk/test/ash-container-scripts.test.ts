@@ -141,9 +141,9 @@ describe('CodeCommit gate handler', () => {
     // Looked up on the scan environment's PATH, not the handler's: Lambda replaces
     // PATH, and _scan_env restores the image's.
     expect(CODECOMMIT_GATE_HANDLER).toContain(
-      'cli = "ashx" if shutil.which("ashx", path=scan_env.get("PATH")) else "ash"',
+      'return "ashx" if shutil.which("ashx", path=scan_env.get("PATH")) else "ash"',
     );
-    expect(CODECOMMIT_GATE_HANDLER).toContain('argv = [cli, "scan", ');
+    expect(CODECOMMIT_GATE_HANDLER).toContain('argv = [_ash_cli(scan_env), "scan", ');
     expect(CODECOMMIT_GATE_HANDLER).not.toMatch(/\["ashx?", "scan"/);
   });
 
@@ -512,17 +512,22 @@ exit 1
   }
 
   test('runs ashx when the image has it, even beside the deprecated ash', () => {
-    const { status, ran, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' }, FAKE_ASH, [
-      'ashx',
-      'ash',
-    ]);
+    const { status, ran, argv } = runEntrypoint(
+      { FAKE_ASH_MODERN: '1', ...HOST_ALLOWLIST },
+      FAKE_ASH,
+      ['ashx', 'ash'],
+    );
     expect(status).toBe(0);
     expect(ran).toBe('ashx');
     expect(argv.slice(0, 3)).toEqual(['mcp', '--transport', 'streamable-http']);
   });
 
   test('falls back to ash on an image built from a v3 tag, which ships no ashx', () => {
-    const { status, ran, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' }, FAKE_ASH, ['ash']);
+    const { status, ran, argv } = runEntrypoint(
+      { FAKE_ASH_MODERN: '1', ...HOST_ALLOWLIST },
+      FAKE_ASH,
+      ['ash'],
+    );
     expect(status).toBe(0);
     expect(ran).toBe('ash');
     expect(argv.slice(0, 3)).toEqual(['mcp', '--transport', 'streamable-http']);
