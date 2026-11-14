@@ -166,7 +166,7 @@ class TestTheFormulaInstallsTheLockedDependencies:
     def test_the_console_scripts_find_the_formulas_node(self):
         """Homebrew's node is on the scripts' PATH, after the user's own PATH."""
         assert re.search(
-            r'path = "#\{libexec\}/bin:\$PATH:#\{Formula\["node"\]\.opt_bin\}"',
+            r'path = "#\{libexec\}/bin:\$PATH:#\{formula_opt_bin\("node"\)\}"',
             _install_method(),
         )
         assert 'write_env_script libexec/"bin"/script, PATH: path' in _install_method()
@@ -531,6 +531,16 @@ class Formula
 
   def initialize(prefix)
     @prefix = Pathname(prefix)
+  end
+
+  # Homebrew's helper for a dependency's opt bin directory.
+  def formula_opt_bin(_name)
+    Pathname("/opt/node/bin")
+  end
+
+  # Homebrew's `rm` raises on a missing file, as FileUtils.rm does.
+  def rm(path)
+    FileUtils.rm(path)
   end
 
   def libexec

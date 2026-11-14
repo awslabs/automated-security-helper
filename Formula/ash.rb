@@ -27,6 +27,12 @@ class Ash < Formula
   # the three channels that keep the deprecated `ash`; the others are pip and the
   # container image.
 
+  depends_on "uv" => :build
+  # cdk-nag runs on Node.js and npm-audit runs npm. Both are in ASH's default and
+  # precommit scanner sets, so without Node.js those scans report them MISSING.
+  depends_on "node"
+  depends_on "python@3.12"
+
   # After the build, Homebrew rewrites every dylib ID in the keg to the library's
   # absolute opt path, and fails the install ("Failed to fix install linkage") on a
   # Mach-O whose header has no room for the longer name. The locked orjson wheel's
@@ -35,12 +41,6 @@ class Ash < Formula
   # Homebrew's -headerpad_max_install_names. Python loads extension modules by path,
   # so the install name is never read; leave @rpath IDs as they are.
   preserve_rpath
-
-  depends_on "uv" => :build
-  # cdk-nag runs on Node.js and npm-audit runs npm. Both are in ASH's default and
-  # precommit scanner sets, so without Node.js those scans report them MISSING.
-  depends_on "node"
-  depends_on "python@3.12"
 
   # ASH's Python dependencies come from the uv.lock committed at the tag above,
   # not from `resource` blocks. `virtualenv_install_with_resources` installs with
@@ -87,14 +87,14 @@ class Ash < Formula
     # recorded, as an install from an index is.
     dist_infos = Dir[(venv.root/"lib/python*/site-packages/automated_security_helper-*.dist-info").to_s]
     odie "expected one automated_security_helper dist-info, found #{dist_infos.length}" if dist_infos.length != 1
-    rm_f "#{dist_infos.first}/direct_url.json"
+    rm "#{dist_infos.first}/direct_url.json"
 
     # The lock includes uv itself, and scans install bandit, checkov and other
     # tools with it. Putting the virtualenv's bin first on PATH makes ASH use the
     # uv version it was locked with rather than whichever one is on the user's
     # PATH, the same thing `uvx` does. Node.js goes last, so a node the user put
     # on PATH still wins and this one is there when none is.
-    path = "#{libexec}/bin:$PATH:#{Formula["node"].opt_bin}"
+    path = "#{libexec}/bin:$PATH:#{formula_opt_bin("node")}"
     %w[ashx ash ashv3 automated-security-helper agentic-security-harness].each do |script|
       (bin/script).write_env_script libexec/"bin"/script, PATH: path
     end
@@ -181,7 +181,7 @@ class Ash < Formula
     exited = shell_output("#{ashx} scan --source-dir #{testpath}/cfn --output-dir #{testpath}/out-cfn " \
                           "--simple --phases scan --phases report --scanners cdk-nag; " \
                           "rc=$?; echo; echo \"ashx exited $rc\"")
-                 .lines.last.strip
+             .lines.last.strip
     status = JSON.parse((testpath/"out-cfn/ash_aggregated_results.json").read)
                  .dig("scanner_results", "cdk-nag", "status")
     assert_includes %w[PASSED FAILED], status, "cdk-nag reported #{status}"
