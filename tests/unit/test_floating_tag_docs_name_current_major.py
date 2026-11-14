@@ -1,39 +1,46 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The floating-tag tip in the docs must name the project's own major version.
+"""What the docs say about floating major tags must stay true across a major bump.
 
 Why this file exists
 --------------------
-``.github/workflows/ash-tag-on-merge.yml`` moves a floating tag named after the
-released major: ``v3`` follows 3.x, ``v4`` follows 4.x. The two tags coexist, so
-``@v3`` keeps resolving after 4.0.0 ships and quietly installs the last 3.x release.
+Floating major tags are retired (#928). ``v3`` is frozen at v3.8.0 and no
+floating tag is created for v4 or later, so a bare ``@vN`` ref never follows a
+release. The docs say so: they name ``v3`` as the frozen tag, and the templates
+say that a floating major tag "such as `vN`" is no longer updated, where N is the
+major being released.
 
-The docs tell users to "stay up to date automatically" with that tag. Before this
-file existed, every template wrote the major as a literal, so the version bump to
-4.0.0 regenerated the pinned ``@v4.0.0`` examples while the same sentence went on
-recommending ``@v3`` as the way to get the latest release. Nothing failed: the
-round-trip test in ``test_version_template_round_trip.py`` only compares a doc with
-its own template, and both said ``v3``.
+The hazard this file guards is the one that predates the retirement, in its new
+form. A template that writes the current major as a literal renders the same at
+any version, so the bump to the next major regenerates the pinned examples while
+the floating-tag sentence goes on naming the old major. Before the retirement that
+sentence recommended a stale tag; now it would state the retirement about the wrong
+tag. Nothing fails on its own: the round-trip test in
+``test_version_template_round_trip.py`` only compares a doc with its own template.
 
 What this asserts
 -----------------
 1. Every template, rendered at the current version AND at the next major, names
-   that version's major in each floating-tag line. Rendering at the next major is
-   what catches a literal major in a template: a literal renders identically at
-   any version, so a check at the current version alone passes until the bump.
-2. Every committed Markdown doc (generated or not) names the current major in each
-   floating-tag line, so a hand-written doc that repeats the tip is held to the
-   same rule.
+   only that version's major (or the frozen one) in each floating-tag line.
+   Rendering at the next major is what catches a literal major in a template.
+2. Every committed Markdown doc (generated or not) names only the current major or
+   the frozen one in each floating-tag line, so a hand-written doc that repeats
+   the sentence is held to the same rule.
+
+The frozen major is ``FROZEN_MAJOR`` (3). It is allowed because the retirement
+text has to name it: "the `v3` tag is frozen at v3.8.0" is true at every later
+version. Any other major on such a line fails, which is what keeps a literal
+``v4`` from surviving into 5.0.0 and a stray ``v2`` from passing.
 
 The major comes from ``[tool.commitizen] version`` in pyproject.toml, for the reason
 recorded in ``test_version_template_round_trip.py``.
 
-A "floating-tag line" is a line that mentions a floating tag, names a major series
-(``v4.x``), or carries an ASH install ref at a bare major
-(``automated-security-helper.git@v4`` with no minor). The series form is there
-because a sentence can describe the tip without saying "floating tag" ("a `v4` Git
-tag that always points to the latest stable v4.x release"). Within such a
+A "floating-tag line" is a line that mentions a floating tag (``floating tag``,
+``floating major tag``), or names a major series (``v4.x``), or carries an ASH
+install ref at a bare major (the repository's git URL followed by ``@v4`` with no
+minor), or directly follows such a line: a sentence wraps, and the major often
+lands on the line after the words "floating major tags such as". Within such a
 line the majors read are `` `vN` ``, ``@vN`` (not followed by a dot or digit) and
 ``vN.x``. Pinned refs such as ``@v4.0.0`` and unrelated actions such as
 ``actions/checkout@v3`` are on other lines or do not match.
@@ -69,7 +76,12 @@ _REPO_NAME = "automated-security-" + "helper"
 _BARE_MAJOR_INSTALL_REF = re.compile(
     rf"{_REPO_NAME}(?:\.git)?@v\d+(?![\d.])", re.IGNORECASE
 )
-_FLOATING_MENTION = re.compile(r"floating[- ]tag", re.IGNORECASE)
+_FLOATING_MENTION = re.compile(r"floating[- ](?:major[- ])?tags?\b", re.IGNORECASE)
+
+# The major whose floating tag existed and is now frozen (at v3.8.0). The docs name
+# it when they explain the retirement, so it is a legitimate major on a
+# floating-tag line at every later version.
+FROZEN_MAJOR = 3
 _MAJOR_SERIES = re.compile(r"\bv\d+\.x\b")
 _MAJOR_TOKENS = (
     re.compile(r"`v(\d+)`"),
@@ -104,12 +116,17 @@ def _major(version: str) -> int:
 def floating_tag_majors(text: str) -> list[tuple[int, int, str]]:
     """Return (line number, major, line) for every major named on a floating-tag line."""
     found = []
+    previous_was_floating = False
     for number, line in enumerate(text.splitlines(), start=1):
-        if not (
+        mentions = bool(
             _FLOATING_MENTION.search(line)
             or _MAJOR_SERIES.search(line)
             or _BARE_MAJOR_INSTALL_REF.search(line)
-        ):
+        )
+        in_scope = mentions or previous_was_floating
+        # A blank line ends the sentence; only a wrapped continuation inherits.
+        previous_was_floating = mentions if line.strip() else False
+        if not in_scope:
             continue
         for token in _MAJOR_TOKENS:
             for match in token.finditer(line):
@@ -118,10 +135,12 @@ def floating_tag_majors(text: str) -> list[tuple[int, int, str]]:
 
 
 def _wrong_majors(text: str, expected: int) -> list[str]:
+    """Majors on floating-tag lines that are neither `expected` nor the frozen one."""
     return [
-        f"  line {number}: names v{major}, expected v{expected}: {line[:160]}"
+        f"  line {number}: names v{major}, expected v{expected} "
+        f"(or the frozen v{FROZEN_MAJOR}): {line[:160]}"
         for number, major, line in floating_tag_majors(text)
-        if major != expected
+        if major not in (expected, FROZEN_MAJOR)
     ]
 
 
@@ -190,8 +209,18 @@ class TestCommittedDocsNameTheCurrentMajor:
 class TestTheCheckCanFail:
     """Positive controls, so an empty census or a dead matcher cannot read as green."""
 
+    # The floors are the counts measured on the tree after the retirement (#928):
+    # 5 templates (README, advanced-usage, platform-teams, install, the Streamlit
+    # example README) and 7 committed docs (those five plus the releases page and
+    # the FAQ, which carry the sentence with no template of their own to render).
+    # Before the retirement the promise to "stay up to date" with the tag was
+    # repeated on more pages, which is why the old floors were 8 and 9; the
+    # deprecation note replaced those repeats and lives on fewer. A floor is only
+    # worth having at the real count: lower, and a matcher that silently drops a
+    # page still passes. A page that legitimately loses the note lowers its floor
+    # here, in the same change, with its reason.
     def test_the_tip_is_found_in_several_templates(self):
-        assert len(_templates_with_the_tip()) >= 8
+        assert len(_templates_with_the_tip()) >= 5
 
     def test_the_tip_is_found_in_the_committed_docs(self):
         hits = [
@@ -199,14 +228,37 @@ class TestTheCheckCanFail:
             for path in _tracked_docs()
             if floating_tag_majors((REPO_ROOT / path).read_text(encoding="utf-8"))
         ]
-        assert len(hits) >= 9, hits
+        assert len(hits) >= 7, hits
 
     def test_a_stale_major_is_reported(self):
         line = (
-            "> **Floating tag `v3`**: use `@v3` to get the latest stable v3.x release."
+            "> **Floating tag `v2`**: use `@v2` to get the latest stable v2.x release."
         )
         assert len(_wrong_majors(line, 4)) == 3
-        assert _wrong_majors(line, 3) == []
+        assert _wrong_majors(line, 2) == []
+
+    def test_a_literal_current_major_fails_after_the_bump(self):
+        # What the next-major render catches: a literal `v4` in a template renders
+        # the same at 5.0.0, where it names a major that is neither current nor frozen.
+        line = "Floating major tags such as `v4` are no longer updated."
+        assert _wrong_majors(line, 4) == []
+        assert len(_wrong_majors(line, 5)) == 1
+
+    def test_the_frozen_major_is_allowed_on_a_floating_tag_line(self):
+        line = "The `v3` floating tag is frozen at v3.8.0 and never moves."
+        assert floating_tag_majors(line)
+        assert _wrong_majors(line, 4) == []
+        assert _wrong_majors(line, 7) == []
+
+    def test_a_wrapped_sentence_keeps_its_floating_context(self):
+        text = "Floating major tags such as\n`@v2` do not follow releases.\n"
+        assert len(_wrong_majors(text, 4)) == 1
+
+    def test_a_blank_line_ends_the_floating_context(self):
+        text = (
+            "Floating major tags are retired.\n\n`actions/checkout@v2` is unrelated.\n"
+        )
+        assert floating_tag_majors(text) == []
 
     # The repository name is interpolated in the fixtures below. The tree-wide pin
     # walk in test_agent_plugin_ash_version.py reads every tracked file as text and
@@ -220,12 +272,12 @@ class TestTheCheckCanFail:
 
     def test_a_major_series_is_a_floating_tag_line(self):
         line = (
-            "We maintain a `v3` Git tag that always points to the latest stable "
-            "v3.x release. This means you can use `@v3` in your installation commands."
+            "We maintain a `v2` Git tag that always points to the latest stable "
+            "v2.x release. This means you can use `@v2` in your installation commands."
         )
         assert len(_wrong_majors(line, 4)) == 3
-        assert _wrong_majors(line, 3) == []
+        assert _wrong_majors(line, 2) == []
 
     def test_a_bare_major_install_ref_is_a_floating_tag_line(self):
-        text = f'alias ashx="uvx git+https://github.com/awslabs/{_REPO_NAME}.git@v3"'
+        text = f'alias ashx="uvx git+https://github.com/awslabs/{_REPO_NAME}.git@v2"'
         assert _wrong_majors(text, 4)
