@@ -297,7 +297,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 import { AshCustomerKey, ashSynthesizer, diagnosticLogGroupProps } from './ash-config';
-import { suppressEksInstallerRoleWildcards } from './ash-nag-suppressions';
+import { suppressEksInstallerRoleWildcards, suppressGuardRule } from './ash-nag-suppressions';
 
 /** The custom resource API group the operator owns. */
 export const ASH_OPERATOR_API_GROUP = 'ash.awslabs.github.io';
@@ -1676,6 +1676,12 @@ export class AshEksOperatorStack extends Stack {
         { Ref: 'AWS::NoValue' },
       ],
     });
+    suppressGuardRule(
+      installer,
+      'LAMBDA_INSIDE_VPC',
+      'Opt-in: set VpcSubnetIds and VpcSecurityGroupIds to attach the installer to your VPC. ' +
+        'Empty (default) leaves VpcConfig out, so the rule finds no subnet or group lists.',
+    );
 
     // -----------------------------------------------------------------------
     // Authorization: the access entry that lets the installer into the cluster.

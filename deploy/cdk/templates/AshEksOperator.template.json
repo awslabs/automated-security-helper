@@ -335,7 +335,17 @@
    },
    "DependsOn": [
     "InstallerRoleDefaultPolicyC01C83A5"
-   ]
+   ],
+   "Metadata": {
+    "guard": {
+     "SuppressedRules": [
+      "LAMBDA_INSIDE_VPC"
+     ],
+     "SuppressedRuleReasons": {
+      "LAMBDA_INSIDE_VPC": "Opt-in: set VpcSubnetIds and VpcSecurityGroupIds to attach the installer to your VPC. Empty (default) leaves VpcConfig out, so the rule finds no subnet or group lists."
+     }
+    }
+   }
   },
   "InstallerEc2CodeDeny0202AC72": {
    "Type": "AWS::IAM::Policy",
