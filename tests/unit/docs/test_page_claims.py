@@ -5665,6 +5665,8 @@ _OUTPUTS_FILE_NAME = re.compile(r"(?<![\w.\-])(\.?ash\.[A-Za-z0-9][\w.\-]*[A-Za-
 _OUTPUTS_REPOSITORY_FILES = (
     "Formula/ash.rb",
     "ash-agent-plugins/agentic-coding/plugins/mcpb/ash.mcpb",
+    # The Chocolatey package's manifest, which its page names as a file of the package.
+    "packaging/chocolatey/ash.nuspec",
 )
 
 
@@ -13025,7 +13027,7 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
         "docs/advanced-usage.md",
         (
             "| bandit, checkov, semgrep, cfn-lint, zizmor | same name | ASH installs "
-            "them with `uv tool` during a scan, or `ash dependencies install` does it "
+            "them with `uv tool` during a scan, or `ashx dependencies install` does it "
             "ahead of time |"
         ),
     ),
@@ -17807,7 +17809,22 @@ def test_every_python_range_the_pages_give_is_requires_python() -> None:
         )
     ]
     assert len(ranges) >= 3, ranges
-    wrong = [r for r in ranges if (r[1], r[2]) != (minors[0], minors[-1])]
+    # The Chocolatey package pins the python3 dependency to its own range, which the
+    # manifest declares and its page repeats (the ceiling is the newest Python the
+    # package's CI exercises). That page is held to the manifest's range, not to
+    # requires-python, so a change to either side still fails here.
+    nuspec = (_code_root() / "packaging/chocolatey/ash.nuspec").read_text(
+        encoding="utf-8"
+    )
+    pinned = re.search(r'id="python3" version="\[3\.(\d+),3\.(\d+)\)"', nuspec)
+    assert pinned, "ash.nuspec no longer pins python3 as a [3.A,3.B) range"
+    package_range = (int(pinned[1]), int(pinned[2]) - 1)
+    package_pages = {"docs/native-packages/chocolatey.md": package_range}
+    wrong = [
+        r
+        for r in ranges
+        if (r[1], r[2]) != package_pages.get(r[0], (minors[0], minors[-1]))
+    ]
     assert not wrong, (
         f"requires-python {_install_project()['requires-python']} allows "
         f"3.{minors[0]} to 3.{minors[-1]}; these pages give other ranges: {wrong}"
