@@ -454,13 +454,16 @@ echo "== 7. negative control: a fixture the sandbox cannot reach must not be sca
 # /tmp is deliberately outside --filesystem=host, so the app sees its own empty tmpfs
 # there: the fixture directory does not exist inside the sandbox at all. ASH refuses a
 # --source-dir that does not exist (cli/scan.py: "Source directory does not exist",
-# exit 1), so that refusal, naming this exact path, IS what an unreachable tree looks
-# like. An earlier version of this step expected a clean exit-0 scan, counted results
-# over any *.sarif it could find, and printed the exit code without comparing it; once
-# ASH started refusing a missing source directory it read rc=1 with no report as "0
-# findings" and kept passing. Each of the three facts is now required:
+# exit 5, ASH_EXIT_USAGE_ERROR in core/constants.py: a refused invocation is a usage
+# error, not the 1 of an incomplete scan), so that refusal, naming this exact path, IS
+# what an unreachable tree looks like. This step expected 1 after the usage-error code
+# was introduced, and failed with the refusal text present and rc=5. An earlier version
+# of this step expected a clean exit-0 scan, counted results over any *.sarif it could
+# find, and printed the exit code without comparing it; once ASH started refusing a
+# missing source directory it read a nonzero rc with no report as "0 findings" and
+# kept passing. Each of the three facts is now required:
 #
-#   - exit exactly 1, the usage refusal, and not 0, 2 or a crash;
+#   - exit exactly 5, the usage refusal, and not 0, 1, 2 or a crash;
 #   - the refusal names this fixture's path, so the exit 1 is that refusal;
 #   - neither report exists at its exact path under an output directory the sandbox
 #     CAN write (under /srv, inside the grant), so "no report" means the scan stopped
@@ -482,8 +485,8 @@ set -e
 echo "   /tmp fixture: rc=$NEG_RC"
 sed -n 's/^/     /;/Source directory/p' "$WORK/scan-negative.log"
 NEG_PROBLEMS=0
-if [ "$NEG_RC" -ne 1 ]; then
-  echo "   FAIL: the scan of a tree outside the grant exited $NEG_RC, not 1 (refused)" >&2
+if [ "$NEG_RC" -ne 5 ]; then
+  echo "   FAIL: the scan of a tree outside the grant exited $NEG_RC, not 5 (usage refusal)" >&2
   NEG_PROBLEMS=1
 fi
 if ! grep -qF "Source directory does not exist: $FIX_UNREACHABLE" "$WORK/scan-negative.log"; then
@@ -502,7 +505,7 @@ if [ "$NEG_PROBLEMS" -ne 0 ]; then
   exit 1
 fi
 rm -rf "$NEG_OUT"
-echo "   OK: inside the sandbox the /tmp fixture does not exist: refused with exit 1, no report"
+echo "   OK: inside the sandbox the /tmp fixture does not exist: refused with exit 5, no report"
 
 echo "== 8. the three e2e cases, through the installed app"
 # run_case.py takes an executable, so the app is reached through a two-line shim named
