@@ -280,17 +280,27 @@ class TestSchemaSource:
             )
         with open(_COMMITTED_SCHEMA) as handle:
             committed = json.load(handle)
-        live = ash_config.AshConfig.model_json_schema()
+        # The committed file is what generate_schemas writes: the model's schema through
+        # ConfigFileJsonSchema, which lets a config file give an environment reference
+        # where a typed value goes. The plain model_json_schema() has no such arms, so
+        # the comparison that holds is against the generator's own output. (The
+        # operator's "model" source still reads the plain schema, so a CRD built without
+        # ASH carries those looser arms and is not byte-for-byte the CRD built with it.)
+        from automated_security_helper.schemas.generate_schemas import (
+            ConfigFileJsonSchema,
+        )
+
+        live = ash_config.AshConfig.model_json_schema(schema_generator=ConfigFileJsonSchema)
         # Compared without `default` keywords, as the digest is: the CRD drops every
         # default, and two of ASH's depend on the platform the schema was generated
         # on (see ash_config_schema_digest). Everything the CRD carries must agree.
         assert _without_defaults(committed) == _without_defaults(live), (
-            f"{_COMMITTED_SCHEMA} no longer matches AshConfig.model_json_schema() "
-            f"outside its defaults. Regenerate it with "
+            f"{_COMMITTED_SCHEMA} no longer matches what generate_schemas writes for "
+            f"AshConfig, outside its defaults. Regenerate it with "
             f"automated_security_helper/schemas/generate_schemas.py."
         )
         assert ash_config_schema_digest(committed) == ash_config_schema_digest(live), (
-            f"{_COMMITTED_SCHEMA} no longer matches AshConfig.model_json_schema(). "
+            f"{_COMMITTED_SCHEMA} no longer matches what generate_schemas writes for AshConfig. "
             f"Regenerate it with automated_security_helper/schemas/generate_schemas.py "
             f"-- until then, a CRD generated without ASH installed describes a "
             f"different config surface from one generated with it."
