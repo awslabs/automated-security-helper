@@ -552,12 +552,22 @@ class TestSpawnDaemonProcess:
         user-site packages the client never sees: the same scan, different
         findings, warm against cold. The flags are also in the socket key, so
         a default client reaches a different daemon altogether."""
-        import types
+        real = runtime.sys.flags
+
+        class _Flags:
+            # sys.flags is process-global: every flag but the three under
+            # test reads through to the real one, so pytest's own reads of
+            # it keep working while the patch is in place.
+            def __init__(self, **overrides):
+                self.__dict__.update(overrides)
+
+            def __getattr__(self, name):
+                return getattr(real, name)
 
         monkeypatch.setattr(
             runtime.sys,
             "flags",
-            types.SimpleNamespace(
+            _Flags(
                 no_user_site=no_user_site,
                 ignore_environment=ignore_environment,
                 isolated=isolated,
@@ -596,7 +606,9 @@ class TestSpawnDaemonProcess:
             "VIRTUAL_ENV",
         ]
         spawned_path = seen["env"].get("PYTHONPATH")
-        assert spawned_path == "/work/ash-checkout"
+        # PYTHONPATH is absolutized, which on a drive-lettered platform adds
+        # the drive; the expectation is spelled the same way.
+        assert spawned_path == os_module.path.abspath("/work/ash-checkout")
 
 
 class TestControlRequestTimeout:
@@ -635,8 +647,13 @@ class TestAutostartBacksOffAfterARetirement:
         monkeypatch.setattr(runtime, "express_supported", lambda: True)
         monkeypatch.setattr(runtime, "socket_path", lambda *_: path)
         monkeypatch.setattr(client, "_connect", lambda _p: None)
+        # raising=False: os.fork does not exist on Windows, where the
+        # assertion still holds (nothing is spawned either).
         monkeypatch.setattr(
-            os_module, "fork", lambda: pytest.fail("no daemon may be forked")
+            os_module,
+            "fork",
+            lambda: pytest.fail("no daemon may be forked"),
+            raising=False,
         )
         runtime.mark_retired_for_threads(path)
         assert client.delegated_exit_code(["scan", "--express"], environ={}) is None
@@ -684,6 +701,6 @@ class TestScrubbedDaemonEnvironment:
             # The interpreter-shaping set is KEPT: it decides which ASH tree and
             # which site set the daemon's own interpreter resolves, and the
             # fingerprint covers it.
-            "PYTHONPATH": "/work/plugins",
+            "PYTHONPATH": os_module.path.abspath("/work/plugins"),
             "VIRTUAL_ENV": "/some/venv",
         }

@@ -304,6 +304,11 @@ class TestSocketKeyCarriesTheInterpreterShape:
         one, two = tmp_path / "one", tmp_path / "two"
         one.mkdir()
         two.mkdir()
+        # The runner's own interpreter variables (CI sets VIRTUAL_ENV) are
+        # part of the shape too; the daemon mapping below carries only
+        # PYTHONPATH, so the process starts without the others.
+        for name in runtime.INTERPRETER_ENV:
+            monkeypatch.delenv(name, raising=False)
         monkeypatch.setenv("PYTHONPATH", ".")
         monkeypatch.chdir(one)
         key_one = runtime.socket_key(version="1", uid=1, prefix="/p")
@@ -324,5 +329,7 @@ class TestSocketKeyCarriesTheInterpreterShape:
         )
 
     def test_the_daemon_scrub_keeps_every_variable_the_key_reads(self):
-        environ = dict.fromkeys(runtime.INTERPRETER_ENV, "/x")
+        # Already absolute on every platform, so the scrub's PYTHONPATH
+        # absolutizing leaves it as it is (a bare "/x" gains a drive on Windows).
+        environ = dict.fromkeys(runtime.INTERPRETER_ENV, os.path.abspath("/x"))
         assert runtime.scrubbed_daemon_environment(environ) == environ
