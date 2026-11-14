@@ -85,6 +85,16 @@ ATOMIC_WRITER_SOURCES = frozenset({"configMap", "secret"})
 # symlink races S108 is about need a shared /tmp on a host.
 TMP_MOUNT = "/tmp"  # noqa: S108  # nosec B108 - the pod's own emptyDir, see above
 
+# The scratch directory ASH can use for the config files it writes for a scanner's
+# tool. ASH refuses a directory, or any parent of one, that other accounts can write
+# without the sticky bit, and the kubelet makes every emptyDir root mode 0777, so
+# /tmp and the output mount never qualify. This one is made private (owned by the
+# pod's uid, mode 0700) by an init container before the scanner container starts, and
+# TMPDIR points at it. See manifests.private_tmp_init_container.
+PRIVATE_TMP_MOUNT = f"{WORKSPACE_ROOT}/tmp"  # noqa: S108  # nosec B108 - the pod's own emptyDir
+PRIVATE_TMP_VOLUME = "ash-private-tmp"
+PRIVATE_TMP_INIT_NAME = "ash-private-tmp"
+
 CONFIG_FILENAME = ".ash.yaml"
 CONFIG_PATH = f"{CONFIG_MOUNT}/{CONFIG_FILENAME}"
 

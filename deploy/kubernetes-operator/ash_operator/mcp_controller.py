@@ -149,6 +149,7 @@ def _attach_capability_probe(deployment: dict[str, Any], spec: dict[str, Any]) -
     container = pod_spec["containers"][0]
     allowed = ",".join(spec.get("allowedHosts") or [])
     pod_spec["initContainers"] = [
+        *pod_spec.get("initContainers", []),
         {
             "name": "ash-mcp-capability-probe",
             "image": container["image"],
@@ -166,7 +167,7 @@ def _attach_capability_probe(deployment: dict[str, Any], spec: dict[str, Any]) -
             ],
             "securityContext": container["securityContext"],
             "resources": container.get("resources") or {},
-        }
+        },
     ]
 
 
