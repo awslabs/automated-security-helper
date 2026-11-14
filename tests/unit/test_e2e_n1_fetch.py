@@ -379,7 +379,7 @@ def test_a_leg_derives_n_minus_1_and_runs_its_script(key):
     assert users, key
     for _, step in users:
         assert script.rsplit("/", 1)[-1] in str(step.get("run", "")), (key, script)
-        assert step["env"]["E2E_PREV_REF"] == LEG_MODES[key], (key, step["env"])
+        assert step["env"]["E2E_PREV_REF"] == LEG_MODES[key], (key, sorted(step["env"]))
     workflow = yaml.safe_load((WORKFLOWS / key[0]).read_text(encoding="utf-8"))
     assert workflow_leg_problems(workflow, key[1], LEG_OVERRIDES.get(key, ())) == [], (
         key

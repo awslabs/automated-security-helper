@@ -455,7 +455,8 @@ def test_every_case_is_well_formed(name):
     assert expectation.usage_problems() == []
     source = CASES.parent / case["source"]
     assert source.is_dir() and any(source.iterdir()), source
-    assert isinstance(case.get("env"), dict)
+    env_is_a_dict = isinstance(case.get("env"), dict)
+    assert env_is_a_dict
     assert isinstance(case.get("args"), list)
     assert all(isinstance(a, str) for a in case["args"])
 
@@ -470,7 +471,9 @@ def test_incomplete_trigger_blanks_the_rule_cache():
     # The cache variable must be set to empty, not left out, so an image that carries a
     # populated cache cannot turn the trigger off.
     env = ao.load_case(CASES, "incomplete")["env"]
-    assert env == {"ASH_OFFLINE": "YES", "OPENGREP_RULES_CACHE_DIR": ""}
+    assert sorted(env) == ["ASH_OFFLINE", "OPENGREP_RULES_CACHE_DIR"]
+    assert env["ASH_OFFLINE"] == "YES"
+    assert env["OPENGREP_RULES_CACHE_DIR"] == ""
 
 
 def test_incomplete_trigger_turns_opengrep_on():
