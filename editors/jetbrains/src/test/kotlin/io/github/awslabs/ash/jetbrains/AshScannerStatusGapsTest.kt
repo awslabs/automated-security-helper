@@ -34,8 +34,10 @@ class AshScannerStatusGapsTest {
         val report = parse(
             passed,
             """"additional_reports": {"bandit": {"a": {"targets_attempted": 3, "targets_failed": 1},
-               "b": {"targets_attempted": 1}, "c": "not a row"}}""",
+               "b": {"targets_attempted": 1, "targets_failed": 0}, "c": "not a row"}}""",
         )
+        // A row with an attempt count and no failure count would poison the pair (ASH's
+        // target_counts), so the second row states its zero failures.
         assertEquals(listOf("bandit"), report.incomplete.map { it.name })
         assertEquals("bandit (PASSED, 1 of 4 targets unevaluated)", report.incomplete.single().describe())
         assertTrue(report.complete.isEmpty())
