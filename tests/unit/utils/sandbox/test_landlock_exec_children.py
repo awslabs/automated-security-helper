@@ -1114,8 +1114,12 @@ def test_a_reap_pass_goes_on_to_the_next_process_when_its_note_cannot_be_written
             "/proc/22/stat": PermissionError(errno.EACCES, "denied"),
         }
     )
-    landlock_exec.os.dup2 = lambda source, target: None
-    landlock_exec.os.waitpid = lambda pid, options: (0, 0)
+    # dup2 and waitpid answer without reaching the host; every other name goes on to
+    # the stand-in /proc installed above.
+    stubbed_dup2 = _Recording(landlock_exec.os, {"dup2"}, [], returns=None)
+    monkeypatch.setattr(
+        landlock_exec, "os", _Recording(stubbed_dup2, {"waitpid"}, [], returns=(0, 0))
+    )
     walks = [[11, 22]]
     monkeypatch.setattr(
         landlock_exec, "_descendants", lambda until=None: walks.pop(0) if walks else []
