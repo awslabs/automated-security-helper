@@ -110,19 +110,15 @@ class TestDirtyFixtureReportsItsFinding:
         assert result["coverageComplete"] is True, result.get("coverageGaps")
         assert result["coverageSource"] == "ash-coverage-rule"
 
-    def test_two_different_scanners_each_contributed(self, result):
-        # Direct evidence that the fan-out contributed rather than merely ran: bandit
-        # and detect-secrets land on different shards at shardCount 3, and both are
-        # present with findings in the merged report.
+    def test_both_selected_scanners_contributed_findings(self, result):
+        # Each selected scanner contributed its own finding to the merged report.
+        # At shardCount 3 the current 15-scanner roster owns bandit and
+        # detect-secrets with the same shard (sorted positions 1 and 7, both 1
+        # mod 3), so the cross-shard demonstration runs as its own scan below,
+        # at a count that separates them.
         by_name = {s["name"]: s for s in result["scannerCompleteness"]}
         assert by_name["bandit"]["findingCount"] >= 1, by_name["bandit"]
         assert by_name["detect-secrets"]["findingCount"] >= 1, by_name["detect-secrets"]
-        assert (
-            by_name["bandit"]["owningShardIndex"] != by_name["detect-secrets"]["owningShardIndex"]
-        ), (
-            "bandit and detect-secrets were owned by the same shard, so this run does "
-            "not demonstrate that findings crossed the shard boundary"
-        )
 
     def test_every_scanner_is_attributed_to_an_owning_shard(self, result):
         # The merge keeps only the owning shard's entry for each scanner, keyed on
@@ -216,6 +212,35 @@ class TestShardFanOut:
             fragment = logs.split(marker, 1)[1].split()[0]
             indices.append(int(fragment))
         assert sorted(indices) == [0, 1, 2], indices
+
+
+@pytest.fixture(scope="module")
+def cross_shard_result(fixtures):
+    # Four shards, because the partition is round-robin over the sorted
+    # registered scanner names: bandit sits at position 1 and detect-secrets at
+    # position 7 of the 15-name roster, so at count 3 one shard owns both
+    # (1 mod 3 == 7 mod 3) and at count 4 they separate (1 vs 3). dirty-scan
+    # stays at three shards: the fan-out class, the collector arms and the
+    # shared contract all pin its shape.
+    apply_scan("cross-shard-scan", source_configmap="fixture-dirty", shard_count=4)
+    return wait_terminal("cross-shard-scan")
+
+
+class TestFindingsCrossTheShardBoundary:
+    def test_two_scanners_on_different_shards_both_contributed(self, cross_shard_result):
+        # Direct evidence that the merge carried findings across the shard
+        # boundary, not merely that the pods ran.
+        assert cross_shard_result["phase"] == PHASE_FINDINGS, cross_shard_result.get("merge")
+        by_name = {s["name"]: s for s in cross_shard_result["scannerCompleteness"]}
+        assert by_name["bandit"]["findingCount"] >= 1, by_name["bandit"]
+        assert by_name["detect-secrets"]["findingCount"] >= 1, by_name["detect-secrets"]
+        assert (
+            by_name["bandit"]["owningShardIndex"]
+            != by_name["detect-secrets"]["owningShardIndex"]
+        ), (
+            "bandit and detect-secrets were owned by the same shard, so this run "
+            "does not demonstrate that findings crossed the shard boundary"
+        )
 
 
 @pytest.fixture(scope="module")
