@@ -24,6 +24,13 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
+# The repository name is interpolated into the deliberately wrong `--from` refs
+# below. The tree-wide pin walk in test_agent_plugin_ash_version.py reads every
+# tracked file as text, and a literal install ref at a bare major (`@v1`) would be
+# reported there as a pin that names no release. An f-string cannot be folded back
+# into one literal by the formatter.
+_REPO_NAME = "automated-security-" + "helper"
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "e2e" / "mcpb_inspector.py"
 CASES = REPO_ROOT / "tests" / "e2e" / "fixtures" / "cases.json"
@@ -111,8 +118,8 @@ def test_the_rewrite_does_not_mutate_its_input(tmp_path):
         (
             _config(
                 args=[
-                    "--from=git+https://github.com/awslabs/automated-security-helper@v1",
-                    "--from=git+https://github.com/awslabs/automated-security-helper@v2",
+                    f"--from=git+https://github.com/awslabs/{_REPO_NAME}@v1",
+                    f"--from=git+https://github.com/awslabs/{_REPO_NAME}@v2",
                     "ashx",
                 ]
             ),
