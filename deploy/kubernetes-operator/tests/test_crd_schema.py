@@ -54,6 +54,13 @@ TOY = {
                         {"type": "string", "maxLength": 4},
                     ]
                 },
+                "typed_and_untyped_union": {
+                    "anyOf": [
+                        {"type": "array", "items": {"type": "string"}},
+                        {"pattern": "^x$"},
+                        {"type": "null"},
+                    ]
+                },
                 "anything": {},
                 "plain_map": {"type": "object", "additionalProperties": {"type": "string"}},
                 "named_plus_extra": {
@@ -156,6 +163,14 @@ class TestTranslationRules:
         assert schema["properties"]["typed_list"]["items"] == {
             "x-kubernetes-preserve-unknown-fields": True
         }
+
+    def test_a_union_with_an_untyped_branch_is_not_hoisted_over_it(self, toy):
+        schema, _ = toy
+        node = schema["properties"]["typed_and_untyped_union"]
+        # Hoisting "array" over the pattern branch would leave an arm with items
+        # and no type; the union is kept as "accepts anything" instead.
+        assert node.get("x-kubernetes-preserve-unknown-fields") is True
+        assert "anyOf" not in node
 
     def test_an_untyped_node_accepts_anything_rather_than_nothing(self, toy):
         schema, _ = toy
