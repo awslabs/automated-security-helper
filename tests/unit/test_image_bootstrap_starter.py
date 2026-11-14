@@ -60,12 +60,27 @@ def _starter(path: Path) -> tuple[dict, dict]:
 
 
 class _RecordingCodeBuild:
+    """Both clients the handler uses: it stores the response URL in SSM, then starts the build.
+
+    The URL reaches the build by parameter name rather than by value, so the
+    handler's first call is `put_parameter`; a double that only knows
+    `start_build` makes it fail the resource before it starts anything.
+    """
+
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.parameters: list[dict] = []
 
     def start_build(self, **kwargs):
         self.calls.append(kwargs)
         return {"build": {"id": "recorded"}}
+
+    def put_parameter(self, **kwargs):
+        self.parameters.append(kwargs)
+        return {}
+
+    def delete_parameter(self, **kwargs):
+        return {}
 
 
 def _load_handler(
@@ -114,11 +129,24 @@ def test_the_shipped_handler_starts_the_project_named_in_resource_properties(
         "StackId": "stack-id",
         "RequestId": "request-id",
         "LogicalResourceId": "ImageBootstrapBuild",
-        "ResourceProperties": {"ServiceToken": "arn", "ProjectName": "the-project"},
+        "ResourceProperties": {
+            "ServiceToken": "arn",
+            "ProjectName": "the-project",
+            "KeyArn": "arn:aws:kms:us-east-1:111122223333:key/example",
+        },
     }
     namespace["handler"](event, None)
 
     assert [c["projectName"] for c in codebuild.calls] == ["the-project"]
+    # The response URL is stored under the project's name and handed to the build
+    # as that name, never as the value.
+    assert [p["Name"] for p in codebuild.parameters] == ["/ash-bootstrap/the-project"]
+    assert codebuild.parameters[0]["Value"] == event["ResponseURL"]
+    overrides = {
+        o["name"]: o for o in codebuild.calls[0]["environmentVariablesOverride"]
+    }
+    assert overrides["CFN_RESPONSE_URL"]["value"] == "/ash-bootstrap/the-project"
+    assert overrides["CFN_RESPONSE_URL"]["type"] == "PARAMETER_STORE"
     # The success path stays silent: the build answers CloudFormation itself.
     assert sent == []
 
