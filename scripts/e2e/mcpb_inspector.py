@@ -1007,6 +1007,27 @@ def wheel_version(wheel: Path) -> str:
     return parts[1]
 
 
+#: What `uv cache clean` leaves in an emptied cache: the lock file it holds while it
+#: cleans. It removes the cache's contents and not this file, by design.
+UV_CACHE_CLEAN_KEEPS = (".lock",)
+
+
+def cache_leftovers(cache: Path) -> List[str]:
+    """What is in the uv cache after `uv cache clean`, beyond the lock file it keeps.
+
+    Exactly ``.lock`` is tolerated, as a regular file; any other name, or a directory
+    called ``.lock``, is a leftover, because the check exists to show that the install
+    is gone from the cache.
+    """
+    if not cache.exists():
+        return []
+    return sorted(
+        entry.name
+        for entry in cache.iterdir()
+        if not (entry.name in UV_CACHE_CLEAN_KEEPS and entry.is_file())
+    )
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1256,7 +1277,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             raise Failure(
                 f"uv cache clean exited {clean.returncode}: {clean.stderr[-400:]}"
             )
-        leftover = sorted(p.name for p in cache.iterdir()) if cache.exists() else []
+        leftover = cache_leftovers(cache)
         if leftover:
             raise Failure(f"uv cache clean left {leftover} in {cache}")
         rc, payload, _ = inspector.run(offline_target, "tools/list")
