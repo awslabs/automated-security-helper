@@ -1852,7 +1852,7 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     text = _squeezed(result.stdout + result.stderr)
     warning = (
         "Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, "
-        "reporters.s3.enabled from {path}: ash merge cannot tell that config from the "
+        "reporters.s3.enabled from {path}: ashx merge cannot tell that config from the "
         "scanned repository's own, since the shards do not record which tree was "
         "scanned, and these options choose whether findings are sent"
     )
