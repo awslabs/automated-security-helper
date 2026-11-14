@@ -80,12 +80,37 @@ def drop_resource(text: str, name: str) -> str:
     return pattern.sub("", text, count=1)
 
 
+_UV_SYNC = re.compile(
+    r'^(      system "uv", "sync", "--frozen", .*"--extra", "cdk",)\n', re.MULTILINE
+)
+
+
+def omit_package(text: str, name: str) -> str:
+    """Has the formula's one `uv sync` leave `name` out of the keg (negative control only).
+
+    The formula installs ASH's dependencies from the lock with `uv sync`, so the
+    equivalent of a missing resource block is `--no-install-package NAME`: the keg is
+    built, the console scripts link, and only a use of the package shows the hole.
+    """
+    matches = _UV_SYNC.findall(text)
+    if len(matches) != 1:
+        raise FormulaShapeError(
+            f"expected exactly one `uv sync --frozen ... --extra cdk,` line, found {len(matches)}"
+        )
+    return _UV_SYNC.sub(
+        lambda m: f'{m.group(1)}\n             "--no-install-package", "{name}",\n',
+        text,
+        count=1,
+    )
+
+
 def render(
     formula: str,
     tarball: Path,
     version: str,
     sha256: str,
     drop: Optional[List[str]] = None,
+    omit: Optional[List[str]] = None,
 ) -> str:
     """Returns formula with its tag `url` line pointed at tarball."""
     if not _VERSION.fullmatch(version):
@@ -108,6 +133,8 @@ def render(
     text = _TAG_URL.sub(lambda _match: replacement, formula, count=1)
     for name in drop or []:
         text = drop_resource(text, name)
+    for name in omit or []:
+        text = omit_package(text, name)
     return text
 
 
@@ -134,6 +161,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="NAME",
         help="remove this resource stanza (negative control only)",
     )
+    parser.add_argument(
+        "--omit-package",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="leave this package out of the uv sync (negative control only)",
+    )
     args = parser.parse_args(argv)
 
     tarball = args.tarball.resolve()
@@ -147,13 +181,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.version,
             sha256_of(tarball),
             args.drop_resource,
+            args.omit_package,
         )
     except FormulaShapeError as error:
         print(f"error: {args.formula}: {error}", file=sys.stderr)
         return 1
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(text, encoding="utf-8")
-    dropped = f", without {', '.join(args.drop_resource)}" if args.drop_resource else ""
+    left_out = [*args.drop_resource, *args.omit_package]
+    dropped = f", without {', '.join(left_out)}" if left_out else ""
     print(f"wrote {args.out}: {args.version} from {tarball}{dropped}")
     return 0
 
