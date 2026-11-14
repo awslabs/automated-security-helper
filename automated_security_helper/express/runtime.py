@@ -438,6 +438,11 @@ def socket_key(
     return digest.hexdigest()[:16]
 
 
+def _has_posix_permissions() -> bool:
+    """Whether this platform's owner and mode bits mean what the checks assume."""
+    return os.name == "posix"
+
+
 def _ensure_private_dir(path: Path) -> Path:
     """Make *path* a private (0700) directory of this user's, or refuse.
 
@@ -467,6 +472,15 @@ def _ensure_private_dir(path: Path) -> Path:
             f"express runtime directory {path} is not a directory reached without "
             "following a link; refusing to place a socket there."
         )
+    if not _has_posix_permissions():
+        # Owner and mode bits are a posix model. On Windows st_uid is always 0,
+        # and os.chmod only toggles the read-only attribute, so a 0700 mode
+        # can never be taken and the directory could never pass the checks
+        # below. The directory sits under the user's own profile (an ACL'd
+        # per-user location), the link check above still ran, and express
+        # itself is unavailable there (express_supported), so this arm only
+        # keeps the helpers that run before that answer from raising.
+        return path
     if info.st_uid != current_uid():
         raise ExpressUnavailable(
             f"express runtime directory {path} is owned by uid {info.st_uid}, not "

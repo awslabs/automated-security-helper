@@ -668,6 +668,9 @@ class TestAutostartBacksOffAfterARetirement:
         path = tmp_path / "d.sock"
         monkeypatch.setattr(runtime, "express_supported", lambda: True)
         monkeypatch.setattr(runtime, "socket_path", lambda *_: path)
+        # The note's tail names the log; without this the test would create
+        # the real runtime directory under the user's home.
+        monkeypatch.setattr(runtime, "log_path", lambda *_: tmp_path / "d.log")
         monkeypatch.setattr(client, "_connect", lambda _p: None)
         # raising=False: os.fork does not exist on Windows, where the
         # assertion still holds (nothing is spawned either).

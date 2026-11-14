@@ -147,6 +147,34 @@ class TestIdleSetting:
 
 
 class TestPlatformNeutralHelpers:
+    def test_a_platform_without_posix_permissions_skips_owner_and_mode(
+        self, tmp_path, monkeypatch
+    ):
+        """On Windows chmod cannot set 0700 and st_uid is always 0, so the
+        owner and mode checks could never hold; the link check still runs."""
+        target = tmp_path / "ash-express"
+        target.mkdir()
+        monkeypatch.setattr(runtime, "_has_posix_permissions", lambda: False)
+        monkeypatch.setattr(
+            os, "chmod", lambda *_a, **_k: pytest.fail("no mode is set")
+        )
+        monkeypatch.setattr(runtime, "current_uid", lambda: -1)  # would mismatch
+        assert runtime._ensure_private_dir(target) == target
+
+    def test_the_link_check_still_runs_without_posix_permissions(
+        self, tmp_path, monkeypatch
+    ):
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "ash-express"
+        try:
+            link.symlink_to(real)
+        except (OSError, NotImplementedError):
+            pytest.skip("this account cannot create symlinks here")
+        monkeypatch.setattr(runtime, "_has_posix_permissions", lambda: False)
+        with pytest.raises(runtime.ExpressUnavailable, match="without\\s+following"):
+            runtime._ensure_private_dir(link)
+
     """The naming and marker helpers run before express_supported() answers,
     so a platform without user ids must still get through them."""
 
