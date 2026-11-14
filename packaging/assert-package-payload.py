@@ -54,7 +54,7 @@ link rule (5e) or the size rule (6) is reached, so on a package payload those tw
 are never the verdict. An earlier version of this file listed both as applied; a real
 .deb with its wrapper replaced by a symlink to /etc/shadow passed at exit 0. The two
 properties are enforced here by local rules instead -- non-regular-member, which
-rejects every link and device node, and oversized-member, a 2 MiB ceiling -- and
+rejects every link and device node, and oversized-member, an 8 MiB ceiling -- and
 --assert-gate-contract re-measures the shadowing so the claim cannot go stale.
 
 The counts here were wrong twice, in the same place, for the same reason: they were
@@ -481,16 +481,20 @@ MINIMUM_PAYLOAD_FILES = 4
 #
 # Ceilings are per-format and unifying them would loosen every format to the most
 # permissive one. The gate uses 4 MiB, which is right for a member inside a wheel.
-# This package's largest honest member is the wheel itself, measured at 1,353,635
-# bytes (1.29 MiB) for 3.7.0; everything else is a few KB of text. 2 MiB is therefore a
-# meaningfully tighter statement than 4 MiB while leaving roughly 55% headroom for
-# the wheel to grow over releases before a correct build trips it -- which matters,
-# because a gate that fails on correct configuration is a gate that gets deleted.
+# This package's largest honest member is the wheel itself. It measured 1,353,635
+# bytes (1.29 MiB) for 3.7.0 and 4,825,794 bytes (4.60 MiB) for 4.0.0 at the v4 base:
+# 343 members, 17.3 MB uncompressed, 91% of the compressed size plain .py source and
+# the rest json schemas, markdown and one font, with no test data, snapshots or
+# archives in it. That is v4 code growth, not stray inclusion, so the ceiling moved
+# from 2 MiB to 8 MiB, which is about 70% headroom over 4.0.0. Everything else in
+# the package is a few KB of text. A scanner binary or a vulnerability database is
+# far past 8 MiB, so the ceiling still separates them from the wheel. A gate that
+# fails on a correct build is a gate that gets deleted.
 #
 # The gate's own `oversize-member` at 4 MiB does NOT apply through the imported
 # rules: it is shadowed by rule 5c on every payload member (see SHADOWED_VERDICTS),
 # so this ceiling is the only size check a package payload gets.
-MAX_MEMBER_BYTES = 2 * 1024 * 1024
+MAX_MEMBER_BYTES = 8 * 1024 * 1024
 
 
 # The two member types a correct package payload is made of. Anything else -- a
