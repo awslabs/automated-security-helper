@@ -46,7 +46,6 @@ MAIN_BASELINE: set[tuple[str, str, int]] = {
     (".github/workflows/ash-install-methods.yml", "validate", 1),
     (".github/workflows/ash-package.yml", "build", 1),
     (".github/workflows/ash-pr-title-check.yml", "pr-title", 1),
-    (".github/workflows/ash-repo-docs.yml", "build-docs", 1),
     (".github/workflows/ash-repo-docs.yml", "deploy-docs", 1),
     (".github/workflows/ash-repo-scan.yml", "grype-db-cache", 1),
     (".github/workflows/ash-repo-scan.yml", "opengrep-cache", 1),
@@ -56,7 +55,6 @@ MAIN_BASELINE: set[tuple[str, str, int]] = {
     (".github/workflows/ash-unified-ci.yml", "lint", 1),
     (".github/workflows/ash-unified-ci.yml", "actionlint", 1),
     (".github/workflows/ash-unified-ci.yml", "snapshot-trailers", 1),
-    (".github/workflows/ash-unified-ci.yml", "unit-test", 1),
     (".github/workflows/ash-unified-ci.yml", "warm-image-layers", 1),
     (".github/workflows/ash-unified-ci.yml", "scan-validation", 1),
     (".github/workflows/ash-unified-ci.yml", "external-target-scan", 1),
@@ -73,7 +71,7 @@ MAIN_BASELINE: set[tuple[str, str, int]] = {
     ("ash-agent-plugins/.github/workflows/validate.yml", "matrix-config", 1),
     ("ash-agent-plugins/.github/workflows/validate.yml", "smoke-test", 1),
 }
-FROZEN_SIZE = 38
+FROZEN_SIZE = 36
 
 
 def _files() -> list[Path]:
