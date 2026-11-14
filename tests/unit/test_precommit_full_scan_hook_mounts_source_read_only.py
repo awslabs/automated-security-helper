@@ -3,10 +3,10 @@
 
 """The ``ash-full-scan`` pre-commit hook runs a container scan with ``/src`` read-only.
 
-The hook (.pre-commit-hooks.yaml) runs ``ashv3 --mode=container --simple`` in the
+The hook (.pre-commit-hooks.yaml) runs ``ashx --mode=container --simple`` in the
 repository being committed to, with no ``--output-dir``, so the output is the
 default ``.ash/ash_output`` inside the source directory, on its own mount. This
-drives the hook's own command line through the CLI the ``ashv3`` script runs, with
+drives the hook's own command line through the CLI the ``ashx`` script runs, with
 the runner recorded instead of started, and checks the mounts.
 """
 
@@ -36,16 +36,14 @@ def _hook(hook_id: str) -> dict:
 
 
 def test_the_hook_runs_the_cli_entry_point():
-    """Guards the premise: ``ashv3`` is the same CLI the rest of this file drives."""
+    """Guards the premise: ``ashx`` is the same CLI the rest of this file drives."""
     entry = shlex.split(_hook("ash-full-scan")["entry"])
     scripts = _load_toml(REPO_ROOT / "pyproject.toml")["project"]["scripts"]
 
-    assert entry[0] == "ashv3"
-    assert (
-        scripts["ashv3"]
-        == scripts["ash"]
-        == "automated_security_helper.cli.entrypoint:main"
-    )
+    assert entry[0] == "ashx"
+    # The deprecated aliases are their own entry points that warn and then run the
+    # same app, so ashx is the one script that names the entry point directly.
+    assert scripts["ashx"] == "automated_security_helper.cli.entrypoint:main"
     assert "--mode=container" in entry
 
 

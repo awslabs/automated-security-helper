@@ -15,7 +15,6 @@ refuses fails here instead of in that job.
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,11 +42,16 @@ def parity():
 def test_the_scan_argv_parses(parity, tmp_path, monkeypatch, mode, offline):
     seen: list[list[str]] = []
 
-    def fake_run(command, **_kwargs):
-        seen.append(list(command))
-        return subprocess.CompletedProcess(command, 0)
+    class RecordedScan:
+        """Stands in for the Popen the script starts the scan with."""
 
-    monkeypatch.setattr(parity.subprocess, "run", fake_run)
+        def __init__(self, command, **_kwargs):
+            seen.append(list(command))
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(parity.subprocess, "Popen", RecordedScan)
     (tmp_path / "src").mkdir()
     (tmp_path / "out").mkdir()
     parity.run_scan(["ashx"], tmp_path / "src", tmp_path / "out", mode, offline)

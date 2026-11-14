@@ -896,7 +896,7 @@ jobs:
           # is its value, so a `--mode` there (`--output-dir --mode`) is not the
           # mode. A bare word, or anything after `--`, is Run ASH's to refuse.
           read -r -a args <<< "${ASH_ARGS}"
-          ASH_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           mode="${ASH_MODE}"
           value_of=""
           for word in ${args[@]+"${args[@]}"}; do
@@ -910,6 +910,10 @@ jobs:
             case "${word}" in
               --) break ;;
               --mode=*) mode="${word#--mode=}" ;;
+              -rev)
+                echo "::error::ash-args word $(one_line "${position}") is -rev, a deprecated spelling that click reads as one option and this step reads letter by letter, so a word after it could run as an ash subcommand. Use --ash-revision-to-install."
+                exit 1
+                ;;
               --*=*) ;;
               --*)
                 if [[ " ${ASH_VALUE_OPTIONS} " == *" ${word} "* ]]; then
@@ -2169,7 +2173,7 @@ jobs:
           # reads every word as bare. ASH_VALUE_OPTIONS is the ash group's options
           # that take a value; tests/unit/test_reusable_workflow_ash_args.py holds
           # it to the CLI's. The refusals name the word by position, not by value.
-          ASH_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+          ASH_VALUE_OPTIONS="--ash-config-from-host --ash-plugin-modules --ash-revision --ash-revision-to-install --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --output-dir --output-format --output-formats --phases --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
           takes_value=""
           position=0
           for word in "${ASH_ARGS_LIST[@]}"; do
@@ -2181,6 +2185,10 @@ jobs:
             case "${word}" in
               --)
                 echo "::error::ash-args word $(one_line "${position}") is --, after which click reads the next word as an ash subcommand, whatever it looks like, and runs it without this workflow's options. ash-args takes options of ash scan only."
+                exit 1
+                ;;
+              -rev)
+                echo "::error::ash-args word $(one_line "${position}") is -rev, a deprecated spelling that click reads as one option and this step reads letter by letter, so a word after it could run as an ash subcommand. Use --ash-revision-to-install."
                 exit 1
                 ;;
               --*=*) ;;

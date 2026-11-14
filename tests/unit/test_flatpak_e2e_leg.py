@@ -86,10 +86,11 @@ def test_the_sandbox_control_asserts_its_exit_code_message_and_report_paths() ->
     assert 'if [ "$NEG_RC" -ne 1 ]; then' in step
     # The refusal ASH prints for a missing --source-dir, naming this fixture's path.
     assert 'grep -qF "Source directory does not exist: $FIX_UNREACHABLE"' in step
-    source = (REPO_ROOT / "automated_security_helper" / "cli" / "scan.py").read_text(
-        encoding="utf-8"
-    )
-    assert 'f"Source directory does not exist: {source_dir}. "' in source, (
+    # `ashx scan` refuses a missing --source-dir through source_dir_refusal.
+    source = (
+        REPO_ROOT / "automated_security_helper" / "utils" / "directory_refusals.py"
+    ).read_text(encoding="utf-8")
+    assert 'f"Source directory does not exist: {path}"' in source, (
         "the message step 7 requires is no longer what ASH prints"
     )
     # Both reports, at their exact paths, under an output dir the sandbox can write.

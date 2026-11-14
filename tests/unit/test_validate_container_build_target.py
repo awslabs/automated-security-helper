@@ -10,9 +10,9 @@ so each invocation asks for ``ci`` itself; without it the action would build
 ``non-root`` and then look for a ``ci`` image nothing built.
 
 What it does not cover: a command is checked when, with its backslash continuations
-joined, it starts with ``ash build-image``, ``ash scan`` or ``ash --mode``. A call
-behind a wrapper or a shell keyword (``timeout 600 ash scan``, ``env X=1 ash scan``,
-``if ash scan``) or through a variable (``"$ASH" scan``) does not, and is not
+joined, it starts with ``ashx build-image``, ``ashx scan`` or ``ashx --mode``. A call
+behind a wrapper or a shell keyword (``timeout 600 ashx scan``, ``env X=1 ashx scan``,
+``if ashx scan``) or through a variable (``"$ASH" scan``) does not, and is not
 checked. Only this action is read, on purpose: other CI builds the default
 ``non-root`` stage deliberately, as
 tests/unit/test_ci_builds_and_probes_the_default_stage.py describes, so asking for
@@ -55,7 +55,7 @@ def _ash_invocations() -> List[str]:
     found = []
     for step in _steps():
         for command in _commands(step.get("run") or ""):
-            if command.startswith(("ash build-image", "ash scan", "ash --mode")):
+            if command.startswith(("ashx build-image", "ashx scan", "ashx --mode")):
                 found.append(command)
     return found
 
@@ -64,7 +64,7 @@ def test_the_action_builds_and_scans_with_ash():
     """Guards the guard: an empty list would pass the test below vacuously."""
     invocations = _ash_invocations()
 
-    assert sum(cmd.startswith("ash build-image") for cmd in invocations) == 3
+    assert sum(cmd.startswith("ashx build-image") for cmd in invocations) == 3
     assert any("--mode container" in cmd for cmd in invocations)
 
 
@@ -83,4 +83,6 @@ def test_the_image_the_nerdctl_leg_removes_is_the_ci_stage():
         step["env"]["IMAGE"] for step in _steps() if "IMAGE" in (step.get("env") or {})
     ]
 
-    assert images == ["automated-security-helper:ci"]
+    # The nerdctl build step removes it before a retry and the alias check runs it:
+    # both name the ci stage, and no step names another image.
+    assert images and set(images) == {"automated-security-helper:ci"}
