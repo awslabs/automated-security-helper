@@ -144,7 +144,7 @@ class TestDirtyFixtureReportsItsFinding:
         by_name = {s["name"]: s for s in result["scannerCompleteness"]}
         # Only bandit and detect-secrets were selected, so the other eight must read
         # SKIPPED -- "not selected" -- and not PASSED.
-        for name in ("grype", "syft", "semgrep", "cfn-nag"):
+        for name in ("grype", "syft", "opengrep", "cfn-nag"):
             assert by_name[name]["status"] == "SKIPPED", by_name[name]
 
 
