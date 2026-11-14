@@ -52,16 +52,34 @@ class AshScannerStatusGapsTest {
     }
 
     @Test
-    fun countsThatAreNotIntegersAreNotClaims() {
+    fun countsThatAreNotIntegersPoisonThePairAndGradeTheScannerError() {
         // true is not one target, 4.0 is a float to ASH, and a failure with no attempt count has
-        // no denominator to state.
+        // no denominator to state: each is a counter present and unusable, so the scanner is ERROR.
         val report = parse(
             passed,
             """"additional_reports": {"bandit": {"a": {"targets_attempted": true, "targets_failed": 1},
                "b": {"targets_attempted": 4.0, "targets_failed": "2"}}}""",
         )
-        assertTrue(report.incomplete.isEmpty())
-        assertNull(report.describeIncompleteness())
+        assertEquals("bandit", report.incomplete.single().name)
+        assertEquals("ERROR", report.incomplete.single().status)
+        assertEquals("bandit (ERROR)", report.incomplete.single().describe())
+    }
+
+    @Test
+    fun aCounterPairAshCannotReadIsErrorAndAZeroDefaultIsNoClaim() {
+        val shapes = listOf(
+            """{"targets_failed": 3}""" to true,
+            """{"targets_attempted": -1, "targets_failed": 0}""" to true,
+            """{"targets_attempted": "4", "targets_failed": 1}""" to true,
+            """{"targets_attempted": 4}""" to true,
+            """{"targets_attempted": 3, "targets_failed": 5}""" to true,
+            """{"targets_failed": 0}""" to false,
+            """{"targets_attempted": 0}""" to false,
+        )
+        for ((row, poisoned) in shapes) {
+            val report = parse(passed, """"additional_reports": {"bandit": {"a": $row}}""")
+            assertEquals(row, poisoned, report.incomplete.isNotEmpty())
+        }
     }
 
     @Test
@@ -215,23 +233,29 @@ class AshScannerStatusGapsTest {
                     ${stale("ASH-CONTENT-DB-STALE", "warning", db("warned"))},
                     ${stale("OTHER", "error", db("other"))},
                     ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": "x"}""")},
+                    ${stale("ASH-CONTENT-DB-STALE", "error", """{"content_database": null}""")},
                     {"level": "error", "properties": $record}]}""",
             ),
         )
-        // Unreadable to ASH, and skipped: the empty record, no measured_at, a measured_at with no
-        // zone or not a string, and a built that is not a timestamp.
-        assertEquals(listOf("", "a-db", "built", "grype-db"), report.staleContentDatabases)
+        // Skipped, as falsy: the empty record and the null one. Every other record ASH cannot
+        // read (no measured_at, one with no zone or not a string, a built that is not a timestamp,
+        // a record that is not an object) is kept as stale, named by the record or "unknown".
+        val expected = listOf(
+            "", "a-db", "bad-built", "built", "grype-db", "naive", "no-time", "num-time", "unknown",
+        )
+        assertEquals(expected, report.staleContentDatabases)
         assertTrue(
             report.describeIncompleteness()!!.contains(
-                "4 content database(s) are past their age bound: , a-db, built, grype-db.",
+                "${expected.size} content database(s) are past their age bound: ${expected.joinToString(", ")}.",
             ),
         )
     }
 
     @Test
-    fun everyTimestampFormAshAcceptsIsReadable() {
+    fun everyTimestampFormIsKeptAsStaleReadableOrNot() {
         // Forms Python's fromisoformat accepts (3.11 and later), and three it refuses: Z as the
-        // separator (ASH turns every Z into +00:00 first), mixed time styles, and no zone.
+        // separator (ASH turns every Z into +00:00 first), mixed time styles, and no zone. The
+        // three it refuses are kept as stale databases of unknown age rather than dropped.
         val forms = mapOf(
             "basic" to "20261001T000000Z",
             "hour-only" to "2026-10-01T00+00:00",
@@ -247,7 +271,7 @@ class AshScannerStatusGapsTest {
                 "properties": {"content_database": {"name": "$name", "measured_at": "$at"}}}"""
         }
         val report = parse(passed, sarif("""{"toolConfigurationNotifications": [$notifications]}"""))
-        assertEquals(listOf("any-separator", "basic", "comma", "hour-only", "week"), report.staleContentDatabases)
+        assertEquals(forms.keys.sorted(), report.staleContentDatabases)
     }
 
     // ---- roster shapes ----

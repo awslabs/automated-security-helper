@@ -161,7 +161,7 @@ object AshScannerStatus {
 
         /**
          * The scanner ran and some of its input was not evaluated. A failure count with no
-         * attempt count is not a claim, because there is no denominator to state.
+         * attempt count never reaches here: the pair is poisoned and the scanner is graded ERROR.
          */
         val lostTargets: Boolean get() = targetsAttempted != null && targetsFailed > 0
 
@@ -356,17 +356,19 @@ object AshScannerStatus {
             val status = entry?.get("status")
                 ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }
                 ?.asString
-            val (attempted, failed) = targetCounts(additionalReports?.obj(name))
+            val counts = targetCounts(additionalReports?.obj(name))
             // An entry with no readable status is INCOMPLETE rather than skipped over: a scanner this
             // cannot classify is a scanner it cannot vouch for. "UNKNOWN" is in neither COMPLETE nor
             // REACHED_A_VERDICT, so it counts against both.
             scanners.add(
                 Scanner(
                     name = name,
-                    status = status ?: "UNKNOWN",
+                    // A poisoned counter pair grades the scanner ERROR whatever its row says, as ASH's
+                    // `get_unified_scanner_metrics` does: it made a coverage claim nobody can read.
+                    status = if (counts.unusable) "ERROR" else status ?: "UNKNOWN",
                     dependenciesSatisfied = entry?.optBoolean("dependencies_satisfied") ?: true,
-                    targetsAttempted = attempted,
-                    targetsFailed = failed,
+                    targetsAttempted = counts.attempted,
+                    targetsFailed = counts.failed,
                 ),
             )
         }
@@ -385,19 +387,44 @@ object AshScannerStatus {
     const val STALE_CONTENT_DB_NOTIFICATION_ID = "ASH-CONTENT-DB-STALE"
 
     /**
+     * What the counters a scanner wrote say. [unusable] is ASH's poisoned pair
+     * (`UNUSABLE_COUNTERS`): the scanner made a coverage claim nobody can read, and ASH grades it
+     * ERROR. Its counts are then null and 0, as the row's are.
+     */
+    private data class TargetCounts(val attempted: Int?, val failed: Int, val unusable: Boolean)
+
+    /**
      * `(attempted, failed)` summed over every target row a scanner wrote under
      * `additional_reports`, as ASH's `target_counts` sums them. Attempted stays null when no row
-     * carries a count.
+     * carries a count. A counter that is present and unusable (not an integer, negative, a failure
+     * count with no attempt count, an attempt count above zero with no failure count, or more
+     * failures than attempts) poisons the pair; a zero failure count beside no attempt count is
+     * still no claim.
      */
-    private fun targetCounts(reports: JsonObject?): Pair<Int?, Int> {
+    private fun targetCounts(reports: JsonObject?): TargetCounts {
+        val poisoned = TargetCounts(null, 0, true)
         var attempted: Int? = null
         var failed = 0
         for ((_, element) in reports?.entrySet().orEmpty()) {
             val target = element.takeIf { it.isJsonObject }?.asJsonObject ?: continue
-            target.count("targets_attempted")?.let { attempted = (attempted ?: 0) + it }
-            failed += target.count("targets_failed") ?: 0
+            val rawAttempted = target.get("targets_attempted")?.takeUnless { it.isJsonNull }
+            val rawFailed = target.get("targets_failed")?.takeUnless { it.isJsonNull }
+            if (rawAttempted == null && rawFailed == null) continue
+            val tried = target.count("targets_attempted")
+            val lost = target.count("targets_failed")
+            if ((tried == null && rawAttempted != null) || (lost == null && rawFailed != null)) return poisoned
+            if ((tried != null && tried < 0) || (lost != null && lost < 0)) return poisoned
+            if (tried == null) {
+                // The zero default beside no attempt claim is still no claim.
+                if (lost == 0) continue
+                return poisoned
+            }
+            if (lost == null && tried > 0) return poisoned
+            if (lost != null && lost > tried) return poisoned
+            attempted = (attempted ?: 0) + tried
+            failed += lost ?: 0
         }
-        return attempted to failed
+        return TargetCounts(attempted, failed, false)
     }
 
     /**
@@ -468,9 +495,11 @@ object AshScannerStatus {
     }
 
     /**
-     * Names of content databases with an error-level staleness notification, sorted. A record ASH
-     * cannot read is skipped, as `stale_content_databases` skips it: an empty one, one without a
-     * `measured_at` timestamp, or one whose `built` is present and not a timestamp.
+     * Names of content databases with an error-level staleness notification, sorted. A falsy
+     * record (absent, null, empty) is skipped, as `stale_content_databases` skips it. Any other
+     * record ASH cannot read (no `measured_at` timestamp, a `built` that is not one, or not an
+     * object) is kept as a stale database of unknown age, named by the record or "unknown", as
+     * `_unreadable_record` does.
      */
     private fun staleDatabases(sarif: JsonObject?): List<String> {
         val names = sortedSetOf<String>()
@@ -479,15 +508,31 @@ object AshScannerStatus {
                 for (notification in invocation.objects("toolConfigurationNotifications")) {
                     if (notification.obj("descriptor")?.text("id") != STALE_CONTENT_DB_NOTIFICATION_ID) continue
                     if (notification.text("level") != "error") continue
-                    val record = notification.obj("properties")?.obj("content_database") ?: continue
-                    if (record.size() == 0 || !isTimestamp(record.get("measured_at"))) continue
-                    val built = record.get("built")
-                    if (truthy(built) && !isTimestamp(built)) continue
-                    names += record.text("name") ?: ""
+                    val record = notification.obj("properties")?.get("content_database")
+                    if (!truthy(record)) continue
+                    val readable = record!!.isJsonObject && record.asJsonObject.let { row ->
+                        isTimestamp(row.get("measured_at")) &&
+                            !(truthy(row.get("built")) && !isTimestamp(row.get("built")))
+                    }
+                    names += if (readable) {
+                        record.asJsonObject.text("name") ?: ""
+                    } else {
+                        unreadableName(record)
+                    }
                 }
             }
         }
         return names.toList()
+    }
+
+    /** The name `_unreadable_record` gives a record it cannot read: its own truthy name, else "unknown". */
+    private fun unreadableName(record: JsonElement): String {
+        val name = record.takeIf { it.isJsonObject }?.asJsonObject?.get("name")
+        return if (name != null && truthy(name)) {
+            if (name.isJsonPrimitive) name.asString else name.toString()
+        } else {
+            "unknown"
+        }
     }
 
     /** Reads a boolean, or null when the field is absent or not a boolean. */

@@ -23,7 +23,9 @@
  *   incomplete_scanners      a scanner whose status is not PASSED, FAILED or
  *                            SKIPPED (today ERROR and MISSING), or one that ran and
  *                            lost some of its targets (`targets_failed > 0` under
- *                            `additional_reports[<scanner>]`).
+ *                            `additional_reports[<scanner>]`). A counter pair ASH cannot
+ *                            read (a failure count with no attempt count, a non-integer
+ *                            or negative count) grades the scanner ERROR.
  *   no_scanner_ran           scanners were recorded and none is PASSED or FAILED,
  *                            or none were recorded while `metadata.expected_scanners`
  *                            says the scan phase ran.
@@ -34,8 +36,10 @@
  *                            unless every notApplicable result for its rule is
  *                            suppressed.
  *   stale_content_databases  an error-level `ASH-CONTENT-DB-STALE`
- *                            `toolConfigurationNotifications` entry whose
- *                            `content_database` record ASH can read.
+ *                            `toolConfigurationNotifications` entry with a non-empty
+ *                            `content_database` record. One ASH cannot read back is
+ *                            kept as stale, of unknown age, named "unknown" when the
+ *                            record carries no name.
  *
  * gate=True on purpose, matching `assess_coverage`: an operator who turned
  * `fail_on_incomplete_scanners` off has accepted the gap, not asked to be told
@@ -196,16 +200,27 @@ function reasonFor(status: string): string {
 }
 
 /**
- * `(attempted, failed)` summed over every target report a scanner wrote, or
- * undefined when it lost nothing or tracks no targets. Mirrors `target_counts` and
- * `_partial_coverage`: an absent attempt count is the absence of a claim, not 0.
+ * What the counters a scanner wrote say. `unusable` is ASH's poisoned pair
+ * (`UNUSABLE_COUNTERS`): the scanner made a coverage claim nobody can read.
  */
-function partialCoverage(
-  additionalReports: unknown,
-  scanner: string,
-): { attempted: number; failed: number } | undefined {
+interface TargetCounts {
+  readonly attempted: number | undefined;
+  readonly failed: number;
+  readonly unusable: boolean;
+}
+
+/**
+ * `(attempted, failed)` summed over every target report a scanner wrote. Mirrors
+ * `target_counts` in automated_security_helper/core/unified_metrics.py: an absent
+ * attempt count beside a zero or absent failure count is the absence of a claim, not
+ * 0, but a counter that is present and unusable (not an integer, negative, a failure
+ * count with no attempt count, an attempt count above zero with no failure count, or
+ * more failures than attempts) poisons the pair, which ASH grades ERROR.
+ */
+function targetCounts(additionalReports: unknown, scanner: string): TargetCounts {
+  const poisoned: TargetCounts = { attempted: undefined, failed: 0, unusable: true };
   if (!isRecord(additionalReports) || !isRecord(additionalReports[scanner])) {
-    return undefined;
+    return { attempted: undefined, failed: 0, unusable: false };
   }
   let attempted: number | undefined;
   let failed = 0;
@@ -213,16 +228,56 @@ function partialCoverage(
     if (!isRecord(target)) {
       continue;
     }
-    const tried = asCount(target.targets_attempted);
-    if (tried !== undefined) {
-      attempted = (attempted ?? 0) + tried;
+    const rawAttempted = target.targets_attempted ?? undefined;
+    const rawFailed = target.targets_failed ?? undefined;
+    if (rawAttempted === undefined && rawFailed === undefined) {
+      continue;
     }
-    failed += asCount(target.targets_failed) ?? 0;
+    const tried = asCount(rawAttempted);
+    const lost = asCount(rawFailed);
+    if ((tried === undefined && rawAttempted !== undefined) || (lost === undefined && rawFailed !== undefined)) {
+      return poisoned;
+    }
+    if ((tried !== undefined && tried < 0) || (lost !== undefined && lost < 0)) {
+      return poisoned;
+    }
+    if (tried === undefined) {
+      if (lost === 0) {
+        // The zero default beside no attempt claim: still no claim.
+        continue;
+      }
+      return poisoned;
+    }
+    if (lost === undefined && tried > 0) {
+      return poisoned;
+    }
+    if (lost !== undefined && lost > tried) {
+      return poisoned;
+    }
+    attempted = (attempted ?? 0) + tried;
+    failed += lost ?? 0;
   }
-  if (attempted === undefined || failed <= 0) {
+  return { attempted, failed, unusable: false };
+}
+
+/** `(attempted, failed)` when the scanner ran and lost some of its targets, else undefined. */
+function partialCoverage(counts: TargetCounts): { attempted: number; failed: number } | undefined {
+  if (counts.attempted === undefined || counts.failed <= 0) {
     return undefined;
   }
-  return { attempted, failed };
+  return { attempted: counts.attempted, failed: counts.failed };
+}
+
+/**
+ * The name `_unreadable_record` gives a record it cannot read back: the record's own
+ * name when it carries a truthy one, else "unknown".
+ */
+function unreadableName(record: unknown): string {
+  if (isRecord(record) && isTruthy(record.name)) {
+    const name = record.name;
+    return typeof name === 'string' ? name : JSON.stringify(name);
+  }
+  return 'unknown';
 }
 
 function staleDatabases(sarif: unknown): string[] {
@@ -236,15 +291,16 @@ function staleDatabases(sarif: unknown): string[] {
         }
         const properties = isRecord(notification.properties) ? notification.properties : {};
         const record = properties.content_database;
-        // A record ASH cannot read is skipped, as `stale_content_databases` skips it:
-        // empty, no `measured_at` timestamp, or a `built` that is not one.
-        if (!isRecord(record) || Object.keys(record).length === 0 || !isTimestamp(record.measured_at)) {
+        // A falsy record (absent, null, empty) is skipped, as `stale_content_databases`
+        // skips it. Any other record ASH cannot read (no `measured_at` timestamp, or a
+        // `built` that is not one) is kept as a stale database of unknown age, named by
+        // the record or "unknown", as `_unreadable_record` does.
+        if (!isTruthy(record)) {
           continue;
         }
-        if (isTruthy(record.built) && !isTimestamp(record.built)) {
-          continue;
-        }
-        names.add(asText(record.name) ?? '');
+        const readable =
+          isRecord(record) && isTimestamp(record.measured_at) && !(isTruthy(record.built) && !isTimestamp(record.built));
+        names.add(readable ? (asText((record as Record<string, unknown>).name) ?? '') : unreadableName(record));
       }
     }
   }
@@ -341,11 +397,16 @@ export function assessCoverage(document: unknown): CoverageAssessment | undefine
       // PASSED only when its own statistics say the scanner ran clean, which this
       // file cannot re-derive, so it is reported as unrecognized.
       return [name, status ?? 'UNREADABLE'];
-    });
+    })
+    // A scanner whose counters are poisoned is graded ERROR whatever its row says, as
+    // `get_unified_scanner_metrics` does: it made a coverage claim nobody can read.
+    .map(([name, status]): [string, string] =>
+      targetCounts(document.additional_reports, name).unusable ? [name, 'ERROR'] : [name, status],
+    );
 
   const incomplete: IncompleteScanner[] = [];
   for (const [scanner, status] of observed) {
-    const shortfall = partialCoverage(document.additional_reports, scanner);
+    const shortfall = partialCoverage(targetCounts(document.additional_reports, scanner));
     const statusIncomplete = !COMPLETE_SCANNER_STATUSES.has(status);
     if (shortfall === undefined) {
       if (statusIncomplete) {

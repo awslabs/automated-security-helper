@@ -111,12 +111,38 @@ describe('details the shared cases do not pin', () => {
     expect(assessCoverage(total)?.incomplete_scanners[0].detail).toBe('ERROR');
   });
 
-  it('does not read a JSON boolean as a target count', () => {
+  it('does not read a JSON boolean as a target count, and grades the poisoned pair ERROR', () => {
     const document = base('findings');
     const reports = document.additional_reports as Record<string, Record<string, Record<string, unknown>>>;
     reports['detect-secrets'].source.targets_attempted = true;
     reports['detect-secrets'].source.targets_failed = true;
-    expect(assessCoverage(document)?.coverage_complete).toBe(true);
+    const assessment = assessCoverage(document);
+    expect(assessment?.coverage_complete).toBe(false);
+    expect(assessment?.incomplete_scanners).toEqual([
+      { scanner: 'detect-secrets', status: 'ERROR', reason: 'error', detail: 'ERROR' },
+    ]);
+  });
+
+  it('grades a counter pair ASH cannot read ERROR, and a zero failure count with no attempt count no claim', () => {
+    const shapes: [string, unknown, unknown, boolean][] = [
+      ['failure count only', undefined, 3, true],
+      ['negative attempt', -1, 0, true],
+      ['string attempt', '4', 1, true],
+      ['attempts with no failure count', 4, undefined, true],
+      ['more failures than attempts', 3, 5, true],
+      ['zero default beside no attempt count', undefined, 0, false],
+      ['zero attempts and no failure count', 0, undefined, false],
+    ];
+    for (const [label, attempted, failed, poisoned] of shapes) {
+      const document = base('findings');
+      const reports = document.additional_reports as Record<string, Record<string, Record<string, unknown>>>;
+      reports['detect-secrets'].source.targets_attempted = attempted;
+      reports['detect-secrets'].source.targets_failed = failed;
+      expect({ label, complete: assessCoverage(document)?.coverage_complete }).toEqual({
+        label,
+        complete: !poisoned,
+      });
+    }
   });
 
   it('reports a status it cannot read as unrecognized rather than as passing', () => {
@@ -153,7 +179,7 @@ describe('details the shared cases do not pin', () => {
     const run = (document.sarif as { runs: Record<string, unknown>[] }).runs[0];
     (run.invocations as Record<string, unknown>[])[0].toolConfigurationNotifications = [
       { level: 'error', descriptor: { id: 'ASH-CONTENT-DB-STALE' } },
-      // Empty, so ASH cannot read it and skips it, as it skips a record with no measured_at.
+      // Empty, so ASH skips it. A non-empty record it cannot read is kept, as stale.
       { level: 'error', descriptor: { id: 'ASH-CONTENT-DB-STALE' }, properties: { content_database: {} } },
       {
         level: 'error',
@@ -169,11 +195,29 @@ describe('details the shared cases do not pin', () => {
     ];
     expect(assessCoverage(document)).toMatchObject({
       incomplete_converters: [],
-      stale_content_databases: [''],
+      stale_content_databases: ['', 'bad-built'],
     });
   });
 
-  it('reads every timestamp form ASH accepts', () => {
+  it('keeps an unreadable staleness record as stale, named by the record or "unknown"', () => {
+    const document = base('clean');
+    const run = (document.sarif as { runs: Record<string, unknown>[] }).runs[0];
+    const note = (content_database: unknown) => ({
+      level: 'error',
+      descriptor: { id: 'ASH-CONTENT-DB-STALE' },
+      properties: { content_database },
+    });
+    (run.invocations as Record<string, unknown>[])[0].toolConfigurationNotifications = [
+      note({ name: 'grype-db', policy: 'fail' }),
+      note({ policy: 'fail' }),
+      note({ name: 'z-sep', measured_at: '2026-10-01Z00:00Z' }),
+      note({}),
+      note(null),
+    ];
+    expect(assessCoverage(document)?.stale_content_databases).toEqual(['grype-db', 'unknown', 'z-sep']);
+  });
+
+  it('keeps a record stale whether or not its timestamp parses', () => {
     const forms: Record<string, string> = {
       basic: '20261001T000000Z',
       'hour-only': '2026-10-01T00+00:00',
@@ -193,13 +237,9 @@ describe('details the shared cases do not pin', () => {
         properties: { content_database: { name, measured_at: at } },
       }),
     );
-    expect(assessCoverage(document)?.stale_content_databases).toEqual([
-      'any-separator',
-      'basic',
-      'comma',
-      'hour-only',
-      'week',
-    ]);
+    // Readable forms are stale by their bound; unreadable ones (z-separator, date-only,
+    // mixed) are kept as stale databases of unknown age, so every form is listed.
+    expect(assessCoverage(document)?.stale_content_databases).toEqual(Object.keys(forms).sort());
   });
 
   it('coerces converter fields as pydantic does', () => {
