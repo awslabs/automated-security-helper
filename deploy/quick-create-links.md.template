@@ -50,6 +50,7 @@ the larger templates — the upload it describes is the same upload these links 
 1. **Copy the templates to a bucket you own.** Any bucket works; the console reads it with
    your credentials, so it does not have to be public.
 
+   <!-- doctest: illustrative reason="copies to a bucket the reader owns, with the reader's AWS credentials" -->
    ```sh
    aws s3 cp deploy/cdk/templates/ "s3://${YOUR_BUCKET}/ash/" \
      --recursive --exclude '*' --include '*.template.json'
@@ -69,12 +70,14 @@ the larger templates — the upload it describes is the same upload these links 
 
 3. **Re-render:**
 
+   <!-- doctest: illustrative reason="run from a checkout of the repository, after the bucket is recorded in quick-create-hosting.json" -->
    ```sh
    python3 scripts/render_quick_create_links.py render
    ```
 
 4. **Check what you got:**
 
+   <!-- doctest: illustrative reason="run from a checkout of the repository, on the links just rendered" -->
    ```sh
    python3 scripts/render_quick_create_links.py check
    ```

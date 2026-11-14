@@ -391,6 +391,7 @@ stops describing the same deployment.
 `deploy/tests/iac-equivalence.py` is the check that compares them. It runs in the same
 workflow, needs no credentials or network, and can be run by hand:
 
+<!-- doctest: illustrative reason="run from a checkout of the repository, which the docs test session's fixture project is not" -->
 ```console
 python3 deploy/tests/iac-equivalence.py
 ```

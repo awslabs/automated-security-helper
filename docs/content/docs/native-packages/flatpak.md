@@ -37,6 +37,7 @@ flatpak install --bundle out/ash-<version>-<arch>.flatpak
 
 A Flatpak cannot put `ashx` on the host's `PATH`. The host-visible name is the app id, and `ashx` is the app's default command:
 
+<!-- doctest: illustrative reason="needs the Flatpak app installed, which the docs test session does not have" -->
 ```bash
 flatpak run io.github.awslabs.automated_security_helper --version
 flatpak run io.github.awslabs.automated_security_helper scan --source-dir .
@@ -52,6 +53,7 @@ The first run creates a virtualenv under `~/.var/app/io.github.awslabs.automated
 
 Install the scanners the same way:
 
+<!-- doctest: illustrative reason="needs the Flatpak app installed, which the docs test session does not have" -->
 ```bash
 flatpak run io.github.awslabs.automated_security_helper dependencies install
 ```
@@ -64,12 +66,14 @@ ASH reads whatever source tree you point it at and writes its report inside that
 
 `flatpak --filesystem=host` does not cover `/tmp`, `/var` or `/root`. A source tree there scans as empty, without an error. Grant the path explicitly:
 
+<!-- doctest: illustrative reason="changes the permissions of the installed Flatpak app, and /var/lib/jenkins is the reader's path" -->
 ```bash
 flatpak override --user --filesystem=/var/lib/jenkins io.github.awslabs.automated_security_helper
 ```
 
 To narrow the grant to one tree instead:
 
+<!-- doctest: illustrative reason="changes the permissions of the installed Flatpak app, and ~/src is the reader's path" -->
 ```bash
 flatpak override --user --nofilesystem=host --filesystem=~/src io.github.awslabs.automated_security_helper
 flatpak info --show-permissions io.github.awslabs.automated_security_helper
@@ -83,6 +87,7 @@ Remove the installed app with a plain `flatpak uninstall io.github.awslabs.autom
 
 ## Uninstall
 
+<!-- doctest: illustrative reason="removes the installed Flatpak app and its data" -->
 ```bash
 flatpak uninstall --delete-data io.github.awslabs.automated_security_helper
 ```
