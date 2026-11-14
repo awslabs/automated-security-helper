@@ -424,9 +424,13 @@ def ash_config_json_schema() -> tuple[dict[str, Any], str]:
 
     Two sources, in order:
 
-    1. ``AshConfig.model_json_schema()`` from an importable ASH -- authoritative.
+    1. ``AshConfig.model_json_schema(schema_generator=ConfigFileJsonSchema)`` from an
+       importable ASH -- authoritative. ``ConfigFileJsonSchema`` is the generator the
+       repository uses for the committed file, and it adds the arms that let a config
+       file give an environment reference where a typed value goes.
     2. The committed ``automated_security_helper/schemas/AshConfig.json``, which the
-       repository generates from that same model and keeps fresh with its own gate.
+       repository generates through that same generator and keeps fresh with its own
+       gate.
 
     The fallback is not a convenience. The operator never imports ASH at runtime, so
     requiring it to run the *tests* would mean either installing ASH's whole
@@ -436,15 +440,19 @@ def ash_config_json_schema() -> tuple[dict[str, Any], str]:
     with ``ModuleNotFoundError: No module named 'automated_security_helper'``, which
     a ``-q`` summary reports on a line nobody reads.
 
-    ``tests/test_crd_schema.py`` asserts the two sources agree whenever both are
-    available, so the fallback cannot quietly drift from the model.
+    ``tests/test_crd_schema.py`` asserts that what this function returns from the
+    model matches the committed file whenever both are available, so the fallback
+    cannot quietly drift from the model.
     """
     try:
         from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.schemas.generate_schemas import (
+            ConfigFileJsonSchema,
+        )
     except ImportError:
         pass
     else:
-        return AshConfig.model_json_schema(), "model"
+        return AshConfig.model_json_schema(schema_generator=ConfigFileJsonSchema), "model"
     if _COMMITTED_SCHEMA.is_file():
         with open(_COMMITTED_SCHEMA) as handle:
             return json.load(handle), "committed"
@@ -463,7 +471,8 @@ def ash_config_schema_digest(schema: dict[str, Any]) -> str:
     differ between a CRD generated with ASH importable and one generated from the
     committed schema, and the drift gate would then fail for two people who produced
     byte-identical schemas. A digest of the schema itself is the same either way --
-    which the agreement test makes true rather than assumed -- and it answers the
+    which the agreement test, comparing the committed file with what
+    ``ash_config_json_schema`` returns from the model, makes true rather than assumed -- and it answers the
     question the annotation exists for: which ASH config surface is this CRD from.
 
     Every ``default`` keyword is left out of the hash. The CRD drops all of them
