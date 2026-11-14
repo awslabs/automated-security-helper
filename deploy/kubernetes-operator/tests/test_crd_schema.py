@@ -246,7 +246,7 @@ class TestSchemaSource:
         cross-check of that gate from the consumer's side rather than a duplicate of
         it -- and it is the positive control that lets the fallback be trusted at all.
         """
-        ash_config = pytest.importorskip(
+        pytest.importorskip(
             "automated_security_helper.config.ash_config",
             reason=(
                 "ASH is not importable here, so the two schema sources cannot be "
@@ -280,17 +280,15 @@ class TestSchemaSource:
             )
         with open(_COMMITTED_SCHEMA) as handle:
             committed = json.load(handle)
-        # The committed file is what generate_schemas writes: the model's schema through
-        # ConfigFileJsonSchema, which lets a config file give an environment reference
-        # where a typed value goes. The plain model_json_schema() has no such arms, so
-        # the comparison that holds is against the generator's own output. (The
-        # operator's "model" source still reads the plain schema, so a CRD built without
-        # ASH carries those looser arms and is not byte-for-byte the CRD built with it.)
-        from automated_security_helper.schemas.generate_schemas import (
-            ConfigFileJsonSchema,
-        )
+        # The comparison is against what the operator ACTUALLY uses when ASH imports:
+        # ash_config_json_schema()'s "model" source. The committed file is what
+        # generate_schemas writes (the model's schema through ConfigFileJsonSchema, with
+        # the environment-reference arms), and the operator's model source must be the
+        # same thing, or the CRD and its digest depend on whether ASH is importable.
+        from ash_operator.crd_schema import ash_config_json_schema
 
-        live = ash_config.AshConfig.model_json_schema(schema_generator=ConfigFileJsonSchema)
+        live, origin = ash_config_json_schema()
+        assert origin == "model"
         # Compared without `default` keywords, as the digest is: the CRD drops every
         # default, and two of ASH's depend on the platform the schema was generated
         # on (see ash_config_schema_digest). Everything the CRD carries must agree.

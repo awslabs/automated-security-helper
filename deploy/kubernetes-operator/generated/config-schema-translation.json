@@ -1,21 +1,65 @@
 {
   "additionalPropertiesDroppedAlongsideProperties": 92,
-  "collapsedOptionals": 99,
+  "collapsedOptionals": 57,
   "constRewrittenToEnum": 32,
   "droppedKeywords": {
-    "default": 408,
+    "default": 199,
     "propertyNames": 1,
-    "title": 440
+    "title": 231
   },
-  "exclusiveBoundsRewritten": 6,
+  "exclusiveBoundsRewritten": 0,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "c2d436534af2be8a",
+  "sourceSchemaSha256": "29caa37967a991e5",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",
       "reason": "AshConfig refers to itself, directly or through another definition. A structural schema cannot hold a cycle because $ref is not allowed and inlining never terminates, so this subtree accepts any object and is validated by ASH at scan time instead."
+    },
+    {
+      "path": "/properties/global_settings/properties/ignore_paths/items/properties/client_supplied",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/global_settings/properties/suppressions/items/properties/client_supplied",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/global_settings/properties/suppressions/items/properties/line_start",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/global_settings/properties/suppressions/items/properties/line_end",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/global_settings/properties/mcp/properties/runtime_overrides/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/global_settings/properties/mcp/properties/runtime_overrides/properties/replace_default_denied_paths",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/fail_on_findings",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/fail_on_incomplete_scanners",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/fail_on_unknown_keys",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/honor_ignore_files",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/content_db_staleness_offline_image_default",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
       "path": "/properties/build/properties/custom_scanners/items",
@@ -26,24 +70,236 @@
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
+      "path": "/properties/build/properties/custom_scanners/items/properties/context/properties/ignore_suppressions",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/build/properties/custom_scanners/items/properties/config/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/build/properties/custom_scanners/items/properties/config/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/build/properties/custom_scanners/items/properties/config/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/build/properties/custom_scanners/items/properties/dependencies_satisfied",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/build/properties/custom_scanners/items/properties/exit_code",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/build/properties/custom_scanners/items/properties/use_uv_tool",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/build/properties/custom_scanners/items/properties/custom_install_commands/additionalProperties/additionalProperties/items/properties/shell",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
       "path": "/properties/build/properties/custom_scanners/items/properties/args",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
       "path": "/properties/build/properties/custom_scanners/items/properties/args/properties/extra_args/items/properties/value",
-      "reason": "a union of 4 branches with types ['boolean', 'integer', 'number', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+      "reason": "a union of 5 branches with types ['boolean', 'integer', 'number', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
       "path": "/properties/converters",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
+      "path": "/properties/converters/properties/archive/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/converters/properties/archive/properties/options/properties/max_members",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/converters/properties/archive/properties/options/properties/max_member_bytes",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/converters/properties/archive/properties/options/properties/max_total_bytes",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/converters/properties/archive/properties/options/properties/max_compression_ratio",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/converters/properties/jupyter/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/converters/properties/jupyter/properties/options/properties/install_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
       "path": "/properties/scanners",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
+      "path": "/properties/scanners/properties/actionlint/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/actionlint/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/actionlint/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/bandit/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/bandit/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/bandit/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/bandit/properties/options/properties/ignore_nosec",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/bandit/properties/options/properties/excluded_paths/items/properties/client_supplied",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/bandit/properties/options/properties/install_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
       "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/nag_packs",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/nag_packs/properties/AwsSolutionsChecks",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/nag_packs/properties/HIPAASecurityChecks",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/nag_packs/properties/NIST80053R4Checks",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/nag_packs/properties/NIST80053R5Checks",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/nag_packs/properties/PCIDSS321Checks",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/include_compliant_checks",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-guard/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-guard/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-guard/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-lint/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-lint/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-lint/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-lint/properties/options/properties/honor_inline_ignores",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-lint/properties/options/properties/install_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-nag/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-nag/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/cfn-nag/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/checkov/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/checkov/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/checkov/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/checkov/properties/options/properties/skip_path/items/properties/client_supplied",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/checkov/properties/options/properties/skip_ash_output_dir",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/checkov/properties/options/properties/install_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/detect-secrets/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
       "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/scan_settings",
@@ -54,20 +310,368 @@
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
+      "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/scan_settings/properties/plugins_used/items/properties/limit",
+      "reason": "a union of 2 branches with types ['number', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
       "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/scan_settings/properties/filters_used/items",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
+    },
+    {
+      "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/scan_settings/properties/filters_used/items/properties/min_level",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
       "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/scan_settings/properties/results",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
+      "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/skip_generated_lockfiles",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/detect-secrets/properties/options/properties/max_worker_output_mib",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/gitleaks/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/gitleaks/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/gitleaks/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/gitleaks/properties/options/properties/honor_inline_ignores",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/gitleaks/properties/options/properties/max_target_megabytes",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/grype/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/grype/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/grype/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/npm-audit/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/npm-audit/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/npm-audit/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/opengrep/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/opengrep/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/opengrep/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/syft/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/syft/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/syft/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/syft/properties/options/properties/exclude/items/properties/client_supplied",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/trivy/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/trivy/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/trivy/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/trivy/properties/options/properties/license_full",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/trivy/properties/options/properties/ignore_unfixed",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/trivy/properties/options/properties/disable_telemetry",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/zizmor/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/zizmor/properties/options/properties/scan_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/zizmor/properties/options/properties/offline",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/zizmor/properties/options/properties/online_audits",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/zizmor/properties/options/properties/honor_inline_ignores",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/scanners/properties/zizmor/properties/options/properties/install_timeout",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
       "path": "/properties/reporters",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
+      "path": "/properties/reporters/properties/csv/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/cyclonedx/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/gitlab-cyclonedx/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/html/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/flat-json/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/flat-json/properties/options/properties/include_scanner_metrics",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/flat-json/properties/options/properties/include_summary_metrics",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/flat-json/properties/options/properties/include_metadata",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/gitlab-sast/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/gitlab-sast/properties/options/properties/exclude_suppressed",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/github-ghas/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/github-ghas/properties/options/properties/exclude_suppressed",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/github-ghas/properties/options/properties/emit_automation_details",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/junitxml/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/junitxml/properties/options/properties/respect_severity_threshold",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/options/properties/include_summary",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/options/properties/include_findings_table",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/options/properties/include_detailed_findings",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/options/properties/max_detailed_findings",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/options/properties/top_hotspots_limit",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/options/properties/use_collapsible_details",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/markdown/properties/options/properties/compact",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/ocsf/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/sarif/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/spdx/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/text/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/text/properties/options/properties/include_summary",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/text/properties/options/properties/include_findings_table",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/text/properties/options/properties/include_detailed_findings",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/text/properties/options/properties/max_detailed_findings",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/text/properties/options/properties/top_hotspots_limit",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/unused-suppressions/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/yaml/properties/enabled",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
       "path": "/properties/output_formats",
-      "reason": "a union of 2 branches with types ['array', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+      "reason": "a union of 2 branches with types ['None', 'array'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/max_concurrent_scans",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/max_concurrent_scans_per_session",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/max_concurrent_tasks",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/thread_pool_max_workers",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/scan_timeout_seconds",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/operation_timeout_seconds",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/shutdown_timeout_seconds",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/memory_warning_threshold_mb",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/memory_critical_threshold_mb",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/task_count_warning_threshold",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/max_message_size_bytes",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/max_path_length",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/max_directory_size_mb",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/enable_health_checks",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/health_check_interval_seconds",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/enable_resource_logging",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/mcp-resource-management/properties/log_resource_operations",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/workspace/properties/max_parallel_projects",
+      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/workspace/properties/project_timeout",
+      "reason": "a union of 2 branches with types ['number', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
       "path": "/properties/extends",

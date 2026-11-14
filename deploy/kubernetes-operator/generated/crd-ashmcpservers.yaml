@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: c2d436534af2be8a
+    ash.awslabs.github.io/ash-config-schema-sha256: 29caa37967a991e5
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -85,7 +85,9 @@ spec:
                   type: string
                 description: 'Host header values to accept. Lower-cased by the operator: a load balancer
                   lower-cases Host while the MCP SDK matches it case-sensitively, so a mixed-case value
-                  yields 421 on every request.'
+                  yields 421 on every request. When unset, the operator accepts the Service''s own names
+                  and localhost, each with the Service port, assuming the default cluster domain (cluster.local);
+                  a cluster with another cluster domain needs this field.'
               auth:
                 type: object
                 description: 'Single-tenant header auth. The expected value is read from a Secret, never
@@ -144,15 +146,19 @@ spec:
                   global_settings:
                     properties:
                       severity_threshold:
+                        type: string
+                        anyOf:
+                        - enum:
+                          - ALL
+                          - LOW
+                          - MEDIUM
+                          - HIGH
+                          - CRITICAL
+                        - description: An environment reference, resolved to the variable's value when
+                            the file is loaded.
+                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                         description: Global minimum severity level to consider findings as failures across
                           all scanners
-                        enum:
-                        - ALL
-                        - LOW
-                        - MEDIUM
-                        - HIGH
-                        - CRITICAL
-                        type: string
                       ignore_paths:
                         description: Global list of IgnorePaths. Each path requires a reason for ignoring,
                           e.g. 'Folder contains test data only and is not committed'.
@@ -173,11 +179,11 @@ spec:
                                 removed in ASH v4.
                               nullable: true
                             client_supplied:
+                              x-kubernetes-preserve-unknown-fields: true
                               description: 'Set by ASH: True when a config or workspace policy file an
                                 MCP client delivered supplied this entry, so results show which suppressions
                                 and ignored paths came from the client. A value written in a config file
                                 is ignored.'
-                              type: boolean
                             expiration:
                               type: string
                               description: (Optional) Deprecated alias of 'expires', accepted when a config
@@ -208,23 +214,21 @@ spec:
                                 removed in ASH v4.
                               nullable: true
                             client_supplied:
+                              x-kubernetes-preserve-unknown-fields: true
                               description: 'Set by ASH: True when a config or workspace policy file an
                                 MCP client delivered supplied this entry, so results show which suppressions
                                 and ignored paths came from the client. A value written in a config file
                                 is ignored.'
-                              type: boolean
                             rule_id:
                               type: string
                               description: Rule ID to suppress
                               nullable: true
                             line_start:
-                              type: integer
+                              x-kubernetes-preserve-unknown-fields: true
                               description: (Optional) Starting line number
-                              nullable: true
                             line_end:
-                              type: integer
+                              x-kubernetes-preserve-unknown-fields: true
                               description: (Optional) Ending line number
-                              nullable: true
                             package_name:
                               type: string
                               description: (Optional) Only suppress findings about this package (glob,
@@ -321,9 +325,9 @@ spec:
                             description: Allowlist for runtime JSON-Patch overrides.
                             properties:
                               enabled:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: "Master switch \u2014 runtime patches are rejected unless\
                                   \ True."
-                                type: boolean
                               allowed_paths:
                                 description: 'JSON-Pointer glob patterns the client may target. `*` matches
                                   one segment, `**` matches any subtree. Example: ''/scanners/*/options/severity_threshold''.'
@@ -360,12 +364,12 @@ spec:
                                   because it is read-only. Each key starts with '/'.
                                 type: object
                               replace_default_denied_paths:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: When true, denied_paths is used as written instead of being
                                   added to ASH's default list, and each default entry it leaves out is
                                   named in a warning. When false (the default), the entries listed are
                                   denied as well as the defaults. Either way, an unset list, or one equal
                                   to a default ASH has shipped, gets the current default list.
-                                type: boolean
                             type: object
                         type: object
                     type: object
@@ -373,14 +377,15 @@ spec:
                       exists at the scanner level and is set in both places, the scanner level settings
                       take precedence.
                   fail_on_findings:
+                    x-kubernetes-preserve-unknown-fields: true
                     description: 'Whether to exit with non-zero code if findings are detected
 
 
                       IGNORED BY THE OPERATOR: Set on `ashx merge` from spec.failOnFindings instead. A
                       shard''s exit code is discarded, so setting it here would read as a gate that never
                       fires.'
-                    type: boolean
                   fail_on_incomplete_scanners:
+                    x-kubernetes-preserve-unknown-fields: true
                     description: 'Whether to exit with a non-zero code when a selected scanner did not
                       complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable,
                       never ran). A SKIPPED scanner, one not selected or one with nothing of its kind
@@ -402,16 +407,16 @@ spec:
 
                       IGNORED BY THE OPERATOR: Set on `ashx merge` from spec.failOnIncompleteScanners
                       instead, for the same reason as fail_on_findings.'
-                    type: boolean
                   fail_on_unknown_keys:
+                    x-kubernetes-preserve-unknown-fields: true
                     description: Whether an unknown key in a suppression or ignore-path entry refuses
                       the config at load. False (the default) loads the config with a warning that names
                       the key, with a did-you-mean, and the entry it sits in suppresses nothing until
                       it is fixed, so a typo can never widen a suppression. True refuses the config, naming
                       the same key. ASH v4 flips the default to True; set it True now to adopt the error
                       early.
-                    type: boolean
                   honor_ignore_files:
+                    x-kubernetes-preserve-unknown-fields: true
                     description: 'Whether the .gitignore and .ignore files in the scanned tree decide
                       which files are left out of ASH''s scan set, the file list detect-secrets, cfn-nag,
                       cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read.
@@ -421,11 +426,22 @@ spec:
                       supplied, cannot change it, and its value there is ignored with a warning. Set it
                       in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files
                       / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.'
-                    type: boolean
                   sandbox:
                     description: OS-level sandboxing of scanner subprocesses.
                     properties:
                       mode:
+                        type: string
+                        anyOf:
+                        - enum:
+                          - 'off'
+                          - auto
+                          - bwrap
+                          - firejail
+                          - landlock
+                          - sandbox-exec
+                        - description: An environment reference, resolved to the variable's value when
+                            the file is loaded.
+                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                         description: 'How scanner subprocesses are confined. ''off'' runs them as plain
                           subprocesses. ''auto'' uses the best sandbox available (Linux: bwrap, then firejail,
                           then landlock; macOS: sandbox-exec). Any other value requires that backend.
@@ -435,14 +451,6 @@ spec:
                           or the scanned directory cannot turn it off or switch backends. Not applied
                           in container mode, where the container is the boundary; ASH logs a warning when
                           it is set there.'
-                        enum:
-                        - 'off'
-                        - auto
-                        - bwrap
-                        - firejail
-                        - landlock
-                        - sandbox-exec
-                        type: string
                       network_scanners:
                         items:
                           type: string
@@ -503,6 +511,14 @@ spec:
                         type: array
                     type: object
                   content_db_staleness:
+                    type: string
+                    anyOf:
+                    - enum:
+                      - fail
+                      - warn
+                    - description: An environment reference, resolved to the variable's value when the
+                        file is loaded.
+                      pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                     description: What a scan does when a scanner's content database (grype's or trivy's
                       vulnerability database, the offline opengrep rulesets) was built longer ago than
                       the bound declared for it in automated_security_helper/utils/content_databases.py.
@@ -511,10 +527,6 @@ spec:
                       same warning in the log and in the reports (summary, SARIF invocation notifications,
                       flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes
                       precedence over this value; --no-allow-stale-content-db sets 'fail'.
-                    enum:
-                    - fail
-                    - warn
-                    type: string
                   content_db_staleness_overrides:
                     description: Per-database exceptions to content_db_staleness, each with a required
                       expiration date and reason. An entry holds one named database to its own policy
@@ -551,11 +563,15 @@ spec:
                             grype-db, trivy-db or opengrep-offline-rules.'
                           type: string
                         policy:
-                          description: The policy this database is held to while the entry is in effect.
-                          enum:
-                          - fail
-                          - warn
                           type: string
+                          anyOf:
+                          - enum:
+                            - fail
+                            - warn
+                          - description: An environment reference, resolved to the variable's value when
+                              the file is loaded.
+                            pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                          description: The policy this database is held to while the entry is in effect.
                         expiration:
                           description: 'Required. The date (YYYY-MM-DD, UTC) from which the entry no longer
                             applies: at 00:00 UTC that day the database returns to the policy it has without
@@ -564,9 +580,13 @@ spec:
                             is false.'
                           type: string
                         reason:
-                          description: Required. Why this database is held differently.
-                          minLength: 1
                           type: string
+                          anyOf:
+                          - minLength: 1
+                          - description: An environment reference, resolved to the variable's value when
+                              the file is loaded.
+                            pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                          description: Required. Why this database is held differently.
                       required:
                       - database
                       - policy
@@ -575,6 +595,7 @@ spec:
                       type: object
                     type: array
                   content_db_staleness_offline_image_default:
+                    x-kubernetes-preserve-unknown-fields: true
                     description: 'Whether an image built with OFFLINE=YES holds trivy-db to ''warn'' rather
                       than to content_db_staleness: fail. Such an image carries the trivy database it
                       was built with, and trivy''s own bound would fail every scan in it from a day after
@@ -585,7 +606,6 @@ spec:
                       trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides
                       entry for trivy-db outranks it, and either form of --allow-stale-content-db sets
                       this to false for that scan.'
-                    type: boolean
                   ash_plugin_modules:
                     description: List of Python modules to import containing ASH plugins and/or event
                       subscribers. These are loaded in addition to the default modules.
@@ -602,12 +622,16 @@ spec:
                     description: Configuration model for build-time settings.
                     properties:
                       build_mode:
+                        type: string
+                        anyOf:
+                        - enum:
+                          - ONLINE
+                          - OFFLINE
+                        - description: An environment reference, resolved to the variable's value when
+                            the file is loaded.
+                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                         description: 'Not used: nothing reads this setting, so it changes neither the
                           container image build nor the scan. To scan offline, pass --offline or set ASH_OFFLINE.'
-                        enum:
-                        - ONLINE
-                        - OFFLINE
-                        type: string
                       tool_install_scripts:
                         additionalProperties:
                           items:
@@ -644,8 +668,8 @@ spec:
                                   type: object
                                   x-kubernetes-preserve-unknown-fields: true
                                 ignore_suppressions:
+                                  x-kubernetes-preserve-unknown-fields: true
                                   description: Ignore all suppression rules
-                                  type: boolean
                                 run_id:
                                   type: string
                                   description: The ID of the scan this context belongs to, under which
@@ -667,41 +691,47 @@ spec:
                             config:
                               properties:
                                 name:
+                                  type: string
+                                  anyOf:
+                                  - minLength: 1
+                                    pattern: ^[a-zA-Z][\w-]+$
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                   description: Name of the component using letters, numbers, underscores
                                     and hyphens. Must begin with a letter.
-                                  minLength: 1
-                                  pattern: ^[a-zA-Z][\w-]+$
-                                  type: string
                                 enabled:
+                                  x-kubernetes-preserve-unknown-fields: true
                                   description: Whether the component is enabled
-                                  type: boolean
                                 options:
                                   description: Scanner options
                                   properties:
                                     severity_threshold:
-                                      enum:
-                                      - ALL
-                                      - LOW
-                                      - MEDIUM
-                                      - HIGH
-                                      - CRITICAL
                                       type: string
+                                      anyOf:
+                                      - enum:
+                                        - ALL
+                                        - LOW
+                                        - MEDIUM
+                                        - HIGH
+                                        - CRITICAL
+                                      - description: An environment reference, resolved to the variable's
+                                          value when the file is loaded.
+                                        pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                       description: Minimum severity level to consider findings as failures.
                                         This is a scanner-level override of the default severity-level
                                         within ASH of MEDIUM.
                                       nullable: true
                                     scan_timeout:
-                                      minimum: 1
-                                      type: integer
+                                      x-kubernetes-preserve-unknown-fields: true
                                       description: Maximum time in seconds to allow this scanner's tool
                                         invocation to run before it is killed. Set to null to leave the
                                         scanner unbounded, which risks a scan that never completes.
-                                      nullable: true
                                     offline:
+                                      x-kubernetes-preserve-unknown-fields: true
                                       description: Run this scanner offline even when ASH runs online.
                                         False follows ASH's own mode; it never puts a scanner online under
                                         --offline.
-                                      type: boolean
                                   type: object
                               type: object
                               nullable: true
@@ -724,7 +754,7 @@ spec:
                               type: string
                               nullable: true
                             dependencies_satisfied:
-                              type: boolean
+                              x-kubernetes-preserve-unknown-fields: true
                             start_time:
                               format: date-time
                               type: string
@@ -734,12 +764,11 @@ spec:
                               type: string
                               nullable: true
                             exit_code:
-                              type: integer
-                              nullable: true
+                              x-kubernetes-preserve-unknown-fields: true
                             use_uv_tool:
+                              x-kubernetes-preserve-unknown-fields: true
                               description: Flag to indicate whether this scanner should use UV tool execution
                                 instead of direct command execution
-                              type: boolean
                             command:
                               type: string
                               description: The command to invoke the scanner, typically the binary or
@@ -763,18 +792,22 @@ spec:
                                       version:
                                         type: string
                                       package_manager:
-                                        enum:
-                                        - apt
-                                        - pip
-                                        - uv
-                                        - conda
-                                        - npm
-                                        - brew
-                                        - yum
-                                        - choco
-                                        - custom
-                                        - url
                                         type: string
+                                        anyOf:
+                                        - enum:
+                                          - apt
+                                          - pip
+                                          - uv
+                                          - conda
+                                          - npm
+                                          - brew
+                                          - yum
+                                          - choco
+                                          - custom
+                                          - url
+                                        - description: An environment reference, resolved to the variable's
+                                            value when the file is loaded.
+                                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                     required:
                                     - name
                                     type: object
@@ -832,7 +865,7 @@ spec:
                                           type: string
                                         type: array
                                       shell:
-                                        type: boolean
+                                        x-kubernetes-preserve-unknown-fields: true
                                     required:
                                     - args
                                     type: object
@@ -846,18 +879,23 @@ spec:
                                 than raised from it. None when nothing blocks it.
                               nullable: true
                             tool_type:
-                              description: Type of scanner tool.
-                              enum:
-                              - SAST
-                              - DAST
-                              - SCA
-                              - IAC
-                              - SECRETS
-                              - CONTAINER
-                              - SBOM
-                              - CUSTOM
-                              - UNKNOWN
                               type: string
+                              anyOf:
+                              - description: Type of scanner tool.
+                                enum:
+                                - SAST
+                                - DAST
+                                - SCA
+                                - IAC
+                                - SECRETS
+                                - CONTAINER
+                                - SBOM
+                                - CUSTOM
+                                - UNKNOWN
+                              - description: An environment reference, resolved to the variable's value
+                                  when the file is loaded.
+                                pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                              description: Type of scanner tool.
                             subcommands:
                               description: Subcommands to include when invoking the scanner, e.g. ['scan']
                                 is needed as the subcommand for 'opengrep' as Opengrep supports multiple
@@ -913,53 +951,53 @@ spec:
                         description: Configure the options for the ArchiveConverter
                         properties:
                           name:
-                            enum:
-                            - archive
                             type: string
+                            anyOf:
+                            - enum:
+                              - archive
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             description: Configure Archive converter
                             properties:
                               max_members:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: The most members an archive may have, directories included.
                                   An archive with more is not extracted. All the archives one scan extracts
                                   may hold four times this many together.
-                                minimum: 0
-                                exclusiveMinimum: true
-                                type: integer
                               max_member_bytes:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: The largest size in bytes one member of an archive may declare.
                                   An archive with a larger member is not extracted. Default 256 MiB.
-                                minimum: 0
-                                exclusiveMinimum: true
-                                type: integer
                               max_total_bytes:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: The most bytes an archive's members may declare added up,
                                   each counted as at least 512. An archive whose members declare more
                                   is not extracted. All the archives one scan extracts may declare four
                                   times this together. Default 1 GiB.
-                                minimum: 0
-                                exclusiveMinimum: true
-                                type: integer
                               max_compression_ratio:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: The most times its own size on disk that an archive's members
                                   may declare added up. An archive that declares more is not extracted.
                                   Checked only once the members declare more than 512 KiB in all.
-                                minimum: 0
-                                exclusiveMinimum: true
-                                type: integer
                             type: object
                         type: object
                       jupyter:
                         description: Configure the options for the JupyterConverter
                         properties:
                           name:
-                            enum:
-                            - jupyter
                             type: string
+                            anyOf:
+                            - enum:
+                              - jupyter
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               tool_version:
@@ -968,8 +1006,8 @@ spec:
                                   '>=7.16.0'). If not specified, the latest version will be installed.
                                 nullable: true
                               install_timeout:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Timeout in seconds for tool installation (default: 300)'
-                                type: integer
                             type: object
                             description: Configure Jupyter Notebook converter
                         type: object
@@ -981,36 +1019,42 @@ spec:
                       actionlint:
                         properties:
                           name:
-                            enum:
-                            - actionlint
                             type: string
+                            anyOf:
+                            - enum:
+                              - actionlint
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               config_file:
                                 type: string
                                 description: 'Path to an actionlint config file. A relative path is taken
@@ -1055,36 +1099,42 @@ spec:
                         description: Configure the options for Bandit
                         properties:
                           name:
-                            enum:
-                            - bandit
                             type: string
+                            anyOf:
+                            - enum:
+                              - bandit
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -1103,12 +1153,16 @@ spec:
                                   as a warning and ignored.'
                                 nullable: true
                               confidence_level:
-                                description: Confidence level for bandit scan (all, low, medium, high)
-                                pattern: ^(all|low|medium|high)$
                                 type: string
+                                anyOf:
+                                - pattern: ^(all|low|medium|high)$
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                description: Confidence level for bandit scan (all, low, medium, high)
                               ignore_nosec:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Whether to ignore #nosec comments in the code'
-                                type: boolean
                               excluded_paths:
                                 description: List of paths to exclude from the bandit scan
                                 items:
@@ -1128,11 +1182,11 @@ spec:
                                         a config is read; the alias is removed in ASH v4.
                                       nullable: true
                                     client_supplied:
+                                      x-kubernetes-preserve-unknown-fields: true
                                       description: 'Set by ASH: True when a config or workspace policy
                                         file an MCP client delivered supplied this entry, so results show
                                         which suppressions and ignored paths came from the client. A value
                                         written in a config file is ignored.'
-                                      type: boolean
                                     expiration:
                                       type: string
                                       description: (Optional) Deprecated alias of 'expires', accepted
@@ -1159,110 +1213,122 @@ spec:
                                   If not specified, uses '>=1.7.8,<2.0.0' for stability.
                                 nullable: true
                               install_timeout:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Timeout in seconds for tool installation (default: 300)'
-                                type: integer
                             type: object
                             description: Configure Bandit scanner
                         type: object
                       cdk-nag:
                         properties:
                           name:
-                            enum:
-                            - cdk-nag
                             type: string
+                            anyOf:
+                            - enum:
+                              - cdk-nag
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             description: Configure CDK Nag scanner
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               nag_packs:
                                 properties:
                                   AwsSolutionsChecks:
+                                    x-kubernetes-preserve-unknown-fields: true
                                     description: Runs the AwsSolutionsChecks NagPack included with CDK
                                       Nag.
-                                    type: boolean
                                   HIPAASecurityChecks:
+                                    x-kubernetes-preserve-unknown-fields: true
                                     description: Runs the HIPAASecurityChecks NagPack included with CDK
                                       Nag.
-                                    type: boolean
                                   NIST80053R4Checks:
+                                    x-kubernetes-preserve-unknown-fields: true
                                     description: Runs the NIST80053R4Checks NagPack included with CDK
                                       Nag.
-                                    type: boolean
                                   NIST80053R5Checks:
+                                    x-kubernetes-preserve-unknown-fields: true
                                     description: Runs the NIST80053R5Checks NagPack included with CDK
                                       Nag.
-                                    type: boolean
                                   PCIDSS321Checks:
+                                    x-kubernetes-preserve-unknown-fields: true
                                     description: Runs the PCIDSS321Checks NagPack included with CDK Nag.
-                                    type: boolean
                                 type: object
                                 description: CDK Nag packs to enable
                                 x-kubernetes-preserve-unknown-fields: true
                               include_compliant_checks:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Kept for configuration compatibility; it changes nothing.
                                   cdk-nag 3 reports violations only, so there is no compliant-resource
                                   finding for this option to include, and a scan with it set says so.
-                                type: boolean
                             type: object
                         type: object
                         description: Configure the options for CdkNag
                       cfn-guard:
                         properties:
                           name:
-                            enum:
-                            - cfn-guard
                             type: string
+                            anyOf:
+                            - enum:
+                              - cfn-guard
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               rule_sets:
                                 description: 'Rule sets from the bundled AWS Guard Rules Registry to evaluate,
                                   by file name without the .guard extension, e.g. [''wa-Security-Pillar'',
@@ -1299,36 +1365,42 @@ spec:
                       cfn-lint:
                         properties:
                           name:
-                            enum:
-                            - cfn-lint
                             type: string
+                            anyOf:
+                            - enum:
+                              - cfn-lint
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -1375,6 +1447,7 @@ spec:
                                   type: string
                                 type: array
                               honor_inline_ignores:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Honor the ignore_checks and configure_rules a template sets
                                   for itself in `Metadata: cfn-lint: config` (ignore_checks also at the
                                   resource level). Off by default: every rule outside ignore_checks and
@@ -1392,7 +1465,6 @@ spec:
                                   every git checkout and the scanned directory: a config file inside one,
                                   or one an MCP client delivered, does not choose it. Set by such a config,
                                   it is ignored with a warning.'
-                                type: boolean
                               tool_version:
                                 type: string
                                 description: 'Version constraint for the cfn-lint installation, in pip
@@ -1403,8 +1475,8 @@ spec:
                                   it. Set by such a config, it is ignored with a warning.'
                                 nullable: true
                               install_timeout:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Timeout in seconds for tool installation
-                                type: integer
                             type: object
                             description: Configure the cfn-lint scanner
                         type: object
@@ -1412,36 +1484,42 @@ spec:
                       cfn-nag:
                         properties:
                           name:
-                            enum:
-                            - cfn-nag
                             type: string
+                            anyOf:
+                            - enum:
+                              - cfn-nag
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                             type: object
                             description: Configure CFN Nag scanner
                         type: object
@@ -1449,38 +1527,44 @@ spec:
                       checkov:
                         properties:
                           name:
-                            enum:
-                            - checkov
                             type: string
+                            anyOf:
+                            - enum:
+                              - checkov
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run in offline mode, disabling policy downloads. When true,
                                   this scanner runs offline even if ASH does not. ASH's own offline mode
                                   (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
                                   it.
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -1519,11 +1603,11 @@ spec:
                                         a config is read; the alias is removed in ASH v4.
                                       nullable: true
                                     client_supplied:
+                                      x-kubernetes-preserve-unknown-fields: true
                                       description: 'Set by ASH: True when a config or workspace policy
                                         file an MCP client delivered supplied this entry, so results show
                                         which suppressions and ignored paths came from the client. A value
                                         written in a config file is ignored.'
-                                      type: boolean
                                     expiration:
                                       type: string
                                       description: (Optional) Deprecated alias of 'expires', accepted
@@ -1539,121 +1623,133 @@ spec:
                                 description: List of additional formats to output. Defaults to including
                                   CycloneDX JSON
                                 items:
-                                  enum:
-                                  - cli
-                                  - csv
-                                  - cyclonedx
-                                  - cyclonedx_json
-                                  - json
-                                  - junitxml
-                                  - github_failed_only
-                                  - gitlab_sast
-                                  - sarif
-                                  - spdx
                                   type: string
+                                  anyOf:
+                                  - enum:
+                                    - cli
+                                    - csv
+                                    - cyclonedx
+                                    - cyclonedx_json
+                                    - json
+                                    - junitxml
+                                    - github_failed_only
+                                    - gitlab_sast
+                                    - sarif
+                                    - spdx
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               frameworks:
                                 description: Specific frameworks to include with Checkov. Defaults to
                                   `all`.
                                 items:
-                                  enum:
-                                  - all
-                                  - ansible
-                                  - argo_workflows
-                                  - arm
-                                  - azure_pipelines
-                                  - bicep
-                                  - bitbucket_pipelines
-                                  - cdk
-                                  - circleci_pipelines
-                                  - cloudformation
-                                  - dockerfile
-                                  - github_configuration
-                                  - github_actions
-                                  - gitlab_configuration
-                                  - gitlab_ci
-                                  - bitbucket_configuration
-                                  - helm
-                                  - json
-                                  - yaml
-                                  - kubernetes
-                                  - kustomize
-                                  - openapi
-                                  - sca_package
-                                  - sca_image
-                                  - secrets
-                                  - serverless
-                                  - terraform
-                                  - terraform_json
-                                  - terraform_plan
-                                  - sast
-                                  - sast_python
-                                  - sast_java
-                                  - sast_javascript
-                                  - sast_typescript
-                                  - sast_golang
-                                  - 3d_policy
                                   type: string
+                                  anyOf:
+                                  - enum:
+                                    - all
+                                    - ansible
+                                    - argo_workflows
+                                    - arm
+                                    - azure_pipelines
+                                    - bicep
+                                    - bitbucket_pipelines
+                                    - cdk
+                                    - circleci_pipelines
+                                    - cloudformation
+                                    - dockerfile
+                                    - github_configuration
+                                    - github_actions
+                                    - gitlab_configuration
+                                    - gitlab_ci
+                                    - bitbucket_configuration
+                                    - helm
+                                    - json
+                                    - yaml
+                                    - kubernetes
+                                    - kustomize
+                                    - openapi
+                                    - sca_package
+                                    - sca_image
+                                    - secrets
+                                    - serverless
+                                    - terraform
+                                    - terraform_json
+                                    - terraform_plan
+                                    - sast
+                                    - sast_python
+                                    - sast_java
+                                    - sast_javascript
+                                    - sast_typescript
+                                    - sast_golang
+                                    - 3d_policy
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               skip_frameworks:
                                 description: Specific frameworks to exclude with Checkov. Defaults to
                                   none.
                                 items:
-                                  enum:
-                                  - all
-                                  - ansible
-                                  - argo_workflows
-                                  - arm
-                                  - azure_pipelines
-                                  - bicep
-                                  - bitbucket_pipelines
-                                  - cdk
-                                  - circleci_pipelines
-                                  - cloudformation
-                                  - dockerfile
-                                  - github_configuration
-                                  - github_actions
-                                  - gitlab_configuration
-                                  - gitlab_ci
-                                  - bitbucket_configuration
-                                  - helm
-                                  - json
-                                  - yaml
-                                  - kubernetes
-                                  - kustomize
-                                  - openapi
-                                  - sca_package
-                                  - sca_image
-                                  - secrets
-                                  - serverless
-                                  - terraform
-                                  - terraform_json
-                                  - terraform_plan
-                                  - sast
-                                  - sast_python
-                                  - sast_java
-                                  - sast_javascript
-                                  - sast_typescript
-                                  - sast_golang
-                                  - 3d_policy
                                   type: string
+                                  anyOf:
+                                  - enum:
+                                    - all
+                                    - ansible
+                                    - argo_workflows
+                                    - arm
+                                    - azure_pipelines
+                                    - bicep
+                                    - bitbucket_pipelines
+                                    - cdk
+                                    - circleci_pipelines
+                                    - cloudformation
+                                    - dockerfile
+                                    - github_configuration
+                                    - github_actions
+                                    - gitlab_configuration
+                                    - gitlab_ci
+                                    - bitbucket_configuration
+                                    - helm
+                                    - json
+                                    - yaml
+                                    - kubernetes
+                                    - kustomize
+                                    - openapi
+                                    - sca_package
+                                    - sca_image
+                                    - secrets
+                                    - serverless
+                                    - terraform
+                                    - terraform_json
+                                    - terraform_plan
+                                    - sast
+                                    - sast_python
+                                    - sast_java
+                                    - sast_javascript
+                                    - sast_typescript
+                                    - sast_golang
+                                    - 3d_policy
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               skip_ash_output_dir:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Tell Checkov to skip ASH's own output directories inside
                                   the scanned directory (this run's output directory and .ash/ash_output),
                                   so it does not parse ASH's previous reports. Defaults to true; set to
                                   false to let Checkov read them. Either way ASH drops the findings located
                                   there after the scan. Has no effect on Windows, where Checkov's --skip-path
                                   matching is unreliable.
-                                type: boolean
                               tool_version:
                                 type: string
                                 description: Version constraint for checkov installation, in pip requirement
                                   syntax. Leave unset to use the scanner's own default constraint.
                                 nullable: true
                               install_timeout:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Timeout in seconds for tool installation
-                                type: integer
                             type: object
                             description: Configure Checkov scanner
                         type: object
@@ -1661,36 +1757,42 @@ spec:
                       detect-secrets:
                         properties:
                           name:
-                            enum:
-                            - detect-secrets
                             type: string
+                            anyOf:
+                            - enum:
+                              - detect-secrets
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               baseline_file:
                                 type: string
                                 anyOf:
@@ -1717,8 +1819,7 @@ spec:
                                           type: string
                                           nullable: true
                                         limit:
-                                          type: number
-                                          nullable: true
+                                          x-kubernetes-preserve-unknown-fields: true
                                         keyword_exclude:
                                           type: string
                                           nullable: true
@@ -1732,8 +1833,7 @@ spec:
                                           type: string
                                           nullable: true
                                         min_level:
-                                          type: integer
-                                          nullable: true
+                                          x-kubernetes-preserve-unknown-fields: true
                                         keyword_exclude:
                                           type: string
                                           nullable: true
@@ -1751,6 +1851,7 @@ spec:
                                   over baseline_file
                                 x-kubernetes-preserve-unknown-fields: true
                               skip_generated_lockfiles:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Skip machine-generated dependency lockfiles (package-lock.json,
                                   yarn.lock, poetry.lock, and similar) before scanning. These are dense
                                   with integrity hashes and are regenerated rather than hand-edited, so
@@ -1758,8 +1859,8 @@ spec:
                                   such as requirements.txt, Pipfile and environment.yml are always scanned
                                   and are not affected by this option. Set to false to scan generated
                                   lockfiles as well.
-                                type: boolean
                               max_worker_output_mib:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'The most of the detect-secrets worker''s output read back,
                                   in MiB, at most 4096. A finding is about 300 bytes of output, so the
                                   default of 256 holds about 900,000 findings. Reading the output costs
@@ -1769,10 +1870,6 @@ spec:
                                   it, with --config-overrides or in a config file outside every git checkout
                                   and the scanned directory: a config file inside one, or one an MCP client
                                   delivered, does not choose it.'
-                                minimum: 0
-                                exclusiveMinimum: true
-                                maximum: 4096
-                                type: integer
                             type: object
                             description: Configure detect-secrets scanner
                         type: object
@@ -1780,36 +1877,42 @@ spec:
                       gitleaks:
                         properties:
                           name:
-                            enum:
-                            - gitleaks
                             type: string
+                            anyOf:
+                            - enum:
+                              - gitleaks
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -1837,6 +1940,7 @@ spec:
                                   it. A path that does not exist fails the scan.'
                                 nullable: true
                               honor_inline_ignores:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Honor gitleaks'' inline `gitleaks:allow` comments. Off by
                                   default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding
                                   reaches ASH, where suppressions are reported and counted. Used only
@@ -1844,16 +1948,13 @@ spec:
                                   outside every git checkout and the scanned directory: a config file
                                   inside one, or one an MCP client delivered, does not choose it. Set
                                   by such a config, it is ignored with a warning.'
-                                type: boolean
                               max_target_megabytes:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Skip files larger than this many megabytes (gitleaks --max-target-megabytes).
                                   Unset scans every file. Used only when the operator sets it, with --config-overrides
                                   or in a config file outside every git checkout and the scanned directory:
                                   a config file inside one, or one an MCP client delivered, does not choose
                                   it. Set by such a config, it is ignored with a warning.'
-                                nullable: true
                             type: object
                             description: Configure the gitleaks scanner
                         type: object
@@ -1861,35 +1962,41 @@ spec:
                       grype:
                         properties:
                           name:
-                            enum:
-                            - grype
                             type: string
+                            anyOf:
+                            - enum:
+                              - grype
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run in offline mode, disabling database updates and validation.
                                   When true, this scanner runs offline even if ASH does not. ASH's own
                                   offline mode (--offline or ASH_OFFLINE) applies whatever this is set
                                   to; false follows it.
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -1910,33 +2017,40 @@ spec:
                       npm-audit:
                         properties:
                           name:
-                            enum:
-                            - npm-audit
                             type: string
+                            anyOf:
+                            - enum:
+                              - npm-audit
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Treat this scanner as offline. npm, pnpm and yarn audit
                                   only against the package registry''s advisory service, so offline npm-audit
                                   audits nothing: each lockfile is listed as not scanned, with a lockfile
@@ -1944,7 +2058,6 @@ spec:
                                   this scanner is offline even if ASH is not. ASH''s own offline mode
                                   (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
                                   it.'
-                                type: boolean
                             type: object
                             description: Configure NpmAudit scanner
                         type: object
@@ -1952,38 +2065,44 @@ spec:
                       opengrep:
                         properties:
                           name:
-                            enum:
-                            - opengrep
                             type: string
+                            anyOf:
+                            - enum:
+                              - opengrep
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run in offline mode, using locally cached rules. When true,
                                   this scanner runs offline even if ASH does not. ASH's own offline mode
                                   (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
                                   it.
-                                type: boolean
                               config:
                                 description: YAML configuration file, directory of YAML files ending in
                                   .yml|.yaml, URL of a configuration file, or Opengrep registry entry
@@ -2004,21 +2123,29 @@ spec:
                                 description: Report findings only from rules matching the supplied severity
                                   level.
                                 items:
-                                  enum:
-                                  - INFO
-                                  - WARNING
-                                  - ERROR
                                   type: string
+                                  anyOf:
+                                  - enum:
+                                    - INFO
+                                    - WARNING
+                                    - ERROR
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               metrics:
+                                type: string
+                                anyOf:
+                                - enum:
+                                  - auto
+                                  - 'on'
+                                  - 'off'
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Configures how usage metrics are sent to the OpenGrep server.
                                   Deprecated in Opengrep v1.7.0+. This configuration is ignored if the
                                   installed version is >= 1.7.0.
-                                enum:
-                                - auto
-                                - 'on'
-                                - 'off'
-                                type: string
                               patterns:
                                 description: Patterns to search for with OpenGrep.
                                 items:
@@ -2029,8 +2156,12 @@ spec:
                                 type: string
                               sha256:
                                 additionalProperties:
-                                  pattern: ^[0-9a-fA-F]{64}$
                                   type: string
+                                  anyOf:
+                                  - pattern: ^[0-9a-fA-F]{64}$
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: SHA256 of the OpenGrep release asset for a custom `version`,
                                   keyed by platform/arch (e.g. linux/amd64). Required for any version
                                   other than the one ASH pins; ignored for the pinned version, whose digests
@@ -2044,38 +2175,44 @@ spec:
                       syft:
                         properties:
                           name:
-                            enum:
-                            - syft
                             type: string
+                            anyOf:
+                            - enum:
+                              - syft
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run in offline mode, disabling update checks. When true,
                                   this scanner runs offline even if ASH does not. ASH's own offline mode
                                   (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
                                   it.
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -2112,11 +2249,11 @@ spec:
                                         a config is read; the alias is removed in ASH v4.
                                       nullable: true
                                     client_supplied:
+                                      x-kubernetes-preserve-unknown-fields: true
                                       description: 'Set by ASH: True when a config or workspace policy
                                         file an MCP client delivered supplied this entry, so results show
                                         which suppressions and ignored paths came from the client. A value
                                         written in a config file is ignored.'
-                                      type: boolean
                                     expiration:
                                       type: string
                                       description: (Optional) Deprecated alias of 'expires', accepted
@@ -2131,16 +2268,20 @@ spec:
                               additional_outputs:
                                 description: List of additional formats to output. Defaults to syft-table.
                                 items:
-                                  enum:
-                                  - cyclonedx-json
-                                  - cyclonedx-xml
-                                  - github-json
-                                  - spdx-json
-                                  - spdx-tag-value
-                                  - syft-json
-                                  - syft-table
-                                  - syft-text
                                   type: string
+                                  anyOf:
+                                  - enum:
+                                    - cyclonedx-json
+                                    - cyclonedx-xml
+                                    - github-json
+                                    - spdx-json
+                                    - spdx-tag-value
+                                    - syft-json
+                                    - syft-table
+                                    - syft-text
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                             type: object
                             description: Configure Syft scanner
@@ -2149,40 +2290,46 @@ spec:
                       trivy:
                         properties:
                           name:
-                            enum:
-                            - trivy
                             type: string
+                            anyOf:
+                            - enum:
+                              - trivy
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Run in offline mode: skip database and check updates and
                                   use the vulnerability database already in trivy''s cache. ASH still
                                   fails the scan when that database is past its 24h bound. When true,
                                   this scanner runs offline even if ASH does not. ASH''s own offline mode
                                   (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
                                   it.'
-                                type: boolean
                               scanners:
                                 description: 'Which trivy scanners to run. Defaults to vuln only: ASH''s
                                   default scanners already cover secrets (detect-secrets) and IaC misconfigurations
@@ -2194,31 +2341,35 @@ spec:
                                   it. Set by such a config, any set but the default is ignored with a
                                   warning.'
                                 items:
-                                  enum:
-                                  - vuln
-                                  - misconfig
-                                  - secret
-                                  - license
                                   type: string
+                                  anyOf:
+                                  - enum:
+                                    - vuln
+                                    - misconfig
+                                    - secret
+                                    - license
+                                  - description: An environment reference, resolved to the variable's
+                                      value when the file is loaded.
+                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 minItems: 1
                                 type: array
                               license_full:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Look for licenses in source file headers and license files
                                   too (trivy --license-full). Only used when scanners includes license.
-                                type: boolean
                               ignore_unfixed:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Report only vulnerabilities that have a fixed version (trivy
                                   --ignore-unfixed). Off by default: an unfixed vulnerability is still
                                   one, and turning this on withholds it from the report.'
-                                type: boolean
                               disable_telemetry:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Disable sending anonymous usage data to Aqua (--disable-telemetry).
                                   Only the operator sets it to false, with --config-overrides or in a
                                   config file outside every git checkout and the scanned directory: a
                                   config file inside one, or one an MCP client delivered, may set it to
                                   true but not to false. Offline, trivy sends none whatever this says.
                                   As for trivy-repo.'
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -2273,36 +2424,42 @@ spec:
                       zizmor:
                         properties:
                           name:
-                            enum:
-                            - zizmor
                             type: string
+                            anyOf:
+                            - enum:
+                              - zizmor
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               severity_threshold:
-                                enum:
-                                - ALL
-                                - LOW
-                                - MEDIUM
-                                - HIGH
-                                - CRITICAL
                                 type: string
+                                anyOf:
+                                - enum:
+                                  - ALL
+                                  - LOW
+                                  - MEDIUM
+                                  - HIGH
+                                  - CRITICAL
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
-                                minimum: 1
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Maximum time in seconds to allow this scanner's tool invocation
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
-                                nullable: true
                               offline:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Run this scanner offline even when ASH runs online. False
                                   follows ASH's own mode; it never puts a scanner online under --offline.
-                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
@@ -2318,15 +2475,20 @@ spec:
                                   scanned repository is not read.'
                                 nullable: true
                               persona:
+                                type: string
+                                anyOf:
+                                - enum:
+                                  - regular
+                                  - pedantic
+                                  - auditor
+                                - description: An environment reference, resolved to the variable's value
+                                    when the file is loaded.
+                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: zizmor persona. `regular` reports the fewest false positives;
                                   `pedantic` adds code-smell findings; `auditor` reports everything, false
                                   positives included.
-                                enum:
-                                - regular
-                                - pedantic
-                                - auditor
-                                type: string
                               online_audits:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Allow zizmor''s online audits. Off by default: ASH runs
                                   `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN
                                   is removed from its environment. When true, ASH does not pass `zizmor
@@ -2337,8 +2499,8 @@ spec:
                                   file inside one, or one an MCP client delivered, does not choose it.
                                   It is ignored, with a warning, when ASH runs in offline mode or this
                                   scanner''s own `offline` option is true.'
-                                type: boolean
                               honor_inline_ignores:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'Honor zizmor''s inline `# zizmor: ignore[...]` comments
                                   and the `ignore` rules of the operator''s `config_file`. Off by default:
                                   ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where
@@ -2347,7 +2509,6 @@ spec:
                                   and the scanned directory: a config file inside one, or one an MCP client
                                   delivered, does not choose it. Set by such a config, it is ignored with
                                   a warning.'
-                                type: boolean
                               tool_version:
                                 type: string
                                 description: 'Version constraint for zizmor installation, in pip requirement
@@ -2359,8 +2520,8 @@ spec:
                                   applies.'
                                 nullable: true
                               install_timeout:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: Timeout in seconds for tool installation
-                                type: integer
                             type: object
                             description: Configure zizmor scanner
                         type: object
@@ -2373,11 +2534,15 @@ spec:
                       csv:
                         properties:
                           name:
-                            enum:
-                            - csv
                             type: string
+                            anyOf:
+                            - enum:
+                              - csv
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties: {}
                             type: object
@@ -2388,11 +2553,15 @@ spec:
                       cyclonedx:
                         properties:
                           name:
-                            enum:
-                            - cyclonedx
                             type: string
+                            anyOf:
+                            - enum:
+                              - cyclonedx
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties: {}
                             type: object
@@ -2403,11 +2572,15 @@ spec:
                       gitlab-cyclonedx:
                         properties:
                           name:
-                            enum:
-                            - gitlab-cyclonedx
                             type: string
+                            anyOf:
+                            - enum:
+                              - gitlab-cyclonedx
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             description: Options for the gitlab-cyclonedx reporter.
                             properties:
@@ -2440,11 +2613,15 @@ spec:
                       html:
                         properties:
                           name:
-                            enum:
-                            - html
                             type: string
+                            anyOf:
+                            - enum:
+                              - html
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties: {}
                             type: object
@@ -2456,20 +2633,24 @@ spec:
                         description: Configure the options for the Flat JSON reporter
                         properties:
                           name:
-                            enum:
-                            - flat-json
                             type: string
+                            anyOf:
+                            - enum:
+                              - flat-json
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             description: Configuration options for the Flat JSON reporter.
                             properties:
                               include_scanner_metrics:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               include_summary_metrics:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               include_metadata:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                             type: object
                           extension:
                             type: string
@@ -2477,19 +2658,23 @@ spec:
                       gitlab-sast:
                         properties:
                           name:
-                            enum:
-                            - gitlab-sast
                             type: string
+                            anyOf:
+                            - enum:
+                              - gitlab-sast
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               exclude_suppressed:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: When true, suppressed findings are excluded entirely from
                                   the GitLab SAST report. When false (default), suppressed findings are
                                   included with Info severity and the suppression reason in the solution
                                   field.
-                                type: boolean
                             type: object
                           extension:
                             type: string
@@ -2498,26 +2683,30 @@ spec:
                       github-ghas:
                         properties:
                           name:
-                            enum:
-                            - github-ghas
                             type: string
+                            anyOf:
+                            - enum:
+                              - github-ghas
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               exclude_suppressed:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: When true (default), suppressed findings are excluded from
                                   the GHAS report. GitHub has its own dismissal workflow so suppressed
                                   findings are typically not needed.
-                                type: boolean
                               emit_automation_details:
+                                x-kubernetes-preserve-unknown-fields: true
                                 description: 'When true, a workspace project''s own report carries runAutomationDetails.id
                                   ash/<project key>/, the category GitHub files the upload under, so the
                                   per-project reports of one repository are kept apart. Off by default:
                                   an id in the file takes precedence over the category the upload-sarif
                                   action is given, so an upload that already names its category would
                                   be moved to a new one, leaving the old analysis''s alerts open.'
-                                type: boolean
                             type: object
                           extension:
                             type: string
@@ -2527,15 +2716,19 @@ spec:
                       junitxml:
                         properties:
                           name:
-                            enum:
-                            - junitxml
                             type: string
+                            anyOf:
+                            - enum:
+                              - junitxml
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties:
                               respect_severity_threshold:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                             type: object
                           extension:
                             type: string
@@ -2544,28 +2737,32 @@ spec:
                       markdown:
                         properties:
                           name:
-                            enum:
-                            - markdown
                             type: string
+                            anyOf:
+                            - enum:
+                              - markdown
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             description: Configuration options for the Markdown reporter.
                             properties:
                               include_summary:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               include_findings_table:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               include_detailed_findings:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               max_detailed_findings:
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                               top_hotspots_limit:
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                               use_collapsible_details:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               compact:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                             type: object
                           extension:
                             type: string
@@ -2574,11 +2771,15 @@ spec:
                       ocsf:
                         properties:
                           name:
-                            enum:
-                            - ocsf
                             type: string
+                            anyOf:
+                            - enum:
+                              - ocsf
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties: {}
                             type: object
@@ -2589,11 +2790,15 @@ spec:
                       sarif:
                         properties:
                           name:
-                            enum:
-                            - sarif
                             type: string
+                            anyOf:
+                            - enum:
+                              - sarif
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties: {}
                             type: object
@@ -2604,11 +2809,15 @@ spec:
                       spdx:
                         properties:
                           name:
-                            enum:
-                            - spdx
                             type: string
+                            anyOf:
+                            - enum:
+                              - spdx
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties: {}
                             type: object
@@ -2620,24 +2829,28 @@ spec:
                         description: Configure the options for the Text reporter
                         properties:
                           name:
-                            enum:
-                            - text
                             type: string
+                            anyOf:
+                            - enum:
+                              - text
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             description: Configuration options for the Text reporter.
                             properties:
                               include_summary:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               include_findings_table:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               include_detailed_findings:
-                                type: boolean
+                                x-kubernetes-preserve-unknown-fields: true
                               max_detailed_findings:
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                               top_hotspots_limit:
-                                type: integer
+                                x-kubernetes-preserve-unknown-fields: true
                             type: object
                           extension:
                             type: string
@@ -2646,11 +2859,15 @@ spec:
                         description: Configure the options for the Unused Suppressions reporter
                         properties:
                           name:
-                            enum:
-                            - unused-suppressions
                             type: string
+                            anyOf:
+                            - enum:
+                              - unused-suppressions
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             description: Configuration options for the Unused Suppressions reporter.
                             properties:
@@ -2663,11 +2880,15 @@ spec:
                       yaml:
                         properties:
                           name:
-                            enum:
-                            - yaml
                             type: string
+                            anyOf:
+                            - enum:
+                              - yaml
+                            - description: An environment reference, resolved to the variable's value
+                                when the file is loaded.
+                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
-                            type: boolean
+                            x-kubernetes-preserve-unknown-fields: true
                           options:
                             properties: {}
                             type: object
@@ -2688,110 +2909,80 @@ spec:
                     description: Configuration for MCP server resource management and limits
                     properties:
                       max_concurrent_scans:
-                        maximum: 100
-                        minimum: 0
-                        type: integer
+                        x-kubernetes-preserve-unknown-fields: true
                         description: Maximum number of scans the MCP server runs at once, across every
                           session; a scan started beyond it is refused. A workspace scan counts as one
                           scan, however many projects it has. 0 or null for no limit. Read from the operator's
                           ASH_CONFIG only.
-                        nullable: true
                       max_concurrent_scans_per_session:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: Maximum number of scans one session of a network transport (streamable-http,
                           sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts
                           once. Read from the operator's config (ASH_CONFIG) only, never from a scanned
                           or delivered one. stdio's single session is not limited.
-                        maximum: 100
-                        minimum: 0
-                        type: integer
                       max_concurrent_tasks:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Maximum number of concurrent
                           async tasks allowed'
-                        maximum: 50
-                        minimum: 1
-                        type: integer
                       thread_pool_max_workers:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Maximum number of worker
                           threads in the shared thread pool'
-                        maximum: 20
-                        minimum: 1
-                        type: integer
                       scan_timeout_seconds:
-                        maximum: 86400
-                        minimum: 0
-                        type: integer
+                        x-kubernetes-preserve-unknown-fields: true
                         description: Longest a single MCP scan may run, in seconds, counted from when
                           it starts running (after any wait for another scan of its session); a scan still
                           running then is stopped and reported as failed. For a workspace scan it covers
                           the whole workspace, and every project is stopped and reported as failed. 60
                           to 86400, or 0 or null for no limit. Read from the operator's ASH_CONFIG only.
-                        nullable: true
                       operation_timeout_seconds:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Default timeout for general
                           operations in seconds'
-                        maximum: 600
-                        minimum: 30
-                        type: integer
                       shutdown_timeout_seconds:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Maximum time to wait for
                           graceful shutdown in seconds'
-                        maximum: 300
-                        minimum: 5
-                        type: integer
                       memory_warning_threshold_mb:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Memory usage threshold
                           in MB that triggers warnings'
-                        maximum: 8192
-                        minimum: 100
-                        type: integer
                       memory_critical_threshold_mb:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Memory usage threshold
                           in MB that triggers protective actions'
-                        maximum: 16384
-                        minimum: 200
-                        type: integer
                       task_count_warning_threshold:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Active task count that
                           triggers warnings'
-                        maximum: 100
-                        minimum: 5
-                        type: integer
                       max_message_size_bytes:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Maximum size of MCP messages
                           in bytes'
-                        maximum: 104857600
-                        minimum: 1024
-                        type: integer
                       max_path_length:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Maximum allowed path length
                           for security validation'
-                        maximum: 8192
-                        minimum: 256
-                        type: integer
                       max_directory_size_mb:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Maximum directory size
                           in MB that can be scanned'
-                        maximum: 10240
-                        minimum: 10
-                        type: integer
                       enable_health_checks:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Enable periodic health
                           checks and resource monitoring'
-                        type: boolean
                       health_check_interval_seconds:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Interval between health
                           checks in seconds'
-                        maximum: 300
-                        minimum: 10
-                        type: integer
                       enable_resource_logging:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Enable detailed resource
                           management logging'
-                        type: boolean
                       log_resource_operations:
+                        x-kubernetes-preserve-unknown-fields: true
                         description: 'Not enforced: nothing reads this setting. Log individual resource
                           operations for debugging'
-                        type: boolean
                     type: object
                   workspace:
                     description: Workspace-mode execution settings. Read from the config resolved for
@@ -2799,20 +2990,14 @@ spec:
                       projects run at once is not a project's decision.
                     properties:
                       max_parallel_projects:
-                        maximum: 64
-                        minimum: 1
-                        type: integer
+                        x-kubernetes-preserve-unknown-fields: true
                         description: Maximum number of projects scanned concurrently. Unset means min(4,
                           cpu_count). This is an outer bound over each project's own scanner thread pool,
                           not a replacement for it.
-                        nullable: true
                       project_timeout:
-                        minimum: 0
-                        exclusiveMinimum: true
-                        type: number
+                        x-kubernetes-preserve-unknown-fields: true
                         description: Seconds to allow a single project. Unset means no limit. On timeout
                           that project is recorded as failed and the remaining projects still complete.
-                        nullable: true
                     type: object
                   extends:
                     x-kubernetes-preserve-unknown-fields: true

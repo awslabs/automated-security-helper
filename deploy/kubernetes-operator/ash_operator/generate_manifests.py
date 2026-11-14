@@ -491,7 +491,10 @@ def build_mcp_crd() -> dict[str, Any]:
                     "Host header values to accept. Lower-cased by the operator: a "
                     "load balancer lower-cases Host while the MCP SDK matches it "
                     "case-sensitively, so a mixed-case value yields 421 on every "
-                    "request."
+                    "request. When unset, the operator accepts the Service's own "
+                    "names and localhost, each with the Service port, assuming the "
+                    "default cluster domain (cluster.local); a cluster with another "
+                    "cluster domain needs this field."
                 ),
             },
             "auth": {

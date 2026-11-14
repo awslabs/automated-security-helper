@@ -541,12 +541,19 @@ def service_host_names(*, name: str, namespace: str, port: int) -> list[str]:
     names the Service answers to inside the cluster, each with the port a client
     includes in Host. A ``spec.allowedHosts`` the operator sets replaces this list,
     for a Service reached through an Ingress or another name.
+
+    The loopback names are in the list because ``kubectl port-forward svc/<name>
+    8000`` sends ``Host: localhost:8000``, the first way most adopters reach a new
+    server. The ``.svc.cluster.local`` name assumes the default cluster domain; a
+    cluster started with another ``--cluster-domain`` needs ``spec.allowedHosts``.
     """
     names = [
         name,
         f"{name}.{namespace}",
         f"{name}.{namespace}.svc",
         f"{name}.{namespace}.svc.cluster.local",
+        "localhost",
+        "127.0.0.1",
     ]
     hosts = [f"{n}:{port}" for n in names]
     if port == 80:
