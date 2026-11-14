@@ -142,7 +142,7 @@ and cfn-nag in a project without CloudFormation templates.
 - git-secrets is gone. detect-secrets and gitleaks look for secrets.
 - opengrep, a fork of semgrep with the same rule syntax, replaces semgrep and runs the
   `p/ci` ruleset by default. v2 ran semgrep with `--config=auto`. The name `semgrep` is an
-  alias for opengrep, so a `scanners.semgrep` config section and `--scanners semgrep` still
+  alias for opengrep, so a semgrep config section and `--scanners semgrep` still
   work.
 - More scanners can report the same problem, because v3 does not merge findings from
   different scanners.

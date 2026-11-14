@@ -441,6 +441,8 @@ over the network on their own:
   scanned repository's `.secrets.baseline` or any config says. See
   [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set).
 
+<a id="seeding-the-semgrep-and-opengrep-rule-cache"></a>
+
 #### Seeding the opengrep rule cache
 
 Offline, opengrep reads its rules only from a local cache: the directory named by
@@ -575,11 +577,11 @@ ashx build-image --build-target ci --custom-containerfile ./my-dockerfile
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Complex configuration overrides
-ashx --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
+ashx --config-overrides 'scanners.opengrep.options.config=p/owasp-top-ten'
 ashx --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
-The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so overrides on `scanners.semgrep` keep working (shared options apply to opengrep; semgrep-only options are dropped with a warning).
+The semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to the opengrep scanner, so an override that names the semgrep section keeps working (shared options apply to opengrep; semgrep-only options are dropped with a warning).
 
 ## Working with Suppressions
 

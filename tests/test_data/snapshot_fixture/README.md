@@ -51,7 +51,7 @@ would move them.
 | bandit | FAILED | B602 `shell=True` (HIGH, app/app.py:9), B105 hardcoded password (LOW, app/app.py:5) |
 | checkov | FAILED | CKV_AWS_20 public-read ACL (HIGH), CKV_AWS_18 no access logging (MEDIUM), CKV_DOCKER_8 last USER is root (MEDIUM), CKV_DOCKER_2 no HEALTHCHECK (LOW) |
 | grype | FAILED | CVE-2018-18074 in requests 2.19.1 (CRITICAL, from the rule's security-severity 9.8), CVE-2023-32681 (MEDIUM, 6.1) |
-| semgrep | PASSED | last user is root (LOW), f-string shell command (INFO): both below the MEDIUM threshold |
+| opengrep | PASSED | last user is root (LOW), f-string shell command (INFO): both below the MEDIUM threshold |
 | detect-secrets | PASSED | the password on app/app.py:5 (HIGH), suppressed by `repo/.ash/.ash.yaml` |
 | syft | PASSED | SBOM with requests 2.19.1 and the python base image |
 | cfn-nag | ERROR | attempted one target and failed on it |
