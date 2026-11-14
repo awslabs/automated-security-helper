@@ -26,6 +26,7 @@ to produce are fixed in the stacks; see deploy/cdk/lib/ash-implied-dependencies.
 
 One exception, and it cannot reach this gate's own rules. ASH's cfn-guard scanner
 runs the AWS Guard Rules Registry over the same templates, and main approved 13
+and the EKS installer's opt-in VPC placement made 14
 per-resource `Metadata.guard.SuppressedRules` entries for three registry rules
 (#761). They are listed once, in deploy/cdk/test/guard-suppressions.approved.json,
 which this script and deploy/cdk/test/ash-guard-suppressions.test.ts both read.

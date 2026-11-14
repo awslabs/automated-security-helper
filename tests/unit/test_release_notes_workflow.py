@@ -74,6 +74,7 @@ from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
 JOB = "tag-and-release"
+VERSION_JOB = "resolve"  # reads the version from the merge commit's checkout
 TEMPLATE = REPO_ROOT / ".github" / "changelog" / "CHANGELOG.md.j2"
 NOTES_V380 = REPO_ROOT / ".github" / "release-notes" / "v3.8.0.md"
 CZ_BIN = Path(sys.executable).parent / ("cz.exe" if os.name == "nt" else "cz")
@@ -568,9 +569,13 @@ class TestTheReleaseTargetsTheMergeCommit:
         Reading them from the tip of main lets the run for an earlier release pull
         request see a later release's version and create that release at the older
         merge commit.
+
+        The version is read in the `resolve` job, which pins the commit and hands the
+        version and SHA to the jobs that build and publish; `tag-and-release` reads
+        both through `needs`, so the read is checked where it happens.
         """
         doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-        steps = doc["jobs"][JOB]["steps"]
+        steps = doc["jobs"][VERSION_JOB]["steps"]
         checkout = next(
             s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")
         )

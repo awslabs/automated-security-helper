@@ -337,6 +337,15 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         if lock_rel and line
                         else None
                     )
+                    # The line is trivy's, and the lockfile may have moved since
+                    # the scan: the entry there counts only when it is the
+                    # package the message names. A license message states no
+                    # version, so it is held to the name alone.
+                    if entry is not None and (
+                        entry.name != name
+                        or (version is not None and entry.version != version)
+                    ):
+                        entry = None
                     resolved.append(
                         install_path(lock_rel, entry.key)
                         if lock_rel and entry is not None

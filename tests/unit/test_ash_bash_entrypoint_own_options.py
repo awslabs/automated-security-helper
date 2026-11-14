@@ -34,6 +34,7 @@ from typing import Dict, List, Optional
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME as ASHX
 from tests.utils.host_ids import with_fixed_ids
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -312,7 +313,7 @@ def test_the_equals_spelling_of_the_wrappers_own_value_options(runner, tmp_path)
     mounts = _mounts(run)
     assert Path(mounts["/src"]["source"]).resolve() == source.resolve(), run
     assert Path(mounts["/out"]["source"]).resolve() == out.resolve(), run
-    assert _inner(run, image) == ["ash", *SANDBOX_OFF, "--scanners", "bandit"], run
+    assert _inner(run, image) == [ASHX, *SANDBOX_OFF, "--scanners", "bandit"], run
 
 
 @pytest.mark.parametrize(
@@ -345,7 +346,7 @@ def test_the_runner_option_in_every_spelling_names_the_wrappers_runner(
     assert result.returncode == 0, shown
     assert "GUARD-RUNNER-RAN" not in shown, shown
     run = _only_run(calls, shown)
-    assert _inner(run) == ["ash", *SANDBOX_OFF], run
+    assert _inner(run) == [ASHX, *SANDBOX_OFF], run
 
 
 @pytest.mark.parametrize(
@@ -414,7 +415,7 @@ def test_dash_v_is_the_scans_verbose_not_the_wrappers_version(runner, tmp_path):
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
     run = _only_run(calls, shown)
-    assert _inner(run) == ["ash", "scan", *SANDBOX_OFF, "-v"], run
+    assert _inner(run) == [ASHX, "scan", *SANDBOX_OFF, "-v"], run
 
 
 def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(
@@ -538,7 +539,7 @@ def test_an_mcp_run_over_a_pipe_keeps_stdin_open_and_asks_for_no_terminal(
     assert _keeps_stdin(options), options
     # Captured stdout is not a terminal, so no pseudo-terminal is asked for.
     assert "-t" not in options, options
-    assert _inner(run) == ["ash", "mcp"], run
+    assert _inner(run) == [ASHX, "mcp"], run
 
 
 @pytest.mark.parametrize(

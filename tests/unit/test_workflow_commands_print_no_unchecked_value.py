@@ -97,14 +97,23 @@ FIXED_FORM = (
     "(sha256:<hex>), a git object id, a random token printed by od as hex digits, "
     "a git mode or object type"
 )
-#: The two judgments. Neither is allowed in a workflow other repositories call.
+ARTIFACT_OUTPUT = (
+    "the artifact-id output of an actions/upload-artifact step in this workflow: an "
+    "integer GitHub assigns, or empty; the step prints it only to say it is not a "
+    "number"
+)
+#: The judgments. None is allowed in a workflow other repositories call.
+PINNED_TOOL = (
+    "printed by a binary the step ran after verifying its sha256 against a digest "
+    "this repository's workflow sets, and compared with the version it expects"
+)
 OWN_TREE = (
     "read from, or produced by a tool run over, the tree the workflow itself comes "
     "from, in a workflow only this repository's events start: a change that could "
     "put a line break in the value could change the workflow too"
 )
 SERVICE = "returned by GitHub for a pull request the step itself opened"
-JUDGMENTS = (OWN_TREE, SERVICE)
+JUDGMENTS = (OWN_TREE, SERVICE, PINNED_TOOL)
 
 _PREPULL = ".github/actions/prepull-base-image/action.yml"
 _SCAN_TEST = ".github/actions/run-scan-test/action.yml"
@@ -173,6 +182,11 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "RUNTIME": WORKFLOW,
         "rc": NUMBER,
     },
+    (
+        ".github/actions/validate-container/action.yml",
+        _COMPOSITE,
+        "Scan the detection fixture with the built image",
+    ): {"rc": NUMBER},
     (
         ".github/actions/validate-container/action.yml",
         _COMPOSITE,
@@ -290,6 +304,63 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "Check every control ran",
     ): {"token": FIXED_FORM},
     (
+        ".github/workflows/ash-e2e.yml",
+        "e2e-gate",
+        "Require every channel to have passed",
+    ): {
+        # Each problem names a job from this workflow file's own census and a
+        # `needs` result (success, failure, cancelled or skipped).
+        "problem": OWN_TREE
+    },
+    (
+        ".github/workflows/ash-iac-drift.yml",
+        "iac-equivalence",
+        "Require the equivalence checker",
+    ): {"SCRIPT": LITERAL},
+    (
+        ".github/workflows/ash-iac-drift.yml",
+        "quick-create-link-drift",
+        "Regenerate the document and let git report the drift",
+    ): {"GEN": LITERAL, "REGEN_CMD": LITERAL},
+    (
+        ".github/workflows/ash-iac-drift.yml",
+        "cfn-lint-guard",
+        "Install cfn-guard from its release, verified by sha256",
+    ): {
+        "CFN_GUARD_ASSET": WORKFLOW,
+        "CFN_GUARD_VERSION": WORKFLOW,
+        "reported": PINNED_TOOL,
+        "uname -m": RUNNER,
+    },
+    (
+        ".github/workflows/ash-iac-drift.yml",
+        "planted-defect-suites",
+        "Prove the guard refuses this run's log with a missing node and a lowered count",
+    ): {
+        # The planted node id is a fixed string in the step; `out` is what this
+        # repository's checker printed about this run's own log and node list.
+        "out": OWN_TREE,
+        "planted": LITERAL,
+    },
+    (
+        ".github/workflows/ash-kubernetes-operator.yml",
+        "lint-and-unit",
+        "Unit tests WITH ASH, the equivalence arms",
+    ): {
+        # Each node id comes from the step's own heredoc list.
+        "node": LITERAL
+    },
+    (
+        ".github/workflows/ash-native-packages.yml",
+        "self-tests",
+        "Confirm the wheel gate still refuses package formats outright",
+    ): {"f": RUNNER, "rc": NUMBER},
+    (
+        ".github/workflows/ash-native-packages.yml",
+        "package",
+        "Hand the uploaded package's artifact ID to the release",
+    ): {"FAMILY": WORKFLOW},
+    (
         ".github/workflows/ash-iac-drift.yml",
         "cdk-nag",
         "Account for a non-zero synth exit code neither check explained",
@@ -374,6 +445,101 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         "Assert the build produced exactly one wheel and one sdist",
     ): {"#sdists[@]": NUMBER, "#wheels[@]": NUMBER},
     (
+        ".github/workflows/ash-package.yml",
+        "flatpak",
+        "Check the wheel artifact ID",
+    ): {"ARTIFACT_ID": ARTIFACT_OUTPUT},
+    (
+        ".github/workflows/ash-package.yml",
+        "msix",
+        "Check the wheel artifact ID",
+    ): {"ARTIFACT_ID": ARTIFACT_OUTPUT},
+    (
+        ".github/workflows/ash-package.yml",
+        "chocolatey",
+        "Check the wheel artifact ID",
+    ): {"ARTIFACT_ID": ARTIFACT_OUTPUT},
+    (
+        ".github/workflows/ash-package.yml",
+        "winget-client",
+        "Check the .msix artifact ID",
+    ): {"ARTIFACT_ID": ARTIFACT_OUTPUT},
+    (
+        ".github/workflows/ash-package.yml",
+        "homebrew",
+        "Put a head-built copy of the formula in a local tap",
+    ): {"rc": NUMBER},
+    (
+        ".github/workflows/ash-package.yml",
+        "homebrew",
+        "Audit the formula against Homebrew's own rules",
+    ): {
+        # `git rev-parse HEAD`: a git object id.
+        "head_commit": FIXED_FORM,
+        "rc": NUMBER,
+    },
+    (
+        ".github/workflows/ash-release-assets.yml",
+        "vsix",
+        "Assert the extension declares no runtime dependencies",
+    ): {"count": NUMBER},
+    (
+        ".github/workflows/ash-release-assets.yml",
+        "assemble",
+        "Check the artifact IDs the build jobs handed over",
+    ): {
+        # The names of the eight variables in the step's own `for` list.
+        "var": LITERAL,
+        "value": ARTIFACT_OUTPUT,
+    },
+    (
+        ".github/workflows/ash-release-assets.yml",
+        "assemble",
+        "Render the winget manifests for the staged .msix",
+    ): {"#msix[@]": NUMBER},
+    (
+        ".github/workflows/ash-release-assets.yml",
+        "assemble",
+        "Negative control: a missing or ungated asset fails the check",
+    ): {
+        # The three are the step's own strings, an exit status, and the step's own
+        # needle text.
+        "label": LITERAL,
+        "needle": LITERAL,
+        "rc": NUMBER,
+    },
+    (
+        ".github/workflows/ash-tag-on-merge.yml",
+        "resolve",
+        "Pin the commit being released",
+    ): {
+        # The event payload's merge_commit_sha, github.sha, and `git rev-parse HEAD`:
+        # git object ids.
+        "GITHUB_SHA": FIXED_FORM,
+        "MERGE_SHA": FIXED_FORM,
+        "SHA": FIXED_FORM,
+    },
+    (
+        ".github/workflows/ash-tag-on-merge.yml",
+        "resolve",
+        "Decide whether this release already exists",
+    ): {"TAG": OWN_TREE},
+    (
+        ".github/workflows/ash-tag-on-merge.yml",
+        "tag-and-release",
+        "Check the release asset artifact ID",
+    ): {"ARTIFACT_ID": ARTIFACT_OUTPUT},
+    (
+        ".github/workflows/ash-tag-on-merge.yml",
+        "tag-and-release",
+        "Verify the assets are the gated set",
+    ): {"BUILT_VERSION": OWN_TREE, "VERSION": OWN_TREE},
+    (
+        ".github/workflows/ash-tag-on-merge.yml",
+        "tag-and-release",
+        "Assert the release carries exactly the staged assets",
+    ): {"TAG": OWN_TREE},
+    (
         ".github/workflows/ash-tag-on-merge.yml",
         "tag-and-release",
         "Create tag and GitHub Release",
@@ -390,7 +556,30 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         ".github/workflows/ash-typescript-ci.yml",
         "typescript-tests",
         "Confirm the package is present",
-    ): {"matrix.package": WORKFLOW},
+    ): {"matrix.dir": WORKFLOW},
+    (
+        ".github/workflows/ash-vscode-extension.yml",
+        "package",
+        "Assert the extension declares no runtime dependencies",
+    ): {"count": NUMBER},
+    (
+        ".github/workflows/ash-vscode-extension.yml",
+        "integration-real",
+        "Build the head wheel and install it into a fresh venv",
+    ): {
+        "#wheels[@]": NUMBER,
+        # packaging/cli-name.sh, sourced from this tree, sets the name; the wheel
+        # built from this tree reports `got`; pyproject.toml holds `want`.
+        "ASH_CLI_NAME": OWN_TREE,
+        "got": OWN_TREE,
+        "name": OWN_TREE,
+        "want": OWN_TREE,
+    },
+    (
+        ".github/workflows/ash-vscode-extension.yml",
+        "integration-real",
+        "Check the .vsix artifact ID",
+    ): {"ARTIFACT_ID": ARTIFACT_OUTPUT},
     (".github/workflows/ash-unified-ci.yml", "actionlint", "Lint every workflow"): {
         "f": OWN_TREE
     },

@@ -481,7 +481,7 @@ def test_a_wrapper_of_richs_hook_is_called(monkeypatch, capsys):
         reported.append(exc)
         printer(exc_type, exc, tb)
 
-    sys.excepthook = reporter
+    monkeypatch.setattr(sys, "excepthook", reporter)
     reports: list = []
     real = entrypoint._ash_traceback
 
@@ -819,8 +819,10 @@ def test_an_installed_hook_runs_and_what_it_writes_is_shown(
         # As install() makes its console on a terminal: color chosen once, now.
         rich.traceback.install(console=Console(stderr=True, force_terminal=True))
     else:
-        sys.excepthook = _raw_printing_hook(
-            hook_calls, raises=installed == "hook-that-raises"
+        monkeypatch.setattr(
+            sys,
+            "excepthook",
+            _raw_printing_hook(hook_calls, raises=installed == "hook-that-raises"),
         )
     reports: list = []
     real = entrypoint._ash_traceback

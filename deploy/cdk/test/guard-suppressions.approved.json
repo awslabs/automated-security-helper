@@ -94,6 +94,17 @@
       "type": "AWS::S3::BucketPolicy"
     },
     {
+      "logicalId": "InstallerA8F6E21F",
+      "reasons": {
+        "LAMBDA_INSIDE_VPC": "Opt-in: set VpcSubnetIds and VpcSecurityGroupIds to attach the installer to your VPC. Empty (default) leaves VpcConfig out, so the rule finds no subnet or group lists."
+      },
+      "rules": [
+        "LAMBDA_INSIDE_VPC"
+      ],
+      "template": "AshEksOperator",
+      "type": "AWS::Lambda::Function"
+    },
+    {
       "logicalId": "AccessLogsArchivePolicyBC5B3007",
       "reasons": {
         "S3_BUCKET_SSL_REQUESTS_ONLY": "enforceSSL already denies s3:* when aws:SecureTransport is false on this bucket and its objects (cdk-nag S10 checks it). The rule matches only a literal Principal \"*\", Resource \"*\" statement, which CDK does not emit."
