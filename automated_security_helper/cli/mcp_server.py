@@ -1026,7 +1026,10 @@ async def run_ash_scan(
                 # shapes without one, a session whose delivered source is being
                 # changed and a session at its scan limit, are the "anything
                 # else" case there, with another scan of the same directory.
-                result = with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
+                # with_exit_code sets the keys on ``result`` itself; the call is
+                # left as a statement so the contract reader keeps following
+                # result to where mcp_scan_directory built it.
+                with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
             return result
         if "scan_id" not in result:
             await _tell_client_error(
