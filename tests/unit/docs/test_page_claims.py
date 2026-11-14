@@ -17817,7 +17817,7 @@ def test_every_python_range_the_pages_give_is_requires_python() -> None:
     minors = _install_supported_minors()
     assert minors and minors == list(range(minors[0], minors[-1] + 1)), minors
     ranges = [
-        (str(page.relative_to(CONTENT)), int(match[1]), int(match[2]))
+        (page.relative_to(CONTENT).as_posix(), int(match[1]), int(match[2]))
         for page in sorted(CONTENT.rglob("*.md"))
         for match in re.finditer(
             r"Python 3\.(\d+) to 3\.(\d+)", page.read_text(encoding="utf-8")

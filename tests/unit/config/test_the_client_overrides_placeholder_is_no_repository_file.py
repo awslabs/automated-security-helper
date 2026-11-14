@@ -72,6 +72,10 @@ def test_the_steps_that_build_repository_file_sets_are_given_no_placeholder(
         assert CLIENT_OVERRIDES_SOURCE not in [Path(f) for f in files], (name, files)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows refuses to remove the process working directory, so a deleted cwd cannot be arranged",
+)
 def test_the_honor_writers_step_never_resolves_the_placeholder(tmp_path, monkeypatch):
     launched = tmp_path / "launched"
     launched.mkdir()
