@@ -12,6 +12,7 @@ inputs it must refuse.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import re
@@ -610,6 +611,42 @@ def test_the_n_minus_one_scan_holds_one_stdio_session():
         text,
     )
     assert call, "the upgrade-before scan of N-1 must hold one stdio session"
+
+
+def test_every_scan_case_holds_one_stdio_session():
+    """No scan case may poll over HTTP: each Inspector call there is a session of its own.
+
+    The head server keeps a scan under the session that started it, so a run_ash_scan
+    followed by a get_scan_progress from another session answers scan_not_found
+    (the MCPB job, run 43552901838). Every run_case call in main() must say so.
+    """
+    tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+    main = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "main"
+    )
+    calls = [
+        node
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "run_case"
+    ]
+    assert len(calls) >= 3, (
+        "main() has three scan call sites: N-1, head findings, the rest"
+    )
+    plain = [
+        call.args[6].value if isinstance(call.args[6], ast.Constant) else "?"
+        for call in calls
+        if not any(
+            kw.arg == "transport"
+            and isinstance(kw.value, ast.Constant)
+            and kw.value.value == "stdio"
+            for kw in call.keywords
+        )
+    ]
+    assert plain == [], f"scan cases that poll over HTTP: {plain}"
 
 
 # --------------------------------------------------------------------------
