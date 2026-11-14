@@ -589,8 +589,8 @@ or `pipx ensurepath` (for pipx), then open a new terminal.
 ### `ash` runs a different program on Windows
 
 Symptom: in Git Bash or an MSYS2 shell, `ash --version` prints an error such as
-`ash: 0: Illegal option --`, and `ash dependencies install` reports
-`cannot open dependencies`.
+`ash: 0: Illegal option --`, and `ash` followed by a subcommand such as
+`dependencies install` reports `cannot open dependencies`.
 
 Cause: Git for Windows and MSYS2 ship an unrelated shell named `ash`, and it comes first
 on your `PATH`.

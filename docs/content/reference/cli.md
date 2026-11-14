@@ -21,7 +21,7 @@ The Environment variable column names the variable click reads for the option; a
 | Command | Description |
 |---------|-------------|
 | [`ash`](#ash) | Automated Security Helper, the agentic security harness · one workflow for your scanners. |
-| [`ash build-image`](#build-image) | Builds the ASH container image, then scans the current directory with it unless --no-run is given. |
+| [`ashx build-image`](#build-image) | Builds the ASH container image, then scans the current directory with it unless --no-run is given. |
 | [`ashx config`](#config) | ASH configuration management |
 | [`ashx config get`](#config-get) | Print the resolved configuration: the file's settings over the defaults. |
 | [`ashx config init`](#config-init) | Create a configuration file with every setting at its default. |
@@ -61,16 +61,16 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ashx config`](#config), [`ashx dependencies`](#dependencies), [`ashx get-genai-guide`](#get-genai-guide), [`ashx inspect`](#inspect), [`ashx mcp`](#mcp), [`ashx merge`](#merge), [`ashx plugin`](#plugin), [`ashx report`](#report), [`ashx scan`](#scan).
+Subcommands: [`ashx build-image`](#build-image), [`ashx config`](#config), [`ashx dependencies`](#dependencies), [`ashx get-genai-guide`](#get-genai-guide), [`ashx inspect`](#inspect), [`ashx mcp`](#mcp), [`ashx merge`](#merge), [`ashx plugin`](#plugin), [`ashx report`](#report), [`ashx scan`](#scan).
 
-## <a id="build-image"></a>`ash build-image`
+## <a id="build-image"></a>`ashx build-image`
 
 Builds the ASH container image, then scans the current directory with it unless --no-run is given.
 
 It takes only the options below. To scan with scan options, run `ashx scan --mode container`, which builds the image the same way and accepts every scan option.
 
 ```text
-ash build-image [OPTIONS]
+ashx build-image [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.build-image -->
