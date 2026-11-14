@@ -87,6 +87,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set,
 import pytest
 import yaml
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from tests.utils.helpers import (
     checkout_env,
     importing_this_checkout,
@@ -550,7 +551,13 @@ def _step_script(tmp_path: Path, text: str, name: str = "step.sh") -> str:
 def _runnable_bash_script(path: Path) -> str:
     """``path``, checked to run as ``./<name>`` would: executable, with a ``#!``
     line that starts bash. ``bash <path>`` alone would hide a lost execute bit or
-    a changed shebang that a user's own ``./<name>`` depends on."""
+    a changed shebang that a user's own ``./<name>`` depends on.
+
+    The v4 line deletes the root ``ash`` script (the CLI absorbed it), as the
+    bash-entrypoint test modules already skip for: with no script there is no ``./ash``
+    to run, and the run is skipped, not read as a lost execute bit."""
+    if not path.is_file():
+        pytest.skip(f"repository {path.name} entrypoint not present")
     assert os.access(path, os.X_OK), f"{path} has no execute bit, so ./ cannot run it"
     first_line = path.read_bytes().split(b"\n", 1)[0]
     assert first_line.startswith(b"#!") and b"bash" in first_line, (
@@ -3614,7 +3621,7 @@ def _container_scan(
     if not record.is_file():
         return result, None
     inner = json.loads(record.read_text(encoding="utf-8"))
-    assert "ash" in inner, inner
+    assert CANONICAL_CLI_NAME in inner, inner
     return result, inner
 
 
@@ -3952,10 +3959,10 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
         ), f"container:\n{_output_tail(result)}\nlocal:\n{_output_tail(local)}"
         return
 
-    scans = [call for call in calls if "ash" in call]
+    scans = [call for call in calls if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {calls}"
     command = scans[0]
-    inner = command[command.index("ash") :]
+    inner = command[command.index(CANONICAL_CLI_NAME) :]
     mounts = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "--mount"]
     config_mounts = sorted(
         m.split("destination=", 1)[1] for m in mounts if "destination=/ash-config" in m
@@ -4410,10 +4417,10 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
         ASH_CONFIG=str(env_config),
         OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
-    scans = [call for call in _runtime_calls(record) if "ash" in call]
+    scans = [call for call in _runtime_calls(record) if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
     scan_command = scans[0]
-    inner = scan_command[scan_command.index("ash") :]
+    inner = scan_command[scan_command.index(CANONICAL_CLI_NAME) :]
     mounts = [
         scan_command[i + 1]
         for i, arg in enumerate(scan_command[:-1])
@@ -4607,10 +4614,10 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
         cwd=tmp_path,
         OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
-    scans = [call for call in _runtime_calls(record) if "ash" in call]
+    scans = [call for call in _runtime_calls(record) if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
     command = scans[0]
-    inner = command[command.index("ash") :]
+    inner = command[command.index(CANONICAL_CLI_NAME) :]
     file_marks = [
         inner[i + 1]
         for i, arg in enumerate(inner[:-1])
@@ -17402,7 +17409,9 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
     assert doctest is not None, "no doctest block right after the sentence"
     assert doctest[1] == "2", doctest[0]
     command = shlex.split(doctest[2])
-    assert command[:3] == [DOCS_COMMAND, "dependencies", "install"], command
+    # advanced-usage.md writes the v4 command; the READ_RESULTS page below still
+    # writes the deprecated alias (DOCS_COMMAND).
+    assert command[:3] == [CANONICAL_CLI_NAME, "dependencies", "install"], command
     unknown = command[command.index("--tool") + 1]
     cwd = tmp_path / "cwd"
     cwd.mkdir()
@@ -18485,9 +18494,10 @@ _PLAIN_STEPS_STOP = (
     "Each step that runs `uv` or `ash` stops workflow commands around it, as the "
     "reusable workflow does"
 )
-#: A ``uv`` or ``ash`` command in a step's script, ``"$(uv tool dir --bin)/ash"``
+#: A ``uv``, ``ash`` or ``ashx`` command in a step's script (the pages write both
+#: names while the docs move to the v4 command), ``"$(uv tool dir --bin)/ash"``
 #: included.
-_TOOL_COMMAND = re.compile(r"\b(?:ash|uv)(?=[\s\"])")
+_TOOL_COMMAND = re.compile(r"\b(?:ashx?|uv)(?=[\s\"])")
 #: A GitHub Actions block of a page, as the docs runner marks it.
 _GITHUB_ACTIONS_BLOCK = re.compile(
     r"<!-- doctest: config kind=github-actions[^>]*-->\n```yaml\n(.*?)```", re.DOTALL
@@ -18630,7 +18640,7 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
     runner_temp = tmp_path / "runner-temp"
     runner_temp.mkdir()
     tool_dir = 'if [ "$1 $2" = "tool dir" ]; then echo "${STUB_BIN}"; exit 0; fi\n'
-    for tool, first in (("ash", ""), ("uv", tool_dir)):
+    for tool, first in (("ash", ""), ("ashx", ""), ("uv", tool_dir)):
         stub = bin_dir / tool
         stub.write_text(
             "#!/bin/sh\n"
