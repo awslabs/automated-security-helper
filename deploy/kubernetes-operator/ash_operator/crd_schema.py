@@ -284,7 +284,12 @@ def _structural(node: Any, report: Translation, pointer: str = "") -> Any:
                     result.pop("nullable", None)
             return result
         if len(non_null) > 1:
-            branch_types = {b.get("type") for b in non_null if isinstance(b, dict) and "type" in b}
+            # A branch with no ``type`` of its own (an enum or a pattern kept apart
+            # from its sibling by anyOf, as the committed schema writes an
+            # environment reference) counts as None: hoisting the other branches'
+            # type over it would leave an arm that holds ``items`` or ``properties``
+            # and no type, which a structural schema refuses.
+            branch_types = {b.get("type") if isinstance(b, dict) else None for b in non_null}
             if len(branch_types) != 1 or None in branch_types:
                 report.note_unexpressible(
                     pointer,
