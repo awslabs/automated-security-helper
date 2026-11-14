@@ -2,18 +2,20 @@
 
 The Flatpak app id is `io.github.awslabs.automated_security_helper`. It is not on Flathub, so you install a bundle file: one downloaded from a GitHub release, or one you build from a checkout. See [Publication status](index.md#publication-status).
 
-Read [The sandbox trade](#the-sandbox-trade) before choosing the Flatpak over a pip install: the app needs `--filesystem=host`, which gives up most of the file system confinement a Flatpak would otherwise provide.
+Read [The sandbox trade](#the-sandbox-trade) before choosing the Flatpak over a pip install: the app needs `flatpak --filesystem=host`, which gives up most of the file system confinement a Flatpak would otherwise provide.
 
 ## Build the bundle
 
 A GitHub release attaches an x86_64 bundle, `ash-<version>-x86_64.flatpak`. To use it, download it into `out/` and go to [Install](#install); the `org.freedesktop.Sdk//24.08` runtime below still has to be installed:
 
+<!-- doctest: illustrative reason="v<version> stands for a release tag the reader chooses" -->
 ```bash
 gh release download v<version> --repo awslabs/automated-security-helper --pattern '*.flatpak' --dir out
 ```
 
 To build it instead, you need `flatpak`, `flatpak-builder`, `uv`, and the `org.freedesktop.Sdk//24.08` runtime, which also has to be present on any machine you install the bundle on:
 
+<!-- doctest: illustrative reason="installs a runtime and builds a bundle from a wheel whose version the reader chooses" -->
 ```bash
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install flathub org.freedesktop.Sdk//24.08
@@ -26,6 +28,7 @@ uv build --out-dir dist
 
 ## Install
 
+<!-- doctest: illustrative reason="the bundle's version and architecture are the reader's" -->
 ```bash
 flatpak install --bundle out/ash-<version>-<arch>.flatpak
 ```
@@ -39,7 +42,7 @@ flatpak run io.github.awslabs.automated_security_helper --version
 flatpak run io.github.awslabs.automated_security_helper scan --source-dir .
 ```
 
-The other names are reachable inside the sandbox with `--command`: `ashx`, the deprecated `ashv3`, and `automated-security-helper`. The deprecated `ash` alias is not in the sandbox. For a short name on the host, define it yourself:
+The other names are reachable inside the sandbox with `flatpak run --command`: `ashx`, the deprecated `ashv3`, and `automated-security-helper`. The deprecated `ash` alias is not in the sandbox. For a short name on the host, define it yourself:
 
 ```bash
 alias ashx='flatpak run io.github.awslabs.automated_security_helper'
@@ -57,9 +60,9 @@ They go to `~/.ash/bin`. If your home directory is outside the paths the sandbox
 
 ## The sandbox trade
 
-ASH reads whatever source tree you point it at and writes its report inside that tree. A Flatpak with no file system grant would install, run, see an empty directory where your code is, and report a clean scan with no findings. To avoid that, the manifest grants `--filesystem=host`. The app can then read and write your home directory, including SSH keys and cloud credentials, and every other project on the machine. What remains is process, IPC and network namespace separation, an immutable `/app`, and no display, audio or D-Bus access.
+ASH reads whatever source tree you point it at and writes its report inside that tree. A Flatpak with no file system grant would install, run, see an empty directory where your code is, and report a clean scan with no findings. To avoid that, the manifest grants `flatpak --filesystem=host`. The app can then read and write your home directory, including SSH keys and cloud credentials, and every other project on the machine. What remains is process, IPC and network namespace separation, an immutable `/app`, and no display, audio or D-Bus access.
 
-`--filesystem=host` does not cover `/tmp`, `/var` or `/root`. A source tree there scans as empty, without an error. Grant the path explicitly:
+`flatpak --filesystem=host` does not cover `/tmp`, `/var` or `/root`. A source tree there scans as empty, without an error. Grant the path explicitly:
 
 ```bash
 flatpak override --user --filesystem=/var/lib/jenkins io.github.awslabs.automated_security_helper
@@ -84,12 +87,13 @@ Remove the installed app with a plain `flatpak uninstall io.github.awslabs.autom
 flatpak uninstall --delete-data io.github.awslabs.automated_security_helper
 ```
 
-Without `--delete-data`, the virtualenv and anything else the app wrote under `~/.var/app/io.github.awslabs.automated_security_helper` stay. If you already uninstalled without it, delete that directory directly. Scanner binaries under `~/.ash/bin` are not removed.
+Without `flatpak uninstall --delete-data`, the virtualenv and anything else the app wrote under `~/.var/app/io.github.awslabs.automated_security_helper` stay. If you already uninstalled without it, delete that directory directly. Scanner binaries under `~/.ash/bin` are not removed.
 
 ## Offline hosts
 
 Stage a wheelhouse in a directory the sandbox can see, such as `/srv`. Resolve it from ASH's own wheel, on a machine that can reach an index. Do not run `pip download automated-security-helper`: that name on PyPI belongs to an unrelated third party, not to this project.
 
+<!-- doctest: illustrative reason="the wheel's version is the reader's, and the host is offline" -->
 ```bash
 pip download ./automated_security_helper-<version>-py3-none-any.whl -d /srv/ash-wheels
 

@@ -13,7 +13,7 @@ user-facing install steps are in `docs/content/docs/native-packages/`.
 ASH's own code may ship in a published artifact. Third-party code never may.
 
 `.github/scripts/assert-artifact-contents.py` enforces that on the wheel and sdist, and
-its `--self-test` plants a payload per detector so it cannot pass vacuously.
+its `assert-artifact-contents.py --self-test` plants a payload per detector so it cannot pass vacuously.
 
 Native packages are downstream of that wheel and carry ASH's own wheel, so they sit on
 the permitted side of the boundary. Each one bundles exactly one wheel and resolves
@@ -55,13 +55,13 @@ tempted.
 | Format | Where it runs | What it checks beyond the wheel count |
 |---|---|---|
 | MSIX | `msix/verify-on-windows.ps1`, step 2b, on the signed package | every member is in the MSIX layout; the root `.exe` files are exactly the Application/@Executable names in the packaged `AppxManifest.xml` and exactly the wheel's console scripts, each a managed PE under 256 KiB; `AppxBlockMap.xml` matches every payload member's size and block hashes |
-| Chocolatey | `chocolatey/verify-on-windows.ps1`, step 3b, on the packed .nupkg | every member is one `build.ps1` stages or `choco pack` adds; no binaries |
+| Chocolatey | `chocolatey/verify-on-windows.ps1`, step 3b, on the packed .nupkg | every member is one the build script `packaging/chocolatey/build.ps1` stages or `choco pack` adds; no binaries |
 | Flatpak | `flatpak/build.sh`, check 4, on `build-dir/files` before export | every file is one the manifest installs; `bin/ash` is byte-identical to `ash-launcher.sh`; symlinks point only at it; the names in `bin/` are exactly the wheel's console scripts |
 
 In all three the one ASH wheel is extracted and handed to the wheel gate, and every
 other member goes through the wheel gate's payload rules (native binaries, vendored
 scanners, nested archives, size). The layouts are closed: a new file in a package needs a
-line in the gate in the same commit. `--self-test` plants payload in fixtures shaped like
+line in the gate in the same commit. `assert-package-contents.py --self-test` plants payload in fixtures shaped like
 the real packages and runs in the `build` job of `ash-package.yml` before anything is
 built; `tests/unit/test_package_contents_gate.py` pins those fixtures to the member
 lists of real builds.
@@ -143,9 +143,9 @@ there, and the formula declares no `resource` stanzas
 ## Install shape, common to the deb and the rpm
 
 Both packages install the same way, so a bug in one is a bug in the other. Below,
-`<pkgname>` is `ASH_PKG_NAME` and `<cli>` is `ASH_CLI_NAME`, both set in
+`<pkgname>` is the package name and `<cli>` the command name, both set in
 `packaging/cli-name.sh`: `automated-security-helper` and `ashx` today. The READMEs the packages ship are
-written with `@ASH_PKG@` and `@ASH_CLI@` and substituted at build time.
+written with placeholders for both and substituted at build time.
 
 - `/usr/lib/<pkgname>/wheels/` — ASH's wheel, the only payload.
 - `/usr/lib/<pkgname>/venv` — a symlink to `/usr/lib/<pkgname>/venv-<id>/`, which the
@@ -210,7 +210,8 @@ components in its installer the way an MSI feature tree would: the bytes are not
 package to select. In v4, "optional components selected at install time" means a
 second, explicit step after the package is installed, run by the user who will scan:
 
-```
+<!-- doctest: illustrative reason="downloads scanner binaries from their upstream releases" -->
+```bash
 ashx dependencies install --tool grype          # one scanner
 ashx dependencies install --tool grype --tool syft
 ashx dependencies install                      # everything ASH knows how to install
@@ -273,7 +274,7 @@ and as that user, on that user's PATH, the leg asserts that `ashx` is the packag
 package takes nothing the user installed and ships no `ash` of its own. `ashx` passes
 all three cases with the release beside it, the release still scans, and removing the
 package leaves the release working (`vl_from_release` in `packaging/verify-lib.sh`).
-The release's own scans are judged with `--allow-unselected-missing`: v3.7.1 reports
+The release's own scans are judged with `assert_outcome.py --allow-unselected-missing`: v3.7.1 reports
 every scanner whose tool is absent as MISSING, even ones the scan was not told to run
 (v4 reports those SKIPPED). Its selected scanner must still complete with the case's
 exit code and count, and every scan by the package keeps the full contract.
@@ -293,12 +294,12 @@ modules and `.dist-info` directories and no wheel at all — so `packaging/flatp
 counts wheels *and* fails on any `.dist-info` or `.egg-info` under the built app.
 
 Two things stop that happening by accident rather than by review: `build.sh` passes
-`--disable-download`, and the manifest grants the build sandbox no network. The second was
+`flatpak-builder --disable-download`, and the manifest grants the build sandbox no network. The second was
 measured by putting a `pip download requests` in the manifest's build-commands, which fails
 with `Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)`.
 
 The Flatpak also cannot put `ashx` on the host's PATH — flatpak exports the application ID
-— and it grants `--filesystem=host`, without which it would install and then be unable to
+— and it grants `flatpak --filesystem=host`, without which it would install and then be unable to
 read the tree it was asked to scan. `packaging/flatpak/README.flatpak` documents both,
 including what the permission gives up and what a user who wants tighter confinement can
 do instead.

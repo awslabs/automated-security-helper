@@ -6032,6 +6032,21 @@ UNREAD_RESPONSE_EXPLAINED = (
             " already lists; the copy changes only the could_not_stop reasons."
         ),
     ),
+    # The helper adds exit_code and its meaning to a refusal the tool already
+    # built. The refusal is a parameter the reader cannot follow back to the
+    # caller's dict literal, which carries the error_type the pages document.
+    (
+        "run_ash_scan",
+        "automated_security_helper/cli/mcp_tools.py",
+        "with_exit_code",
+        "def with_exit_code(",
+        "2026-12-31",
+        (
+            "adds exit_code and exit_code_meaning to a refusal the caller built;"
+            " the caller's dict literal holds the error_type, and the helper"
+            " adds no other key."
+        ),
+    ),
 )
 
 
@@ -8360,6 +8375,29 @@ def documented_plugin_files(page: Page, plugins: dict[str, set[str]]) -> set[str
     return found
 
 
+#: The VS Code extension's manifest and the pages that document its settings. A setting
+#: is spelled ``ash.<name>``, which reads like a report file, but it is a key the
+#: extension's manifest contributes; the pages of the extension's project may name them.
+VSCODE_MANIFEST = "editors/vscode/package.json"
+VSCODE_PROJECT = "editors/vscode/"
+
+
+def vscode_setting_names(code: Path) -> set[str]:
+    """The ``ash.<name>`` settings the VS Code extension's manifest contributes."""
+    try:
+        manifest = json.loads((code / VSCODE_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    configuration = (manifest.get("contributes") or {}).get("configuration") or []
+    sections = [configuration] if isinstance(configuration, dict) else configuration
+    return {
+        str(key)
+        for section in sections
+        if isinstance(section, dict)
+        for key in (section.get("properties") or {})
+    }
+
+
 def output_files(code: Path, models: ConfigModels) -> OutputFiles:
     tracked = _tracked_paths(code)
     return OutputFiles(
@@ -8430,17 +8468,22 @@ def check_report_files(
     reporter's options default to, a string a file-name constant of the package
     holds (OUTPUT_LOG_FILES, SESSION_CONFIG_FILENAME), a reporter a python block on
     the same page declares, a report of a plugin package the page documents (the
-    example plugin package), or a file the repository ships (Formula/ash.rb).
+    example plugin package), a file the repository ships (Formula/ash.rb), or, on
+    a page of the VS Code extension's project, a setting the extension's manifest
+    contributes (``ash.executablePath``).
     ``reports/<name>`` must be a report or a file a reporter writes beside it.
     """
     models = models or load_config_models()
     code = code or code_root(root)
     known = output_files(code, models)
+    vscode_settings = vscode_setting_names(code)
     findings: list[Finding] = []
     for page in load_pages(files, root):
         if is_historical_doc(page.rel):
             continue
         own = page_reporter_files(page) | documented_plugin_files(page, known.plugins)
+        if page.rel.startswith(VSCODE_PROJECT):
+            own |= vscode_settings
         for number, line in page.prose:
             for span in inline_code_spans(line):
                 for token in re.split(r"[\s,;]+", span.strip()):

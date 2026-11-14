@@ -14,7 +14,8 @@ Publishing to the VS Code Marketplace is out of scope for this directory: nothin
 here submits to a registry, and there is no publisher account. Build the `.vsix`
 and install it from the file:
 
-```
+<!-- doctest: illustrative reason="installs Node dependencies, builds the extension package and installs it into VS Code" -->
+```bash
 cd editors/vscode
 npm ci
 npm run package
@@ -30,7 +31,7 @@ MSYS2 section below before filing anything.
 `ASH: Scan workspace` scans the first workspace folder and replaces the extension's
 diagnostics with what the scan found. `ASH: Clear findings` empties them.
 
-| Setting | Default | What it is for |
+| VS Code setting | Value when unset | What it is for |
 |---|---|---|
 | `ash.executablePath` | empty | Empty runs `ashx` from PATH, and `ash` when no `ashx` is installed. Anything else is run exactly as given, with no fallback. Machine-scoped, so a cloned repository cannot set it. |
 | `ash.outputDirectory` | `.ash/ash_output` | Where the scan writes, relative to the workspace folder. It must resolve, symlinks included, to a folder inside the workspace: ASH clears directories under it before scanning, so an absolute path or an escape is refused and nothing runs. A symlink at `reports/`, `reports/ash.sarif` or `ash_aggregated_results.json` below it is refused too, before the previous report is deleted. |
@@ -282,23 +283,27 @@ command dispatch, the real diagnostics API, settings, global state, and a real
 child process on a PATH the suite controls. On a host without a display run it
 under Xvfb, as CI does:
 
-```
+<!-- doctest: illustrative reason="starts a VS Code extension host under a virtual display" -->
+```bash
 xvfb-run -a npm run test:integration
 ```
 
 By default the CLI is `test/integration/ash-stub.ts` behind wrappers named `ash`
 and `ashx`, replaying the captured runs under `test/fixtures/scans/` with their
-exit codes. Set `ASH_IT_REAL_ASH_DIR` to a directory holding an installed ASH
-(a venv's `bin/`, with both `ashx` and `ash`) to run the same suite against
-genuine scans instead. Real mode scans the shared e2e cases in
+exit codes. Pointing the suite at a directory holding an installed ASH (a venv's
+`bin/`, with both `ashx` and `ash`) runs the same suite against genuine scans
+instead; the variable is named on the
+[contributor testing page](../../docs/content/contributing/testing.md#run-the-vs-code-extensions-integration-tests-against-a-real-ash).
+Real mode scans the shared e2e cases in
 `tests/e2e/fixtures/cases.json` and judges each output directory with
 `scripts/e2e/assert_outcome.py`, the verdict every install channel uses. Both
 modes cover the `ashx` -> `ash` fallback and its one-time notice, exit 2
 findings, exit 1 with partial findings, exit 0 clearing the editor, exit 1 with no
 report, a scan timeout, and a configured executable used as given.
 
-`npm run test:e2e-vsix` is the channel end to end. It needs `ASH_IT_REAL_ASH_DIR`
-and a built `ash-vscode.vsix` (or `ASH_IT_VSIX`). It installs the `.vsix` into a
+`npm run test:e2e-vsix` is the channel end to end. It needs the real-ASH directory
+and a built `ash-vscode.vsix` (the contributor testing page names the variable for
+each). It installs the `.vsix` into a
 fresh extensions directory with VS Code's own CLI, runs the real-mode suite
 against that installed copy, uninstalls it, and upgrades from an N-1 `.vsix`
 built from this tree at a lower version. Its negative controls are a truncated
@@ -307,7 +312,7 @@ finding too many that must fail through `assert_outcome`, and the post-uninstall
 absence check run while the extension is still installed, where it must fail. See
 `test/integration/vsix-e2e.ts`.
 
-VS Code is launched with `--force-disable-user-env`. Without it VS Code resolves
+VS Code is launched with the `code --force-disable-user-env` option. Without it VS Code resolves
 your login shell's environment and puts its PATH ahead of the suite's, so an
 installed scanner or a real `ash` on the development machine answers instead of
 the one under test.

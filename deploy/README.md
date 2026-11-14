@@ -342,7 +342,7 @@ bucket.
 
 **ASH publishes them to no bucket, and will not.** That is the same position it takes on the
 container image, for the same reason, set out in
-[Building your own container image](../docs/content/docs/building-your-own-image.md): ASH
+[Build and host your own image](../docs/content/how-to/run-in-a-container.md#own-image): ASH
 reads your source code, so anything that scans or provisions on your behalf sits in the
 trust position of your build tooling, and what is in it, when it changed, and who approved
 that should be answerable by the organization running it.

@@ -13,18 +13,20 @@ The manifest set is schema-valid and CI installs, upgrades and uninstalls throug
 
 ## Install from a local manifest
 
-A GitHub release attaches a manifest set rendered for its own `.msix`, whose installer URL is that release's download. To use it, trust the certificate of the release's `.msix` (step 1), put the three `Amazon.AutomatedSecurityHelper*.yaml` files in one directory, and run step 4 with `--manifest` naming that directory; steps 2 and 3 are for a `.msix` that is not on a release.
+A GitHub release attaches a manifest set rendered for its own `.msix`, whose installer URL is that release's download. To use it, trust the certificate of the release's `.msix` (step 1), put the three `Amazon.AutomatedSecurityHelper*.yaml` files in one directory, and run step 4 with `winget --manifest` naming that directory; steps 2 and 3 are for a `.msix` that is not on a release.
 
 1. Get the `.msix` and trust its certificate, following [Get the package](msix.md#get-the-package) and steps 1 and 2 of [Trust the certificate and install](msix.md#trust-the-certificate-and-install). Do not run `Add-AppxPackage`; winget installs it.
 
 2. Serve the directory holding the `.msix` on loopback. Leave this running in its own shell:
 
+    <!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
     ```powershell
     python -m http.server 8000 --bind 127.0.0.1 --directory C:\path\to\msix-dir
     ```
 
 3. Render a manifest set for that file. `set-release-metadata.py` reads the digest, architecture, minimum OS version and package family name out of the `.msix`, writes a copy of the manifests, and validates the copy. The validation fetches Microsoft's published schemas, so it needs network access.
 
+    <!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
     ```powershell
     uv run packaging/winget/set-release-metadata.py `
         --msix C:\path\to\msix-dir\automated-security-helper-<version>.msix `
@@ -34,6 +36,7 @@ A GitHub release attaches a manifest set rendered for its own `.msix`, whose ins
 
 4. Allow local manifests once, then install:
 
+    <!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
     ```powershell
     winget settings --enable LocalManifestFiles
     winget install --manifest build\winget --accept-package-agreements --accept-source-agreements
@@ -45,6 +48,7 @@ winget checks the `.msix` against the digest in the manifest and refuses a file 
 
 The installed commands are the MSIX's app execution aliases: `ashx`, the deprecated `ashv3`, and `automated-security-helper`. No `ash` command is installed, because MSYS2 and Git for Windows ship the Almquist shell under that name.
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 ashx --version
 ashx dependencies install
@@ -54,12 +58,14 @@ ashx dependencies install
 
 Render a manifest set for the newer `.msix` the same way, then:
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 winget upgrade --manifest build\winget --accept-package-agreements --accept-source-agreements
 ```
 
 ## Uninstall
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 winget uninstall --manifest build\winget
 ```

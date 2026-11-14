@@ -1144,6 +1144,37 @@ def test_the_files_a_reporter_writes_are_read_from_its_code(tmp_path, file_code)
     assert dc.check_report_files([page], tmp_path, file_code) == []
 
 
+@pytest.mark.integration
+def test_a_vscode_setting_is_named_only_on_the_extensions_own_pages(
+    tmp_path, file_code
+):
+    """`ash.executablePath` reads like a report file; the extension's manifest says it is a setting."""
+    _write(
+        file_code,
+        "editors/vscode/package.json",
+        json.dumps(
+            {
+                "contributes": {
+                    "configuration": {"properties": {"ash.executablePath": {}}}
+                }
+            }
+        ),
+    )
+    inside = _write(
+        tmp_path, "editors/vscode/README.md", "Set `ash.executablePath` to a path.\n"
+    )
+    elsewhere = _write(
+        tmp_path, "docs/page.md", "Set `ash.executablePath` to a path.\n"
+    )
+    findings = dc.check_report_files([inside, elsewhere], tmp_path, file_code)
+    assert [f.path for f in findings] == ["docs/page.md"]
+    unknown = _write(
+        tmp_path, "editors/vscode/OTHER.md", "Set `ash.noSuchSetting` to a path.\n"
+    )
+    findings = dc.check_report_files([unknown], tmp_path, file_code)
+    assert [f.path for f in findings] == ["editors/vscode/OTHER.md"]
+
+
 REPORTER_WRITES = """
 from pathlib import Path
 
