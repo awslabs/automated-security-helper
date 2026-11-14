@@ -223,8 +223,15 @@ def private_tmp_init_container(
     bit. The kubelet gives every emptyDir root mode 0777 and the pod's uid does not own
     it, so no emptyDir under a non-root uid can pass, and the scan came back with the
     scanner ERROR "No private directory for the config files". This container runs as
-    root for one ``chown`` and one ``chmod``, with every capability dropped but CHOWN,
-    and exits; the scanner container stays non-root and never holds the capability.
+    root for one ``chmod`` and then one ``chown``, with every capability dropped but
+    CHOWN, and exits; the scanner container stays non-root and never holds the
+    capability. The order matters: root owns the directory until the ``chown``, so
+    the ``chmod`` before it needs no capability. After it the directory belongs to the
+    app uid, and a ``chmod`` by root would need CAP_FOWNER, which is dropped (the
+    first version ran them the other way round and crash-looped with "Operation not
+    permitted"). A same-uid ``mkdir -m 0700`` of a subdirectory would need no
+    capability at all but does not satisfy ASH, which also walks the parents of the
+    directory and refuses the world-writable emptyDir root above it.
     The product's check is not loosened: it is what made the pod's directory private.
     """
     return {
@@ -234,7 +241,7 @@ def private_tmp_init_container(
         "command": [
             "/bin/sh",
             "-c",
-            'chown "$0:$1" "$2" && chmod 0700 "$2"',
+            'chmod 0700 "$2" && chown "$0:$1" "$2"',
             str(uid),
             str(gid),
             PRIVATE_TMP_MOUNT,

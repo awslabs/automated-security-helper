@@ -688,6 +688,11 @@ class TestPrivateScratch:
         init = next(c for c in pod["initContainers"] if c["name"] == PRIVATE_TMP_INIT_NAME)
         script = " ".join(init["command"])
         assert "chown" in script and "chmod 0700" in script
+        # Root owns the emptyDir until the chown. After it the directory belongs to the
+        # app uid, and a chmod by root then needs CAP_FOWNER, which is dropped: with the
+        # order reversed the init container crash-looped ("Operation not permitted").
+        assert script.index("chmod") < script.index("chown"), script
+        assert "FOWNER" not in init["securityContext"]["capabilities"]["add"]
         assert PRIVATE_TMP_MOUNT in init["command"]
         assert [m["mountPath"] for m in init["volumeMounts"]] == [PRIVATE_TMP_MOUNT]
         assert init["securityContext"]["capabilities"] == {"drop": ["ALL"], "add": ["CHOWN"]}
