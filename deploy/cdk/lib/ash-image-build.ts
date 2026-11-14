@@ -1030,16 +1030,18 @@ def send(event, status, reason):
 
 def handler(event, context):
     props = event["ResourceProperties"]
-    # The URL reaches the build by parameter name; see ash-image-build.ts.
-    parameter = "/${BOOTSTRAP_PARAMETER_PREFIX}/" + props["ProjectName"]
     ssm = boto3.client("ssm")
     if event["RequestType"] == "Delete":  # never block a teardown on a build
         try:
-            ssm.delete_parameter(Name=parameter)
+            ssm.delete_parameter(Name="/${BOOTSTRAP_PARAMETER_PREFIX}/" + props["ProjectName"])
         except Exception as exc:
-            print("could not delete %s: %s" % (parameter, exc))
+            print("could not delete the bootstrap parameter: %s" % exc)
         return send(event, "SUCCESS", "Nothing to undo")
     try:
+        # The URL reaches the build by parameter name; see ash-image-build.ts. Inside
+        # the try so a missing property answers FAILED instead of leaving the stack
+        # waiting for a response nobody sends.
+        parameter = "/${BOOTSTRAP_PARAMETER_PREFIX}/" + props["ProjectName"]
         ssm.put_parameter(Name=parameter, Value=event["ResponseURL"], Type="SecureString",
                           KeyId=props["KeyArn"], Overwrite=True)
         boto3.client("codebuild").start_build(

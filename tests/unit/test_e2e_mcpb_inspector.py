@@ -595,6 +595,22 @@ def test_the_e2e_scans_one_case_over_stdio():
     assert call, "the stdio scan must run the findings case with the head version"
 
 
+def test_the_n_minus_one_scan_holds_one_stdio_session():
+    """v3.8.0's scan registry is per MCP session, so the N-1 scan cannot be HTTP calls.
+
+    Each one-shot Inspector call opens a session of its own; over HTTP the scan that
+    run_ash_scan started was "not found in registry" to the next call.
+    """
+    text = SCRIPT.read_text(encoding="utf-8")
+    call = re.search(
+        r'"upgrade-before",\s*prev_version,\s*'
+        r"allow_unselected_missing=bool\(args\.prev_release\),\s*"
+        r'transport="stdio",',
+        text,
+    )
+    assert call, "the upgrade-before scan of N-1 must hold one stdio session"
+
+
 # --------------------------------------------------------------------------
 # The release N-1 bundle's recorded defect, exempted for that bundle only
 # --------------------------------------------------------------------------

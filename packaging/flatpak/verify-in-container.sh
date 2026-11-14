@@ -63,6 +63,19 @@ N1_ENV="${N1_ENV:-$PREV_ROOT/n1.env}"
 # mktemp honors TMPDIR; CI points that at RUNNER_TEMP.
 WORK="$(mktemp -d -t ash-flatpak.XXXXXX)"
 OUT="${OUT:-$WORK/flatpakbuild}"
+# `flatpak run` keeps each sandbox instance's directory under $XDG_RUNTIME_DIR/.flatpak
+# and binds it into the sandbox. CI starts this script with sudo, which hands root the
+# runner user's XDG_RUNTIME_DIR (/run/user/<runner uid>). Root then creates the instance
+# directory there, and bwrap, inside its user namespace, cannot reach a path under a
+# directory owned by a uid the namespace does not map:
+#   bwrap: Can't find source path /run/user/1001/.flatpak/<id>: Permission denied
+# Measured on the hosted runner, after the "bwrap can create a sandbox" probe passed. A
+# runtime directory this process owns avoids it.
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ ! -O "$XDG_RUNTIME_DIR" ]; then
+  XDG_RUNTIME_DIR="$WORK/xdg-runtime"
+  mkdir -m 0700 "$XDG_RUNTIME_DIR"
+  export XDG_RUNTIME_DIR
+fi
 APP_ID="io.github.awslabs.automated_security_helper"
 RUNTIME_VERSION="24.08"
 # The runtime is pinned by OSTree commit, not only by branch. Flathub rebuilds

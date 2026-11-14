@@ -781,3 +781,16 @@ def test_bash_parses_a_crlf_script_from_raw_bytes(rel):
     assert lf.returncode == 0, lf.stderr
     assert crlf.returncode == 0, crlf.stderr
     assert crlf.stdout == lf.stdout
+
+
+def test_every_cli_that_builds_a_local_image_is_installed_from_a_source_directory():
+    """A LOCAL build-image finds its Dockerfile from the source tree the CLI was installed from.
+
+    A wheel install records none, so `build-image --ash-revision-to-install LOCAL`
+    refuses ("Dockerfile not found"). The head host CLI and the N-1 CLI the upgrade
+    case builds with are therefore installed from their export directories.
+    """
+    text = (REPO_ROOT / "scripts" / "e2e" / "container.sh").read_text(encoding="utf-8")
+    assert '--python "$WORK/venv-host/bin/python" "$SRC_HEAD"' in text
+    assert '--python "$UPGRADE_VENV/bin/python" "$SRC_PREV"' in text
+    assert '"$PREV_WHEEL"\n' not in text.split("UPGRADE_VENV=")[1].split("PREV_CLI=")[0]

@@ -1124,6 +1124,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         say(f"N-1 launch over stdio reports {got}")
         server_env = {**os.environ, **original.get("env", {}), **harness_env}
         prev_command = [prev_config["command"], *prev_config["args"]]
+        # N-1 is scanned over one held stdio session, as a desktop host holds it (the
+        # transport="stdio" below). v3.8.0 keeps its scan registry per MCP session, and
+        # every one-shot Inspector call over HTTP opens a session of its own, so the scan
+        # that run_ash_scan started was unknown ("not found in registry") to the
+        # get_scan_progress that followed.
         run_case(
             inspector,
             prev_command,
@@ -1134,6 +1139,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "upgrade-before",
             prev_version,
             allow_unselected_missing=bool(args.prev_release),
+            transport="stdio",
         )
 
         head_target = stdio_target(work, "head", head_config, harness_env)

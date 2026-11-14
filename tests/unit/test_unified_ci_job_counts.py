@@ -505,7 +505,8 @@ class TestTheCommentsMatchTheWorkflow:
             "expands to 280 jobs",
             "contributes 478 check",
             "478 is this",
-            "expands to 286 jobs",
+            # ("expands to 286 jobs" is not in this list: 286 is the current push figure
+            # again, after the method: bash cells left scan-validation, so it left.)
             "contributes 484 check",
             "484 is this",
             "expands to 316 jobs",

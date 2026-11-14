@@ -368,9 +368,11 @@ def wait_terminal(name: str, timeout: int = 900) -> dict:
     if status.get("phase") != "Clean" and status.get("coverageComplete") is False:
         # An incomplete scan names the scanner but not why; the shard's own log does.
         # Printed here, where the evidence is, rather than only on a test's failure.
+        # The last 60 lines of a shard are the results table and the next-steps text;
+        # the scanner's own error line comes earlier, so read well back past them.
         try:
             print(f"=== AshScan/{name} shard pod logs ===")
-            print(container_logs(f"{GROUP}/scan-uid={scan_uid(name)}", previous=False, tail=60))
+            print(container_logs(f"{GROUP}/scan-uid={scan_uid(name)}", previous=False, tail=600))
         except Exception as err:  # noqa: BLE001 - diagnostic only
             print(f"(could not read the shard logs: {err})")
     return status

@@ -347,7 +347,10 @@ prune_build_cache "the N build"
 # --------------------------------------------------------------------------
 UPGRADE_VENV="$WORK/venv-upgrade"
 uv venv --quiet --python "$PYTHON" "$UPGRADE_VENV"
-uv pip install --quiet --no-cache --python "$UPGRADE_VENV/bin/python" "$PREV_WHEEL"
+# From N-1's export directory, not its wheel, for the reason given at the host CLI's
+# install above: N-1's own `build-image --ash-revision-to-install LOCAL` builds the source
+# tree it was installed from, and a wheel install records none.
+uv pip install --quiet --no-cache --python "$UPGRADE_VENV/bin/python" "$SRC_PREV"
 if [ -x "$UPGRADE_VENV/bin/$ASH_CLI_NAME" ]; then
   PREV_CLI="$UPGRADE_VENV/bin/$ASH_CLI_NAME"
 elif [ -x "$UPGRADE_VENV/bin/ash" ]; then

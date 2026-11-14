@@ -48,7 +48,8 @@ def _installed_tools() -> set[str]:
     tools: set[str] = set()
     for step in _integration_steps():
         run = step.get("run") or ""
-        if "ash dependencies install" not in run:
+        # The v4 command; the deprecated `ash` alias would print a warning in CI.
+        if "ashx dependencies install" not in run:
             continue
         words = run.split()
         tools |= {words[i + 1] for i, word in enumerate(words) if word == "--tool"}

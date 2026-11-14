@@ -271,3 +271,12 @@ def test_the_runtime_pin_is_checked_again_after_the_app_update() -> None:
     text = _script()
     update = text.index('flatpak update -y --system --noninteractive "$APP_ID"')
     assert text.find('assert_runtime_commit "$RUNTIME_COMMIT"', update) > update
+
+
+def test_flatpak_runs_with_a_runtime_directory_the_script_owns() -> None:
+    """sudo hands root the runner user's XDG_RUNTIME_DIR, and bwrap cannot bind a path under it."""
+    text = _script()
+    guard = text.index('[ ! -O "$XDG_RUNTIME_DIR" ]')
+    assert text.index("export XDG_RUNTIME_DIR", guard) > guard
+    # Before the first flatpak command that starts a sandbox.
+    assert guard < text.index("flatpak run ")
