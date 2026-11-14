@@ -4,9 +4,9 @@
 """A whole ``ash scan`` does not start tools that live inside the tree it scans.
 
 ``uv run ash scan .`` puts the repository's ``.venv/bin`` first on PATH, and
-``npm run`` does the same with ``node_modules/.bin``. A bandit or semgrep there is
+``npm run`` does the same with ``node_modules/.bin``. A bandit or opengrep there is
 repository content. This runs the real command, in a child process, over a tree
-holding a stand-in ``.venv/bin/bandit`` and ``node_modules/.bin/semgrep``, each of
+holding a stand-in ``.venv/bin/bandit`` and ``node_modules/.bin/opengrep``, each of
 which leaves a file behind when it is started, and with both directories on PATH.
 
 Offline, the scanners' tool check runs a PATH copy of the tool with ``--version`` to
@@ -81,8 +81,8 @@ def tree(tmp_path):
     marks.mkdir()
     tools = {
         "bandit": stand_in(tree / ".venv" / "bin", "bandit", marks / "bandit-ran"),
-        "semgrep": stand_in(
-            tree / "node_modules" / ".bin", "semgrep", marks / "semgrep-ran"
+        "opengrep": stand_in(
+            tree / "node_modules" / ".bin", "opengrep", marks / "opengrep-ran"
         ),
     }
     # The "other copy" a run may find once the in-tree one is refused: the test's
@@ -102,8 +102,8 @@ def scan(tree: Path, tools: dict, *extra: str, env_extra=None) -> str:
     import automated_security_helper
 
     output = tree.parent / "out"
-    # Offline, semgrep needs a rule cache before it looks for its tool at all.
-    rules = tree.parent / "semgrep-rules"
+    # Offline, opengrep needs a rule cache before it looks for its tool at all.
+    rules = tree.parent / "opengrep-rules"
     rules.mkdir(exist_ok=True)
     (rules / "rule.yaml").write_text(
         "rules:\n- id: ash-test\n  pattern: eval(...)\n  message: m\n"
@@ -116,14 +116,14 @@ def scan(tree: Path, tools: dict, *extra: str, env_extra=None) -> str:
             "ASH_OFFLINE": "YES",
             "NO_COLOR": "1",
             "COLUMNS": "200",
-            "SEMGREP_RULES_CACHE_DIR": str(rules),
+            "OPENGREP_RULES_CACHE_DIR": str(rules),
             "ASH_TEST_CODE_ROOT": str(
                 Path(automated_security_helper.__file__).parents[1]
             ),
             "PATH": os.pathsep.join(
                 [
                     str(tools["bandit"].parent),
-                    str(tools["semgrep"].parent),
+                    str(tools["opengrep"].parent),
                     str(tree.parent / "outside-bin"),
                     # A run that must find no other copy gets the system directories
                     # only, not the host's whole PATH.
@@ -147,7 +147,7 @@ def scan(tree: Path, tools: dict, *extra: str, env_extra=None) -> str:
             str(output),
             "--mode",
             "local",
-            *(() if "--scanners" in extra else ("--scanners", "bandit,semgrep")),
+            *(() if "--scanners" in extra else ("--scanners", "bandit,opengrep")),
             "--phases",
             "scan",
             "--no-progress",
@@ -198,7 +198,7 @@ def test_the_operators_opt_in_starts_them_with_a_warning(tree, how):
     log = scan(root, tools, *how.get("extra", ()), env_extra=how.get("env_extra"))
 
     assert (marks / "bandit-ran").exists(), log[-4000:]
-    assert (marks / "semgrep-ran").exists(), log[-4000:]
+    assert (marks / "opengrep-ran").exists(), log[-4000:]
     assert any(
         "Running bandit from inside the scanned tree" in line
         and str(tools["bandit"]) in line
@@ -242,7 +242,7 @@ def test_a_scanner_whose_only_tool_is_in_the_tree_is_missing_and_says_why(tmp_pa
 
     log = scan(
         tree,
-        {"bandit": tool, "semgrep": tool},
+        {"bandit": tool, "opengrep": tool},
         "--scanners",
         "cfn-nag",
         env_extra={"ASH_BIN_PATH": str(empty_bin), "PATH_SUFFIX_ONLY": "1"},
