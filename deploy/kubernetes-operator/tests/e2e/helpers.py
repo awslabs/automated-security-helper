@@ -205,6 +205,36 @@ def operator_logs(tail: int = 200) -> str:
     return result.stdout + result.stderr
 
 
+def container_logs(selector: str, *, previous: bool, tail: int = 80) -> str:
+    """The logs of every container of every pod matching ``selector``.
+
+    ``kubectl describe`` names a back-off and an exit code but not the reason the
+    container wrote to stderr, so a failure dump that stops at describe leaves the
+    cause unread. With ``previous`` the last terminated instance is read, which is the
+    one a crash-looping container leaves behind. Errors are returned as text: this runs
+    while a failure is already being reported.
+    """
+    try:
+        pods = kubectl_json("-n", NAMESPACE, "get", "pods", "-l", selector)["items"]
+    except Exception as err:  # noqa: BLE001 - diagnostic only
+        return f"(could not list pods for {selector}: {err})"
+    chunks: list[str] = []
+    for pod in pods:
+        name = pod["metadata"]["name"]
+        spec = pod.get("spec") or {}
+        for container in (spec.get("initContainers") or []) + (spec.get("containers") or []):
+            args = ["-n", NAMESPACE, "logs", name, "-c", container["name"], f"--tail={tail}"]
+            if previous:
+                args.append("--previous")
+            result = kubectl(*args, check=False)
+            label = "previous" if previous else "current"
+            chunks.append(
+                f"--- {name}/{container['name']} ({label}) ---\n"
+                f"{(result.stdout + result.stderr).strip()}"
+            )
+    return "\n".join(chunks) or f"(no pods matched {selector})"
+
+
 # The default ``config`` of :func:`apply_scan`: a project name and a MEDIUM threshold.
 # A sentinel rather than a literal default, so ``config=None`` can mean "no config".
 PROJECT_CONFIG = object()
@@ -320,6 +350,13 @@ def wait_terminal(name: str, timeout: int = 900) -> dict:
         print("=== jobs ===")
         kubectl("-n", NAMESPACE, "get", "jobs", check=False)
         kubectl("-n", NAMESPACE, "get", "pods", check=False)
+        print("=== scan shard pod logs ===")
+        try:
+            uid = scan_uid(name)
+        except Exception as err:  # noqa: BLE001 - diagnostic only
+            print(f"(could not read the scan's uid: {err})")
+        else:
+            print(container_logs(f"{GROUP}/scan-uid={uid}", previous=False, tail=120))
         raise
     # The verdict fields, printed on success too, so a CI log shows what each run
     # actually ended as rather than only that the assertions held.
@@ -328,6 +365,14 @@ def wait_terminal(name: str, timeout: int = 900) -> dict:
         for key in ("phase", "exitCode", "coverageComplete", "coverageGaps", "findings")
     }
     print(f"=== AshScan/{name} terminal: {json.dumps(summary, sort_keys=True)} ===")
+    if status.get("phase") != "Clean" and status.get("coverageComplete") is False:
+        # An incomplete scan names the scanner but not why; the shard's own log does.
+        # Printed here, where the evidence is, rather than only on a test's failure.
+        try:
+            print(f"=== AshScan/{name} shard pod logs ===")
+            print(container_logs(f"{GROUP}/scan-uid={scan_uid(name)}", previous=False, tail=60))
+        except Exception as err:  # noqa: BLE001 - diagnostic only
+            print(f"(could not read the shard logs: {err})")
     return status
 
 

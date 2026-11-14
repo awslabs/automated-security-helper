@@ -48,6 +48,7 @@ from tests.e2e.helpers import (
     TERMINAL,
     apply_fixture_configmap,
     apply_scan,
+    container_logs,
     kubectl,
     kubectl_apply_stdin,
     kubectl_json,
@@ -738,11 +739,16 @@ class TestMcpServer:
             pod_describe = kubectl(
                 "-n", NAMESPACE, "describe", "pods", "-l", f"{GROUP}/mcp-name=mcp-e2e", check=False
             ).stdout
+            selector = f"{GROUP}/mcp-name=mcp-e2e"
+            previous = container_logs(selector, previous=True)
+            current = container_logs(selector, previous=False)
             raise AssertionError(
                 "no MCP pod became Ready. The probe is a TCP connect, so an unready "
                 "pod means the server did not bind its port -- check the capability "
                 f"probe's exit code and the container's log.\n{err}\n"
-                f"{describe[-1500:]}\n{pod_describe[-2500:]}"
+                f"{describe[-1500:]}\n{pod_describe[-2500:]}\n"
+                f"=== container logs, last terminated instance ===\n{previous[-3000:]}\n"
+                f"=== container logs, current instance ===\n{current[-3000:]}"
             ) from err
 
         status = wait_for(
