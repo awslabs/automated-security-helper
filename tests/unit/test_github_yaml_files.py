@@ -201,6 +201,25 @@ def test_the_test_source_enumeration_does_not_walk_into_the_scratch_tree(
     assert not any(path.resolve().is_relative_to(planted.resolve()) for path in files)
 
 
+# Workflow files that are scanner test inputs, not workflows this repository runs.
+# zizmor and actionlint are run over these trees by the scanner tests, and the
+# "vulnerable" ones are planted defects whose findings are the expected output
+# (the zizmor one runs actions/checkout without persist-credentials on purpose).
+# Listing them in github_yaml_files() would make the persist-credentials and
+# canonical-CLI guards read planted defects and fail on them, and "fixing" a
+# fixture would change the scanner snapshots next to it. Each entry is explicit, so
+# a new fixture workflow is noticed, and test_the_fixture_exemptions_are_current
+# fails when an entry stops existing.
+SCANNER_FIXTURE_WORKFLOWS = frozenset(
+    {
+        "tests/test_data/scanners/actionlint/repo/.github/workflows/clean.yml",
+        "tests/test_data/scanners/actionlint/repo/.github/workflows/vulnerable.yml",
+        "tests/test_data/scanners/zizmor/repo/.github/workflows/clean.yml",
+        "tests/test_data/scanners/zizmor/repo/.github/workflows/vulnerable.yml",
+    }
+)
+
+
 def _tracked_files() -> list[str]:
     """Tracked paths, or a failure that says why they could not be listed."""
     try:
@@ -224,7 +243,11 @@ def _tracked_files() -> list[str]:
 
 def test_the_ci_yaml_enumeration_is_complete():
     """Every tracked workflow and composite action, so a new .github root is noticed."""
-    tracked = {name for name in _tracked_files() if _TRACKED.search(name)}
+    tracked = {
+        name
+        for name in _tracked_files()
+        if _TRACKED.search(name) and name not in SCANNER_FIXTURE_WORKFLOWS
+    }
     assert tracked, "no tracked workflow or composite action matched"
     found = {
         path.relative_to(REPO_ROOT).as_posix() for path in github_yaml_files(REPO_ROOT)
@@ -250,6 +273,7 @@ def test_every_tracked_yaml_that_checks_out_is_enumerated():
         name
         for name in _tracked_files()
         if _YAML.search(name)
+        and name not in SCANNER_FIXTURE_WORKFLOWS
         and (REPO_ROOT / name).is_file()
         and _USES_CHECKOUT.search(
             (REPO_ROOT / name).read_text(encoding="utf-8", errors="replace")
@@ -261,6 +285,20 @@ def test_every_tracked_yaml_that_checks_out_is_enumerated():
         f"these tracked YAML files run actions/checkout but github_yaml_files() does "
         f"not list them, so the persist-credentials and canonical-CLI guards never "
         f"read them: {missing}"
+    )
+
+
+def test_the_fixture_exemptions_are_current():
+    """Every exempted fixture is still tracked, and none is a workflow we run."""
+    tracked = set(_tracked_files())
+    stale = sorted(SCANNER_FIXTURE_WORKFLOWS - tracked)
+    assert stale == [], f"exempted fixtures that are no longer tracked: {stale}"
+    found = {
+        path.relative_to(REPO_ROOT).as_posix() for path in github_yaml_files(REPO_ROOT)
+    }
+    assert not (SCANNER_FIXTURE_WORKFLOWS & found), (
+        "github_yaml_files() lists a scanner fixture; drop it from "
+        "SCANNER_FIXTURE_WORKFLOWS or from the enumeration"
     )
 
 
