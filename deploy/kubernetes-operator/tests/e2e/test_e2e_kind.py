@@ -235,8 +235,7 @@ class TestFindingsCrossTheShardBoundary:
         assert by_name["bandit"]["findingCount"] >= 1, by_name["bandit"]
         assert by_name["detect-secrets"]["findingCount"] >= 1, by_name["detect-secrets"]
         assert (
-            by_name["bandit"]["owningShardIndex"]
-            != by_name["detect-secrets"]["owningShardIndex"]
+            by_name["bandit"]["owningShardIndex"] != by_name["detect-secrets"]["owningShardIndex"]
         ), (
             "bandit and detect-secrets were owned by the same shard, so this run "
             "does not demonstrate that findings crossed the shard boundary"
