@@ -499,6 +499,29 @@ class TestMcpShapes:
         command = deployment["spec"]["template"]["spec"]["containers"][0]["command"]
         assert "0.0.0.0" in command  # noqa: S104  # nosec B104 - asserting the bind address
 
+    def test_the_bind_names_the_hosts_the_service_answers_to(self):
+        """ashx refuses a non-loopback --host with no --allowed-host (exit 5, a restart loop)."""
+        command = mcp_deployment()["spec"]["template"]["spec"]["containers"][0]["command"]
+        name, namespace = MCP["metadata"]["name"], MCP["metadata"]["namespace"]
+        given = [command[i + 1] for i, word in enumerate(command) if word == "--allowed-host"]
+        assert f"{name}.{namespace}.svc.cluster.local:8000" in given, command
+        assert f"{name}:8000" in given, command
+        assert "--trust-upstream-host-check" not in command
+
+    def test_an_allowed_hosts_the_operator_sets_replaces_the_service_names(self):
+        command = mcp_deployment({"image": "ash:local", "allowedHosts": ["Mcp.Example.Com"]})[
+            "spec"
+        ]["template"]["spec"]["containers"][0]["command"]
+        given = [command[i + 1] for i, word in enumerate(command) if word == "--allowed-host"]
+        assert given == ["mcp.example.com"], command
+
+    def test_the_generated_bind_passes_ashxs_own_validation(self):
+        mcp = pytest.importorskip("automated_security_helper.cli.mcp")
+        command = mcp_deployment()["spec"]["template"]["spec"]["containers"][0]["command"]
+        given = [command[i + 1] for i, word in enumerate(command) if word == "--allowed-host"]
+        host = command[command.index("--host") + 1]
+        mcp._validate_bind(host, given, False)  # raises for the command the pod used to run
+
     def test_the_probes_are_tcp_not_http(self):
         # Measured: `ashx mcp` answers 401 to a bare GET on its mount path, and a
         # kubelet httpGet probe accepts only 200-399. An httpGet probe there can
