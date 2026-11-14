@@ -15,7 +15,7 @@ scan wrote is checked, and no finding may sit at a link's path.
 
 That proves something only for the scanners that ran, so each one that can run here
 must also have scanned the tree: be PASSED, or FAILED on its findings, and report
-the in-tree finding ``CONTROLS`` names (``real.py`` for bandit and the semgrep
+the in-tree finding ``CONTROLS`` names (``real.py`` for bandit and the opengrep
 rule, ``real.tf`` for checkov, and so on). ``in_tree_link.py`` is a link to
 ``real.py``, which is still scanned. A scanner that cannot run here (its tool or
 database is absent, or it needs the network) does not count as taking part: its
@@ -24,7 +24,7 @@ test is skipped with its status and what it lacks, so the run's report lists it.
 Tools the test can use when the environment provides them, none required: the
 grype and trivy databases (``GRYPE_DB_CACHE_DIR`` naming grype's ``db`` directory,
 ``TRIVY_CACHE_DIR``), the cfn-guard rules directory (``ASH_CFN_GUARD_RULES_DIR``), and
-the scanner binaries on ``PATH``. semgrep and opengrep get an offline rule cache the test writes.
+the scanner binaries on ``PATH``. opengrep gets an offline rule cache the test writes. semgrep is a retired name for opengrep, so it has no entry of its own.
 """
 
 from __future__ import annotations
@@ -411,7 +411,7 @@ class Control:
 
 
 #: One for every registered scanner. The in-tree findings were measured with
-#: bandit 1.9.4, checkov 3.3.26, detect-secrets, semgrep 1.180.0, opengrep 1.30.2,
+#: bandit 1.9.4, checkov 3.3.26, detect-secrets, opengrep 1.30.2,
 #: cfn-nag, cdk-nag, grype 0.120.1, trivy 0.75.0 and syft 1.54.1; ferret-scan's,
 #: actionlint's, cfn-lint's, cfn-guard's, gitleaks's, trivy's and zizmor's have not
 #: been measured in this scan. The last six read the findings their own integration
@@ -422,7 +422,6 @@ CONTROLS = {
     "bandit": Control(commands=("bandit",), in_tree="real.py"),
     "checkov": Control(commands=("checkov",), in_tree="real.tf"),
     "detect-secrets": Control(commands=("detect-secrets",), in_tree="settings.yml"),
-    "semgrep": Control(commands=("semgrep",), in_tree="real.py"),
     "opengrep": Control(commands=("opengrep",), in_tree="real.py"),
     "cfn-nag": Control(
         commands=("cfn_nag_scan",), in_tree="templates/real.template.json"
