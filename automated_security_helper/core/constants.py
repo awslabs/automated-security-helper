@@ -58,12 +58,13 @@ def ash_git_requirement(extra: str = "") -> str:
     is untagged rather than ``@vunknown``, which names no tag at all. The command
     builders below say so in the hint.
     """
-    name = (
-        f"automated-security-helper[{extra}]" if extra else "automated-security-helper"
-    )
+    # One expression, so the name is never a requirement without its repository: a
+    # name and extra built apart and joined to the URL later read, to the install
+    # hint gate, as a bare index requirement.
+    extras = f"[{extra}]" if extra else ""
     tag = _running_tag()
     ref = f"@{tag}" if tag else ""
-    return f"{name} @ git+{ASH_REPO_URL}.git{ref}"
+    return f"automated-security-helper{extras} @ git+{ASH_REPO_URL}.git{ref}"
 
 
 def _running_python() -> str:
@@ -99,7 +100,7 @@ def ash_extra_install_command(extra: str) -> str:
 
     ASH is installed from git, not from a package index, and the name
     ``automated-security-helper`` on PyPI belongs to an unrelated third party. So a
-    hint like ``pip install automated-security-helper[symbols]`` installs a
+    hint that installs the distribution and its extra by name alone installs a
     stranger's package. This names ASH's own repository as a PEP 508 direct
     reference instead, installed with the interpreter that is running ASH.
     """

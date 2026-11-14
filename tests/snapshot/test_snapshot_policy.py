@@ -118,11 +118,14 @@ _CONFIG_FILES = (
 def _ci_files() -> list[Path]:
     # __pycache__ is skipped: other xdist workers write .pyc files there (this module
     # imports a script from .github/scripts), and a half-written one can vanish mid-scan.
+    # iter_repo_files lists files only and never enters node_modules
+    # (scripts/e2e/inspector/node_modules is where npm installs) or __pycache__.
     files = [
         p
         for top in (".github", "scripts")
-        for p in (REPO_ROOT / top).rglob("*")
-        if p.is_file() and "__pycache__" not in p.parts
+        for p in iter_repo_files(
+            REPO_ROOT / top, skip_dirs=frozenset({"__pycache__", "node_modules"})
+        )
     ]
     files += [
         REPO_ROOT / name for name in _CONFIG_FILES if (REPO_ROOT / name).is_file()

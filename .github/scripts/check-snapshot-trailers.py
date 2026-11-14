@@ -1166,6 +1166,27 @@ def find_orphans(root: Path) -> list[str]:
 EDITOR_ROOTS: tuple[str, ...] = ("editors/vscode",)
 
 
+#: Directories under an editor root that hold no snapshot a test owns: the installed
+#: packages (npm writes them while other jobs read) and the build output.
+_EDITOR_SKIPPED_DIRS = frozenset({"node_modules", "out", "out-integration"})
+
+
+def _editor_snapshot_dirs(base: Path) -> list[Path]:
+    """Every ``__snapshots__`` directory under ``base``, without entering node_modules.
+
+    A walk that prunes ``dirnames`` in place, so ``editors/vscode/node_modules`` (tens
+    of thousands of directories, written by ``npm ci``) is never descended into. The
+    ``rglob`` this replaced listed all of it and dropped the matches afterward.
+    """
+    found: list[Path] = []
+    for dirpath, dirnames, _files in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in _EDITOR_SKIPPED_DIRS]
+        here = Path(dirpath)
+        if here.name == "__snapshots__":
+            found.append(here)
+    return sorted(found)
+
+
 def _visual_scenario_names(scenarios: Path) -> tuple[list[str], str | None]:
     """The scenario names a ``scenarios.json`` lists, or a problem reading it."""
     try:
@@ -1194,11 +1215,9 @@ def find_editor_orphans(root: Path) -> list[str]:
         if not base.is_dir():
             problems.append(f"{editor}/ does not exist; update EDITOR_ROOTS")
             continue
-        for snapdir in sorted(base.rglob("__snapshots__")):
+        for snapdir in _editor_snapshot_dirs(base):
             rel_parts = snapdir.relative_to(root).parts
-            if not snapdir.is_dir() or {"node_modules", "out", "out-integration"} & set(
-                rel_parts
-            ):
+            if not snapdir.is_dir() or _EDITOR_SKIPPED_DIRS & set(rel_parts):
                 continue
             rel = snapdir.relative_to(root).as_posix()
             entries = sorted(snapdir.iterdir())

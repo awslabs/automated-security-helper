@@ -44,6 +44,11 @@ from typing import Dict, List, NamedTuple, Optional
 
 import pytest
 
+#: The v4 line's command is ``ashx``; ``ash`` is the deprecated v3 alias. The
+#: Dockerfile's install steps run ``ashx dependencies install``; the older spelling
+#: still counts so the check keeps finding an install if the alias is used again.
+DEPENDENCIES_INSTALL = re.compile(r"\bashx? dependencies install\b")
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -315,7 +320,7 @@ def test_the_bin_path_ends_root_owned_after_the_non_root_install(instructions, e
         index
         for index, instruction in enumerate(stage)
         if instruction.keyword == "RUN"
-        and "ash dependencies install" in instruction.text
+        and DEPENDENCIES_INSTALL.search(instruction.text)
     ]
     bin_chowns = [
         (index, owner)
@@ -452,7 +457,7 @@ def test_each_stage_ends_by_clearing_what_installers_left_writable(stage, instru
     installs = [
         index
         for index, text in enumerate(runs)
-        if "ash dependencies install" in text or "uv pip install" in text
+        if DEPENDENCIES_INSTALL.search(text) or "uv pip install" in text
     ]
     sweeps = [index for index, text in enumerate(runs) if SWEEP.search(text)]
 

@@ -69,6 +69,10 @@ def _job() -> tuple[ga.Workflow, dict[str, Any]]:
     return workflow, workflow.jobs[JOB_ID]
 
 
+#: The v4 line's command is `ashx`; `ash` is the deprecated v3 alias. The job runs
+#: `uv run ashx dependencies install`, which the older spelling alone did not match.
+_INSTALL_COMMAND = re.compile(r"\bashx? dependencies install\b")
+
 #: `tests/integration` as a pytest argument of its own. The job's separate docs
 #: examples step runs `tests/integration/docs`, which is not this path.
 _SUITE_PATH = re.compile(r"tests/integration(?=[\s\\]|$)")
@@ -89,7 +93,7 @@ def _installed_tools(tmp_path, steps: list[dict[str, Any]]) -> list[tuple[int, s
     workflow, job = _job()
     tools = []
     for index, step in enumerate(steps):
-        if "ash dependencies install" not in str(step.get("run") or ""):
+        if not _INSTALL_COMMAND.search(str(step.get("run") or "")):
             continue
         sandbox = ga.StepSandbox(tmp_path / str(index))
         run = ga.run_step(sandbox, workflow, job, step, ga.base_context())

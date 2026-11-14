@@ -32,6 +32,15 @@ EXEMPT = {
     "tests/test_data/snapshot_fixture/repo": (
         "a fixture ASH scans in the snapshot tests; its bytes are part of the expected output"
     ),
+    "tests/test_data/scanners/trivy/fixture_repo": (
+        "a known-positive fixture for trivy's misconfig scanner; the digest only satisfies "
+        "the image-pin check, and the fixture's bytes are part of the expected findings"
+    ),
+    "tests/integration/docs/ci_runners/gitlab-helper": (
+        "its base digest must equal the one images.debian-bookworm-slim names in "
+        "tests/integration/docs/ci_runners/runners.toml (test_docs_ci_runner_launchers.py "
+        "checks the two agree), so a Dependabot bump of this file alone would break that"
+    ),
 }
 
 

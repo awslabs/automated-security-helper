@@ -522,6 +522,10 @@ def _run_release_step(
         "HOME": str(tmp_path),
         "VERSION": "3.8.0",
         "MERGE_SHA": FAKE_SHA,
+        # The job's env maps this from the `resolve` job's output: the commit it
+        # pinned, which it checked equal to the merge commit. The step targets it
+        # and stops under `set -u` when it is unset.
+        "RELEASE_SHA": FAKE_SHA,
         "GITHUB_REPOSITORY": FAKE_REPO,
         "GH_TOKEN": "stub-token",
         "GH_CALL_LOG": str(log),

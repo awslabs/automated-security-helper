@@ -25,7 +25,12 @@ dependencies = [
 # AshConfig.model_json_schema(). The controller does not: it never imports ASH, so
 # a cluster can run this operator against an ASH image whose version differs from
 # whatever generated the CRD.
-generate = ["automated-security-helper"]
+#
+# No extra names ASH here. ASH installs from its git repository, and its name on
+# PyPI belongs to an unrelated project, so an extra that listed the name would
+# install that project. The generator runs with ASH's checkout and this directory
+# on PYTHONPATH instead (the remedy tests/unit/test_operator_crd_generator_check.py
+# prints).
 test = ["pytest>=8", "PyYAML>=6"]
 
 [project.scripts]
