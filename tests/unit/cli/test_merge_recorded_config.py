@@ -1416,7 +1416,7 @@ class TestVerdictSettings:
         named = [
             m
             for m in harness.warnings
-            if "ash merge's --config sets global_settings.suppressions" in m
+            if "ashx merge's --config sets global_settings.suppressions" in m
         ]
         assert named, harness.warnings
         assert "client_supplied" not in named[0], named[0]
@@ -1447,7 +1447,7 @@ class TestVerdictSettings:
         assert not [
             m
             for m in harness.warnings
-            if "ash merge's --config sets global_settings.suppressions" in m
+            if "ashx merge's --config sets global_settings.suppressions" in m
         ], harness.warnings
 
     def test_a_flag_that_decides_the_setting_leaves_no_config_warning(self, harness):
@@ -1465,7 +1465,7 @@ class TestVerdictSettings:
         assert not [
             m
             for m in harness.warnings
-            if "ash merge's --config sets fail_on_findings" in m
+            if "ashx merge's --config sets fail_on_findings" in m
         ], harness.warnings
 
     def test_an_operator_config_that_sets_no_verdict_setting_names_none(self, harness):
@@ -1486,7 +1486,7 @@ class TestVerdictSettings:
         result = harness.merge(shard_paths, "--config", str(operator))
 
         assert result.exit_code == 0, (result.output, result.exception)
-        assert not [m for m in harness.warnings if "ash merge's --config sets" in m]
+        assert not [m for m in harness.warnings if "ashx merge's --config sets" in m]
 
 
 @pytest.mark.unit

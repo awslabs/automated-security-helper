@@ -39,7 +39,7 @@
     'stderr': '''
       Usage: ashx [OPTIONS] COMMAND [ARGS]...
       Try 'ashx -h' for help.
-      Error: 'ash report' does not take --source-dir, given before it (see 'ash report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
+      Error: 'ashx report' does not take --source-dir, given before it (see 'ashx report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
   
     ''',
     'stdout': '',
