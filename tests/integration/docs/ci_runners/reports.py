@@ -88,7 +88,7 @@ _OPTION_SCAN = r"-(?:[A-Za-z]|-(?!(?:help|version)(?![\w-]))[A-Za-z])"
 
 def _runs_ash(subcommands: str, space: str = _ASH_SPACE) -> re.Pattern[str]:
     """``ash`` followed by one of ``subcommands`` or by an option."""
-    return re.compile(rf"(?<![\w.-])ash{space}(?:(?:{subcommands})\b|{_OPTION_SCAN})")
+    return re.compile(rf"(?<![\w.-])ashx?{space}(?:(?:{subcommands})\b|{_OPTION_SCAN})")
 
 
 #: A command that runs an ASH scan: ``ash scan``, or ``ash`` followed by an option,
@@ -100,7 +100,7 @@ RUNS_SCAN_OR_MERGE = _runs_ash("scan|merge")
 RUNS_SCAN_OR_MERGE_ANY_LINE = _runs_ash("scan|merge", _ANY_SPACE)
 _GATES = RUNS_SCAN_OR_MERGE
 _MATRIX = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
-_RUNS_ASH = re.compile(r"(?<![\w.-])uvx\b.*?(?<![\w.-])ash(?![\w.-])")
+_RUNS_ASH = re.compile(r"(?<![\w.-])uvx\b.*?(?<![\w.-])ashx?(?![\w.-])")
 #: Names the kept copies leave out: Jenkins' keys and secrets, and private keys.
 _SECRET_SHAPED = re.compile(
     r"^(?:secrets|secret\.key.*|identity\.key\.enc)$|\.(?:key|pem)$", re.IGNORECASE
@@ -989,7 +989,7 @@ def gating_step(workflow: Mapping[str, Any], command: str) -> tuple[str, str] | 
     for job_id, job in (workflow.get("jobs") or {}).items():
         for step in (job or {}).get("steps") or []:
             run = str((step or {}).get("run", ""))
-            if re.search(rf"(?<![\w.-])ash{_ASH_SPACE}{command}\b", run):
+            if re.search(rf"(?<![\w.-])ashx?{_ASH_SPACE}{command}\b", run):
                 return str(job_id), str(step.get("name") or "")
     return None
 

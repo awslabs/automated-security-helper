@@ -6,7 +6,7 @@ published by this project, so installing or running ASH by that name from PyPI g
 project's package, not ASH. Always install from the GitHub URL, as on this page.
 
 Installing ASH gives you the `ash` command. The scanners it runs are separate tools:
-after installing, run `ash dependencies install`, described in
+after installing, run `ashx dependencies install`, described in
 [Manage scanner tools](../docs/advanced-usage.md).
 
 ## Requirements
@@ -163,7 +163,7 @@ To install an extra from git, use the direct-reference form `name[extra] @ URL`,
 the commands on this page do. List several extras with commas, as in
 `[cdk,symbols]`.
 
-You can also add the cdk packages later: `ash dependencies install --tool cdk-nag`
+You can also add the cdk packages later: `ashx dependencies install --tool cdk-nag`
 installs them into ASH's environment, whichever way you installed ASH. A later
 `uv tool upgrade` or `uv tool install --force` rebuilds a uv tool environment without
 them, so installing the extra with ASH is simpler.
@@ -241,7 +241,7 @@ newer release:
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network and scans in a Nix shell" -->
 ```bash
 uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
-ash scan --mode nix
+ashx scan --mode nix
 ```
 
 Which flake supplies the shell's tools:
@@ -286,7 +286,7 @@ network access, and building with `HOMEBREW_FORMULA_BUILD_NETWORK=deny` is not
 supported. The formula also installs
 Node.js, which cdk-nag and npm-audit run on; a `node` already on your `PATH` comes
 first. It does not install the scanners that are separate programs, such as grype,
-syft, opengrep, and cfn-nag, so run `ash dependencies install` as with the other
+syft, opengrep, and cfn-nag, so run `ashx dependencies install` as with the other
 methods.
 
 In container mode, a Homebrew install builds its image from the commit the formula
@@ -313,7 +313,7 @@ with `brew untap awslabs/automated-security-helper`.
 
 The scanner tools and data that ASH installed stay behind. To remove them too:
 
-- `~/.ash/`, which holds the binaries from `ash dependencies install`, their install
+- `~/.ash/`, which holds the binaries from `ashx dependencies install`, their install
   records, and the cfn-guard rules. If you installed with `--bin-path` or
   `ASH_BIN_PATH`, the binaries are in that directory instead, and the cfn-guard rules
   are in `share/cfn-guard-rules` next to it.

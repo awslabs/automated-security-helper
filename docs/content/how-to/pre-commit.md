@@ -37,7 +37,7 @@ Exit code 1 means the scan did not complete, for example because a scanner was M
 
 Ignore ASH's output directory in git, so the reports are not committed. ASH leaves its own
 files there out of the scan whether or not `.gitignore` lists them, but it scans a file
-committed there like any other. `ash config init`
+committed there like any other. `ashx config init`
 writes a `.ash/.gitignore` that ignores it, or add the line yourself:
 
 ```text
@@ -263,7 +263,7 @@ pre-commit run --hook-stage manual ash-full-scan --all-files
 `.pre-commit-hooks.yaml` defines no Nix hook: `ash` and `ash-simple-scan` run precommit
 mode and `ash-full-scan` runs container mode, and ASH takes one `--mode` per run. To scan
 with the scanners that ASH's `flake.nix` supplies, add a `local` hook that calls
-`ash scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
+`ashx scan --mode nix` on an `ash` already on `PATH`, and give it a slow stage like
 `ash-full-scan`:
 
 <!-- doctest: config kind=pre-commit -->
@@ -273,7 +273,7 @@ repos:
     hooks:
       - id: ash-nix
         name: ASH scan in Nix mode
-        entry: ash scan --mode nix --no-progress
+        entry: ashx scan --mode nix --no-progress
         language: system
         pass_filenames: false
         stages: [manual]

@@ -65,7 +65,7 @@ UPLOADS = re.compile(
 )
 # A step that runs ASH: the `ash` command (directly, or through uv/uvx), Invoke-ASH, or
 # this repository's scan action.
-RUNS_ASH = re.compile(r"(?<![\w./-])ash(?=\s|$)|\bInvoke-ASH\b|/run-scan-test\b")
+RUNS_ASH = re.compile(r"(?<![\w./-])ashx?(?=\s|$)|\bInvoke-ASH\b|/run-scan-test\b")
 
 
 def workflow_files() -> list[Path]:

@@ -25,7 +25,7 @@ one of them.
 | Container | An image you build yourself; no ASH image is published | Build it yourself | [Container image](how-to/install.md#container-image), [Run in a container](how-to/run-in-a-container.md) |
 | Nix | Scan inside `nix develop` with `--mode nix` | Supported; see the note below | [Nix mode](how-to/install.md#nix-mode) |
 | Homebrew | The Homebrew tap | Supported | [Homebrew](how-to/install.md#homebrew) |
-| Pre-built image in your registry | `ash build-image`, then push to your own registry | Operator-built | [Roll out across repositories](getting-started/platform-teams.md) |
+| Pre-built image in your registry | `ashx build-image`, then push to your own registry | Operator-built | [Roll out across repositories](getting-started/platform-teams.md) |
 
 !!! note "Nix mode needs a current release"
     Nix mode is in the latest release; v3.7.x and older reject `--mode nix`, so
@@ -142,9 +142,9 @@ Tell ASH which Python modules hold your plugins with any of three inputs:
 
 - `ash_plugin_modules` in an ASH config file
   ([reference](reference/configuration.md#ash_plugin_modules));
-- the `--ash-plugin-modules` option of `ash scan`
+- the `--ash-plugin-modules` option of `ashx scan`
   ([reference](reference/cli.md#scan--ash-plugin-modules));
-- the `ASH_PLUGIN_MODULES` environment variable, which `ash scan` reads as the
+- the `ASH_PLUGIN_MODULES` environment variable, which `ashx scan` reads as the
   option's default.
 
 [Plugins](plugins/index.md#load-a-plugin-module) describes the separators each

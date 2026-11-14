@@ -51,7 +51,7 @@ Prerequisites:
   templates to the ASH release they ship in. The Terraform `ash_version` variable has
   no default, and the Terraform examples pin the same release. Both accept a tag, a
   branch, or a full commit SHA. The targets need options that no release up to 3.7.1
-  has: stateless MCP (`ash mcp --stateless-http`), and `ash merge` with the shard
+  has: stateless MCP (`ashx mcp --stateless-http`), and `ashx merge` with the shard
   options for the distributed pipeline. Set `AshVersion` to an ASH that has them, for
   example the commit SHA you deploy from. With one that lacks them, the Fargate MCP
   container exits at startup, the AgentCore server starts in stateful mode and logs a
@@ -64,7 +64,7 @@ Prerequisites:
 - The image the targets build has neither bubblewrap nor firejail. When a client's config or
   a scanned repository's config sets `sandbox.mode` to `bwrap` or `firejail`, every scanner
   that mode would wrap is MISSING and the scan is incomplete: an MCP scan ends with status
-  `incomplete`, and `ash` exits with code 1.
+  `incomplete`, and `ashx` exits with code 1.
 
 ## Network defaults {#network}
 

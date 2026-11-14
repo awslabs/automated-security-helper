@@ -45,7 +45,7 @@ reuses that copy afterward. The plugin does not need ASH installed separately.
 
     <!-- doctest: illustrative reason="downloads ASH and scanner tools from the network" -->
     ```bash
-    uvx --python 3.12 --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ash dependencies install
+    uvx --python 3.12 --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ashx dependencies install
     ```
 
     Without them the scans still run, but a scan ends with status `incomplete` when a scanner

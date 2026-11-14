@@ -1,6 +1,6 @@
 # Python API
 
-`run_ash_scan` runs an ASH scan from Python. It is the function that `ash scan` and the MCP server's scan tool call, so a scan started from Python behaves like one started from the command line, with one difference that matters: it ends a non-zero result by raising `SystemExit`.
+`run_ash_scan` runs an ASH scan from Python. It is the function that `ashx scan` and the MCP server's scan tool call, so a scan started from Python behaves like one started from the command line, with one difference that matters: it ends a non-zero result by raising `SystemExit`.
 
 ## Programmatic usage
 
@@ -41,10 +41,10 @@ The scan also writes its usual output directory, here `.ash/ash_output` under th
 | actionable findings (exit code 2) | raises `SystemExit(2)`, with no results attached |
 | incomplete scan: a scanner MISSING, ERROR, or with lost targets, no scanner ran, a converter that lost inputs, a rule that could not be evaluated, or a stale content database | raises `ScanIncompleteExit`, a `SystemExit` with code 1 whose `incompleteness` says why and whose `results` holds the model |
 | other errors (exit code 1) | raises `SystemExit(1)` |
-| a configuration that cannot be used or is invalid, as for [`ash scan`](exit-codes.md#scan): a `config` path or an `ASH_CONFIG` that names no readable file, a config file that does not parse or does not validate, or an override that does not validate (exit code 3) | raises `SystemExit(3)` |
+| a configuration that cannot be used or is invalid, as for [`ashx scan`](exit-codes.md#scan): a `config` path or an `ASH_CONFIG` that names no readable file, a config file that does not parse or does not validate, or an override that does not validate (exit code 3) | raises `SystemExit(3)` |
 | a scanner selection that selects nothing: no name in `scanners` matches a scanner, or every name in `scanners` is also in `exclude_scanners` (exit code 5) | raises `SystemExit(5)` before any scanner runs |
 | an output directory ASH refuses because it, a directory on the way to it, or one of its `reports`, `scanners`, `converted`, or `analysis` directories is a symbolic link | raises `OutputDirRefusedExit`, a `SystemExit` with code 1 whose `found` names the link and whose `reason` says what to do |
-| interrupted with Ctrl-C | lets `KeyboardInterrupt` propagate; `ash scan` turns it into exit code 130 |
+| interrupted with Ctrl-C | lets `KeyboardInterrupt` propagate; `ashx scan` turns it into exit code 130 |
 
 The exit codes are those of the CLI ([Exit codes](exit-codes.md)). To get the results of a scan that has findings, pass `fail_on_findings=False`, as the example does. To get them from an incomplete scan, catch `ScanIncompleteExit`:
 
@@ -112,7 +112,7 @@ With a `workspace_plan`, `run_ash_scan` returns the workspace result instead of 
 
 ## Parameters
 
-Every parameter is optional and can be passed by keyword. Unless the table says otherwise, a parameter means what the [`ash scan`](cli.md#scan) option of the same name means. An unknown keyword argument raises `TypeError`, so a misspelled parameter name stops the call before anything runs, and so does a positional argument past the last parameter.
+Every parameter is optional and can be passed by keyword. Unless the table says otherwise, a parameter means what the [`ashx scan`](cli.md#scan) option of the same name means. An unknown keyword argument raises `TypeError`, so a misspelled parameter name stops the call before anything runs, and so does a positional argument past the last parameter.
 
 <!-- doctest: options of=python.automated_security_helper.interactions.run_ash_scan.run_ash_scan -->
 | Parameter | Default | Notes |
@@ -170,9 +170,9 @@ Every parameter is optional and can be passed by keyword. Unless the table says 
 
 `config_base_gate`, `untrusted_config`, `trusted_config_path`, and `client_config_policy` let the MCP server apply the MCP-client limits of the [Configuration trust model](../concepts/trust-model.md) to the scans it runs; leave them at their defaults. `untrusted_config` raises `ValueError` in container or nix mode and with a `workspace_plan`, and `client_config_policy` raises it in container or nix mode.
 
-Some `ash scan` options have no parameter. They become config overrides or an environment variable:
+Some `ashx scan` options have no parameter. They become config overrides or an environment variable:
 
-| `ash scan` option | Python equivalent |
+| `ashx scan` option | Python equivalent |
 |---|---|
 | `--sandbox auto` | `config_overrides=["sandbox.mode=auto"]` |
 | `--compact-report` | `config_overrides=["reporters.markdown.options.compact=true"]` |

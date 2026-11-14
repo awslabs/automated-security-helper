@@ -15,7 +15,7 @@ Pass `--offline` to a scan:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --offline --scanners detect-secrets
+ashx scan --offline --scanners detect-secrets
 ```
 
 This scan runs offline as usual; in a repository with a hardcoded password it exits 2.
@@ -28,7 +28,7 @@ The other ways to turn it on:
 | How | Scope |
 |---|---|
 | `ASH_OFFLINE=YES` (also `TRUE` or `1`) in the environment | Every ASH run that inherits it. `--offline` in local mode sets it for one scan and restores it afterward. |
-| `ash scan --mode container --offline` | Builds an offline image and runs it with no network. See [the offline image](#offline-image). |
+| `ashx scan --mode container --offline` | Builds an offline image and runs it with no network. See [the offline image](#offline-image). |
 | `--mode nix` | Always offline. |
 | `scanners.<name>.options.offline: true` | That scanner only. `false`, the default, follows ASH and cannot give a scanner network while ASH is offline. npm-audit's option does not run it offline: it makes npm-audit MISSING, or SKIPPED in a project without a lockfile, as below. |
 
@@ -59,7 +59,7 @@ An offline scan of a project with a lockfile reports npm-audit MISSING and exits
 mkdir -p js-app
 printf '{"name": "js-app", "version": "1.0.0"}\n' > js-app/package.json
 printf '{"name": "js-app", "version": "1.0.0", "lockfileVersion": 3, "packages": {}}\n' > js-app/package-lock.json
-ash scan --offline --scanners npm-audit --source-dir js-app --output-dir js-app-results
+ashx scan --offline --scanners npm-audit --source-dir js-app --output-dir js-app-results
 ```
 
 To scan such a project offline, leave npm-audit out with `--exclude-scanners npm-audit`.
@@ -68,7 +68,7 @@ To scan such a project offline, leave npm-audit out with `--exclude-scanners npm
 
 Do this while the host still has network access:
 
-1. Install the scanner tools with `ash dependencies install`. It puts grype and trivy in
+1. Install the scanner tools with `ashx dependencies install`. It puts grype and trivy in
    `~/.ash/bin` (or the directory `ASH_BIN_PATH` names), which ASH searches but which is
    not on your `PATH`.
 2. Download each database into the cache the scan will read. Set the cache variables
@@ -96,7 +96,7 @@ sandboxed offline scan of a file with a known finding reports it.
 
 ## The offline image {#offline-image}
 
-`ash build-image --offline` and `ash scan --mode container --offline` build the image with
+`ashx build-image --offline` and `ashx scan --mode container --offline` build the image with
 `OFFLINE=YES`. The build needs network access: it downloads the grype database, the trivy
 database, and the semgrep rulesets named by `--offline-semgrep-rulesets` (default `p/ci`),
 copies the rulesets for opengrep, and fails if any of them is empty. The image has
@@ -113,7 +113,7 @@ The same holds for `./ash --offline` and `Invoke-ASH -Offline`. Container mode b
 
 <!-- doctest: illustrative reason="needs a container runtime and an offline image built elsewhere" -->
 ```bash
-ash scan --mode container --offline --no-build
+ashx scan --mode container --offline --no-build
 ```
 
 The image has to carry the name ASH runs, `automated-security-helper:<target>`, or the

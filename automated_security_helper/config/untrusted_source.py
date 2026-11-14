@@ -109,11 +109,11 @@ SHARD_RECORDED = UntrustedSource(
 #: confine_off_host_reporters_to_overrides``).
 REPORT_CONFIG_FILE = UntrustedSource(
     reason=(
-        "ash report cannot tell that config from the scanned repository's own, "
+        "ashx report cannot tell that config from the scanned repository's own, "
         "since stored results do not record which tree was scanned"
     ),
     remedy=(
-        "To send findings off the host from ash report, pass each of these "
+        "To send findings off the host from ashx report, pass each of these "
         "settings with --config-overrides instead."
     ),
     modules_remedy="To load a module, pass it with ash report's --config-overrides.",

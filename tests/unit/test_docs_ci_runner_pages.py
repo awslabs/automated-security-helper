@@ -259,11 +259,11 @@ CALL_ARGS_LINE = (
     "      ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db\n"
 )
 SHARD_LINE = (
-    "          ash scan --mode local --no-progress --no-fail-on-findings "
+    "          ashx scan --mode local --no-progress --no-fail-on-findings "
     "--no-allow-stale-content-db \\\n"
 )
 MERGE_LINE = (
-    "          ash merge --fail-on-findings --fail-on-incomplete-scanners "
+    "          ashx merge --fail-on-findings --fail-on-incomplete-scanners "
     "--output-dir .ash/ash_output \\\n"
 )
 

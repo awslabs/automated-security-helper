@@ -5,7 +5,7 @@ small project for you. The agent starts the scan, follows it to the end, reads t
 explains a finding, drafts a suppression, and compares two scans.
 
 Any agent or IDE that can start a local MCP server over stdio works: Claude Code, Kiro, Cursor,
-GitHub Copilot in VS Code, Codex, Gemini CLI, and others. The agent starts `ash mcp` as a child
+GitHub Copilot in VS Code, Codex, Gemini CLI, and others. The agent starts `ashx mcp` as a child
 process on your machine, and every scan runs there, with the scanner tools installed there.
 
 You need git and an agent that supports MCP tools.
@@ -25,7 +25,7 @@ Then install the tools the scanners run:
 
 <!-- doctest: illustrative reason="downloads scanner tools from the network" -->
 ```bash
-ash dependencies install
+ashx dependencies install
 ```
 
 You can skip this step. In an online scan with the sandbox off, ASH then installs the tools
@@ -101,7 +101,7 @@ to the ref you want, as described in
 [Change the ASH version a plugin uses](../how-to/agent-plugins.md#change-the-ash-version-a-plugin-uses).
 The entry does not install the scanner tools; step 1
 still applies, and [Install the ASH plugin for your agent](../how-to/agent-plugins.md) shows how
-to run `ash dependencies install` through `uvx`. Step 1 does not change what the entry
+to run `ashx dependencies install` through `uvx`. Step 1 does not change what the entry
 installs: the entry installs ASH without the `cdk` extra, so the cdk-nag scanner is reported MISSING,
 and [Run the MCP server](../how-to/mcp-server.md#start-the-server-with-uvx-instead-of-an-installed-ash)
 shows how to add the extra. To run the server in a container or over HTTP
@@ -116,10 +116,10 @@ In Claude Code you can add the server from the command line instead:
 
 <!-- doctest: illustrative reason="needs Claude Code" -->
 ```bash
-claude mcp add ash -- ash mcp
+claude mcp add ash -- ashx mcp
 ```
 
-Restart the agent, or reload its MCP servers, so it starts `ash mcp`.
+Restart the agent, or reload its MCP servers, so it starts `ashx mcp`.
 
 If the agent reports that it cannot start the server, it probably does not see the same `PATH`
 as your shell, which is common for desktop apps. Put the absolute path of `ash` in `command`.
@@ -289,7 +289,7 @@ EOF
 Check that ASH accepts the file:
 
 ```bash
-ash config validate
+ashx config validate
 ```
 
 It checks the config a scan of the project would use, the way the scan loads it, and ends
@@ -304,7 +304,7 @@ typo in a required key does the same, because the required field then goes missi
 <!-- doctest: run expect-exit=3 -->
 ```bash
 sed 's/reason:/reasn:/' .ashrc.yaml > typo.yaml
-ash config validate --config typo.yaml
+ashx config validate --config typo.yaml
 ```
 
 Then delete the copy:
@@ -365,7 +365,7 @@ your reason. The scan now has no actionable findings.
 ## Next steps
 
 - [ASH GenAI integration guide](../docs/genai-steering-guide.md): instructions written for the
-  agent itself. `ash get-genai-guide` writes the guide for your installed version of ASH to a
+  agent itself. `ashx get-genai-guide` writes the guide for your installed version of ASH to a
   file, without network access, so you can give it to your agent.
 - [MCP tools reference](../reference/mcp-tools.md): every tool, its parameters, and its
   resources.

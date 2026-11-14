@@ -64,7 +64,7 @@ ASH_REPORTERS = [FindingsListReporter]
 
 ```bash
 export PYTHONPATH="$PWD/ash-plugins"
-ash plugin list --ash-plugin-modules acme_ash_plugins
+ashx plugin list --ash-plugin-modules acme_ash_plugins
 ```
 
 The reporters table has a row for the plugin:
@@ -80,7 +80,7 @@ A loaded reporter runs in every scan, beside the built-in ones. This scan uses o
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
 ```
 
 In a repository with one hardcoded password, the scan exits with code 2. Read the report:
@@ -97,17 +97,17 @@ It reads:
 detect-secrets	SECRET-SECRET-KEYWORD	app.py:3
 ```
 
-To see the report again from the last scan's results without scanning, use `ash report`, which takes the module through a config override. It prints the report to the terminal and writes no file:
+To see the report again from the last scan's results without scanning, use `ashx report`, which takes the module through a config override. It prints the report to the terminal and writes no file:
 
 ```bash
-ash report --format findings-list --config-overrides 'ash_plugin_modules+=[acme_ash_plugins]'
+ashx report --format findings-list --config-overrides 'ash_plugin_modules+=[acme_ash_plugins]'
 ```
 
-`ash scan --output-formats` and the `output_formats` config key cannot select this reporter: they accept only the names of the reporters that ship with ASH, and when either names any, only the reporters it names run. `--output-formats` refuses the name of another reporter as a usage error, with exit code 5, and the config key refuses it as an invalid configuration, with exit code 3:
+`ashx scan --output-formats` and the `output_formats` config key cannot select this reporter: they accept only the names of the reporters that ship with ASH, and when either names any, only the reporters it names run. `--output-formats` refuses the name of another reporter as a usage error, with exit code 5, and the config key refuses it as an invalid configuration, with exit code 3:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline \
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline \
   --output-formats findings-list
 ```
 
@@ -278,7 +278,7 @@ class FindingsBucketReporter(ReporterPluginBase[FindingsBucketConfig]):
 
 A reporter that sends findings somewhere, or writes them to a path its options name, declares those options in `destination_options`, as `FindingsBucketReporter` does. List every option that chooses where findings are sent or written, or which credentials send them: an endpoint, a region, an account, a bucket, a profile, a token, an output path. Name each as its field in the options model. An alias of the field is covered as well. The default is `()`.
 
-When the config was built from a file inside the scanned tree (a discovered `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`), or from a file an MCP client delivered, ASH takes these options from the trusted base instead: the defaults, an operator config outside the tree, and `--config-overrides`. A value such a file set is replaced, under any spelling of the reporter's section that ASH reads as this reporter's, and one warning names each option it ignored. The reporter's other options still apply from the file. ASH does this once it has imported your plugin module and before it builds any reporter, in a scan and in `ash report`. The built-in AWS reporters declare theirs the same way ([Configuration trust model](../concepts/trust-model.md#what-each-tier-may-set)).
+When the config was built from a file inside the scanned tree (a discovered `.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or `ASH_CONFIG`), or from a file an MCP client delivered, ASH takes these options from the trusted base instead: the defaults, an operator config outside the tree, and `--config-overrides`. A value such a file set is replaced, under any spelling of the reporter's section that ASH reads as this reporter's, and one warning names each option it ignored. The reporter's other options still apply from the file. ASH does this once it has imported your plugin module and before it builds any reporter, in a scan and in `ashx report`. The built-in AWS reporters declare theirs the same way ([Configuration trust model](../concepts/trust-model.md#what-each-tier-may-set)).
 
 A reporter that declares any destination option sends findings somewhere, so whether it runs is the operator's choice too, in both directions. Its `enabled` comes from the trusted base, or from the default of your config model's `enabled` when the trusted base sets none: such a file's `enabled: true` or `enabled: false` is replaced with a warning where it differs, and leaving the section out leaves the reporter as the trusted base has it. That is why `FindingsBucketConfig` sets `enabled` to `False`. A reporter that declares no destination options writes only local files, and its `enabled` applies from the file.
 
@@ -301,4 +301,4 @@ A repository that names an endpoint in its `.ash/.ash.yaml` then changes nothing
 
 ## Workspace scans
 
-In a workspace scan (`ash scan --workspace`), ASH asks each reporter what to do with several projects through its `workspace_behaviour` class variable. The default, `ReporterWorkspaceBehaviour.PER_PROJECT`, writes the report once per project, under each project's own output directory, and no workspace-level file. Set `MERGED` only if your reporter handles results with one SARIF run per project. [Scale to large repositories](../how-to/scale-large-repos.md) covers workspace scans.
+In a workspace scan (`ashx scan --workspace`), ASH asks each reporter what to do with several projects through its `workspace_behaviour` class variable. The default, `ReporterWorkspaceBehaviour.PER_PROJECT`, writes the report once per project, under each project's own output directory, and no workspace-level file. Set `MERGED` only if your reporter handles results with one SARIF run per project. [Scale to large repositories](../how-to/scale-large-repos.md) covers workspace scans.

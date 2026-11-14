@@ -38,7 +38,7 @@ module inside it, ASH drops that entry, logs a warning that says why, and runs t
 its default policy, the MCP server refuses a config an MCP client delivered whose
 `ash_plugin_modules` list names it; in any other case it drops the entry the same way.
 
-For `ash scan`, turn on the reporters you use in the same operator config. This one sends
+For `ashx scan`, turn on the reporters you use in the same operator config. This one sends
 to S3 and CloudWatch Logs only:
 
 <!-- doctest: config kind=ash -->
@@ -76,7 +76,7 @@ Ignoring reporters.aws-security-hub.enabled from /home/me/repo/.ash/.ash.yaml: t
 Under its default policy, the MCP server refuses a delivered config that turns one of
 these reporters on.
 
-All of this is how `ash scan` reads the reporters' settings. `ash report` and `ash merge`
+All of this is how `ashx scan` reads the reporters' settings. `ashx report` and `ashx merge`
 take whether these reporters run, and where they send, from `--config-overrides` only, and
 ignore those settings in any config file ([Rendering a reporter from saved
 results](#ash-report)).
@@ -92,7 +92,7 @@ from the run without changing the exit code. An enabled reporter that is missing
 does not run either, and ASH logs an error that names the setting and how to set it, once
 per run for each reporter and setting: the bucket for S3, the log group for CloudWatch
 Logs, and the region (`aws_region`, else `AWS_REGION` or `AWS_DEFAULT_REGION`) for S3,
-CloudWatch Logs, and Security Hub. A run is one `ash scan`, `ash report`, or `ash merge`,
+CloudWatch Logs, and Security Hub. A run is one `ashx scan`, `ashx report`, or `ashx merge`,
 and a workspace run gives each error once for all its projects.
 Bedrock's region defaults to `us-east-1`, so it has no region only when a config sets
 `aws_region` to `null`. For S3 with no region set:
@@ -110,8 +110,8 @@ list too, as in `--output-formats sarif,s3`.
 
 These options choose where data goes, with which identity, what the Bedrock reporter
 sends. ASH takes them only from operator
-sources: the defaults below, an operator config file, or `--config-overrides`. `ash report`
-and `ash merge` take them from the defaults and `--config-overrides` only.
+sources: the defaults below, an operator config file, or `--config-overrides`. `ashx report`
+and `ashx merge` take them from the defaults and `--config-overrides` only.
 
 The operator-only options of `s3`:
 
@@ -308,7 +308,7 @@ the reporter does not run. A refusal of `DescribeHub` for lack of permission onl
 warning, and the import reports its own refusal. Before it imports, the reporter calls
 `sts:GetCallerIdentity` whether or not `account_id` is set, and refuses to import when
 `account_id` names any other account than the credentials'. If Security Hub does not import every finding, the reporter fails
-with the counts and the reason, and `ash report` exits non-zero. The file the reporter
+with the counts and the reason, and `ashx report` exits non-zero. The file the reporter
 writes, `reports/ash.aws-security-hub.asff.json`, is a receipt with the number of findings
 imported and archived, plus the findings as they were sent. In a workspace scan the reporter
 runs once per project.
@@ -318,15 +318,15 @@ and `securityhub:GetFindings` when `archive_resolved_findings` is on.
 
 ## Rendering a reporter from saved results {#ash-report}
 
-`ash report --format s3`, or the name of any of the other three, runs that reporter
+`ashx report --format s3`, or the name of any of the other three, runs that reporter
 against the results of a previous scan, which sends the data again. Stored results do not
-record which tree was scanned, so a config file `ash report` reads could be the scanned
-repository's own, even one outside every git checkout. So `ash report` takes whether the
+record which tree was scanned, so a config file `ashx report` reads could be the scanned
+repository's own, even one outside every git checkout. So `ashx report` takes whether the
 reporter runs, and its destination options, from `--config-overrides` only:
 
 <!-- doctest: illustrative reason="sends the stored findings to an S3 bucket" -->
 ```bash
-ash report --format s3 \
+ashx report --format s3 \
   --config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_aws_plugins]' \
   --config-overrides reporters.s3.enabled=true \
   --config-overrides reporters.s3.options.bucket_name=my-bucket
@@ -335,35 +335,35 @@ ash report --format s3 \
 The config file that `--config` or `ASH_CONFIG` names still applies its other settings.
 Its `enabled` and destination options for these reporters are ignored with a warning, and
 a reporter that `--config-overrides` does not turn on is refused with exit code 1. With the
-same settings in a file, `ash report --format s3 --config /etc/ash/ash.yaml` sends nothing
+same settings in a file, `ashx report --format s3 --config /etc/ash/ash.yaml` sends nothing
 and prints:
 
 ```text
-WARNING  Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, reporters.s3.enabled from /etc/ash/ash.yaml: ash report cannot tell that config from the scanned repository's own, since stored results do not record which tree was scanned, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To send findings off the host from ash report, pass each of these settings with --config-overrides instead.
-Error: reporter 's3' sends findings off the host and is not enabled. ash report takes whether it runs, and where it sends, from --config-overrides: pass --config-overrides reporters.s3.enabled=true and its destination options.
+WARNING  Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, reporters.s3.enabled from /etc/ash/ash.yaml: ashx report cannot tell that config from the scanned repository's own, since stored results do not record which tree was scanned, and these options choose whether findings are sent, where they are sent or written, and which credentials send them. To send findings off the host from ashx report, pass each of these settings with --config-overrides instead.
+Error: reporter 's3' sends findings off the host and is not enabled. ashx report takes whether it runs, and where it sends, from --config-overrides: pass --config-overrides reporters.s3.enabled=true and its destination options.
 ```
 
-`ash merge` holds its `--config` file to the same rule, since the shards do not record the
+`ashx merge` holds its `--config` file to the same rule, since the shards do not record the
 tree either: the merged findings go off the host only with the reporter's `enabled` and
-destination options in `ash merge`'s `--config-overrides`, and the file's values are
-ignored with the same warning, naming `ash merge`. A reporter a plugin module adds is held
-the same way for the options it declares as destinations. `ash merge` has these reporters
+destination options in `ashx merge`'s `--config-overrides`, and the file's values are
+ignored with the same warning, naming `ashx merge`. A reporter a plugin module adds is held
+the same way for the options it declares as destinations. `ashx merge` has these reporters
 only when the package is named for the merge itself, in its `--config` file's
 `ash_plugin_modules` or with
 `--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_aws_plugins]'`:
 a package that only the shards' scan loaded is not loaded. It runs them only when
 `--output-formats` is not given.
 
-`ash report` runs the reporter's pre-flight check first, as a scan does. When the check
+`ashx report` runs the reporter's pre-flight check first, as a scan does. When the check
 refuses, for a missing setting or for credentials it cannot find, the reporter sends
-nothing, and `ash report` logs the reason and exits 1. For S3 with no region set:
+nothing, and `ashx report` logs the reason and exits 1. For S3 with no region set:
 
 ```text
 ERROR    Reporter 's3' is enabled but does not run: no aws_region is set. Set it with --config-overrides reporters.s3.options.aws_region=<value>, or set AWS_REGION or AWS_DEFAULT_REGION in the environment, which is read only when no config sets aws_region.
 Error: reporter 's3' cannot run: its dependency check refused. See the log above for the reason.
 ```
 
-`ash report` has no `--ash-plugin-modules` option and does
+`ashx report` has no `--ash-plugin-modules` option and does
 not read `ASH_PLUGIN_MODULES`, and without `--config` it reads the config file of the
 directory you run it from. Run it from outside the repository, and load the package with
 your config file (`--config`) or with

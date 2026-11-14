@@ -49,14 +49,14 @@ You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and
 
     The scanners are not project dependencies. A scan runs the Python-based ones, such
     as bandit, checkov, and semgrep, with `uv tool run`, and finds binary ones such as
-    grype or trivy on your `PATH` or in `~/.ash/bin`, where `ash dependencies install`
+    grype or trivy on your `PATH` or in `~/.ash/bin`, where `ashx dependencies install`
     puts them. See [Manage scanner tools](../docs/advanced-usage.md).
 
 3. Check that the ASH in your checkout runs:
 
     <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
     ```bash
-    uv run ash --version
+    uv run ashx --version
     ```
 
     It prints the version in `pyproject.toml`.
@@ -98,7 +98,7 @@ from that project and point uv at the checkout with `uv run --project`:
 <!-- doctest: illustrative reason="runs ASH from a checkout of this repository" -->
 ```bash
 cd ~/src/my-project
-uv run --project ~/src/automated-security-helper ash --source-dir . --output-dir .ash/ash_output
+uv run --project ~/src/automated-security-helper ashx --source-dir . --output-dir .ash/ash_output
 ```
 
 `uv run --project` keeps your working directory. `uv run --directory` also uses the
