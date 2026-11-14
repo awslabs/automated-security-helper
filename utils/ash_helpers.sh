@@ -3,7 +3,7 @@
 #################################################################################
 ###                 ~~ ASH HELPERS ~~
 ### Source this file from your shell profile to get an `invoke-ash` command that
-### runs this checkout's ./ash container entrypoint from any directory:
+### runs the ashx CLI in container mode from any directory:
 ###
 ### $ echo ". '/path/to/automated-security-helper/utils/ash_helpers.sh'" >> ~/.bashrc
 ###
@@ -11,7 +11,7 @@
 ### checkout is found from this file's location, following a symlink to it. dash
 ### and other POSIX shells do not, so there set ASH_ROOT_DIR to the checkout
 ### first. A preset ASH_ROOT_DIR is also used when this file's location has no
-### ash above it, as for a copy kept outside the checkout:
+### pyproject.toml above it, as for a copy kept outside the checkout:
 ###
 ### ASH_ROOT_DIR='/path/to/automated-security-helper'
 ### . "${ASH_ROOT_DIR}/utils/ash_helpers.sh"
@@ -34,11 +34,11 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
 elif (eval '[ -n "${.sh.version}" ]') 2>/dev/null; then
   eval '_ash_helpers_file="${.sh.file}"'
 fi
-# The directory above this file is the checkout when it has an ash entrypoint. A
+# The directory above this file is the checkout when it has a pyproject.toml. A
 # symlink to this file (from ~/bin, say) is followed until one does, with readlink,
 # which is not POSIX but is on every system that has bash, zsh, or ksh93. It is
 # followed at most 40 links deep, so a loop of links ends. Only a directory with an
-# ash replaces a preset ASH_ROOT_DIR, so a copy of this file kept outside the checkout
+# pyproject.toml replaces a preset ASH_ROOT_DIR, so a copy of this file kept outside the checkout
 # still works with one.
 _ash_helpers_root=""
 _ash_helpers_hops=0
@@ -49,7 +49,7 @@ while [ -n "${_ash_helpers_file}" ]; do
   # and a zsh chpwd hook may print anything. The || keeps a dangling link from ending
   # a shell that runs under set -e.
   _ash_helpers_root="$(CDPATH="" cd -P -- "$(dirname -- "${_ash_helpers_file}")/.." >/dev/null 2>&1 && pwd -P)" || _ash_helpers_root=""
-  if [ -f "${_ash_helpers_root}/ash" ]; then
+  if [ -f "${_ash_helpers_root}/pyproject.toml" ]; then
     ASH_ROOT_DIR="${_ash_helpers_root}"
     break
   fi
@@ -70,7 +70,7 @@ unset _ash_helpers_file _ash_helpers_root _ash_helpers_hops _ash_helpers_link
 # do. It returns from the sourced file and does not end the shell that sourced it.
 if [ -z "${ASH_ROOT_DIR:-}" ]; then
   if [ -n "${_ash_helpers_found}" ]; then
-    echo "ash_helpers.sh: '${_ash_helpers_found}', the directory above this file, has no ash entrypoint. Set ASH_ROOT_DIR to your automated-security-helper checkout before sourcing this file." >&2
+    echo "ash_helpers.sh: '${_ash_helpers_found}', the directory above this file, is not an ASH checkout (it has no pyproject.toml). Set ASH_ROOT_DIR to your automated-security-helper checkout before sourcing this file." >&2
   else
     echo "ash_helpers.sh: this shell does not report the path of a sourced file. Set ASH_ROOT_DIR to your automated-security-helper checkout before sourcing this file." >&2
   fi
@@ -78,8 +78,8 @@ if [ -z "${ASH_ROOT_DIR:-}" ]; then
   return 3 2>/dev/null || exit 3
 fi
 unset _ash_helpers_found
-if [ ! -f "${ASH_ROOT_DIR}/ash" ]; then
-  echo "ash_helpers.sh: ASH_ROOT_DIR is '${ASH_ROOT_DIR}', which has no ash entrypoint. Set ASH_ROOT_DIR to your automated-security-helper checkout before sourcing this file." >&2
+if [ ! -f "${ASH_ROOT_DIR}/pyproject.toml" ]; then
+  echo "ash_helpers.sh: ASH_ROOT_DIR is '${ASH_ROOT_DIR}', which is not an ASH checkout (it has no pyproject.toml). Set ASH_ROOT_DIR to your automated-security-helper checkout before sourcing this file." >&2
   return 3 2>/dev/null || exit 3
 fi
 
