@@ -535,7 +535,7 @@ jobs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     # Longer than the 25 the deb and rpm jobs get. This one additionally downloads a managed
     # CPython for uv, searches the SDK for two tools, compiles three launchers twice (N and
-    # the N-1 package the upgrade leg starts from), and does a full pip install of ASH's
+    # the N-1 package the upgrade leg starts from), and installs all of ASH's
     # dependencies twice, once per venv bootstrap, before four scans. The bootstrap alone
     # measured about 90 seconds on windows-latest.
     timeout-minutes: 55

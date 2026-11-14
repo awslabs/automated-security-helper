@@ -363,7 +363,7 @@ class TestTheCodeIsPublished:
             # paragraph still reads and a phrase elsewhere on the page does not.
             "the exit-codes reference's dependencies install sentence": (
                 re.search(
-                    rf"Two `ash dependencies install` selections exit "
+                    rf"Two `ashx dependencies install` selections exit "
                     rf"{BAD_SELECTION_EXIT} instead: a `--tool` name[^.|]*, and a "
                     r"`--plugin-type` other than `converter`, `scanner`, or `reporter`",
                     " ".join(reference.split()),

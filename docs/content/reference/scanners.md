@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 18 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 18 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ashx scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -52,7 +52,7 @@ The network entry of each scanner below is its default. `sandbox.network_scanner
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `actionlint`
-- Install: pinned, checksum-verified release of `actionlint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: pinned, checksum-verified release of `actionlint` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -135,7 +135,7 @@ Options, under `scanners.cdk-nag.options`. An option not listed here refuses the
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `cfn-guard`
-- Install: pinned, checksum-verified release of `cfn-guard`; custom command by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: pinned, checksum-verified release of `cfn-guard`; custom command by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -189,7 +189,7 @@ Options, under `scanners.cfn-lint.options`. An option not listed here refuses th
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `cfn_nag_scan`
-- Install: `gem install cfn-nag -v 0.8.10` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: none declared
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -268,7 +268,7 @@ Options, under `scanners.detect-secrets.options`. An option not listed here refu
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `gitleaks`
-- Install: pinned, checksum-verified release of `gitleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: pinned, checksum-verified release of `gitleaks` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -294,7 +294,7 @@ Options, under `scanners.gitleaks.options`. An option not listed here refuses th
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `grype`
-- Install: pinned, checksum-verified release of `grype` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Install: pinned, checksum-verified release of `grype` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `GRYPE_*`
@@ -339,7 +339,7 @@ Options, under `scanners.npm-audit.options`. An option not listed here refuses t
 - Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `opengrep`
-- Install: pinned, checksum-verified release of `opengrep` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Install: pinned, checksum-verified release of `opengrep` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `OPENGREP_*`, `SEMGREP_*`
@@ -369,7 +369,7 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 - Enabled by default: yes
 - Tool type: SBOM
 - Command: `syft`
-- Install: pinned, checksum-verified release of `syft` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: pinned, checksum-verified release of `syft` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `SYFT_*`
@@ -395,7 +395,7 @@ Options, under `scanners.syft.options`. An option not listed here refuses the co
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `trivy`
-- Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Install: pinned, checksum-verified release of `trivy` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `TRIVY_*`
@@ -454,7 +454,7 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 
 - Scanner page: [`ferret-scan` scanner page](../docs/plugins/community/ferret-scan-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner`
-- Provided by: community module `ash_ferret_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
+- Provided by: community module `ash_ferret_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `ferret-scan`
@@ -497,7 +497,7 @@ Options, under `scanners.ferret-scan.options`. An option not listed here refuses
 
 - Scanner page: [`snyk-code` scanner page](../docs/plugins/community/snyk-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner`
-- Provided by: community module `ash_snyk_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
+- Provided by: community module `ash_snyk_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `snyk`
@@ -521,11 +521,11 @@ Options, under `scanners.snyk-code.options`. An option not listed here refuses t
 
 - Scanner page: [`trivy-repo` scanner page](../docs/plugins/community/trivy-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
-- Provided by: community module `ash_trivy_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
+- Provided by: community module `ash_trivy_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `trivy`
-- Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Install: pinned, checksum-verified release of `trivy` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `TRIVY_*`

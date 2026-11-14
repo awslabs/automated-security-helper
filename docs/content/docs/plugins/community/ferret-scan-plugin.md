@@ -74,7 +74,7 @@ This plugin is tested and compatible with specific ferret-scan versions. Using v
 ### Install Ferret Scan
 
 The plugin runs the `ferret-scan` command. ASH finds it on `PATH`, or beside the
-Python interpreter that runs ASH, which is where `ash dependencies install` puts it.
+Python interpreter that runs ASH, which is where `ashx dependencies install` puts it.
 
 **ASH (Recommended)** — installs the version the plugin is tested against into
 the Python environment that runs ASH, with pip or uv, whichever owns that
@@ -244,7 +244,7 @@ Configuration validation failed: scanners.ferret-scan.options (scanner 'ferret-s
 ```
 
 Any other option the plugin does not declare is refused the same way, as `Unknown
-key '<option>'` with the accepted options listed. `ash config validate` and `ash
+key '<option>'` with the accepted options listed. `ashx config validate` and `ashx
 config lint` do not import the plugin, so they do not catch either kind; both say
 its section is not checked there, and a scan checks it.
 
@@ -429,7 +429,7 @@ Set them with `--config-overrides`:
 
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
-ash --config-overrides 'scanners.ferret-scan.options.profile=security-audit'
+ashx --config-overrides 'scanners.ferret-scan.options.profile=security-audit'
 ```
 
 or in a config file outside the scanned tree, named with `--config`:

@@ -22,7 +22,7 @@
       "name": "results"
     }
   ],
-  "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
+  "description": "Run ASH (Automated Security Helper) security scans via MCP \u2014 Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
   "display_name": "ASH Security Scanner",
   "homepage": "https://github.com/awslabs/automated-security-helper",
   "keywords": [

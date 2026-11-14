@@ -1999,7 +1999,7 @@ def check_session_variables(
 # ---------------------------------------------------------------------------
 
 ASH_PROGRAMS = frozenset(
-    {"ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
+    {"ash", "ashx", "ashv3", "automated-security-helper", "agentic-security-harness"}
 )
 ASH_PACKAGE = "automated-security-helper"
 ASH_MODULE = "automated_security_helper"

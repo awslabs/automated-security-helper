@@ -19,7 +19,7 @@ You need:
 
 ASH runs without Node.js or Ruby. The scanners that need them are cdk-nag, cfn-nag, and
 npm-audit, and this tutorial's project has nothing for them to scan, so they show as
-SKIPPED either way; `ash dependencies install` in step 3 still exits 1 and names them.
+SKIPPED either way; `ashx dependencies install` in step 3 still exits 1 and names them.
 In a project with CloudFormation templates or a lockfile beside a `package.json`, those
 scanners show as MISSING without their tools, and the scan exits 1. Step 5 shows what to
 do then.
@@ -69,7 +69,7 @@ ASH runs other projects' scanners. Install the ones it can install for you:
 
 <!-- doctest: illustrative reason="downloads scanner tools from GitHub releases and PyPI" -->
 ```bash
-ash dependencies install
+ashx dependencies install
 ```
 
 It prints a table with one row per scanner and ends with a box like this:
@@ -127,7 +127,7 @@ entries. `archive` passes its argument to a shell, so a directory name such as
 
 Do the same in your own projects before you scan them: the scan results can contain
 the values of secrets that scanners detect, so `.ash/ash_output/` must not be
-committed. Add it to `.gitignore`, or run `ash config init`, which writes a
+committed. Add it to `.gitignore`, or run `ashx config init`, which writes a
 `.gitignore` inside `.ash/`.
 
 ## 5. Run the scan
@@ -214,7 +214,7 @@ report, Markdown and text summaries, SARIF, and other formats.
 ### If a scanner shows MISSING
 
 A MISSING scanner makes the scan exit 1 and print which scanners did not run, and why.
-If `ash dependencies install` could not download grype, for example, the scan ends
+If `ashx dependencies install` could not download grype, for example, the scan ends
 with:
 
 ```text
@@ -222,7 +222,7 @@ ERROR (1) Exiting because the scan was incomplete: 1 selected scanner(s) did not
 evaluate everything they were given
   grype: MISSING
     its tool grype was not found on PATH or in ...; install it with
-`ash dependencies install` or exclude grype with --exclude-scanners
+`ashx dependencies install` or exclude grype with --exclude-scanners
 ```
 
 Install the tool the scanner needs ([Troubleshoot](../how-to/troubleshoot.md#a-scanner-shows-missing)
@@ -238,12 +238,12 @@ An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
 
 ## 6. Look at a finding
 
-`ash report` prints the latest results in the terminal. After the scan details, a
+`ashx report` prints the latest results in the terminal. After the scan details, a
 legend, the scanner table, and the files with the most findings, it prints one block
 per actionable finding:
 
 ```bash
-ash report
+ashx report
 ```
 
 ```text
@@ -267,7 +267,7 @@ Piped to another program, or with `--no-color`, it prints the same report as Mar
 
 <!-- doctest: run -->
 ```bash
-ash report --no-color
+ashx report --no-color
 ```
 
 <!-- doctest: output -->
@@ -286,7 +286,7 @@ Use of weak MD5 hash for security. Consider usedforsecurity=False
 
 Finding 2 is B602, `subprocess call with shell=True`, at `app.py:11`. The Rule ID is
 what a suppression names in the next step. To browse the findings interactively, run
-`ash inspect findings`, which shows the same value in its Rule ID column, or open
+`ashx inspect findings`, which shows the same value in its Rule ID column, or open
 `.ash/ash_output/reports/ash.html` in a browser.
 
 ## 7. Suppress the false positive

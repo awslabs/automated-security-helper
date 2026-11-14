@@ -324,6 +324,26 @@ MAIN_WORKFLOW_WRITES = {
         "actionlint",
         "Self-test -- an unquoted expansion must be reported",
     ): 1,
+    # The two steps that resolve and pin the ASH to install write ASH_UVX_SOURCE and
+    # ASH_ASSETS_URL to GITHUB_ENV on purpose: every later uv/uvx call and the cfn-nag
+    # Gemfile fetch must use the one commit the ref resolved to. The ref is held to
+    # what `git check-ref-format` accepts and the repository to owner/repo before it
+    # is written (see the comments above those steps). Main has both steps unchanged.
+    (
+        ".github/workflows/run-ash-security-scan.yml",
+        "ash",
+        "Resolve the ASH to install",
+    ): 1,
+    (
+        ".github/workflows/run-ash-security-scan.yml",
+        "ash",
+        "Pin the ASH ref to a commit",
+    ): 1,
+    (
+        ".github/workflows/run-ash-security-scan.yml",
+        "ash",
+        "Install actionlint, cfn-guard, gitleaks and trivy",
+    ): 1,
     (".github/workflows/run-ash-security-scan.yml", "ash", "Install Grype"): 1,
     (".github/workflows/run-ash-security-scan.yml", "ash", "Install Syft"): 1,
     (".github/workflows/run-ash-security-scan.yml", "ash", "Install OpenGrep"): 1,

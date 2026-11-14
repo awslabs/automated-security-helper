@@ -450,7 +450,7 @@ _KEYED_HEADERS = {
 MARKED_PAGES = sorted(set(REFERENCE_PAGES.values()))
 _HEADING_TOOL = re.compile(r"^## ([a-z][a-z0-9_]*)$")
 _HEADING_COMMAND = re.compile(
-    r"^#{2,3} (?:<a id=\"[^\"]+\"></a>)?`ash((?: [a-z][\w-]*)*)`$"
+    r"^#{2,3} (?:<a id=\"[^\"]+\"></a>)?`ashx?((?: [a-z][\w-]*)*)`$"
 )
 
 
@@ -1545,9 +1545,11 @@ print(json.dumps({
 
 def _validator_note_kind(note: str) -> str:
     """The verdict a page note states: "rejects", "warns" or "" (no note)."""
-    if "`ash config validate`" not in note:
+    # The generator writes the code's own wording (`ash`) and the page spells it
+    # `ashx` (scripts/_reference_docs.py canonical_cli), so a note is read in either.
+    if not re.search(r"`ashx? config validate`", note):
         return ""
-    return "warns" if "`ash config validate` warns" in note else "rejects"
+    return "warns" if re.search(r"`ashx? config validate` warns", note) else "rejects"
 
 
 @pytest.mark.integration
@@ -1576,7 +1578,7 @@ def test_configuration_says_what_ash_config_validate_does_with_each_key(
         own_note = row
         if name != key:
             spelled = field["spelled"]
-            mentions = f"as `{name}`, which `ash config validate`" in row
+            mentions = f"as `{name}`, which `ashx config validate`" in row
             assert mentions == bool(spelled), (key, spelled, row, field["spelled_said"])
             if spelled:
                 stated = _validator_note_kind(row.split(f"as `{name}`, which")[1])
@@ -1594,10 +1596,10 @@ def test_configuration_says_what_ash_config_validate_does_with_each_key(
     for verdict in set(verdicts.values()) - {""}:
         kinds = [s[:-1] for s, v in verdicts.items() if v == verdict]
         phrase = "warns" if verdict == "warns" else "rejects"
-        assert f"`ash config validate` {phrase}" in name_row, (verdicts, name_row)
+        assert f"`ashx config validate` {phrase}" in name_row, (verdicts, name_row)
         assert all(kind in name_row for kind in kinds), (verdicts, name_row)
     if not any(verdicts.values()):
-        assert "`ash config validate`" not in name_row, name_row
+        assert "`ashx config validate`" not in name_row, name_row
 
 
 @pytest.mark.unit
@@ -1807,7 +1809,7 @@ def test_mcp_notes_match_the_server() -> None:
     returned = _progress_keys()
     assert "results_available" not in returned or "`results_available`" in progress
     assert "results_available" in returned or "`results_available`" not in progress
-    assert "ash mcp --profile NAME=path/to/ash.yaml" in _section(
+    assert "ashx mcp --profile NAME=path/to/ash.yaml" in _section(
         text, "## list_profiles"
     )
     install = _section(text, "## check_installation")
@@ -1962,14 +1964,14 @@ def test_community_loading_is_scoped_to_ash_scan() -> None:
     """
     text = _page("scanners.md")
     intro = text.split("\n| Scanner |", 1)[0]
-    assert "that `ash scan` loads only when" in intro
+    assert "that `ashx scan` loads only when" in intro
     assert "(../plugins/index.md#what-a-plugin-can-do)" in intro
     provided = [
         ln for ln in text.splitlines() if ln.startswith("- Provided by: community")
     ]
     assert provided, "no community scanners on the page"
     for line in provided:
-        assert "which `ash scan` loads when" in line, line
+        assert "which `ashx scan` loads when" in line, line
 
 
 # ---------------------------------------------------------------------------

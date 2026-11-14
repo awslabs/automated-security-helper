@@ -1368,8 +1368,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         any index -- it installs from git, as the README documents -- and on
         PyPI its distribution name belongs to an unrelated project, so naming
         the extra's packages is what makes this command install what the extra
-        declares. This method used to install ``automated-security-helper[cdk]``,
-        which made ``ashx dependencies install`` resolve that name from whatever
+        declares. This method used to install ASH's own distribution with that
+        extra, which made ``ashx dependencies install`` resolve that name from whatever
         index pip is pointed at, and the package it found was installed by a
         security scanner running with repository access.
         """

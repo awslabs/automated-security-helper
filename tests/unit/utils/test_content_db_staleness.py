@@ -63,6 +63,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import content_db_staleness as staleness
+from tests.utils.helpers import iter_repo_files
 
 
 @pytest.mark.unit
@@ -1277,8 +1278,11 @@ class TestNoSecondLiteral:
         )
         offenders = []
         for root in ("automated_security_helper", ".github", "scripts"):
-            for path in (REPO_ROOT / root).rglob("*"):
-                if not path.is_file() or path.suffix not in {
+            # iter_repo_files never enters the tests' scratch tree or node_modules.
+            for path in iter_repo_files(
+                REPO_ROOT / root, skip_dirs=frozenset({"node_modules"})
+            ):
+                if path.suffix not in {
                     ".py",
                     ".yml",
                     ".yaml",

@@ -437,6 +437,37 @@ def display_path(path: Path) -> str:
     return str(path)
 
 
+#: The subcommands of the CLI. The generated pages take prose from help text and
+#: docstrings that were written when the command was `ash`; the docs spell it with
+#: the v4 entry point, `ashx` (tests/unit/test_docs_name_the_canonical_cli.py).
+_CLI_SUBCOMMANDS = (
+    "scan",
+    "config",
+    "dependencies",
+    "mcp",
+    "report",
+    "plugin",
+    "inspect",
+    "merge",
+    "image",
+    "get-genai-guide",
+)
+_V3_COMMAND = re.compile(
+    r"(?:^|(?<=[\s`(&;|]))ash (?=(?:" + "|".join(_CLI_SUBCOMMANDS) + r")(?:[\s`]|$))",
+    re.MULTILINE,
+)
+
+
+def canonical_cli(text: str) -> str:
+    """Spell every ``ash <subcommand>`` in a generated page ``ashx <subcommand>``.
+
+    Matches the same places the docs test refuses (line start, or after whitespace,
+    a backtick, ``(``, ``&``, ``;`` or ``|``), so ``flash scan``, ``the ash
+    scanners`` and the deprecated alias named on its own are left alone.
+    """
+    return _V3_COMMAND.sub("ashx ", text)
+
+
 def write_or_check(
     path: Path, content: str, check: bool, generator: str, summary: str = ""
 ) -> int:
@@ -446,6 +477,7 @@ def write_or_check(
     difference (the diff is printed to stderr). ``summary`` is printed on success so
     a CI log shows what was compared, not only that something passed.
     """
+    content = canonical_cli(content)
     rel = display_path(path)
     actual = path.read_text(encoding="utf-8") if path.exists() else None
 

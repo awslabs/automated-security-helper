@@ -13,7 +13,7 @@ It does not wrap:
 - the content database refresh that ASH runs itself before an online scan, outside the sandbox and with network, from a working directory outside the scanned tree and with an empty tool configuration (see [Content databases](content-databases.md));
 - any process a third-party plugin starts without ASH's helpers.
 
-ASH refuses shell commands under the sandbox instead of wrapping them, and a sandboxed scan does not install missing scanner tools. Install them first with `ash dependencies install`, which also installs the notebook converter's nbconvert.
+ASH refuses shell commands under the sandbox instead of wrapping them, and a sandboxed scan does not install missing scanner tools. Install them first with `ashx dependencies install`, which also installs the notebook converter's nbconvert.
 
 ## What it enforces
 
@@ -52,7 +52,7 @@ Five settings grant a sandboxed scanner more than the policy above: `sandbox.net
 
 Only the operator may grant. A grant counts when it comes from `--config-overrides`; from a config file outside every git checkout and outside the scanned directory, named with `--config` or `ASH_CONFIG`; in workspace mode, from the `--config` file given to the workspace scan, under the same rule with the workspace root as the scanned directory; or from the MCP server's own configuration, under the same rule. When such a file extends a base that cannot grant, only the grants it writes in its own `sandbox` section count, not what it inherits from any base or changes with `patch`. `--sandbox` sets the mode and grants nothing.
 
-A config file inside any git checkout, the scanned one or a separate one such as an ops or dotfiles repository, or inside the scanned directory, cannot grant, whether it is the file you name or a base it extends. Nor can, under `ash mcp`, one an MCP client delivered. ASH drops the grants of a file that cannot grant and logs a warning that names the file and the settings and says how to grant instead. Its `network_scanners` list still counts as a limit, so a repository can take the network away from its own scan but cannot add one. Its `sandbox.mode` applies only when no operator source turns the sandbox on; it cannot turn off, or change, a mode you set. Under the MCP server's default policy, a delivered file whose own `sandbox` section gives a scanner a network or an `extra_read_paths` entry the server's settings do not, or changes a sandbox mode other than `off` that the server sets, is refused instead ([What a delivered config cannot set](../how-to/mcp-server.md#what-a-delivered-config-cannot-set)); its other grants are dropped the same way. [Configuration trust model](trust-model.md) explains how ASH decides where a config file belongs.
+A config file inside any git checkout, the scanned one or a separate one such as an ops or dotfiles repository, or inside the scanned directory, cannot grant, whether it is the file you name or a base it extends. Nor can, under `ashx mcp`, one an MCP client delivered. ASH drops the grants of a file that cannot grant and logs a warning that names the file and the settings and says how to grant instead. Its `network_scanners` list still counts as a limit, so a repository can take the network away from its own scan but cannot add one. Its `sandbox.mode` applies only when no operator source turns the sandbox on; it cannot turn off, or change, a mode you set. Under the MCP server's default policy, a delivered file whose own `sandbox` section gives a scanner a network or an `extra_read_paths` entry the server's settings do not, or changes a sandbox mode other than `off` that the server sets, is refused instead ([What a delivered config cannot set](../how-to/mcp-server.md#what-a-delivered-config-cannot-set)); its other grants are dropped the same way. [Configuration trust model](trust-model.md) explains how ASH decides where a config file belongs.
 
 ## What fails closed
 
@@ -75,7 +75,7 @@ ASH also refuses, rather than runs unsandboxed, a shell command that a scanner t
 - On `firejail` and `sandbox-exec`, files outside your home and temporary directories stay readable.
 - On the Linux backends, a scanner can run programs from the scanned tree inside its sandbox.
 - It shares the host's kernel and sets no resource limits.
-- It does not apply in container mode. `ash scan --mode container` turns the sandbox off for the scan inside the container, and logs a warning when the sandbox was asked for; the container is the boundary there. See [Run ASH in a container](../how-to/run-in-a-container.md).
+- It does not apply in container mode. `ashx scan --mode container` turns the sandbox off for the scan inside the container, and logs a warning when the sandbox was asked for; the container is the boundary there. See [Run ASH in a container](../how-to/run-in-a-container.md).
 - It does not make a scanner's results trustworthy. A scanner still reads every file in the source tree, and a hostile file can still change what it reports.
 
 One setting to plan for: an offline opengrep scan reads its rules from the directory `OPENGREP_RULES_CACHE_DIR` names, and under the sandbox it can read only directories the sandbox mounts. Keep the rules cache under a system directory such as `/opt`, or add it to `sandbox.extra_read_paths`.

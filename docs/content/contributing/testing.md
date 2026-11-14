@@ -114,7 +114,7 @@ installs them first, and turns a missing one into a failure:
 
 <!-- doctest: illustrative reason="downloads scanner binaries from the network" -->
 ```bash
-uv run ash dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
+uv run ashx dependencies install --tool actionlint --tool cfn-lint --tool cfn-guard
 ```
 
 Binary tools go to `~/.ash/bin`, where ASH looks for them.
@@ -284,7 +284,7 @@ tests are collected, which is where a path that a module computes from the home 
 time points. `UV_CACHE_DIR` stays on the cache uv would use for you, so a test that runs uv
 does not download again. uv's tool and Python directories follow `XDG_DATA_HOME` into the
 test's home on Linux and macOS; on Windows they are under `%APPDATA%`, which is not moved.
-The tools `ash dependencies install` puts in `~/.ash/bin` are out of reach too, so the
+The tools `ashx dependencies install` puts in `~/.ash/bin` are out of reach too, so the
 integration tests that need one skip. Set `ASH_BIN_PATH` to that directory to use them;
 the run's header says so when the directory has tools. Mark a test
 `@pytest.mark.real_home` to give it the values the run started with, and use the
@@ -292,11 +292,11 @@ the run's header says so when the directory has tools. Mark a test
 
 ### Tests that install tools
 
-An install by `ash dependencies install` or the pinned-tool installer writes a receipt
+An install by `ashx dependencies install` or the pinned-tool installer writes a receipt
 under `~/.ash/install-receipts`. An autouse fixture sends each receipt that a test writes
 in the test process to a directory under pytest's base temporary directory instead. A
 child process does not inherit that, so a second autouse fixture fails a test that starts
-a tool-installing child, `ash dependencies install` or a child that calls
+a tool-installing child, `ashx dependencies install` or a child that calls
 `install_pinned_tool`, with the developer's `HOME` or with no `HOME`. Give such a child an
 environment with `HOME`, and `USERPROFILE` on Windows, set to a temporary directory.
 
@@ -343,7 +343,7 @@ channel end-to-end run, `npm run test:e2e-vsix`, needs that variable and a built
 
 ## Test an MCP change locally
 
-The MCP server is `ash mcp`. Its tests are in `tests/unit/cli/mcp/` and
+The MCP server is `ashx mcp`. Its tests are in `tests/unit/cli/mcp/` and
 `tests/snapshot/mcp/`:
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
@@ -429,7 +429,7 @@ whether every registered scanner is in the results:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --verbose
+ashx --source-dir . --scanners detect-secrets --offline --no-progress --verbose
 ```
 
 In a checkout whose environment is not activated, put `uv run` in front. The command

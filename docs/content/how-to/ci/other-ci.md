@@ -17,10 +17,10 @@ python3 -m venv "$HOME/ash-venv"
 "$HOME/ash-venv/bin/pip" install --quiet \
   "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"
 export PATH="$HOME/ash-venv/bin:$PATH"
-(cd "$(mktemp -d)" && ash dependencies install \
+(cd "$(mktemp -d)" && ashx dependencies install \
   --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
   --tool grype --tool opengrep --tool syft --tool trivy)
-ash scan --mode local --no-progress \
+ashx scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
 
@@ -41,10 +41,10 @@ ash() {
     'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0' \
     ash "$@"
 }
-(cd "$(mktemp -d)" && ash dependencies install \
+(cd "$(mktemp -d)" && ashx dependencies install \
   --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
   --tool grype --tool opengrep --tool syft --tool trivy)
-ash scan --mode local --no-progress \
+ashx scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
 
@@ -55,14 +55,14 @@ and reuses it for later calls.
   the directory it scans, and the virtual environment's `bin` holds the `uv` that ASH uses to
   install bandit, checkov, cfn-lint, and zizmor during the scan; see
   [Tools inside the scanned directory](../../docs/advanced-usage.md#tools-inside-the-scanned-directory).
-- Run `ash dependencies install` outside the checkout too, as the empty directory does here,
+- Run `ashx dependencies install` outside the checkout too, as the empty directory does here,
   so a config in the repository cannot change what it installs. It downloads the tool
   versions that this ASH version pins, checks each against its pinned SHA256, and installs
   it into `~/.ash/bin`, where the scan finds it. A binary that is already there and matches
   is not downloaded again, so `~/.ash/bin` is safe to cache between builds. Cache it and
   nothing else under `~/.ash`: the cfn-guard rules in `~/.ash/share/cfn-guard-rules` are
   downloaded again on each run, and `~/.ash/install-receipts` holds the install records.
-  Restore the cache with the files' execute bits: `ash dependencies install`
+  Restore the cache with the files' execute bits: `ashx dependencies install`
   downloads a binary there again if it has lost its execute bit, and a scan run without
   that step skips it. cfn-nag is the exception: it is a Ruby gem, not a pinned binary, and
   it is installed again on every run.
@@ -80,8 +80,8 @@ and reuses it for later calls.
 |---|---|
 | detect-secrets | Nothing; it is part of ASH |
 | bandit, checkov, cfn-lint, zizmor | Access to PyPI during the scan |
-| grype, syft, opengrep, actionlint, cfn-guard, gitleaks, trivy | The binary, from `ash dependencies install` |
-| cfn-nag | Ruby, with the headers and a C compiler to build gems, so that `ash dependencies install` can install it |
+| grype, syft, opengrep, actionlint, cfn-guard, gitleaks, trivy | The binary, from `ashx dependencies install` |
+| cfn-nag | Ruby, with the headers and a C compiler to build gems, so that `ashx dependencies install` can install it |
 | cdk-nag | The `cdk` extra, which the recipe installs, and Node.js |
 | npm-audit | Node.js and npm |
 
@@ -92,11 +92,11 @@ installed. In a repository with no npm lockfile, npm-audit is SKIPPED, and this 
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --mode local --no-progress --offline --scanners detect-secrets --scanners npm-audit
+ashx scan --mode local --no-progress --offline --scanners detect-secrets --scanners npm-audit
 ```
 
 To run without a scanner, name it in `--exclude-scanners`, for example
-`ash scan --mode local --no-progress --exclude-scanners cfn-nag`. Several scanners also use
+`ashx scan --mode local --no-progress --exclude-scanners cfn-nag`. Several scanners also use
 the network during the scan, for their vulnerability databases, rules, or registries;
 [What each scanner does offline](../run-offline.md#scanners) lists them.
 
@@ -119,7 +119,7 @@ tool. Two more things differ in CI:
   error before ASH runs ([Run ASH in GitHub Actions](github-actions.md)).
 
 For many repositories, build the image once, push it to your registry, and use it as the
-build image, running `ash scan --mode local` inside it. Nothing is installed per build. See
+build image, running `ashx scan --mode local` inside it. Nothing is installed per build. See
 [Run ASH in a container](../run-in-a-container.md) and
 [Roll out ASH across repositories](../../getting-started/platform-teams.md).
 
@@ -130,7 +130,7 @@ build image, running `ash scan --mode local` inside it. Nothing is installed per
     that release, as below, or use a source checkout.
 
 Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
-ASH's `flake.nix`, so the build host does not need the `ash dependencies install` step or
+ASH's `flake.nix`, so the build host does not need the `ashx dependencies install` step or
 the Ruby packages the [recipe](#recipe) uses for cfn-nag. The host needs:
 
 - Nix, on Linux or macOS. ASH passes `nix-command` and `flakes` on each invocation, so
@@ -148,7 +148,7 @@ running ASH from `main` or a fork ([Nix mode](../install.md#nix-mode)):
 ```bash
 uv tool install 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
 ash_exit=0
-ash scan --mode nix --no-progress \
+ashx scan --mode nix --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
   || ash_exit=$?
 tar -czf ash-output.tar.gz .ash/ash_output
@@ -176,7 +176,7 @@ finding or as a clean scan:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --mode local --no-progress --offline --scanners detect-secrets --min-severity hihg
+ashx scan --mode local --no-progress --offline --scanners detect-secrets --min-severity hihg
 ```
 
 Fail the build on any non-zero code, and keep the reports when it fails: the build tools
@@ -203,8 +203,8 @@ pipeline {
           python3 -m venv "$WORKSPACE_TMP/ash"
           "$WORKSPACE_TMP/ash/bin/pip" install --quiet "$INSTALL_SPEC"
           export PATH="$WORKSPACE_TMP/ash/bin:$PATH"
-          (cd "$WORKSPACE_TMP/tools" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
-          ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+          (cd "$WORKSPACE_TMP/tools" && ashx dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
+          ashx scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
         '''
       }
     }
@@ -249,10 +249,10 @@ phases:
       - python -m venv /opt/ash
       - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
       - export PATH="/opt/ash/bin:$PATH"
-      - (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
+      - (cd "$(mktemp -d)" && ashx dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
   build:
     commands:
-      - ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+      - ashx scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 reports:
   ash-findings:
     base-directory: .ash/ash_output/reports
@@ -292,10 +292,10 @@ steps:
       "$(Agent.TempDirectory)/ash/bin/pip" install --quiet "$INSTALL_SPEC"
       echo "##vso[task.prependpath]$(Agent.TempDirectory)/ash/bin"
     displayName: Install ASH
-  - script: ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy
+  - script: ashx dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy
     workingDirectory: $(Agent.TempDirectory)
     displayName: Install scanner tools
-  - script: ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+  - script: ashx scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
     displayName: Run ASH
   - task: PublishTestResults@2
     condition: succeededOrFailed()
@@ -321,7 +321,7 @@ steps:
 
 - `succeededOrFailed()` runs the publishing steps after a failed scan, and skips them when
   the run is canceled.
-- `workingDirectory` runs `ash dependencies install` outside the checkout.
+- `workingDirectory` runs `ashx dependencies install` outside the checkout.
 - The JUnit file appears in the run's **Tests** tab.
 - The artifact named `CodeAnalysisLogs` is the one the free SARIF SAST Scans Tab extension
   from Microsoft DevLabs reads. With the extension installed in your organization, the run
@@ -360,14 +360,14 @@ jobs:
           key: ash-tools-v4.0.0-{{ arch }}
       - run:
           name: Install scanner tools
-          command: (cd "$(mktemp -d)" && ash dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
+          command: (cd "$(mktemp -d)" && ashx dependencies install --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks --tool grype --tool opengrep --tool syft --tool trivy)
       - save_cache:
           key: ash-tools-v4.0.0-{{ arch }}
           paths:
             - ~/.ash/bin
       - run:
           name: Run ASH
-          command: ash scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+          command: ashx scan --mode local --no-progress --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       - run:
           name: Copy the JUnit file out of .ash
           when: always
@@ -402,16 +402,16 @@ workflows:
   before it succeeded, and a scan with findings fails its step. CircleCI never overwrites
   a saved key, so key the cache on the ASH version, as above: each version pins its own
   tool versions.
-- Keep `ash dependencies install` after `restore_cache`. Pull requests from a fork share
+- Keep `ashx dependencies install` after `restore_cache`. Pull requests from a fork share
   a cache with the repository's own builds, so a restored cache may have been written by
-  another branch. `ash dependencies install` checks each binary against its pinned
+  another branch. `ashx dependencies install` checks each binary against its pinned
   SHA256 and installs again any that does not match, so a restored cache cannot
   substitute a different tool. Because that check needs no install record, the cache
   holds `~/.ash/bin` and nothing else: the records in `~/.ash/install-receipts` hold the
   SHA256 each installed tool is checked against, so a cache a fork's pull request can
   write must not carry them. cfn-nag, and the cfn-guard rules in
   `~/.ash/share/cfn-guard-rules`, are installed again on every run.
-- A non-zero exit from `ash scan` fails its step and the job. `store_test_results` and
+- A non-zero exit from `ashx scan` fails its step and the job. `store_test_results` and
   `store_artifacts` run after a failed step, so the JUnit file appears in the job's
   **Tests** tab, one failed test per actionable finding, and `.ash/ash_output/reports/` and
   `.ash/ash_output/ash_aggregated_results.json` are kept as the job's artifacts. Neither runs when the job is canceled or times out.
@@ -428,7 +428,7 @@ through to the build result:
 <!-- doctest: illustrative reason="runs a full scan with every scanner, which needs the network" -->
 ```bash
 ash_exit=0
-ash scan --mode local --no-progress \
+ashx scan --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
   || ash_exit=$?
 tar -czf ash-output.tar.gz .ash/ash_output
@@ -442,7 +442,7 @@ and the step exits 2:
 <!-- doctest: run expect-exit=2 -->
 ```bash
 ash_exit=0
-ash scan --mode local --no-progress --offline --scanners detect-secrets \
+ashx scan --mode local --no-progress --offline --scanners detect-secrets \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
   || ash_exit=$?
 tar -czf ash-output.tar.gz .ash/ash_output

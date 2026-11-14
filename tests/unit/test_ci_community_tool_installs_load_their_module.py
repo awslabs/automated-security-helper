@@ -28,6 +28,9 @@ from automated_security_helper.core.community_scanners import community_module_f
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+#: The v4 line's command is ``ashx``; ``ash`` is the deprecated v3 alias. CI installs
+#: through ``ashx``, so matching only ``ash`` found no install at all.
+INSTALL_COMMAND = re.compile(r"\bashx? dependencies install\b")
 DOCKERFILE_ARG = re.compile(r'^ARG (\w+)="([^"]*)"$', re.MULTILINE)
 
 
@@ -52,11 +55,12 @@ def _scripts():
 
 
 def _install_commands(script: str):
-    """Each `ash dependencies install ...` command, continuation lines joined."""
+    """Each `ashx dependencies install ...` (or the v3 alias `ash`) command, joined."""
     joined = re.sub(r"\\\n\s*", " ", script)
     for line in joined.splitlines():
-        if "ash dependencies install" in line:
-            yield line[line.index("ash dependencies install") :]
+        found = INSTALL_COMMAND.search(line)
+        if found:
+            yield line[found.start() :]
 
 
 def _config_modules(path: str) -> "set[str]":

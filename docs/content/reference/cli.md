@@ -22,26 +22,26 @@ The Environment variable column names the variable click reads for the option; a
 |---------|-------------|
 | [`ash`](#ash) | Automated Security Helper, the agentic security harness · one workflow for your scanners. |
 | [`ash build-image`](#build-image) | Builds the ASH container image, then scans the current directory with it unless --no-run is given. |
-| [`ash config`](#config) | ASH configuration management |
-| [`ash config get`](#config-get) | Print the resolved configuration: the file's settings over the defaults. |
-| [`ash config init`](#config-init) | Create a configuration file with every setting at its default. |
-| [`ash config lint`](#config-lint) | Lint an ASH configuration file for issues and optionally auto-fix them. |
-| [`ash config update`](#config-update) | Update an existing configuration file with the specified modifications. |
-| [`ash config validate`](#config-validate) | Validate an ASH configuration file the way a scan loads it. |
-| [`ash config validate-plugin-dependencies`](#config-validate-plugin-dependencies) | Check that the configuration resolves and names a project. |
-| [`ash config wizard`](#config-wizard) | Interactive configuration wizard. |
-| [`ash dependencies`](#dependencies) | Install dependencies for ASH plugins |
-| [`ash dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
-| [`ash get-genai-guide`](#get-genai-guide) | Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file. |
-| [`ash inspect`](#inspect) | Inspect and analyze ASH outputs and reports |
-| [`ash inspect findings`](#inspect-findings) | The `inspect findings` command provides an interactive TUI to explore the findings and identify actions to quickly take. |
-| [`ash inspect sarif-fields`](#inspect-sarif-fields) | The `inspect sarif-fields` command analyzes SARIF reports to understand field usage across different scanners and ensure fields are preserved during aggregation. |
-| [`ash mcp`](#mcp) | Start the ASH MCP server (Model Context Protocol) |
-| [`ash merge`](#merge) | Merges the results of a sharded scan into one unified report. |
-| [`ash plugin`](#plugin) | Manage ASH plugins |
-| [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
-| [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
-| [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
+| [`ashx config`](#config) | ASH configuration management |
+| [`ashx config get`](#config-get) | Print the resolved configuration: the file's settings over the defaults. |
+| [`ashx config init`](#config-init) | Create a configuration file with every setting at its default. |
+| [`ashx config lint`](#config-lint) | Lint an ASH configuration file for issues and optionally auto-fix them. |
+| [`ashx config update`](#config-update) | Update an existing configuration file with the specified modifications. |
+| [`ashx config validate`](#config-validate) | Validate an ASH configuration file the way a scan loads it. |
+| [`ashx config validate-plugin-dependencies`](#config-validate-plugin-dependencies) | Check that the configuration resolves and names a project. |
+| [`ashx config wizard`](#config-wizard) | Interactive configuration wizard. |
+| [`ashx dependencies`](#dependencies) | Install dependencies for ASH plugins |
+| [`ashx dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
+| [`ashx get-genai-guide`](#get-genai-guide) | Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file. |
+| [`ashx inspect`](#inspect) | Inspect and analyze ASH outputs and reports |
+| [`ashx inspect findings`](#inspect-findings) | The `inspect findings` command provides an interactive TUI to explore the findings and identify actions to quickly take. |
+| [`ashx inspect sarif-fields`](#inspect-sarif-fields) | The `inspect sarif-fields` command analyzes SARIF reports to understand field usage across different scanners and ensure fields are preserved during aggregation. |
+| [`ashx mcp`](#mcp) | Start the ASH MCP server (Model Context Protocol) |
+| [`ashx merge`](#merge) | Merges the results of a sharded scan into one unified report. |
+| [`ashx plugin`](#plugin) | Manage ASH plugins |
+| [`ashx plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
+| [`ashx report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
+| [`ashx scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
 
 ## `ash`
 
@@ -51,7 +51,7 @@ Automated Security Helper, the agentic security harness · one workflow for your
 ash [OPTIONS] COMMAND [ARGS]...
 ```
 
-Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg).
+Run with no command, `ash` runs a scan. It accepts these options of [`ashx scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg).
 
 Options that only `ash` itself accepts:
 
@@ -61,13 +61,13 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
+Subcommands: [`ash build-image`](#build-image), [`ashx config`](#config), [`ashx dependencies`](#dependencies), [`ashx get-genai-guide`](#get-genai-guide), [`ashx inspect`](#inspect), [`ashx mcp`](#mcp), [`ashx merge`](#merge), [`ashx plugin`](#plugin), [`ashx report`](#report), [`ashx scan`](#scan).
 
 ## <a id="build-image"></a>`ash build-image`
 
 Builds the ASH container image, then scans the current directory with it unless --no-run is given.
 
-It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
+It takes only the options below. To scan with scan options, run `ashx scan --mode container`, which builds the image the same way and accepts every scan option.
 
 ```text
 ash build-image [OPTIONS]
@@ -99,19 +99,19 @@ ash build-image [OPTIONS]
 | <a id="build-image--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="build-image--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
-## <a id="config"></a>`ash config`
+## <a id="config"></a>`ashx config`
 
 ASH configuration management
 
 ```text
-ash config [OPTIONS] COMMAND [ARGS]...
+ashx config [OPTIONS] COMMAND [ARGS]...
 ```
 
 This command takes no options.
 
-Subcommands: [`ash config get`](#config-get), [`ash config init`](#config-init), [`ash config lint`](#config-lint), [`ash config update`](#config-update), [`ash config validate`](#config-validate), [`ash config validate-plugin-dependencies`](#config-validate-plugin-dependencies), [`ash config wizard`](#config-wizard).
+Subcommands: [`ashx config get`](#config-get), [`ashx config init`](#config-init), [`ashx config lint`](#config-lint), [`ashx config update`](#config-update), [`ashx config validate`](#config-validate), [`ashx config validate-plugin-dependencies`](#config-validate-plugin-dependencies), [`ashx config wizard`](#config-wizard).
 
-### <a id="config-get"></a>`ash config get`
+### <a id="config-get"></a>`ashx config get`
 
 Print the resolved configuration: the file's settings over the defaults.
 
@@ -120,7 +120,7 @@ use, or the defaults when there is none. Exit codes: 0 printed, 3 the named
 file does not exist, cannot be read or is not a valid configuration.
 
 ```text
-ash config get [OPTIONS] [config_path]
+ashx config get [OPTIONS] [config_path]
 ```
 
 <!-- doctest: options of=cli.config.get -->
@@ -133,12 +133,12 @@ ash config get [OPTIONS] [config_path]
 |--------|------|---------|----------------------|-------------|
 | <a id="config-get--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
 | <a id="config-get--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW') |
-| <a id="config-get--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
+| <a id="config-get--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ashx scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-get--verbose"></a>`--verbose`, `-v` / `--no-verbose` | flag | off |  | Enable verbose logging |
 | <a id="config-get--debug"></a>`--debug`, `-d` / `--no-debug` | flag | off |  | Enable debug logging |
 | <a id="config-get--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-### <a id="config-init"></a>`ash config init`
+### <a id="config-init"></a>`ashx config init`
 
 Create a configuration file with every setting at its default.
 
@@ -148,7 +148,7 @@ file, or the tool.ash table of pyproject.toml), since sources are never
 merged.
 
 ```text
-ash config init [OPTIONS]
+ashx config init [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.config.init -->
@@ -160,7 +160,7 @@ ash config init [OPTIONS]
 | <a id="config-init--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 | <a id="config-init--force"></a>`--force` / `--no-force` | flag | off |  | Overwrite the config file if it already exists at the target path. |
 
-### <a id="config-lint"></a>`ash config lint`
+### <a id="config-lint"></a>`ashx config lint`
 
 Lint an ASH configuration file for issues and optionally auto-fix them.
 
@@ -210,7 +210,7 @@ ashx config lint --config path/to/config.yaml
 ```
 
 ```text
-ash config lint [OPTIONS]
+ashx config lint [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.config.lint -->
@@ -221,12 +221,12 @@ ash config lint [OPTIONS]
 | <a id="config-lint--fix"></a>`--fix` | flag | off |  | Auto-fix fixable issues (internal fields, missing line_end, expired suppressions, multi-line suppression reasons). A TOML file, and a file that reads the environment (${VAR} or !ENV), are not rewritten: fix those by hand |
 | <a id="config-lint--fix-unused"></a>`--fix-unused` | flag | off |  | Comment out unused suppressions based on the last scan's unused suppressions report. A TOML file, and a JSON file (which holds no comments), are not rewritten: remove those by hand |
 | <a id="config-lint--non-interactive"></a>`--non-interactive`, `--yes`, `-y` | flag | off |  | Accept all changes without prompting. Useful for pre-commit hooks and CI/CD |
-| <a id="config-lint--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
+| <a id="config-lint--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ashx scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-lint--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="config-lint--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="config-lint--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-### <a id="config-update"></a>`ash config update`
+### <a id="config-update"></a>`ashx config update`
 
 Update an existing configuration file with the specified modifications.
 
@@ -239,7 +239,7 @@ command read it. A file that uses extends or patch, or reads the environment
 rewriting it would lose what those express.
 
 ```text
-ash config update [OPTIONS] [config_path]
+ashx config update [OPTIONS] [config_path]
 ```
 
 <!-- doctest: options of=cli.config.update -->
@@ -252,13 +252,13 @@ ash config update [OPTIONS] [config_path]
 |--------|------|---------|----------------------|-------------|
 | <a id="config-update--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
 | <a id="config-update--set"></a>`--set` | text, repeatable | not set |  | Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. |
-| <a id="config-update--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
+| <a id="config-update--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ashx scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-update--verbose"></a>`--verbose`, `-v` / `--no-verbose` | flag | off |  | Enable verbose logging |
 | <a id="config-update--debug"></a>`--debug`, `-d` / `--no-debug` | flag | off |  | Enable debug logging |
 | <a id="config-update--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 | <a id="config-update--dry-run"></a>`--dry-run` / `--no-dry-run` | flag | off |  | Show changes without writing to file |
 
-### <a id="config-validate"></a>`ash config validate`
+### <a id="config-validate"></a>`ashx config validate`
 
 Validate an ASH configuration file the way a scan loads it.
 
@@ -284,7 +284,7 @@ or cannot be read. A file that does not parse is invalid too, and a scan
 refuses it as well. With --config-overrides or ASH_PLUGIN_MODULES and no
 config file, the default configuration with those scan inputs applied is
 validated -- the config a scan of the directory would run with, and the
-one `ash config get` prints or refuses for the same input, exiting 3 when
+one `ashx config get` prints or refuses for the same input, exiting 3 when
 the environment names a module the scan's plugin loader refuses.
 
 Examples:
@@ -301,7 +301,7 @@ ashx config validate --config-overrides 'fail_on_findings=false'
 ```
 
 ```text
-ash config validate [OPTIONS]
+ashx config validate [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.config.validate -->
@@ -309,12 +309,12 @@ ash config validate [OPTIONS]
 |--------|------|---------|----------------------|-------------|
 | <a id="config-validate--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
 | <a id="config-validate--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'), checked as a scan given the same --config-overrides would apply them. |
-| <a id="config-validate--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
+| <a id="config-validate--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ashx scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-validate--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="config-validate--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="config-validate--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-### <a id="config-validate-plugin-dependencies"></a>`ash config validate-plugin-dependencies`
+### <a id="config-validate-plugin-dependencies"></a>`ashx config validate-plugin-dependencies`
 
 Check that the configuration resolves and names a project.
 
@@ -323,7 +323,7 @@ project (an empty project_name), 3 the named file does not exist, cannot be
 read or is not a valid configuration.
 
 ```text
-ash config validate-plugin-dependencies [OPTIONS] [config_path]
+ashx config validate-plugin-dependencies [OPTIONS] [config_path]
 ```
 
 <!-- doctest: options of=cli.config.validate-plugin-dependencies -->
@@ -336,12 +336,12 @@ ash config validate-plugin-dependencies [OPTIONS] [config_path]
 |--------|------|---------|----------------------|-------------|
 | <a id="config-validate-plugin-dependencies--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. |
 | <a id="config-validate-plugin-dependencies--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW') |
-| <a id="config-validate-plugin-dependencies--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
+| <a id="config-validate-plugin-dependencies--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ashx scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-validate-plugin-dependencies--verbose"></a>`--verbose`, `-v` / `--no-verbose` | flag | off |  | Enable verbose logging |
 | <a id="config-validate-plugin-dependencies--debug"></a>`--debug`, `-d` / `--no-debug` | flag | off |  | Enable debug logging |
 | <a id="config-validate-plugin-dependencies--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-### <a id="config-wizard"></a>`ash config wizard`
+### <a id="config-wizard"></a>`ashx config wizard`
 
 Interactive configuration wizard.
 
@@ -351,31 +351,31 @@ offline-mode, and community-plugin settings interactively, then writes the
 result back. With no config yet, it creates .ashrc.yaml there.
 
 ```text
-ash config wizard [OPTIONS]
+ashx config wizard [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.config.wizard -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
 | <a id="config-wizard--config"></a>`--config`, `-c` | text | not set | `ASH_CONFIG` | Path to read/write the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given), or a new .ashrc.yaml in that directory when there is none. |
-| <a id="config-wizard--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ash scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
+| <a id="config-wizard--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The directory a scan would scan, as `ashx scan --source-dir`: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory. |
 | <a id="config-wizard--verbose"></a>`--verbose`, `-v` | flag | off |  | Enable verbose logging |
 | <a id="config-wizard--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="config-wizard--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-## <a id="dependencies"></a>`ash dependencies`
+## <a id="dependencies"></a>`ashx dependencies`
 
 Install dependencies for ASH plugins
 
 ```text
-ash dependencies [OPTIONS] COMMAND [ARGS]...
+ashx dependencies [OPTIONS] COMMAND [ARGS]...
 ```
 
 This command takes no options.
 
-Subcommands: [`ash dependencies install`](#dependencies-install).
+Subcommands: [`ashx dependencies install`](#dependencies-install).
 
-### <a id="dependencies-install"></a>`ash dependencies install`
+### <a id="dependencies-install"></a>`ashx dependencies install`
 
 Install dependencies for ASH plugins.
 
@@ -385,7 +385,7 @@ By default, it installs dependencies for all plugin types (converter, scanner, r
 Binary tools will be installed to the specified bin path (defaults to ~/.ash/bin).
 
 ```text
-ash dependencies install [OPTIONS]
+ashx dependencies install [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.dependencies.install -->
@@ -400,7 +400,7 @@ ash dependencies install [OPTIONS]
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-## <a id="get-genai-guide"></a>`ash get-genai-guide`
+## <a id="get-genai-guide"></a>`ashx get-genai-guide`
 
 Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.
 
@@ -414,7 +414,7 @@ interact with ASH scan results, including:
 - Common pitfalls and solutions
 
 ```text
-ash get-genai-guide [OPTIONS]
+ashx get-genai-guide [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.get-genai-guide -->
@@ -424,19 +424,19 @@ ash get-genai-guide [OPTIONS]
 | <a id="get-genai-guide--from-github"></a>`--from-github` | flag | off |  | Fetch from GitHub instead of local installation |
 | <a id="get-genai-guide--branch"></a>`--branch`, `-b` | text | `main` |  | GitHub branch to fetch from when using --from-github (default: main) |
 
-## <a id="inspect"></a>`ash inspect`
+## <a id="inspect"></a>`ashx inspect`
 
 Inspect and analyze ASH outputs and reports
 
 ```text
-ash inspect [OPTIONS] COMMAND [ARGS]...
+ashx inspect [OPTIONS] COMMAND [ARGS]...
 ```
 
 This command takes no options.
 
-Subcommands: [`ash inspect findings`](#inspect-findings), [`ash inspect sarif-fields`](#inspect-sarif-fields).
+Subcommands: [`ashx inspect findings`](#inspect-findings), [`ashx inspect sarif-fields`](#inspect-sarif-fields).
 
-### <a id="inspect-findings"></a>`ash inspect findings`
+### <a id="inspect-findings"></a>`ashx inspect findings`
 
 The `inspect findings` command provides an interactive TUI to explore the findings
 and identify actions to quickly take.
@@ -448,7 +448,7 @@ file sits in &lt;root&gt;/.ash/ash_output, and only from a regular file inside &
 otherwise the detail view says "(source not shown)".
 
 ```text
-ash inspect findings [OPTIONS]
+ashx inspect findings [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.inspect.findings -->
@@ -458,7 +458,7 @@ ash inspect findings [OPTIONS]
 | <a id="inspect-findings--report-file"></a>`--report-file` | text | `ash_aggregated_results.json` |  | Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'. |
 | <a id="inspect-findings--config"></a>`--config`, `-c` | path | not set | `ASH_CONFIG` | Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used in the scanned directory (the one holding the results' .ash/ash_output), or in the current directory when the results sit elsewhere. With none found, suppressions go to a new .ashrc.yaml there. |
 
-### <a id="inspect-sarif-fields"></a>`ash inspect sarif-fields`
+### <a id="inspect-sarif-fields"></a>`ashx inspect sarif-fields`
 
 The `inspect sarif-fields` command analyzes SARIF reports to understand field usage
 across different scanners and ensure fields are preserved during aggregation.
@@ -472,7 +472,7 @@ This command:
 5. Outputs field data in both JSON and CSV formats for further analysis
 
 ```text
-ash inspect sarif-fields [OPTIONS]
+ashx inspect sarif-fields [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.inspect.sarif-fields -->
@@ -481,12 +481,12 @@ ash inspect sarif-fields [OPTIONS]
 | <a id="inspect-sarif-fields--sarif-dir"></a>`--sarif-dir` | text | not set |  | Directory containing SARIF files to analyze |
 | <a id="inspect-sarif-fields--output-dir"></a>`--output-dir` | text | not set |  | Directory to write output files |
 
-## <a id="mcp"></a>`ash mcp`
+## <a id="mcp"></a>`ashx mcp`
 
 Start the ASH MCP server (Model Context Protocol)
 
 ```text
-ash mcp [OPTIONS]
+ashx mcp [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.mcp -->
@@ -512,14 +512,14 @@ ash mcp [OPTIONS]
 | <a id="mcp--trust-upstream-host-check"></a>`--trust-upstream-host-check` | flag | off |  | HTTP transports only. Declare that a proxy or platform in front of ASH checks the Host and Origin headers, so ASH serves any. Without it, a non-loopback --host needs --allowed-host or the server refuses to start. Cannot be combined with --allowed-host. |
 | <a id="mcp--profile"></a>`--profile` | text, repeatable | not set |  | Register a named config profile as NAME=path/to/ash.yaml, repeatable. Clients list them with the list_profiles tool and bind one to their session with select_profile; a bound profile supplies the config for every later call in that session that names none. Each file is loaded and schema-validated now, so a typo fails startup rather than a scan. |
 
-## <a id="merge"></a>`ash merge`
+## <a id="merge"></a>`ashx merge`
 
 Merges the results of a sharded scan into one unified report.
 
 Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
 
 ```text
-ash merge [OPTIONS]
+ashx merge [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.merge -->
@@ -541,24 +541,24 @@ ash merge [OPTIONS]
 | <a id="merge--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="merge--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
-## <a id="plugin"></a>`ash plugin`
+## <a id="plugin"></a>`ashx plugin`
 
 Manage ASH plugins
 
 ```text
-ash plugin [OPTIONS] COMMAND [ARGS]...
+ashx plugin [OPTIONS] COMMAND [ARGS]...
 ```
 
 This command takes no options.
 
-Subcommands: [`ash plugin list`](#plugin-list).
+Subcommands: [`ashx plugin list`](#plugin-list).
 
-### <a id="plugin-list"></a>`ash plugin list`
+### <a id="plugin-list"></a>`ashx plugin list`
 
 The `plugin list` command lists what a scan with this configuration loads, on or off.
 
 ```text
-ash plugin list [OPTIONS]
+ashx plugin list [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.plugin.list -->
@@ -573,12 +573,12 @@ ash plugin list [OPTIONS]
 | <a id="plugin-list--show-versions"></a>`--show-versions` | flag | off |  | For scanners, add Version and Reachable columns reporting each scanner's detected tool version and whether its dependencies are satisfied (Yes/No/Unknown). Off by default; enabling it checks each scanner's dependencies and probes its version, which takes longer. |
 | <a id="plugin-list--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-## <a id="report"></a>`ash report`
+## <a id="report"></a>`ashx report`
 
 Generate a report from ASH scan results using the specified reporter plugin.
 
 ```text
-ash report [OPTIONS]
+ashx report [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.report -->
@@ -595,18 +595,18 @@ ash report [OPTIONS]
 | <a id="report--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="report--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
-## <a id="scan"></a>`ash scan`
+## <a id="scan"></a>`ashx scan`
 
 Scan code, infrastructure, secrets, and dependencies.
 
 Start with: ash --mode container --source-dir .
 
-Review the result with: ash inspect findings
+Review the result with: ashx inspect findings
 
 Options are grouped by workflow below. Running ash without a subcommand starts a scan.
 
 ```text
-ash scan [OPTIONS]
+ashx scan [OPTIONS]
 ```
 
 <!-- doctest: options of=cli.scan -->
@@ -648,7 +648,7 @@ ash scan [OPTIONS]
 | <a id="scan--compact-report"></a>`--compact-report` | flag | off |  | Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings. |
 | <a id="scan--changed-files-only"></a>`--changed-files-only` | flag | off | `ASH_CHANGED_FILES_ONLY` | Report only findings in files changed between --base-ref and HEAD, for example on a pull request. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. Findings with no file location are kept. When git cannot list the changes, everything is reported; when nothing changed inside --source-dir, nothing is. Not supported with --mode container, which refuses it (exit 5). |
 | <a id="scan--base-ref"></a>`--base-ref` | text | `origin/main` | `ASH_BASE_REF` | Git ref to diff against when --changed-files-only is set. |
-| <a id="scan--allow-in-tree-tools"></a>`--allow-in-tree-tools` | flag | off |  | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ash mcp` never does. |
+| <a id="scan--allow-in-tree-tools"></a>`--allow-in-tree-tools` | flag | off |  | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ashx mcp` never does. |
 | <a id="scan--shard-index"></a>`--shard-index` | integer | not set | `ASH_SHARD_INDEX` | Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ashx merge'. |
 | <a id="scan--shard-count"></a>`--shard-count` | integer | not set | `ASH_SHARD_COUNT` | Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner. |
 | <a id="scan--config-from-scanned-repository"></a>`--config-from-scanned-repository` | flag | off |  | Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config is a file the scanned repository wrote (judged by its resolved path and by the name that reached it) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on. This option is hidden from `--help` output. |

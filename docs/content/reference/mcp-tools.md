@@ -262,7 +262,7 @@ On failure, `error_type` is one of `bound_profile_unavailable`, `config_check_fa
 
 List the config profiles the operator registered at server startup.
 
-No parameters. Returns the config profiles the operator registered at server startup, each with `ash mcp --profile NAME=path/to/ash.yaml` (repeatable). A client cannot register one; an empty list means the operator registered none.
+No parameters. Returns the config profiles the operator registered at server startup, each with `ashx mcp --profile NAME=path/to/ash.yaml` (repeatable). A client cannot register one; an empty list means the operator registered none.
 
 On failure, `error_type` is the class name of an exception.
 

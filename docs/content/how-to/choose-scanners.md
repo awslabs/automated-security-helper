@@ -5,12 +5,12 @@ ASH runs every enabled scanner it has, and all 15 built-in scanners are enabled 
 ## See which scanners will run
 
 ```bash
-ash plugin list
+ashx plugin list
 ```
 
-`ash plugin list` prints the scanners, reporters, and converters, with an **Enabled** column that applies the config ASH finds in the current directory. Add `--show-versions` to see which scanner tools are installed on this machine.
+`ashx plugin list` prints the scanners, reporters, and converters, with an **Enabled** column that applies the config ASH finds in the current directory. Add `--show-versions` to see which scanner tools are installed on this machine.
 
-A scanner whose tool is not installed is recorded MISSING, and the scan exits 1, because `fail_on_incomplete_scanners` is on by default. Install the tools with `ash dependencies install` (see [Manage scanner tools](../docs/advanced-usage.md)), run the scan in the [container image](run-in-a-container.md), or turn the scanner off. [Set the gate](set-the-gate.md#incomplete) explains the incomplete-scan rule.
+A scanner whose tool is not installed is recorded MISSING, and the scan exits 1, because `fail_on_incomplete_scanners` is on by default. Install the tools with `ashx dependencies install` (see [Manage scanner tools](../docs/advanced-usage.md)), run the scan in the [container image](run-in-a-container.md), or turn the scanner off. [Set the gate](set-the-gate.md#incomplete) explains the incomplete-scan rule.
 
 A scanner that has nothing to scan in the source is the exception: it is recorded SKIPPED, whether or not its tool is installed, and the scanner's `skipped_reason` in `ash_aggregated_results.json` says why. cdk-nag, cfn-nag, cfn-guard, and cfn-lint have nothing to scan when no scanned file is a CloudFormation template; actionlint when there is no GitHub Actions workflow; zizmor when there is no workflow or composite action; and npm-audit when no `package.json` has a lockfile (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, or `pnpm-lock.yaml`) beside it. When a scanner's tool is not installed, ASH counts a `.json`, `.yaml`, or `.yml` file that does not parse as a template, and records the scanner MISSING, when the file's text has `AWSTemplateFormatVersion` or a `Type: AWS::` resource type, as a damaged template does. With the tool installed, the scanner passes over such a file and is SKIPPED.
 
@@ -18,7 +18,7 @@ In a repository with no CloudFormation template and one detect-secrets finding, 
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets,cfn-nag --offline --no-progress
+ashx --source-dir . --scanners detect-secrets,cfn-nag --offline --no-progress
 ```
 
 ## Turn scanners off
@@ -33,18 +33,18 @@ scanners:
     enabled: false
 ```
 
-Use the hyphenated names that `ash plugin list` shows (`detect-secrets`, `cdk-nag`, and `npm-audit`). A misspelled name is ignored without a warning, so the scanner keeps running.
+Use the hyphenated names that `ashx plugin list` shows (`detect-secrets`, `cdk-nag`, and `npm-audit`). A misspelled name is ignored without a warning, so the scanner keeps running.
 
 To choose scanners for one run, use `--scanners` to run only the ones you name, or `--exclude-scanners` to run all but those:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ashx --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
 <!-- doctest: illustrative reason="runs every scanner, which needs each scanner's tool installed" -->
 ```bash
-ash --source-dir . --exclude-scanners trivy,grype
+ashx --source-dir . --exclude-scanners trivy,grype
 ```
 
 Both options take a comma-separated list or can be repeated, and the `ASH_SCANNERS` and `ASH_EXCLUDED_SCANNERS` environment variables set them too. How they combine with the config:
@@ -91,7 +91,7 @@ Every scanner has `severity_threshold`, which overrides the global threshold for
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress \
+ashx --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides scanners.bandit.options.severity_level=HIGH
 ```
 
@@ -110,7 +110,7 @@ scanners:
     enabled: true
     severity_threshold: HIGH
 EOF
-ash config validate --config section-key.yaml
+ashx config validate --config section-key.yaml
 ```
 
 ## Keep one scanner of an overlapping pair {#overlap}
@@ -166,7 +166,7 @@ When a repository config sets one of these to a value other than the operator's,
 
 <!-- doctest: illustrative reason="names a gitleaks config file that the sample project does not have" -->
 ```bash
-ash --source-dir . --config-overrides scanners.gitleaks.options.config_file=/etc/ash/gitleaks.toml
+ashx --source-dir . --config-overrides scanners.gitleaks.options.config_file=/etc/ash/gitleaks.toml
 ```
 
 These scanners do not read the repository's own config files for their tools, such as `.gitleaks.toml`, `.gitleaksignore`, `zizmor.yml`, `actionlint.yaml`, `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.syft.yaml`, `trivy.yaml`, `.trivyignore`, or `.cfnlintrc`. To use one, point the option at it from an operator source.

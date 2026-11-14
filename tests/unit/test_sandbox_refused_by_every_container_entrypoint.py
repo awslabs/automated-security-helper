@@ -176,8 +176,11 @@ def _argv_lists(tmp_path: Path) -> List[List[str]]:
 
 
 def _inner_words(run_argv: List[str]) -> List[str]:
-    """The words the run gives ash in the image: everything after its ``ash``."""
-    return run_argv[run_argv.index("ash") + 1 :]
+    """The words the run gives ash in the image: everything after its ``ashx``.
+
+    The image's command is ``ashx``, the v4 canonical name (the Dockerfile CMD and
+    ``Invoke-ASH`` both say so); ``ash`` is only the deprecated alias."""
+    return run_argv[run_argv.index("ashx") + 1 :]
 
 
 def _has_pair(words: List[str], first: str, second: str) -> bool:

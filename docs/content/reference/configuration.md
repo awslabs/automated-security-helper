@@ -67,7 +67,7 @@ A key not listed here is ignored, without an error, when the configuration is lo
 | <a id="content_db_staleness_offline_image_default"></a>`content_db_staleness_offline_image_default` | boolean | `true` | Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather than to content_db_staleness: fail. Such an image carries the trivy database it was built with, and trivy's own bound would fail every scan in it from a day after the build; with this, those scans pass and every report records the stale database. Only trivy-db: grype-db and the offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES in ASH's environment, which the image sets from its OFFLINE build argument, turns it on; without that variable this does nothing, whatever it says. Set false to hold trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides entry for trivy-db outranks it, and either form of --allow-stale-content-db sets this to false for that scan. |
 | <a id="ash_plugin_modules"></a>`ash_plugin_modules` | list of string | `[]` | List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules. |
 | <a id="external_reports_to_include"></a>`external_reports_to_include` | list of string | `[]` | List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools. |
-| <a id="build"></a>`build` | [section](#section-build) or null | `null` | Build-time configuration settings. `ash config validate` warns that this key is an internal field, and still passes the config; a scan accepts it. |
+| <a id="build"></a>`build` | [section](#section-build) or null | `null` | Build-time configuration settings. `ashx config validate` warns that this key is an internal field, and still passes the config; a scan accepts it. |
 | <a id="converters"></a>`converters` | [section](#section-converters) | see the section | Converter configurations by name. |
 | <a id="scanners"></a>`scanners` | [section](#section-scanners) | see the section | Scanner configurations by name. |
 | <a id="reporters"></a>`reporters` | [section](#section-reporters) | see the section | Reporter configurations by name. |
@@ -262,7 +262,7 @@ A key not listed here is an error when the configuration is loaded.
 <!-- doctest: options of=scanners.* -->
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `name` | string, length at least 1, matches `^[a-zA-Z][\w-]+$` | the plugin's own name | Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. `ash config validate` warns that it is internal-only in a scanner, reporter, or converter entry, and still passes the config; a scan accepts it. |
+| `name` | string, length at least 1, matches `^[a-zA-Z][\w-]+$` | the plugin's own name | Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter. `ashx config validate` warns that it is internal-only in a scanner, reporter, or converter entry, and still passes the config; a scan accepts it. |
 | `enabled` | boolean | `true` | Whether the component is enabled |
 | `options` | mapping | the plugin's defaults | The plugin's options. Each plugin's are listed on its reference page: [scanners](scanners.md), [reporters](reporters.md), [converters](converters.md). |
 

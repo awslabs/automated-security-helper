@@ -1908,7 +1908,11 @@ def test_the_job_on_the_built_image_prints_its_ash_right_before_the_scan():
     printing = [
         i for i, item in enumerate(script) if begin in str(item) and end in str(item)
     ]
-    scan = [i for i, item in enumerate(script) if str(item).startswith("ash scan")]
+    scan = [
+        i
+        for i, item in enumerate(script)
+        if str(item).startswith(("ash scan", "ashx scan"))
+    ]
     assert len(printing) == 1 and len(scan) == 1, script
     assert printing[0] == scan[0] - 1, "the print is the command right before the scan"
     assert str(script[printing[0]]).startswith("python3 -I -c ")
@@ -1951,7 +1955,7 @@ def test_a_built_image_job_with_a_matrix_prints_once_per_entry():
                 ),
             )
         ],
-        [("      ash scan --mode local", "      echo scan --mode local")],
+        [("      ashx scan --mode local", "      echo scan --mode local")],
         [
             ("  script:\n    - ash_exit=0\n    - >-\n", "  script: >-\n"),
             ('    - echo "$ash_exit" > ash-exit-code.txt\n', ""),

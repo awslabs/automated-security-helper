@@ -17,12 +17,12 @@ global_settings:
     # GuardDog's heuristics read source text, so test code that writes a fake
     # credentials file matches them. Pinned to the one line GuardDog reports, so a
     # real finding elsewhere in the file is still reported. The test writes creds.env
-    # twice, at lines 738 and 954; GuardDog 3.2.0 drops a match whose code snippet
-    # is the same as one it already reported, so it reports 738 only.
+    # twice, at lines 739 and 955; GuardDog 3.2.0 drops a match whose code snippet
+    # is the same as one it already reported, so it reports 739 only.
     - rule_id: "threat-filesystem-read"
       path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 738
-      line_end: 738
+      line_start: 739
+      line_end: 739
       reason: >-
         False positive. The line writes a creds.env holding a fake AWS key id and
         secret, generated per run with secrets.choice, into the test's temporary
@@ -1458,13 +1458,13 @@ global_settings:
       reason: "file:///etc/passwd is an input the test asserts is rejected as non-https."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 292
-      line_end: 292
+      line_start: 293
+      line_end: 293
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-destruction
       path: tests/snapshot/test_snapshot_normalizer.py
-      line_start: 300
-      line_end: 300
+      line_start: 301
+      line_end: 301
       reason: "Regex artifact: the match is the \"rm\" inside \"normalizer\" before add_literal(\"/home/...\"); nothing is deleted."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_artifact_contents_gate.py
@@ -1483,8 +1483,8 @@ global_settings:
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1199
-      line_end: 1199
+      line_start: 1211
+      line_end: 1211
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py

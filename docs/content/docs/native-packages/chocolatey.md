@@ -75,7 +75,7 @@ This removes the shims and the virtualenv in `%ProgramData%\ash`, since Chocolat
 
 ## Offline machines
 
-Stage a wheelhouse before `choco install`, as Administrator. Resolve it from ASH's own wheel, on a machine that can reach an index. Do not run `pip download automated-security-helper`: that name on PyPI belongs to an unrelated third party, not to this project.
+Stage a wheelhouse before `choco install`, as Administrator. Resolve it from ASH's own wheel, on a machine that can reach an index. Do not download ASH by its name from an index: the name `automated-security-helper` on PyPI belongs to an unrelated third party, not to this project.
 
 <!-- doctest: illustrative reason="Windows batch commands, which the docs job does not run" -->
 ```bat

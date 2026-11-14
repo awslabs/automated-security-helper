@@ -38,6 +38,7 @@ from typing import Dict, List, Optional, Sequence
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from tests.utils.helpers import checkout_env
 from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
 
@@ -818,7 +819,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
             "-e",
             "LINES=24",
             DEFAULT_IMAGE,
-            "ash",
+            CANONICAL_CLI_NAME,
             "--source-dir",
             "/src",
             "--output-dir",
@@ -863,7 +864,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
             "project_name: repo\nsandbox:\n  mode: not-a-mode\n", encoding="utf-8"
         )
         inner = run_args[run_args.index(DEFAULT_IMAGE) + 1 :]
-        assert inner[0] == "ash", inner
+        assert inner[0] == CANONICAL_CLI_NAME, inner
         inner_out = tmp_path / "inner-out"
         mapped = [
             {"/src": str(project), "/out": str(inner_out)}.get(arg, arg)

@@ -34,7 +34,7 @@ def run_finished(**kwargs):
 <!-- doctest: run expect-exit=2 -->
 ```bash
 export PYTHONPATH="$PWD/ash-plugins"
-ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
 ```
 
 Among the scan's output are the two lines the subscribers print:
@@ -45,7 +45,7 @@ acme: detect-secrets finished, 0 left
 acme: run finished in 0.9 s
 ```
 
-`ash plugin list` does not show event subscribers.
+`ashx plugin list` does not show event subscribers.
 
 ## How subscribing works
 

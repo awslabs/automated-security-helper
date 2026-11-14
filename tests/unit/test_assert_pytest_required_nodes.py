@@ -20,6 +20,8 @@ from types import ModuleType
 
 import pytest
 
+from tests.utils.helpers import checkout_env
+
 pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[2]
@@ -301,11 +303,15 @@ def positional_nodes(directory: Path, cwd: Path, paths: list[str]) -> list[str]:
         capture_output=True,
         text=True,
         check=False,
-        env={
-            **os.environ,
-            "PYTHONPATH": str(directory),
-            "POSITIONAL_IDS_OUT": str(out),
-        },
+        # The suites collected from the repository import ASH, so this checkout
+        # comes first on PYTHONPATH, ahead of the plugin's directory.
+        env=checkout_env(
+            {
+                **os.environ,
+                "PYTHONPATH": str(directory),
+                "POSITIONAL_IDS_OUT": str(out),
+            }
+        ),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(out.read_text(encoding="utf-8"))

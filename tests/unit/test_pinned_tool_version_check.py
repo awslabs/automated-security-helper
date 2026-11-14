@@ -32,6 +32,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.utils.helpers import iter_repo_files
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_pinned_tool_versions.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-pinned-tool-versions.yml"
@@ -1469,11 +1471,14 @@ _CENSUS_EXEMPT = {
 def _census() -> list[tuple[str, str]]:
     hits = []
     for root in _CENSUS_ROOTS:
-        for path in sorted((REPO_ROOT / root).rglob("*")):
+        # iter_repo_files lists files only and never enters node_modules.
+        walked = iter_repo_files(
+            REPO_ROOT / root, skip_dirs=frozenset({"node_modules"})
+        )
+        for path in sorted(walked):
             rel = path.relative_to(REPO_ROOT).as_posix()
             if (
-                not path.is_file()
-                or "node_modules" in path.parts
+                "node_modules" in path.parts
                 or "/tests/unit" in f"/{rel}"
                 or not _CENSUS_NAMES.match(path.name)
             ):

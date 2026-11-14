@@ -40,10 +40,10 @@ vulnerability databases.
 
 [Connect an AI agent to ASH](agents.md) is for developers who work with a coding agent or
 an IDE that supports MCP, such as Claude Code, Kiro, Cursor, or GitHub Copilot in VS Code.
-The agent starts `ash mcp` on your machine as a local server and runs scans through it.
+The agent starts `ashx mcp` on your machine as a local server and runs scans through it.
 
 You need git and ASH on the same machine as the agent, and an agent that can start a local
-MCP server over stdio. Installing the scanner tools first with `ash dependencies install`
+MCP server over stdio. Installing the scanner tools first with `ashx dependencies install`
 is optional. Without them, an online scan with the sandbox off installs bandit,
 checkov, cfn-lint, and zizmor itself, with the `uv` installed with ASH. A
 scanner with nothing to scan, for example cfn-nag in a project without CloudFormation
