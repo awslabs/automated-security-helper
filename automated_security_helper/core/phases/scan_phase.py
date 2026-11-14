@@ -1336,7 +1336,15 @@ class ScanPhase(EnginePhase):
                     _selection_key(_scanner_display_name(instance))
                     for instance in scanner_instances
                 }
-                known_names = registered_names | construction_failed
+                # construction_failed holds raw lower-cased display names, while
+                # the requested names and registered_names are selection keys
+                # (a retired spelling resolved to the scanner that serves it).
+                # Re-keyed here so a scanner whose retired-spelling name failed
+                # construction is known under the key a request for it resolves
+                # to, and the two refusals below agree on it.
+                known_names = registered_names | {
+                    _selection_key(name) for name in construction_failed
+                }
                 requested = [(name, _selection_key(name)) for name in enabled_scanners]
                 unresolved = [name for name, key in requested if key not in known_names]
                 # The module hint and the refusal text are the engine's too
