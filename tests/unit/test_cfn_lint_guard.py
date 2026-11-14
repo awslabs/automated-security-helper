@@ -335,10 +335,11 @@ def _flagged(gate: ModuleType, bodies: dict, approved: list) -> list[str]:
     ]
 
 
-def test_the_approved_list_is_mains_thirteen(approved: list) -> None:
-    # #761 approved 13 resources over three registry rules; the jest test pins the
-    # same file, so the two gates read one list.
-    assert len(approved) == 13
+def test_the_approved_list_holds_fourteen(approved: list) -> None:
+    # #761 approved 13 resources over three registry rules, and the EKS installer's
+    # opt-in VPC placement is the fourteenth; the jest test pins the same file, so
+    # the two gates read one list.
+    assert len(approved) == 14
     assert {r for a in approved for r in a.rules} == {
         "LAMBDA_INSIDE_VPC",
         "NO_UNRESTRICTED_ROUTE_TO_IGW",

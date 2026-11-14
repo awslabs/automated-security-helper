@@ -1032,10 +1032,11 @@ def handler(event, context):
     props = event["ResourceProperties"]
     ssm = boto3.client("ssm")
     if event["RequestType"] == "Delete":  # never block a teardown on a build
+        parameter = "/${BOOTSTRAP_PARAMETER_PREFIX}/" + props["ProjectName"]
         try:
-            ssm.delete_parameter(Name="/${BOOTSTRAP_PARAMETER_PREFIX}/" + props["ProjectName"])
+            ssm.delete_parameter(Name=parameter)
         except Exception as exc:
-            print("could not delete the bootstrap parameter: %s" % exc)
+            print("could not delete %s: %s" % (parameter, exc))
         return send(event, "SUCCESS", "Nothing to undo")
     try:
         # The URL reaches the build by parameter name; see ash-image-build.ts. Inside

@@ -63,9 +63,9 @@ const IGW = 'NO_UNRESTRICTED_ROUTE_TO_IGW';
 
 /**
  * The approved set, read from test/guard-suppressions.approved.json, which
- * deploy/tests/cfn-lint-guard.py reads too, so the two gates cannot drift apart. 13
- * resources carrying the 25 findings cfn-guard reported: one bucket-policy result per
- * policy statement (15 on 7 policies), two per Lambda function (8 on 4), one per route
+ * deploy/tests/cfn-lint-guard.py reads too, so the two gates cannot drift apart. 14
+ * resources carrying the 27 findings cfn-guard reported: one bucket-policy result per
+ * policy statement (15 on 7 policies), two per Lambda function (10 on 5), one per route
  * (2 on 2).
  */
 interface ApprovedEntry extends GuardEntry {
@@ -84,8 +84,9 @@ const APPROVED: GuardEntry[] = APPROVED_WITH_REASONS.map(({ template, logicalId,
 
 describe('cfn-guard suppressions sit only on the approved resources', () => {
   test('all six templates were read', () => {
-    // AshEksOperator carries no suppression; it is listed so the exact-set test
-    // below is known to have looked at it.
+    // AshEksOperator carries one, on its installer function; AshImagePipeline
+    // carries none and is listed so the exact-set test below is known to have
+    // looked at it.
     expect(Object.keys(COMMITTED).sort()).toEqual([
       'AshAgentCore',
       'AshCodeCommitGate',
@@ -116,9 +117,9 @@ describe('cfn-guard suppressions sit only on the approved resources', () => {
     },
   );
 
-  test('the approved list holds 13 entries over the three registry rules', () => {
+  test('the approved list holds 14 entries over the three registry rules', () => {
     // Pins the file itself, so emptying it cannot make the exact-set test vacuous.
-    expect(APPROVED).toHaveLength(13);
+    expect(APPROVED).toHaveLength(14);
     expect([...new Set(APPROVED.flatMap((e) => e.rules))].sort()).toEqual([IGW, VPC, TLS].sort());
   });
 
