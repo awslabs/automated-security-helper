@@ -193,8 +193,6 @@ def test_the_action_passes_the_script_path_through_env():
     assert len(steps) == 1, steps
     step = steps[0]
     assert "${{" not in step["run"], step["run"]
-    env = step.get("env", {})
-    assert env.get("ASSERT_DETECTION") == (
-        "${{ github.action_path }}/assert_detection.py"
-    ), env
+    declared = step.get("env", {}).get("ASSERT_DETECTION")
+    assert declared == "${{ github.action_path }}/assert_detection.py", declared
     assert '"${ASSERT_DETECTION}"' in step["run"], step["run"]

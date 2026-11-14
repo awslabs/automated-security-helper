@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.env_assertions import differing_names
+
 pytestmark = pytest.mark.unit
 
 # The repository name is interpolated into the deliberately wrong `--from` refs
@@ -99,7 +101,7 @@ def test_the_committed_bundle_is_one_manifest_the_rewrite_accepts(tmp_path):
     ]
     assert len(changed) == 1
     assert rewritten["args"][changed[0]] == f"--from={tmp_path / 'a.whl'}"
-    assert rewritten["env"] == config["env"]
+    assert differing_names(rewritten["env"], config["env"]) == []
     assert rewritten["command"] == config["command"]
 
 

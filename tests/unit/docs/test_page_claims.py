@@ -106,6 +106,11 @@ SCALE_LARGE_REPOS = "how-to/scale-large-repos.md"
 SANDBOX = "concepts/sandbox.md"
 CONFIGURE = "how-to/configure.md"
 
+#: The command the pages' code blocks spell. The docs still write ``ash`` (the
+#: deprecated v3 alias), so a claim read back from a page names that word; it is not
+#: the program a Python driver starts (CANONICAL_CLI_NAME).
+DOCS_COMMAND = "ash"
+
 #: How a suppression's justification starts when the entry came from an MCP client.
 CLIENT_MARK = "(ASH, client-supplied config)"
 
@@ -17398,7 +17403,7 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
     assert doctest is not None, "no doctest block right after the sentence"
     assert doctest[1] == "2", doctest[0]
     command = shlex.split(doctest[2])
-    assert command[:3] == ["ash", "dependencies", "install"], command
+    assert command[:3] == [DOCS_COMMAND, "dependencies", "install"], command
     unknown = command[command.index("--tool") + 1]
     cwd = tmp_path / "cwd"
     cwd.mkdir()
@@ -19556,7 +19561,7 @@ def test_ash_report_refuses_an_unknown_format_before_it_reads_the_results(
     assert doctest is not None, "no doctest block right after the sentence"
     assert doctest[1] == "5", doctest[0]
     command = shlex.split(doctest[2])
-    assert command[:2] == ["ash", "report"] and "--format" in command, command
+    assert command[:2] == [DOCS_COMMAND, "report"] and "--format" in command, command
     name = command[command.index("--format") + 1]
     cwd = tmp_path / "work"
     cwd.mkdir()

@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils.rules_bundles import RulesBundleUnavailable
 from automated_security_helper.utils.subprocess_utils import find_executable
 from tests.utils.helpers import checkout_env
@@ -140,8 +141,8 @@ def _require_tools() -> None:
 
 
 def _ash() -> str:
-    ash = shutil.which("ash", path=str(Path(sys.executable).parent))
-    assert ash, f"no ash entry point beside {sys.executable}"
+    ash = shutil.which(CANONICAL_CLI_NAME, path=str(Path(sys.executable).parent))
+    assert ash, f"no {CANONICAL_CLI_NAME} entry point beside {sys.executable}"
     return ash
 
 

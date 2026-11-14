@@ -1352,12 +1352,12 @@ class TestDeployment:
         """
         container = self._deployment(docs)["spec"]["template"]["spec"]["containers"][0]
         assert container["args"][:2] == ["--namespace", "$(WATCH_NAMESPACE)"]
-        assert container["env"] == [
-            {
-                "name": "WATCH_NAMESPACE",
-                "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}},
-            }
-        ]
+        # The container's one env entry, a manifest fragment holding no host value.
+        (watch_namespace,) = container["env"]
+        assert watch_namespace == {
+            "name": "WATCH_NAMESPACE",
+            "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}},
+        }
         referenced = re.fullmatch(r"\$\((\w+)\)", container["args"][1])
         assert referenced is not None
         assert referenced.group(1) == container["env"][0]["name"]
