@@ -526,7 +526,7 @@ class TestRecordedReporterDestinations:
         assert "reporters.endpoint-reporter.options.endpoint" in harness.ignored_keys(
             named
         )
-        assert "ash merge's --config-overrides or --config" in named[0]
+        assert "ashx merge's --config-overrides or --config" in named[0]
 
     def test_the_merged_results_do_not_record_the_shards_destinations(self, harness):
         shard_paths = harness.write_shards(SHARD_CONFIG)
@@ -639,7 +639,7 @@ class TestTheOperatorsBase:
             for m in harness.ignoring()
             # The warning names the file with forward slashes on every platform.
             if operator.as_posix() in m
-            and "ash merge's --config-overrides instead" in m
+            and "ashx merge's --config-overrides instead" in m
         ]
         assert len(named) == 1, harness.warnings
         for key in (
@@ -972,7 +972,7 @@ class TestEnablementIsTheOperators:
         assert written == {"endpoint": ENDPOINT_DEFAULT}
         named = [m for m in harness.ignoring() if "endpoint-reporter.enabled" in m]
         assert named, harness.warnings
-        assert "ash merge's --config-overrides or --config" in named[0]
+        assert "ashx merge's --config-overrides or --config" in named[0]
 
     def test_a_shard_that_repeats_the_operators_enabled_is_not_warned_about(
         self, harness
@@ -1045,7 +1045,7 @@ class TestMergeWarnings:
         for message in messages:
             assert shard_paths[0].as_posix() in message, message
             assert "a shard recorded in its results" in message, message
-            assert "ash merge's --config-overrides or --config" in message, message
+            assert "ashx merge's --config-overrides or --config" in message, message
             assert "inside the scanned tree" not in message, message
             assert "--ash-plugin-modules" not in message, message
 

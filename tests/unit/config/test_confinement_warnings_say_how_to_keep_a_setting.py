@@ -294,4 +294,4 @@ def test_a_merged_shards_config_says_how_to_keep_a_setting_there():
     from automated_security_helper.config.untrusted_source import SHARD_RECORDED
 
     assert SHARD_RECORDED.remedy.startswith("To keep a setting, ")
-    assert "ash merge's --config-overrides or --config" in SHARD_RECORDED.remedy
+    assert "ashx merge's --config-overrides or --config" in SHARD_RECORDED.remedy
