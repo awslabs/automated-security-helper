@@ -209,6 +209,13 @@ async def _run_delivery(function: Callable[..., Any], /, **kwargs: Any) -> Any:
 #: clone or a delivery still running. run_mcp_server reads it on the way out.
 _source_jobs_left_running = False
 
+#: Whether the stdio lifespan's stop of the scans (stop_running_scans) ended with a
+#: scan still running. Like the flag above, run_mcp_server reads it on the way out:
+#: the interpreter's own exit waits for that scan's thread, and the handlers that
+#: end the process on a stop signal (_exit_on_late_signal) must stay installed
+#: until then.
+_scans_left_running = False
+
 
 def _join_source_pools(executors: Tuple[ThreadPoolExecutor, ...]) -> None:
     """Return once every worker of ``executors`` has finished its job and exited."""
@@ -345,6 +352,7 @@ async def _lifespan(_server: MCPServer) -> AsyncIterator[Dict[str, Any]]:
     STDIO_SCAN_STOP_TIMEOUT_SECONDS after the scans, so that they are not still
     writing when run_mcp_server removes the stdio session workspace.
     """
+    global _scans_left_running
     try:
         yield {}
     finally:
@@ -352,10 +360,15 @@ async def _lifespan(_server: MCPServer) -> AsyncIterator[Dict[str, Any]]:
             with anyio.CancelScope(shield=True):
                 deadline = time.monotonic() + STDIO_SCAN_STOP_TIMEOUT_SECONDS
                 joiner = _begin_stopping_source_jobs()
-                await stop_running_scans(
-                    "the stdio client closed the connection",
-                    timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
-                    promptly=True,
+                # Kept, as the source jobs' answer is: a scan that did not stop in
+                # time still holds the interpreter's exit, and run_mcp_server keeps
+                # _exit_on_late_signal installed for it.
+                _scans_left_running = bool(
+                    await stop_running_scans(
+                        "the stdio client closed the connection",
+                        timeout=STDIO_SCAN_STOP_TIMEOUT_SECONDS,
+                        promptly=True,
+                    )
                 )
                 await _wait_for_source_jobs(joiner, deadline)
             # The process ends next, by the client's SIGTERM if not sooner; a tool
@@ -1013,6 +1026,9 @@ async def run_ash_scan(
                 # shapes without one, a session whose delivered source is being
                 # changed and a session at its scan limit, are the "anything
                 # else" case there, with another scan of the same directory.
+                # with_exit_code sets the keys on ``result`` itself; the call is
+                # left as a statement so the contract reader keeps following
+                # result to where mcp_scan_directory built it.
                 with_exit_code(result, REFUSED_INTERNAL_EXIT_CODE)
             return result
         if "scan_id" not in result:
@@ -3652,7 +3668,9 @@ def run_mcp_server():
     running (_wait_for_source_jobs): the interpreter's own exit waits for that
     thread after this returns, and a SIGTERM then, with the previous handler's
     default action, would end the server with -15 and leave the tools' groups
-    running, so _exit_on_late_signal stays installed until the process ends.
+    running, so _exit_on_late_signal stays installed until the process ends. So it
+    does for a scan that did not stop within the lifespan's window
+    (_scans_left_running).
 
     The HTTP transports are served by uvicorn instead (cli/mcp). There, Ctrl-C
     stops the server gracefully, the app's lifespan stops the scans, and
@@ -3661,7 +3679,9 @@ def run_mcp_server():
     cli/mcp._ask_server_to_stop_on_sighup), so on every transport.
     """
     global _serving_stdio, _source_jobs_left_running, _stdio_presence
+    global _scans_left_running
     _source_jobs_left_running = False
+    _scans_left_running = False
     # The sinks that are not handlers write to sys.stderr as given: lastResort
     # for a library logger with no handler, warnings, and the thread and sys
     # excepthooks. Python's writes to sys.stderr, bytes to its buffer included,
@@ -3753,11 +3773,11 @@ def run_mcp_server():
         for signum, handler in previous_handlers.items():
             if handler is None:
                 continue
-            if (
-                _source_jobs_left_running
-                and signal.getsignal(signum) is _exit_on_late_signal
-            ):
-                # The interpreter waits for the job's thread after this returns.
+            if (_source_jobs_left_running or _scans_left_running) and signal.getsignal(
+                signum
+            ) is _exit_on_late_signal:
+                # The interpreter waits for the job's or the scan's thread after
+                # this returns (stop_scans_at_server_exit ORs the two the same way).
                 continue
             signal.signal(signum, handler)
 

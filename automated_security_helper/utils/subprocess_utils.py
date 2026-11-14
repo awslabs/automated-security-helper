@@ -108,6 +108,7 @@ from automated_security_helper.core.constants import (
     ASH_BIN_PATH,
     ash_bin_path_from_environment,
     home_bin_path,
+    is_anchored,
     warn_if_home_unusable,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, delivers
@@ -1033,18 +1034,9 @@ def _executable_candidate_names(command: str) -> List[str]:
     return [f"{command}{suffix}" for suffix in suffixes] + [command]
 
 
-def _is_anchored(path: str, pathmod: Any = os.path) -> bool:
-    """Whether ``path`` names a location without reference to the cwd.
-
-    ``isabs`` alone is not enough on Windows: before Python 3.13 ``\\tools`` counts
-    as absolute there, but it is rooted on whichever drive is current. A drive
-    letter or UNC share is required as well.
-    """
-    if not pathmod.isabs(path):
-        return False
-    if pathmod.__name__ == "ntpath":
-        return bool(pathmod.splitdrive(path)[0])
-    return True
+#: One definition of "anchored", ``core.constants.is_anchored``, so the lookup, the
+#: ``ash dependencies install`` target and its hint can never disagree.
+_is_anchored = is_anchored
 
 
 def _absolute_path_entries() -> List[str]:

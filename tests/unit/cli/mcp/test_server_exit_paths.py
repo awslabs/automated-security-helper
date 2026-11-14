@@ -1012,3 +1012,61 @@ def test_the_late_stop_handlers_are_kept_only_while_a_source_job_is_running(
             assert left is mcp_server._exit_on_late_signal, (name, left)
         else:
             assert left == handler, (name, left, handler)
+
+
+@pytest.mark.parametrize(
+    "scan_survives", [True, False], ids=["a-scan-survives", "every-scan-stopped"]
+)
+@pytest.mark.unit
+def test_the_stdio_lifespan_records_whether_a_scan_outlived_its_stop(
+    monkeypatch, scan_survives
+):
+    """stop_running_scans says whether a scan is still running when its wait ends;
+    the lifespan used to throw that answer away, so nothing recorded the scan."""
+
+    async def stop_running_scans(reason, timeout, promptly=False):
+        return scan_survives
+
+    monkeypatch.setattr(mcp_server, "stop_running_scans", stop_running_scans)
+    monkeypatch.setattr(mcp_server, "_serving_stdio", True)
+    monkeypatch.setattr(mcp_server, "_scans_left_running", not scan_survives)
+    monkeypatch.setattr(mcp_server, "kill_running_groups", lambda: None)
+    monkeypatch.setattr(mcp_server, "_flush_stdout", lambda: None)
+
+    asyncio.run(_leave_the_stdio_lifespan())
+
+    assert mcp_server._scans_left_running is scan_survives
+
+
+@pytest.mark.parametrize(
+    "scan_survives", [True, False], ids=["a-scan-survives", "every-scan-stopped"]
+)
+@pytest.mark.unit
+def test_the_late_stop_handlers_are_kept_while_a_scan_outlives_its_stop(
+    monkeypatch, stop_signals_put_back, scan_survives
+):
+    """A scan thread that did not stop in the lifespan's window still holds the
+    interpreter's exit, so the client's follow-up SIGTERM must reach
+    _exit_on_late_signal (status 0), not the default action (-15)."""
+
+    async def serve() -> None:
+        for signum in _STOP_STATUS:
+            signal.signal(signum, mcp_server._exit_on_late_signal)
+        # What the lifespan records when stop_running_scans reports a survivor;
+        # no source job is left running in this case.
+        mcp_server._scans_left_running = scan_survives
+
+    monkeypatch.setattr(mcp_server, "_source_jobs_left_running", False)
+    monkeypatch.setattr(mcp_server, "_scans_left_running", False)
+    monkeypatch.setattr(mcp_server, "_serve_stdio", serve)
+    before = {signum: signal.getsignal(signum) for signum in _STOP_STATUS}
+
+    mcp_server.run_mcp_server()
+
+    for signum, handler in before.items():
+        left = signal.getsignal(signum)
+        name = signal.Signals(signum).name
+        if scan_survives:
+            assert left is mcp_server._exit_on_late_signal, (name, left)
+        else:
+            assert left == handler, (name, left, handler)
