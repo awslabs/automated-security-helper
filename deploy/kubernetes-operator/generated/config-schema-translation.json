@@ -1,17 +1,17 @@
 {
-  "additionalPropertiesDroppedAlongsideProperties": 74,
-  "collapsedOptionals": 67,
-  "constRewrittenToEnum": 26,
+  "additionalPropertiesDroppedAlongsideProperties": 92,
+  "collapsedOptionals": 99,
+  "constRewrittenToEnum": 32,
   "droppedKeywords": {
-    "default": 309,
+    "default": 408,
     "propertyNames": 1,
-    "title": 341
+    "title": 440
   },
-  "exclusiveBoundsRewritten": 1,
+  "exclusiveBoundsRewritten": 6,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "33c2bd5cae618c8e",
+  "sourceSchemaSha256": "c2d436534af2be8a",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",
@@ -23,14 +23,6 @@
     },
     {
       "path": "/properties/build/properties/custom_scanners/items/properties/context",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/build/properties/custom_scanners/items/properties/config",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/build/properties/custom_scanners/items/properties/config/properties/options",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
@@ -46,67 +38,11 @@
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
-      "path": "/properties/converters/properties/archive",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/converters/properties/archive/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/converters/properties/jupyter",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/converters/properties/jupyter/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
       "path": "/properties/scanners",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
-      "path": "/properties/scanners/properties/bandit",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/bandit/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/cdk-nag",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/cdk-nag/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
       "path": "/properties/scanners/properties/cdk-nag/properties/options/properties/nag_packs",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/cfn-nag",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/cfn-nag/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/checkov",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/checkov/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/detect-secrets",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/detect-secrets/properties/options",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
@@ -126,160 +62,12 @@
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
-      "path": "/properties/scanners/properties/grype",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/grype/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/npm-audit",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/npm-audit/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/opengrep",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/opengrep/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/syft",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/scanners/properties/syft/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
       "path": "/properties/reporters",
       "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
     },
     {
-      "path": "/properties/reporters/properties/csv",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/csv/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/cyclonedx",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/cyclonedx/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/gitlab-cyclonedx",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/gitlab-cyclonedx/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/html",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/html/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/flat-json",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/flat-json/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/gitlab-sast",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/gitlab-sast/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/github-ghas",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/github-ghas/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/junitxml",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/junitxml/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/markdown",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/markdown/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/ocsf",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/ocsf/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/sarif",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/sarif/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/spdx",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/spdx/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/text",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/text/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/unused-suppressions",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/unused-suppressions/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/yaml",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
-    },
-    {
-      "path": "/properties/reporters/properties/yaml/properties/options",
-      "reason": "this object declares named properties and a schema for any others; a structural schema permits only one of the two. The named properties stay validated and unknown keys are preserved rather than pruned, so a custom plugin's config still reaches .ash.yaml -- but its values are checked by ASH when it loads the config, not by the API server."
+      "path": "/properties/output_formats",
+      "reason": "a union of 2 branches with types ['array', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
       "path": "/properties/extends",

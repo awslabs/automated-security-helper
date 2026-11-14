@@ -10,7 +10,7 @@ metadata:
   name: ashscans.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 33c2bd5cae618c8e
+    ash.awslabs.github.io/ash-config-schema-sha256: c2d436534af2be8a
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -279,9 +279,23 @@ spec:
                             reason:
                               description: Reason for exclusion
                               type: string
+                            expires:
+                              type: string
+                              description: (Optional) Expiration date (YYYY-MM-DD). The entry stops applying
+                                on this date, by the local clock of the host running the scan. 'expiration'
+                                is accepted as a deprecated alias when a config is read; the alias is
+                                removed in ASH v4.
+                              nullable: true
+                            client_supplied:
+                              description: 'Set by ASH: True when a config or workspace policy file an
+                                MCP client delivered supplied this entry, so results show which suppressions
+                                and ignored paths came from the client. A value written in a config file
+                                is ignored.'
+                              type: boolean
                             expiration:
                               type: string
-                              description: (Optional) Expiration date (YYYY-MM-DD)
+                              description: (Optional) Deprecated alias of 'expires', accepted when a config
+                                is read and removed in ASH v4; the entry is written and stored as 'expires'.
                               nullable: true
                           required:
                           - path
@@ -300,10 +314,19 @@ spec:
                             reason:
                               description: Reason for exclusion
                               type: string
-                            expiration:
+                            expires:
                               type: string
-                              description: (Optional) Expiration date (YYYY-MM-DD)
+                              description: (Optional) Expiration date (YYYY-MM-DD). The entry stops applying
+                                on this date, by the local clock of the host running the scan. 'expiration'
+                                is accepted as a deprecated alias when a config is read; the alias is
+                                removed in ASH v4.
                               nullable: true
+                            client_supplied:
+                              description: 'Set by ASH: True when a config or workspace policy file an
+                                MCP client delivered supplied this entry, so results show which suppressions
+                                and ignored paths came from the client. A value written in a config file
+                                is ignored.'
+                              type: boolean
                             rule_id:
                               type: string
                               description: Rule ID to suppress
@@ -343,6 +366,63 @@ spec:
                                 Java), which needs the 'symbols' extra; a finding whose file cannot be
                                 parsed never matches.
                               nullable: true
+                            scope:
+                              description: 'What a suppression is scoped to beyond path, lines and package
+                                fields.
+
+
+                                The universal keys (``resource_id``, ``resource_type``) are evaluated
+                                by
+
+                                ASH''s own matcher against the resource identity a finding carries, whatever
+
+                                engine produced it. ``engines`` carries per-engine blocks, keyed by scanner
+
+                                name, whose contents are opaque to ASH''s core and owned by the named
+
+                                scanner plugin (the way a k8s object carries per-controller blocks under
+
+                                one metadata envelope).'
+                              properties:
+                                resource_id:
+                                  type: string
+                                  description: (Optional) Only suppress findings about the resource with
+                                    this identity, as the producing engine reports it (for cdk-nag, the
+                                    CDK construct path). Literal match first, then glob; case-sensitive.
+                                    Findings that carry no resource identity never match.
+                                  nullable: true
+                                resource_type:
+                                  type: string
+                                  description: (Optional) Only suppress findings about resources of this
+                                    type (e.g. 'AWS::IAM::Policy'). Literal match first, then glob; case-insensitive.
+                                    Findings that carry no resource type never match.
+                                  nullable: true
+                                engines:
+                                  additionalProperties:
+                                    type: object
+                                    x-kubernetes-preserve-unknown-fields: true
+                                  type: object
+                                  description: '(Optional) Per-engine blocks, keyed by scanner name (e.g.
+                                    ''cdk-nag''). Listing engines ENUMERATES the engines the entry covers:
+                                    a finding from a scanner not listed here does not match this entry,
+                                    and a listed scanner''s finding matches only when that scanner''s
+                                    plugin accepts its block. A listed scanner whose plugin is not installed
+                                    or enabled suppresses nothing (fail closed). The block''s keys belong
+                                    to the named plugin.'
+                                  nullable: true
+                              type: object
+                              nullable: true
+                            resource_id:
+                              type: string
+                              description: '(Optional) Sugar for scope.resource_id: the entry-level spelling
+                                users reach for on their own. Folded into scope at validation; setting
+                                both to different values is an error.'
+                              nullable: true
+                            expiration:
+                              type: string
+                              description: (Optional) Deprecated alias of 'expires', accepted when a config
+                                is read and removed in ASH v4; the entry is written and stored as 'expires'.
+                              nullable: true
                           required:
                           - path
                           - reason
@@ -365,21 +445,41 @@ spec:
                                   type: string
                                 type: array
                               denied_paths:
-                                description: JSON-Pointer glob patterns that are NEVER allowed (denied
-                                  wins over allowed). Defaults block the most dangerous fields on the
-                                  real AshConfig schema.
+                                description: 'JSON-Pointer glob patterns that are never allowed (denied
+                                  wins over allowed). Each entry starts with ''/''. The defaults block
+                                  the fields that decide whether a scan fails, what it runs and reports,
+                                  where findings are sent, the scanner sandbox, and this policy. A list
+                                  equal to a default ASH has shipped counts as the current default list.
+                                  Any other list is added to the current defaults, unless replace_default_denied_paths
+                                  is true. When it is added, a list that holds some default entries and
+                                  leaves others out still gets them, and a warning names the ones it leaves
+                                  out. Whatever the list, and with replace_default_denied_paths too, the
+                                  entries ASH always denies (the scanner sandbox, ash_plugin_modules,
+                                  the detect-secrets verification, plugin and baseline settings, the archive
+                                  converter''s extraction limits, and the sections of the plugins that
+                                  send data off the host: the s3, aws-security-hub, cloudwatch-logs and
+                                  bedrock-summary-reporter reporters and the detect-secrets, npm-audit,
+                                  opengrep, semgrep, snyk-code, trivy, trivy-repo and zizmor scanners)
+                                  are added to it.'
                                 items:
                                   type: string
                                 type: array
                               denied_value_patterns:
                                 additionalProperties:
                                   type: string
-                                description: "Map of JSON-Pointer pattern \u2192 regex. add/replace ops\
-                                  \ are rejected when any string leaf reachable from the op's value matches\
-                                  \ the regex; lists and dicts are walked recursively so a forbidden token\
-                                  \ cannot be hidden inside a nested structure. The `test` op is exempt\
-                                  \ because it is read-only."
+                                description: Map of JSON-Pointer pattern to regex. add/replace ops are
+                                  rejected when any string leaf reachable from the op's value matches
+                                  the regex; lists and dicts are walked recursively so a forbidden token
+                                  cannot be hidden inside a nested structure. The `test` op is exempt
+                                  because it is read-only. Each key starts with '/'.
                                 type: object
+                              replace_default_denied_paths:
+                                description: When true, denied_paths is used as written instead of being
+                                  added to ASH's default list, and each default entry it leaves out is
+                                  named in a warning. When false (the default), the entries listed are
+                                  denied as well as the defaults. Either way, an unset list, or one equal
+                                  to a default ASH has shipped, gets the current default list.
+                                type: boolean
                             type: object
                         type: object
                     type: object
@@ -397,18 +497,44 @@ spec:
                   fail_on_incomplete_scanners:
                     description: 'Whether to exit with a non-zero code when a selected scanner did not
                       complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable,
-                      never ran). SKIPPED scanners are not selected and never trip this. Independent of
-                      fail_on_findings: one answers ''was anything found'', this one answers ''did what
-                      I asked for actually run''. Selects on the scanner''s status, so it covers only
-                      a failure that reached that status. Defaults to True, so a scanner recorded ERROR
-                      or MISSING does not report the exit code of a clean scan. Set it to False, or pass
-                      --no-fail-on-incomplete-scanners, to accept a partial scan''s exit code; excluding
-                      the scanner whose tool is unavailable is usually better, because an excluded scanner
-                      is recorded SKIPPED and the report then says what was not measured.
+                      never ran). A SKIPPED scanner, one not selected or one with nothing of its kind
+                      to scan, does not trip this by itself, but a run in which every scanner is SKIPPED,
+                      such as one where no selected scanner had a file to scan, exits 1 while this is
+                      on. Independent of fail_on_findings: one answers ''was anything found'', this one
+                      answers ''did what I asked for actually run''. Selects on the scanner''s status,
+                      so it covers only a failure that reached that status. Defaults to True, so a scanner
+                      recorded ERROR or MISSING does not report the exit code of a clean scan. Converters
+                      count too: one that crashed, one that could not convert some of its inputs, and
+                      one whose tool is missing while it had inputs make the scan exit non-zero the same
+                      way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial
+                      scan''s exit code; excluding the scanner whose tool is unavailable is usually better,
+                      because an excluded scanner is recorded SKIPPED and the report then says what was
+                      not measured. One ending overrides this setting: a run where ASH could not stop
+                      a scanner''s tool exits 1 either way, because the tool may still be running and
+                      writing into the output directory.
 
 
                       IGNORED BY THE OPERATOR: Set on `ashx merge` from spec.failOnIncompleteScanners
                       instead, for the same reason as fail_on_findings.'
+                    type: boolean
+                  fail_on_unknown_keys:
+                    description: Whether an unknown key in a suppression or ignore-path entry refuses
+                      the config at load. False (the default) loads the config with a warning that names
+                      the key, with a did-you-mean, and the entry it sits in suppresses nothing until
+                      it is fixed, so a typo can never widen a suppression. True refuses the config, naming
+                      the same key. ASH v4 flips the default to True; set it True now to adopt the error
+                      early.
+                    type: boolean
+                  honor_ignore_files:
+                    description: 'Whether the .gitignore and .ignore files in the scanned tree decide
+                      which files are left out of ASH''s scan set, the file list detect-secrets, cfn-nag,
+                      cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read.
+                      True (the default) leaves out every file they match. False scans those files too;
+                      ASH''s own exclusions (.git, CDK assets, its own output directory) still apply.
+                      An operator setting: a config file inside the scanned tree, or one an MCP client
+                      supplied, cannot change it, and its value there is ignored with a warning. Set it
+                      in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files
+                      / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.'
                     type: boolean
                   sandbox:
                     description: OS-level sandboxing of scanner subprocesses.
@@ -418,8 +544,11 @@ spec:
                           subprocesses. ''auto'' uses the best sandbox available (Linux: bwrap, then firejail,
                           then landlock; macOS: sandbox-exec). Any other value requires that backend.
                           A scanner that cannot be sandboxed as requested is recorded MISSING with the
-                          reason; it is never run unsandboxed. Ignored in container mode, where the container
-                          is the boundary.'
+                          reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the
+                          operator''s config file sets is a floor: a config file inside a git checkout
+                          or the scanned directory cannot turn it off or switch backends. Not applied
+                          in container mode, where the container is the boundary; ASH logs a warning when
+                          it is set there.'
                         enum:
                         - 'off'
                         - auto
@@ -436,13 +565,53 @@ spec:
                           uses each scanner''s declared need: opengrep, grype, trivy, npm-audit and snyk-code
                           fetch rules, databases or audit data. A list replaces those defaults. Under
                           --offline no scanner gets a network. Honored only from --config-overrides or
-                          a config file outside the scanned tree; set inside the tree, a list can only
-                          remove network.'
+                          a config file outside every git checkout and the scanned directory; set by any
+                          other config file, a list can only remove network.'
                         nullable: true
                       extra_read_paths:
                         description: Additional host paths every sandboxed scanner may read, for example
-                          a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored
-                          when set by a config file inside the scanned tree.
+                          a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Honored
+                          only from --config-overrides or a config file outside every git checkout and
+                          the scanned directory.
+                        items:
+                          type: string
+                        type: array
+                      read_path_scanners:
+                        description: Scanners allowed the extra host paths their own options ask for (a
+                          rules file or baseline outside the source tree, for example). Under a sandbox,
+                          without this, a scanner whose read paths come from its options gets only the
+                          default policy, and ASH does not read a detect-secrets baseline_file outside
+                          the source tree. With it, a granted path, that baseline included, is used only
+                          when it resolves inside the source tree or an extra_read_paths entry. Honored
+                          only from --config-overrides or a config file outside every git checkout and
+                          the scanned directory.
+                        items:
+                          type: string
+                        type: array
+                      env_scanners:
+                        description: Scanners allowed the environment variables their own options ask
+                          for (a token for an online check, for example). Without this, such variables
+                          are not passed. Honored only from --config-overrides or a config file outside
+                          every git checkout and the scanned directory.
+                        items:
+                          type: string
+                        type: array
+                      environment:
+                        description: 'The environment variables every sandboxed scanner is passed besides
+                          its fixed baseline (PATH, locale and terminal settings, a few tool homes such
+                          as JAVA_HOME and VIRTUAL_ENV, and the ASH_, UV_, LC_ and PYTHON families), written
+                          as a docker-compose ''environment'' list: NAME passes the value ASH has, NAME=value
+                          sets one, and a name listed twice takes its last entry. The default list is
+                          the proxy variables (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY and their
+                          lower-case spellings), which a scanner is passed only when it has a network,
+                          and the CA-bundle variables (SSL_CERT_FILE, SSL_CERT_DIR, REQUESTS_CA_BUNDLE,
+                          CURL_CA_BUNDLE, NODE_EXTRA_CA_CERTS), whose files the sandbox also lets a scanner
+                          with a network read. A list here REPLACES the default, as a compose list replaces
+                          an image''s: [MY_VAR] alone drops the proxy and CA variables, so list them too.
+                          A name that marks a credential (TOKEN, PASSWORD, SECRET and the like), TMPDIR,
+                          TEMP, TMP, HOME and ASH''s own run id are refused with the name; a scanner that
+                          needs a credential is granted it with env_scanners. Honored only from --config-overrides
+                          or a config file outside every git checkout and the scanned directory.'
                         items:
                           type: string
                         type: array
@@ -485,7 +654,11 @@ spec:
 
                         (00:00 UTC) the entry is ignored, with a warning in the log, and the database
 
-                        falls back to ``content_db_staleness``.'
+                        is held to the policy it has without the entry: ``content_db_staleness``, or,
+
+                        for trivy-db in an image built with ``OFFLINE=YES``, that image''s ``warn``
+
+                        default unless ``content_db_staleness_offline_image_default`` is false.'
                       properties:
                         database:
                           description: 'The content database''s registry name, as listed in automated_security_helper/utils/content_databases.py:
@@ -499,7 +672,10 @@ spec:
                           type: string
                         expiration:
                           description: 'Required. The date (YYYY-MM-DD, UTC) from which the entry no longer
-                            applies: at 00:00 UTC that day the database returns to content_db_staleness.'
+                            applies: at 00:00 UTC that day the database returns to the policy it has without
+                            the entry, which is content_db_staleness, or, for trivy-db in an image built
+                            with OFFLINE=YES, that image''s warn default unless content_db_staleness_offline_image_default
+                            is false.'
                           type: string
                         reason:
                           description: Required. Why this database is held differently.
@@ -512,6 +688,18 @@ spec:
                       - reason
                       type: object
                     type: array
+                  content_db_staleness_offline_image_default:
+                    description: 'Whether an image built with OFFLINE=YES holds trivy-db to ''warn'' rather
+                      than to content_db_staleness: fail. Such an image carries the trivy database it
+                      was built with, and trivy''s own bound would fail every scan in it from a day after
+                      the build; with this, those scans pass and every report records the stale database.
+                      Only trivy-db: grype-db and the offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES
+                      in ASH''s environment, which the image sets from its OFFLINE build argument, turns
+                      it on; without that variable this does nothing, whatever it says. Set false to hold
+                      trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides
+                      entry for trivy-db outranks it, and either form of --allow-stale-content-db sets
+                      this to false for that scan.'
+                    type: boolean
                   ash_plugin_modules:
                     description: List of Python modules to import containing ASH plugins and/or event
                       subscribers. These are loaded in addition to the default modules.
@@ -528,8 +716,8 @@ spec:
                     description: Configuration model for build-time settings.
                     properties:
                       build_mode:
-                        description: Build mode for the container image build. If enabled, also enables
-                          offline mode during the scan phase without any explicit directive when scanning.
+                        description: 'Not used: nothing reads this setting, so it changes neither the
+                          container image build nor the scan. To scan offline, pass --offline or set ASH_OFFLINE.'
                         enum:
                         - ONLINE
                         - OFFLINE
@@ -539,10 +727,12 @@ spec:
                           items:
                             type: string
                           type: array
-                        description: Map of tool names to their installation scripts
+                        description: 'Not used: nothing reads this setting, so no script listed here runs.
+                          Map of tool names to their installation scripts.'
                         type: object
                       custom_scanners:
-                        description: Scanner configurations by type
+                        description: 'Not supported: nothing reads these entries, so the list must stay
+                          empty. Configure scanners under their own sections.'
                         items:
                           description: 'Base class for all scanner plugins.
 
@@ -570,6 +760,18 @@ spec:
                                 ignore_suppressions:
                                   description: Ignore all suppression rules
                                   type: boolean
+                                run_id:
+                                  type: string
+                                  description: The ID of the scan this context belongs to, under which
+                                    its scan set is written to the output directory and read back
+                                  nullable: true
+                                workspace_output_dir:
+                                  format: path
+                                  type: string
+                                  description: 'In a workspace scan, the workspace''s output directory,
+                                    which holds this project''s output directory and every other project''s:
+                                    ASH''s own output, left out of the scan like the output directory'
+                                  nullable: true
                               required:
                               - source_dir
                               - output_dir
@@ -609,10 +811,13 @@ spec:
                                         invocation to run before it is killed. Set to null to leave the
                                         scanner unbounded, which risks a scan that never completes.
                                       nullable: true
+                                    offline:
+                                      description: Run this scanner offline even when ASH runs online.
+                                        False follows ASH's own mode; it never puts a scanner online under
+                                        --offline.
+                                      type: boolean
                                   type: object
-                                  x-kubernetes-preserve-unknown-fields: true
                               type: object
-                              x-kubernetes-preserve-unknown-fields: true
                               nullable: true
                             output:
                               items:
@@ -644,6 +849,7 @@ spec:
                               nullable: true
                             exit_code:
                               type: integer
+                              nullable: true
                             use_uv_tool:
                               description: Flag to indicate whether this scanner should use UV tool execution
                                 instead of direct command execution
@@ -694,6 +900,46 @@ spec:
                               additionalProperties:
                                 additionalProperties:
                                   items:
+                                    description: 'An install command a plugin declares, with its argv
+                                      and a shell flag.
+
+
+                                      ``get_installation_commands`` returns a custom command as this object,
+                                      so
+
+                                      the installer reads ``shell`` beside the argv. A reader that indexes,
+
+                                      slices, iterates or searches the entry reads its ``args``, as it
+                                      read the
+
+                                      bare argv list the method used to return in its place; the flag
+                                      rides
+
+                                      beside and is read by name.
+
+
+                                      ``shell=False`` (the default): ``args`` is the argv handed to the
+                                      program
+
+                                      unchanged, no shell in between. ``shell=True``: the installer joins
+                                      the
+
+                                      words with single spaces into ONE command line and hands that line
+                                      to the
+
+                                      shell as written, so each word carries its own quoting, and shell
+                                      syntax in
+
+                                      it (a ``$VARIABLE``, a redirection, a pipe) is expanded and interpreted
+                                      by
+
+                                      the shell. Declare ``shell=True`` only when that expansion is the
+                                      point; a
+
+                                      command that already names its program and arguments is an argv
+                                      and stays
+
+                                      ``shell=False``.'
                                     properties:
                                       args:
                                         items:
@@ -771,6 +1017,7 @@ spec:
                               nullable: true
                           type: object
                           x-kubernetes-preserve-unknown-fields: true
+                        maxItems: 0
                         type: array
                     type: object
                     nullable: true
@@ -786,12 +1033,38 @@ spec:
                           enabled:
                             type: boolean
                           options:
-                            properties: {}
-                            type: object
                             description: Configure Archive converter
-                            x-kubernetes-preserve-unknown-fields: true
+                            properties:
+                              max_members:
+                                description: The most members an archive may have, directories included.
+                                  An archive with more is not extracted. All the archives one scan extracts
+                                  may hold four times this many together.
+                                minimum: 0
+                                exclusiveMinimum: true
+                                type: integer
+                              max_member_bytes:
+                                description: The largest size in bytes one member of an archive may declare.
+                                  An archive with a larger member is not extracted. Default 256 MiB.
+                                minimum: 0
+                                exclusiveMinimum: true
+                                type: integer
+                              max_total_bytes:
+                                description: The most bytes an archive's members may declare added up,
+                                  each counted as at least 512. An archive whose members declare more
+                                  is not extracted. All the archives one scan extracts may declare four
+                                  times this together. Default 1 GiB.
+                                minimum: 0
+                                exclusiveMinimum: true
+                                type: integer
+                              max_compression_ratio:
+                                description: The most times its own size on disk that an archive's members
+                                  may declare added up. An archive that declares more is not extracted.
+                                  Checked only once the members declare more than 512 KiB in all.
+                                minimum: 0
+                                exclusiveMinimum: true
+                                type: integer
+                            type: object
                         type: object
-                        x-kubernetes-preserve-unknown-fields: true
                       jupyter:
                         description: Configure the options for the JupyterConverter
                         properties:
@@ -813,15 +1086,87 @@ spec:
                                 type: integer
                             type: object
                             description: Configure Jupyter Notebook converter
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
-                        x-kubernetes-preserve-unknown-fields: true
                     type: object
                     description: Converter configurations by name.
                     x-kubernetes-preserve-unknown-fields: true
                   scanners:
                     properties:
+                      actionlint:
+                        properties:
+                          name:
+                            enum:
+                            - actionlint
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
+                              config_file:
+                                type: string
+                                description: 'Path to an actionlint config file. A relative path is taken
+                                  from the directory of the config file that sets it, or from the working
+                                  directory for --config-overrides, not from the source directory. Used
+                                  only when the operator sets it, with --config-overrides or in a config
+                                  file outside every git checkout and the scanned directory: a config
+                                  file inside one, or one an MCP client delivered, does not choose it.
+                                  Otherwise actionlint runs with an empty config, and a .github/actionlint.yaml
+                                  in the scanned repository is not read. A path set here that does not
+                                  exist fails the scan.'
+                                nullable: true
+                              shellcheck:
+                                type: string
+                                description: 'Command name or path of shellcheck, which actionlint runs
+                                  on every run: script. Unset (the default) disables the integration so
+                                  results do not depend on what is installed on the host. Any config may
+                                  set ''shellcheck'', looked up on PATH. Another program, or a path that
+                                  resolves outside the scanned tree: Used only when the operator sets
+                                  it, with --config-overrides or in a config file outside every git checkout
+                                  and the scanned directory: a config file inside one, or one an MCP client
+                                  delivered, does not choose it. From such a config it is ignored with
+                                  a warning. When set and not found, the scanner reports MISSING.'
+                                nullable: true
+                              pyflakes:
+                                type: string
+                                description: 'Command name or absolute path of pyflakes, which actionlint
+                                  runs on ''shell: python'' steps. Unset (the default) disables the integration.
+                                  Any config may set ''pyflakes'', looked up on PATH. Another program,
+                                  or a path that resolves outside the scanned tree: Used only when the
+                                  operator sets it, with --config-overrides or in a config file outside
+                                  every git checkout and the scanned directory: a config file inside one,
+                                  or one an MCP client delivered, does not choose it. From such a config
+                                  it is ignored with a warning. When set and not found, the scanner reports
+                                  MISSING.'
+                                nullable: true
+                            type: object
+                            description: Configure the actionlint scanner
+                        type: object
+                        description: Configure the options for actionlint
                       bandit:
+                        description: Configure the options for Bandit
                         properties:
                           name:
                             enum:
@@ -850,30 +1195,36 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
                                 - format: path
-                                description: Path to Bandit configuration file, relative to current source
-                                  directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`,
-                                  and `bandit.toml` in the root of the source directory if this is left
-                                  empty.
+                                description: 'Path to Bandit configuration file. A relative path is taken
+                                  from the directory of the config file that sets it, or from the working
+                                  directory for --config-overrides, not from the source directory. Used
+                                  only when the operator sets it, with --config-overrides or in a config
+                                  file outside every git checkout and the scanned directory: a config
+                                  file inside one, or one an MCP client delivered, does not choose it.
+                                  ASH does not look for one by name. A file named exactly `.bandit` is
+                                  passed with `bandit --ini`, and any other file with `bandit --configfile`.
+                                  Unless config_file names a `.bandit` file that exists, ASH passes bandit
+                                  an empty config file with `bandit --ini`, so bandit does not read a
+                                  `.bandit` file from the scanned tree. A path that is not a file is logged
+                                  as a warning and ignored.'
                                 nullable: true
                               confidence_level:
-                                description: Confidence level for Bandit findings
-                                enum:
-                                - all
-                                - low
-                                - medium
-                                - high
+                                description: Confidence level for bandit scan (all, low, medium, high)
+                                pattern: ^(all|low|medium|high)$
                                 type: string
                               ignore_nosec:
-                                description: 'If True, do not skip lines with # nosec comments. Defaults
-                                  to False.'
+                                description: 'Whether to ignore #nosec comments in the code'
                                 type: boolean
                               excluded_paths:
-                                description: List of excluded paths and their corresponding reason to
-                                  exclude from scanning
+                                description: List of paths to exclude from the bandit scan
                                 items:
                                   description: Represents a path exclusion entry.
                                   properties:
@@ -883,9 +1234,24 @@ spec:
                                     reason:
                                       description: Reason for exclusion
                                       type: string
+                                    expires:
+                                      type: string
+                                      description: (Optional) Expiration date (YYYY-MM-DD). The entry
+                                        stops applying on this date, by the local clock of the host running
+                                        the scan. 'expiration' is accepted as a deprecated alias when
+                                        a config is read; the alias is removed in ASH v4.
+                                      nullable: true
+                                    client_supplied:
+                                      description: 'Set by ASH: True when a config or workspace policy
+                                        file an MCP client delivered supplied this entry, so results show
+                                        which suppressions and ignored paths came from the client. A value
+                                        written in a config file is ignored.'
+                                      type: boolean
                                     expiration:
                                       type: string
-                                      description: (Optional) Expiration date (YYYY-MM-DD)
+                                      description: (Optional) Deprecated alias of 'expires', accepted
+                                        when a config is read and removed in ASH v4; the entry is written
+                                        and stored as 'expires'.
                                       nullable: true
                                   required:
                                   - path
@@ -893,33 +1259,25 @@ spec:
                                   type: object
                                 type: array
                               additional_formats:
-                                description: List of additional formats to output
+                                description: 'Additional output formats (e.g., html, csv, xml). bandit
+                                  writes one format per run through a single --format option, and ASH
+                                  needs that run''s output to be SARIF, so these formats are not produced:
+                                  a value here is accepted and logged as a warning. Convert the SARIF
+                                  results with ASH''s reporters instead.'
                                 items:
-                                  enum:
-                                  - csv
-                                  - custom
-                                  - html
-                                  - json
-                                  - sarif
-                                  - txt
-                                  - xml
-                                  - yaml
                                   type: string
                                 type: array
                               tool_version:
                                 type: string
-                                description: Version constraint for bandit installation, in pip requirement
-                                  syntax. The default below is the constraint the scanner enforces.
+                                description: Version constraint for bandit tool installation (e.g., '>=1.7.8').
+                                  If not specified, uses '>=1.7.8,<2.0.0' for stability.
                                 nullable: true
                               install_timeout:
-                                description: Timeout in seconds for tool installation
+                                description: 'Timeout in seconds for tool installation (default: 300)'
                                 type: integer
                             type: object
                             description: Configure Bandit scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
-                        description: Configure the options for Bandit
-                        x-kubernetes-preserve-unknown-fields: true
                       cdk-nag:
                         properties:
                           name:
@@ -929,7 +1287,7 @@ spec:
                           enabled:
                             type: boolean
                           options:
-                            description: Configure Bandit scanner
+                            description: Configure CDK Nag scanner
                             properties:
                               severity_threshold:
                                 enum:
@@ -950,6 +1308,10 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
                               nag_packs:
                                 properties:
                                   AwsSolutionsChecks:
@@ -975,14 +1337,192 @@ spec:
                                 description: CDK Nag packs to enable
                                 x-kubernetes-preserve-unknown-fields: true
                               include_compliant_checks:
-                                description: Include INFO-level findings for compliant resources in the
-                                  report.
+                                description: Kept for configuration compatibility; it changes nothing.
+                                  cdk-nag 3 reports violations only, so there is no compliant-resource
+                                  finding for this option to include, and a scan with it set says so.
                                 type: boolean
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for CdkNag
-                        x-kubernetes-preserve-unknown-fields: true
+                      cfn-guard:
+                        properties:
+                          name:
+                            enum:
+                            - cfn-guard
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
+                              rule_sets:
+                                description: 'Rule sets from the bundled AWS Guard Rules Registry to evaluate,
+                                  by file name without the .guard extension, e.g. [''wa-Security-Pillar'',
+                                  ''cis-aws-benchmark-level-1'']. Defaults to the Well-Architected Security
+                                  Pillar set. Set to [] to evaluate only rules_paths. Used only when the
+                                  operator sets it, with --config-overrides or in a config file outside
+                                  every git checkout and the scanned directory: a config file inside one,
+                                  or one an MCP client delivered, does not choose it. Set by such a config,
+                                  it is ignored with a warning and the default set is evaluated.'
+                                items:
+                                  type: string
+                                type: array
+                              rules_paths:
+                                description: 'Your own cfn-guard rules: .guard files or directories of
+                                  them. A relative path is taken from the directory of the config file
+                                  that sets it, or from the working directory for --config-overrides,
+                                  not from the source directory. Evaluated in addition to rule_sets. Used
+                                  only when the operator sets it, with --config-overrides or in a config
+                                  file outside every git checkout and the scanned directory: a config
+                                  file inside one, or one an MCP client delivered, does not choose it.
+                                  cfn-guard prints a rules file it cannot parse, so a path the scanned
+                                  repository chose could put any file the scan can read into the report.
+                                  Set by such a config, it is ignored with a warning, and an empty rule_sets
+                                  falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset
+                                  files are read, recursively; one that resolves outside the directory,
+                                  through a symlink, is refused.'
+                                items:
+                                  type: string
+                                type: array
+                            type: object
+                            description: Configure the cfn-guard scanner
+                        type: object
+                        description: Configure the options for cfn-guard
+                      cfn-lint:
+                        properties:
+                          name:
+                            enum:
+                            - cfn-lint
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'Path to a cfn-lint configuration file (.cfnlintrc). A relative
+                                  path is taken from the directory of the config file that sets it, or
+                                  from the working directory for --config-overrides, not from the source
+                                  directory. When unset, ASH gives cfn-lint an empty configuration, so
+                                  a .cfnlintrc in the scanned repository or the home directory is NOT
+                                  read: such a file can load Python rules (append_rules) and switch checks
+                                  off. Used only when the operator sets it, with --config-overrides or
+                                  in a config file outside every git checkout and the scanned directory:
+                                  a config file inside one, or one an MCP client delivered, does not choose
+                                  it. The file is used only when it is outside the scanned tree; otherwise
+                                  it is ignored with a warning.'
+                                nullable: true
+                              regions:
+                                description: 'AWS regions to validate templates against, e.g. [''us-east-1'',
+                                  ''eu-west-1''], or [''ALL_REGIONS'']. Empty validates against us-east-1,
+                                  or the regions a template names in its own cfn-lint metadata or config_file
+                                  names; AWS_REGION and AWS_DEFAULT_REGION are not read. Used only when
+                                  the operator sets it, with --config-overrides or in a config file outside
+                                  every git checkout and the scanned directory: a config file inside one,
+                                  or one an MCP client delivered, does not choose it. Set by such a config,
+                                  it is ignored with a warning.'
+                                items:
+                                  type: string
+                                type: array
+                              ignore_checks:
+                                description: 'cfn-lint rule ids or prefixes to skip, e.g. [''W2001'',
+                                  ''W3'']. Prefer ASH suppressions for individual findings; this removes
+                                  the rule from every template. Used only when the operator sets it, with
+                                  --config-overrides or in a config file outside every git checkout and
+                                  the scanned directory: a config file inside one, or one an MCP client
+                                  delivered, does not choose it. Set by such a config, it is ignored with
+                                  a warning.'
+                                items:
+                                  type: string
+                                type: array
+                              include_checks:
+                                description: cfn-lint rule ids or prefixes to enable in addition to the
+                                  defaults, e.g. ['I'] for informational rules.
+                                items:
+                                  type: string
+                                type: array
+                              honor_inline_ignores:
+                                description: 'Honor the ignore_checks and configure_rules a template sets
+                                  for itself in `Metadata: cfn-lint: config` (ignore_checks also at the
+                                  resource level). Off by default: every rule outside ignore_checks and
+                                  the config_file''s ignore_checks is passed to cfn-lint as mandatory,
+                                  and the config_file''s configure_rules are passed on the command line,
+                                  which cfn-lint takes instead of a template''s, so a template cannot
+                                  hide its own findings or the next template''s parse errors, which reach
+                                  ASH, where suppressions are reported and counted. A config_file setting
+                                  the command line cannot carry (a list of more than one item, or a value
+                                  with a comma, colon or equals sign) is then left out with a warning,
+                                  and a config_file that sets merge_configs fails the scan. On, each template
+                                  is linted by a cfn-lint run of its own, so its settings reach no other
+                                  template; that adds a cfn-lint start-up per template. Used only when
+                                  the operator sets it, with --config-overrides or in a config file outside
+                                  every git checkout and the scanned directory: a config file inside one,
+                                  or one an MCP client delivered, does not choose it. Set by such a config,
+                                  it is ignored with a warning.'
+                                type: boolean
+                              tool_version:
+                                type: string
+                                description: 'Version constraint for the cfn-lint installation, in pip
+                                  requirement syntax. The default is the range the scanner''s SARIF handling
+                                  was verified against. Used only when the operator sets it, with --config-overrides
+                                  or in a config file outside every git checkout and the scanned directory:
+                                  a config file inside one, or one an MCP client delivered, does not choose
+                                  it. Set by such a config, it is ignored with a warning.'
+                                nullable: true
+                              install_timeout:
+                                description: Timeout in seconds for tool installation
+                                type: integer
+                            type: object
+                            description: Configure the cfn-lint scanner
+                        type: object
+                        description: Configure the options for cfn-lint
                       cfn-nag:
                         properties:
                           name:
@@ -1012,12 +1552,14 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
                             type: object
                             description: Configure CFN Nag scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for CfnNag
-                        x-kubernetes-preserve-unknown-fields: true
                       checkov:
                         properties:
                           name:
@@ -1047,19 +1589,33 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
+                              offline:
+                                description: Run in offline mode, disabling policy downloads. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
+                                type: boolean
                               config_file:
                                 type: string
                                 anyOf:
                                 - format: path
-                                description: Path to Checkov configuration file, relative to current source
-                                  directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml`
-                                  in the root of the source directory.
+                                description: Path to a Checkov configuration file. A relative path is
+                                  taken from the directory of the config file that sets it, or from the
+                                  working directory for --config-overrides, not from the source directory.
+                                  Only a file the operator names and that lies outside the scanned tree
+                                  is passed to Checkov; a `.checkov.yaml` or `.checkov.yml` found in the
+                                  scanned tree is not read, and the scan tells Checkov to read none from
+                                  its working directory either, because such a file can change what is
+                                  reported.
                                 nullable: true
                               skip_path:
-                                description: Path (file or directory) to skip, using regular expression
-                                  logic, relative to current working directory. Word boundaries are not
-                                  implicit; i.e., specifying "dir1" will skip any directory or subdirectory
-                                  named "dir1". Ignored with -f. Can be specified multiple times.
+                                description: 'Path (file or directory) to skip, as a regular expression
+                                  Checkov searches for in each path it walks, and also as a substring
+                                  of that path. The paths Checkov walks start with the absolute path of
+                                  the scanned directory. Word boundaries are not implicit: "dir1" skips
+                                  any directory or subdirectory whose path holds "dir1". An entry whose
+                                  path is empty is ignored (it would skip every file). Can be specified
+                                  multiple times.'
                                 items:
                                   description: Represents a path exclusion entry.
                                   properties:
@@ -1069,9 +1625,24 @@ spec:
                                     reason:
                                       description: Reason for exclusion
                                       type: string
+                                    expires:
+                                      type: string
+                                      description: (Optional) Expiration date (YYYY-MM-DD). The entry
+                                        stops applying on this date, by the local clock of the host running
+                                        the scan. 'expiration' is accepted as a deprecated alias when
+                                        a config is read; the alias is removed in ASH v4.
+                                      nullable: true
+                                    client_supplied:
+                                      description: 'Set by ASH: True when a config or workspace policy
+                                        file an MCP client delivered supplied this entry, so results show
+                                        which suppressions and ignored paths came from the client. A value
+                                        written in a config file is ignored.'
+                                      type: boolean
                                     expiration:
                                       type: string
-                                      description: (Optional) Expiration date (YYYY-MM-DD)
+                                      description: (Optional) Deprecated alias of 'expires', accepted
+                                        when a config is read and removed in ASH v4; the entry is written
+                                        and stored as 'expires'.
                                       nullable: true
                                   required:
                                   - path
@@ -1095,12 +1666,6 @@ spec:
                                   - spdx
                                   type: string
                                 type: array
-                              offline:
-                                description: Run in offline mode, disabling policy downloads. When true,
-                                  this scanner runs offline even if ASH does not. ASH's own offline mode
-                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
-                                  it.
-                                type: boolean
                               frameworks:
                                 description: Specific frameworks to include with Checkov. Defaults to
                                   `all`.
@@ -1188,10 +1753,12 @@ spec:
                                   type: string
                                 type: array
                               skip_ash_output_dir:
-                                description: Skip ASH's own output directory when it sits inside the scanned
-                                  directory, so Checkov does not parse ASH's previous reports. Defaults
-                                  to true; set to false to scan it anyway. Has no effect on Windows, where
-                                  Checkov's --skip-path matching is unreliable.
+                                description: Tell Checkov to skip ASH's own output directories inside
+                                  the scanned directory (this run's output directory and .ash/ash_output),
+                                  so it does not parse ASH's previous reports. Defaults to true; set to
+                                  false to let Checkov read them. Either way ASH drops the findings located
+                                  there after the scan. Has no effect on Windows, where Checkov's --skip-path
+                                  matching is unreliable.
                                 type: boolean
                               tool_version:
                                 type: string
@@ -1203,10 +1770,8 @@ spec:
                                 type: integer
                             type: object
                             description: Configure Checkov scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for Checkov
-                        x-kubernetes-preserve-unknown-fields: true
                       detect-secrets:
                         properties:
                           name:
@@ -1236,14 +1801,20 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
                               baseline_file:
                                 type: string
                                 anyOf:
                                 - format: path
-                                description: Path to detect-secrets baseline file, relative to current
-                                  source directory. Defaults to searching for `.secrets.baseline` in the
-                                  root of the source directory. The settings from the baseline will be
-                                  overwritten if scan_settings is provided.
+                                description: Path to detect-secrets baseline file. A relative path is
+                                  taken from the directory of the config file that sets it, or from the
+                                  working directory for --config-overrides, not from the source directory.
+                                  Defaults to searching for `.secrets.baseline` in the root of the source
+                                  directory. The settings from the baseline will be overwritten if scan_settings
+                                  is provided.
                                 nullable: true
                               scan_settings:
                                 properties:
@@ -1302,12 +1873,105 @@ spec:
                                   and are not affected by this option. Set to false to scan generated
                                   lockfiles as well.
                                 type: boolean
+                              max_worker_output_mib:
+                                description: 'The most of the detect-secrets worker''s output read back,
+                                  in MiB, at most 4096. A finding is about 300 bytes of output, so the
+                                  default of 256 holds about 900,000 findings. Reading the output costs
+                                  about three times its size in memory (1024 MiB of output needs about
+                                  3 GiB). A scan whose output is larger fails and records no findings,
+                                  with an error that names this option. Used only when the operator sets
+                                  it, with --config-overrides or in a config file outside every git checkout
+                                  and the scanned directory: a config file inside one, or one an MCP client
+                                  delivered, does not choose it.'
+                                minimum: 0
+                                exclusiveMinimum: true
+                                maximum: 4096
+                                type: integer
                             type: object
                             description: Configure detect-secrets scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for DetectSecrets
-                        x-kubernetes-preserve-unknown-fields: true
+                      gitleaks:
+                        properties:
+                          name:
+                            enum:
+                            - gitleaks
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'Path to a gitleaks TOML config. A relative path is taken
+                                  from the directory of the config file that sets it, or from the working
+                                  directory for --config-overrides, not from the source directory. Its
+                                  rules and [[allowlists]] apply on top of ASH suppressions. Used only
+                                  when the operator sets it, with --config-overrides or in a config file
+                                  outside every git checkout and the scanned directory: a config file
+                                  inside one, or one an MCP client delivered, does not choose it. Unset,
+                                  gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment
+                                  if one is set, else its default rules; a .gitleaks.toml in the scanned
+                                  repository is not read. A path that does not exist fails the scan.'
+                                nullable: true
+                              baseline_path:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'Path to a gitleaks JSON report whose findings gitleaks ignores
+                                  (gitleaks --baseline-path). A relative path is taken as for config_file.
+                                  Used only when the operator sets it, with --config-overrides or in a
+                                  config file outside every git checkout and the scanned directory: a
+                                  config file inside one, or one an MCP client delivered, does not choose
+                                  it. A path that does not exist fails the scan.'
+                                nullable: true
+                              honor_inline_ignores:
+                                description: 'Honor gitleaks'' inline `gitleaks:allow` comments. Off by
+                                  default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding
+                                  reaches ASH, where suppressions are reported and counted. Used only
+                                  when the operator sets it, with --config-overrides or in a config file
+                                  outside every git checkout and the scanned directory: a config file
+                                  inside one, or one an MCP client delivered, does not choose it. Set
+                                  by such a config, it is ignored with a warning.'
+                                type: boolean
+                              max_target_megabytes:
+                                minimum: 1
+                                type: integer
+                                description: 'Skip files larger than this many megabytes (gitleaks --max-target-megabytes).
+                                  Unset scans every file. Used only when the operator sets it, with --config-overrides
+                                  or in a config file outside every git checkout and the scanned directory:
+                                  a config file inside one, or one an MCP client delivered, does not choose
+                                  it. Set by such a config, it is ignored with a warning.'
+                                nullable: true
+                            type: object
+                            description: Configure the gitleaks scanner
+                        type: object
+                        description: Configure the options for Gitleaks
                       grype:
                         properties:
                           name:
@@ -1334,26 +1998,29 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
-                              config_file:
-                                type: string
-                                anyOf:
-                                - format: path
-                                description: Path to Grype configuration file, relative to current source
-                                  directory. Defaults to searching for `.grype.yaml` and `.grype.yml`
-                                  in the root of the source directory.
-                                nullable: true
                               offline:
                                 description: Run in offline mode, disabling database updates and validation.
                                   When true, this scanner runs offline even if ASH does not. ASH's own
                                   offline mode (--offline or ASH_OFFLINE) applies whatever this is set
                                   to; false follows it.
                                 type: boolean
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'Path to Grype configuration file. A relative path is taken
+                                  from the directory of the config file that sets it, or from the working
+                                  directory for --config-overrides, not from the source directory. Used
+                                  only when the operator sets it, with --config-overrides or in a config
+                                  file outside every git checkout and the scanned directory: a config
+                                  file inside one, or one an MCP client delivered, does not choose it.
+                                  ASH does not look for one by name. Without one, grype gets an empty
+                                  config, so it does not read `.grype.yaml` from the scanned tree.'
+                                nullable: true
                             type: object
                             description: Configure Grype scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for Grype
-                        x-kubernetes-preserve-unknown-fields: true
                       npm-audit:
                         properties:
                           name:
@@ -1384,17 +2051,18 @@ spec:
                                   which risks a scan that never completes.
                                 nullable: true
                               offline:
-                                description: Run in offline mode, using locally cached data. When true,
-                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                description: 'Treat this scanner as offline. npm, pnpm and yarn audit
+                                  only against the package registry''s advisory service, so offline npm-audit
+                                  audits nothing: each lockfile is listed as not scanned, with a lockfile
+                                  the scanner is reported MISSING, and with none it is SKIPPED. When true,
+                                  this scanner is offline even if ASH is not. ASH''s own offline mode
                                   (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
-                                  it.
+                                  it.'
                                 type: boolean
                             type: object
                             description: Configure NpmAudit scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for NpmAudit
-                        x-kubernetes-preserve-unknown-fields: true
                       opengrep:
                         properties:
                           name:
@@ -1424,6 +2092,12 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
+                              offline:
+                                description: Run in offline mode, using locally cached rules. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
+                                type: boolean
                               config:
                                 description: YAML configuration file, directory of YAML files ending in
                                   .yml|.yaml, URL of a configuration file, or Opengrep registry entry
@@ -1459,12 +2133,6 @@ spec:
                                 - 'on'
                                 - 'off'
                                 type: string
-                              offline:
-                                description: Run in offline mode, using locally cached rules. When true,
-                                  this scanner runs offline even if ASH does not. ASH's own offline mode
-                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
-                                  it.
-                                type: boolean
                               patterns:
                                 description: Patterns to search for with OpenGrep.
                                 items:
@@ -1485,10 +2153,8 @@ spec:
                                 type: object
                             type: object
                             description: Configure Opengrep scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for Opengrep
-                        x-kubernetes-preserve-unknown-fields: true
                       syft:
                         properties:
                           name:
@@ -1518,18 +2184,31 @@ spec:
                                   to run before it is killed. Set to null to leave the scanner unbounded,
                                   which risks a scan that never completes.
                                 nullable: true
+                              offline:
+                                description: Run in offline mode, disabling update checks. When true,
+                                  this scanner runs offline even if ASH does not. ASH's own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.
+                                type: boolean
                               config_file:
-                                format: path
                                 type: string
-                                description: Path to Syft configuration file, relative to current source
-                                  directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in
-                                  the root of the source directory.
+                                anyOf:
+                                - format: path
+                                description: 'Path to Syft configuration file. A relative path is taken
+                                  from the directory of the config file that sets it, or from the working
+                                  directory for --config-overrides, not from the source directory. Used
+                                  only when the operator sets it, with --config-overrides or in a config
+                                  file outside every git checkout and the scanned directory: a config
+                                  file inside one, or one an MCP client delivered, does not choose it.
+                                  ASH does not look for one by name. Without one, syft gets an empty config,
+                                  so it does not read `.syft.yaml` from the scanned tree.'
                                 nullable: true
                               exclude:
-                                description: Path (file or directory) to skip, using regular expression
-                                  logic, relative to current working directory. Word boundaries are not
-                                  implicit; i.e., specifying "dir1" will skip any directory or subdirectory
-                                  named "dir1". Ignored with -f. Can be specified multiple times.
+                                description: 'Paths (files or directories) to skip, each a glob relative
+                                  to the scanned directory and passed to syft as one --exclude. A glob
+                                  must start with "./", "*/" or "**/", and syft fails the scan on any
+                                  other. "*" does not match across "/" and "**" does: "./dir1/**" skips
+                                  the top-level "dir1", and "**/dir1/**" skips every directory named "dir1".'
                                 items:
                                   description: Represents a path exclusion entry.
                                   properties:
@@ -1539,9 +2218,24 @@ spec:
                                     reason:
                                       description: Reason for exclusion
                                       type: string
+                                    expires:
+                                      type: string
+                                      description: (Optional) Expiration date (YYYY-MM-DD). The entry
+                                        stops applying on this date, by the local clock of the host running
+                                        the scan. 'expiration' is accepted as a deprecated alias when
+                                        a config is read; the alias is removed in ASH v4.
+                                      nullable: true
+                                    client_supplied:
+                                      description: 'Set by ASH: True when a config or workspace policy
+                                        file an MCP client delivered supplied this entry, so results show
+                                        which suppressions and ignored paths came from the client. A value
+                                        written in a config file is ignored.'
+                                      type: boolean
                                     expiration:
                                       type: string
-                                      description: (Optional) Expiration date (YYYY-MM-DD)
+                                      description: (Optional) Deprecated alias of 'expires', accepted
+                                        when a config is read and removed in ASH v4; the entry is written
+                                        and stored as 'expires'.
                                       nullable: true
                                   required:
                                   - path
@@ -1562,18 +2256,229 @@ spec:
                                   - syft-text
                                   type: string
                                 type: array
-                              offline:
-                                description: Run in offline mode, disabling update checks. When true,
-                                  this scanner runs offline even if ASH does not. ASH's own offline mode
-                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
-                                  it.
-                                type: boolean
                             type: object
                             description: Configure Syft scanner
-                            x-kubernetes-preserve-unknown-fields: true
                         type: object
                         description: Configure the options for Syft
-                        x-kubernetes-preserve-unknown-fields: true
+                      trivy:
+                        properties:
+                          name:
+                            enum:
+                            - trivy
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              offline:
+                                description: 'Run in offline mode: skip database and check updates and
+                                  use the vulnerability database already in trivy''s cache. ASH still
+                                  fails the scan when that database is past its 24h bound. When true,
+                                  this scanner runs offline even if ASH does not. ASH''s own offline mode
+                                  (--offline or ASH_OFFLINE) applies whatever this is set to; false follows
+                                  it.'
+                                type: boolean
+                              scanners:
+                                description: 'Which trivy scanners to run. Defaults to vuln only: ASH''s
+                                  default scanners already cover secrets (detect-secrets) and IaC misconfigurations
+                                  (checkov, cfn-nag, cdk-nag), and license findings are a compliance question.
+                                  Add secret, misconfig or license to run trivy''s checks for them as
+                                  well. Used only when the operator sets it, with --config-overrides or
+                                  in a config file outside every git checkout and the scanned directory:
+                                  a config file inside one, or one an MCP client delivered, does not choose
+                                  it. Set by such a config, any set but the default is ignored with a
+                                  warning.'
+                                items:
+                                  enum:
+                                  - vuln
+                                  - misconfig
+                                  - secret
+                                  - license
+                                  type: string
+                                minItems: 1
+                                type: array
+                              license_full:
+                                description: Look for licenses in source file headers and license files
+                                  too (trivy --license-full). Only used when scanners includes license.
+                                type: boolean
+                              ignore_unfixed:
+                                description: 'Report only vulnerabilities that have a fixed version (trivy
+                                  --ignore-unfixed). Off by default: an unfixed vulnerability is still
+                                  one, and turning this on withholds it from the report.'
+                                type: boolean
+                              disable_telemetry:
+                                description: 'Disable sending anonymous usage data to Aqua (--disable-telemetry).
+                                  Only the operator sets it to false, with --config-overrides or in a
+                                  config file outside every git checkout and the scanned directory: a
+                                  config file inside one, or one an MCP client delivered, may set it to
+                                  true but not to false. Offline, trivy sends none whatever this says.
+                                  As for trivy-repo.'
+                                type: boolean
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'A trivy config file (trivy.yaml), passed as --config. Used
+                                  only when the operator sets it, with --config-overrides or in a config
+                                  file outside every git checkout and the scanned directory: a config
+                                  file inside one, or one an MCP client delivered, does not choose it.
+                                  The file is used only when it is outside the scanned tree; otherwise
+                                  it is ignored with a warning. A relative path is taken from the directory
+                                  of the config file that sets it, or from the working directory for --config-overrides,
+                                  not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG
+                                  when that names a file outside the scanned tree (a relative path in
+                                  it is taken from the working directory), and otherwise an empty config
+                                  of its own, so a trivy.yaml in the scanned repository is not read: its
+                                  settings (severity, scan.skip-files, db.repository, ...) can drop findings
+                                  with nothing in the report saying so, and module.dir can load WASM modules.
+                                  A path that does not exist fails the scan.'
+                                nullable: true
+                              ignore_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'A trivy ignore file, passed as --ignorefile. Used only when
+                                  the operator sets it, with --config-overrides or in a config file outside
+                                  every git checkout and the scanned directory: a config file inside one,
+                                  or one an MCP client delivered, does not choose it. The file is used
+                                  only when it is outside the scanned tree; a relative path is taken from
+                                  the directory of the config file that sets it, or from the working directory
+                                  for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE
+                                  is used the same way, and otherwise trivy gets an empty one, so a .trivyignore
+                                  in the scanned repository does not remove findings. As for trivy-repo.'
+                                nullable: true
+                              secret_config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'A trivy secret scanning config (trivy-secret.yaml), passed
+                                  as --secret-config. Only read when scanners includes secret. Used only
+                                  when the operator sets it, with --config-overrides or in a config file
+                                  outside every git checkout and the scanned directory: a config file
+                                  inside one, or one an MCP client delivered, does not choose it. The
+                                  file is used only when it is outside the scanned tree, and a relative
+                                  path is taken as for ignore_file. Unset, TRIVY_SECRET_CONFIG is used
+                                  the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml
+                                  in the scanned repository does not disable secret rules. As for trivy-repo.'
+                                nullable: true
+                            type: object
+                            description: Configure the trivy scanner
+                        type: object
+                        description: Configure the options for Trivy (trivy fs)
+                      zizmor:
+                        properties:
+                          name:
+                            enum:
+                            - zizmor
+                            type: string
+                          enabled:
+                            type: boolean
+                          options:
+                            properties:
+                              severity_threshold:
+                                enum:
+                                - ALL
+                                - LOW
+                                - MEDIUM
+                                - HIGH
+                                - CRITICAL
+                                type: string
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
+                                nullable: true
+                              scan_timeout:
+                                minimum: 1
+                                type: integer
+                                description: Maximum time in seconds to allow this scanner's tool invocation
+                                  to run before it is killed. Set to null to leave the scanner unbounded,
+                                  which risks a scan that never completes.
+                                nullable: true
+                              offline:
+                                description: Run this scanner offline even when ASH runs online. False
+                                  follows ASH's own mode; it never puts a scanner online under --offline.
+                                type: boolean
+                              config_file:
+                                type: string
+                                anyOf:
+                                - format: path
+                                description: 'Path to a zizmor configuration file, passed as `zizmor --config`.
+                                  A relative path is taken from the directory of the config file that
+                                  sets it, or from the working directory for --config-overrides, not from
+                                  the source directory; an absolute path is used as given. Used only when
+                                  the operator sets it, with --config-overrides or in a config file outside
+                                  every git checkout and the scanned directory: a config file inside one,
+                                  or one an MCP client delivered, does not choose it. Otherwise it runs
+                                  `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the
+                                  scanned repository is not read.'
+                                nullable: true
+                              persona:
+                                description: zizmor persona. `regular` reports the fewest false positives;
+                                  `pedantic` adds code-smell findings; `auditor` reports everything, false
+                                  positives included.
+                                enum:
+                                - regular
+                                - pedantic
+                                - auditor
+                                type: string
+                              online_audits:
+                                description: 'Allow zizmor''s online audits. Off by default: ASH runs
+                                  `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN
+                                  is removed from its environment. When true, ASH does not pass `zizmor
+                                  --offline`, those variables reach zizmor unchanged, and zizmor may call
+                                  the GitHub API with the token. ASH never reads or logs the token. Used
+                                  only when the operator sets it, with --config-overrides or in a config
+                                  file outside every git checkout and the scanned directory: a config
+                                  file inside one, or one an MCP client delivered, does not choose it.
+                                  It is ignored, with a warning, when ASH runs in offline mode or this
+                                  scanner''s own `offline` option is true.'
+                                type: boolean
+                              honor_inline_ignores:
+                                description: 'Honor zizmor''s inline `# zizmor: ignore[...]` comments
+                                  and the `ignore` rules of the operator''s `config_file`. Off by default:
+                                  ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where
+                                  suppressions are reported and counted. Used only when the operator sets
+                                  it, with --config-overrides or in a config file outside every git checkout
+                                  and the scanned directory: a config file inside one, or one an MCP client
+                                  delivered, does not choose it. Set by such a config, it is ignored with
+                                  a warning.'
+                                type: boolean
+                              tool_version:
+                                type: string
+                                description: 'Version constraint for zizmor installation, in pip requirement
+                                  syntax. The default below is the constraint the scanner enforces. Another
+                                  value: Used only when the operator sets it, with --config-overrides
+                                  or in a config file outside every git checkout and the scanned directory:
+                                  a config file inside one, or one an MCP client delivered, does not choose
+                                  it. Set by such a config, it is ignored with a warning and the default
+                                  applies.'
+                                nullable: true
+                              install_timeout:
+                                description: Timeout in seconds for tool installation
+                                type: integer
+                            type: object
+                            description: Configure zizmor scanner
+                        type: object
+                        description: Configure the options for zizmor
                     type: object
                     description: Scanner configurations by name.
                     x-kubernetes-preserve-unknown-fields: true
@@ -1590,12 +2495,10 @@ spec:
                           options:
                             properties: {}
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the CSV reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       cyclonedx:
                         properties:
                           name:
@@ -1607,12 +2510,10 @@ spec:
                           options:
                             properties: {}
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the CycloneDX reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       gitlab-cyclonedx:
                         properties:
                           name:
@@ -1645,13 +2546,11 @@ spec:
                                   match the repo layout.
                                 nullable: true
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the GitLab CycloneDX dependency scanning
                           reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       html:
                         properties:
                           name:
@@ -1663,12 +2562,10 @@ spec:
                           options:
                             properties: {}
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the HTML reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       flat-json:
                         description: Configure the options for the Flat JSON reporter
                         properties:
@@ -1688,11 +2585,9 @@ spec:
                               include_metadata:
                                 type: boolean
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
-                        x-kubernetes-preserve-unknown-fields: true
                       gitlab-sast:
                         properties:
                           name:
@@ -1710,12 +2605,10 @@ spec:
                                   field.
                                 type: boolean
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the GitLab SAST reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       github-ghas:
                         properties:
                           name:
@@ -1731,14 +2624,20 @@ spec:
                                   the GHAS report. GitHub has its own dismissal workflow so suppressed
                                   findings are typically not needed.
                                 type: boolean
+                              emit_automation_details:
+                                description: 'When true, a workspace project''s own report carries runAutomationDetails.id
+                                  ash/<project key>/, the category GitHub files the upload under, so the
+                                  per-project reports of one repository are kept apart. Off by default:
+                                  an id in the file takes precedence over the category the upload-sarif
+                                  action is given, so an upload that already names its category would
+                                  be moved to a new one, leaving the old analysis''s alerts open.'
+                                type: boolean
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the GitHub Advanced Security (GHAS) SARIF
                           reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       junitxml:
                         properties:
                           name:
@@ -1752,14 +2651,11 @@ spec:
                               respect_severity_threshold:
                                 type: boolean
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the JUnit XML reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       markdown:
-                        description: Configure the options for the Markdown reporter
                         properties:
                           name:
                             enum:
@@ -1785,11 +2681,10 @@ spec:
                               compact:
                                 type: boolean
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
-                        x-kubernetes-preserve-unknown-fields: true
+                        description: Configure the options for the Markdown reporter
                       ocsf:
                         properties:
                           name:
@@ -1801,12 +2696,10 @@ spec:
                           options:
                             properties: {}
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the OCSF reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       sarif:
                         properties:
                           name:
@@ -1818,12 +2711,10 @@ spec:
                           options:
                             properties: {}
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the SARIF reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       spdx:
                         properties:
                           name:
@@ -1835,12 +2726,10 @@ spec:
                           options:
                             properties: {}
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the SPDX reporter
-                        x-kubernetes-preserve-unknown-fields: true
                       text:
                         description: Configure the options for the Text reporter
                         properties:
@@ -1864,11 +2753,9 @@ spec:
                               top_hotspots_limit:
                                 type: integer
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
-                        x-kubernetes-preserve-unknown-fields: true
                       unused-suppressions:
                         description: Configure the options for the Unused Suppressions reporter
                         properties:
@@ -1884,11 +2771,9 @@ spec:
                               output_format:
                                 type: string
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
-                        x-kubernetes-preserve-unknown-fields: true
                       yaml:
                         properties:
                           name:
@@ -1900,91 +2785,126 @@ spec:
                           options:
                             properties: {}
                             type: object
-                            x-kubernetes-preserve-unknown-fields: true
                           extension:
                             type: string
                         type: object
                         description: Configure the options for the YAML reporter
-                        x-kubernetes-preserve-unknown-fields: true
                     type: object
                     description: Reporter configurations by name.
                     x-kubernetes-preserve-unknown-fields: true
+                  output_formats:
+                    x-kubernetes-preserve-unknown-fields: true
+                    description: 'Reports to write, by reporter name (for example sarif, markdown, github-ghas):
+                      a list, one name, or names separated by commas. Narrows the enabled reporters; it
+                      does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats
+                      list on the command line replaces this list.'
                   mcp-resource-management:
                     description: Configuration for MCP server resource management and limits
                     properties:
                       max_concurrent_scans:
-                        description: Maximum number of concurrent scans allowed
-                        maximum: 10
-                        minimum: 1
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                        description: Maximum number of scans the MCP server runs at once, across every
+                          session; a scan started beyond it is refused. A workspace scan counts as one
+                          scan, however many projects it has. 0 or null for no limit. Read from the operator's
+                          ASH_CONFIG only.
+                        nullable: true
+                      max_concurrent_scans_per_session:
+                        description: Maximum number of scans one session of a network transport (streamable-http,
+                          sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts
+                          once. Read from the operator's config (ASH_CONFIG) only, never from a scanned
+                          or delivered one. stdio's single session is not limited.
+                        maximum: 100
+                        minimum: 0
                         type: integer
                       max_concurrent_tasks:
-                        description: Maximum number of concurrent async tasks allowed
+                        description: 'Not enforced: nothing reads this setting. Maximum number of concurrent
+                          async tasks allowed'
                         maximum: 50
                         minimum: 1
                         type: integer
                       thread_pool_max_workers:
-                        description: Maximum number of worker threads in the shared thread pool
+                        description: 'Not enforced: nothing reads this setting. Maximum number of worker
+                          threads in the shared thread pool'
                         maximum: 20
                         minimum: 1
                         type: integer
                       scan_timeout_seconds:
-                        description: Maximum time allowed for a single scan operation in seconds
-                        maximum: 7200
-                        minimum: 60
+                        maximum: 86400
+                        minimum: 0
                         type: integer
+                        description: Longest a single MCP scan may run, in seconds, counted from when
+                          it starts running (after any wait for another scan of its session); a scan still
+                          running then is stopped and reported as failed. For a workspace scan it covers
+                          the whole workspace, and every project is stopped and reported as failed. 60
+                          to 86400, or 0 or null for no limit. Read from the operator's ASH_CONFIG only.
+                        nullable: true
                       operation_timeout_seconds:
-                        description: Default timeout for general operations in seconds
+                        description: 'Not enforced: nothing reads this setting. Default timeout for general
+                          operations in seconds'
                         maximum: 600
                         minimum: 30
                         type: integer
                       shutdown_timeout_seconds:
-                        description: Maximum time to wait for graceful shutdown in seconds
+                        description: 'Not enforced: nothing reads this setting. Maximum time to wait for
+                          graceful shutdown in seconds'
                         maximum: 300
                         minimum: 5
                         type: integer
                       memory_warning_threshold_mb:
-                        description: Memory usage threshold in MB that triggers warnings
+                        description: 'Not enforced: nothing reads this setting. Memory usage threshold
+                          in MB that triggers warnings'
                         maximum: 8192
                         minimum: 100
                         type: integer
                       memory_critical_threshold_mb:
-                        description: Memory usage threshold in MB that triggers protective actions
+                        description: 'Not enforced: nothing reads this setting. Memory usage threshold
+                          in MB that triggers protective actions'
                         maximum: 16384
                         minimum: 200
                         type: integer
                       task_count_warning_threshold:
-                        description: Active task count that triggers warnings
+                        description: 'Not enforced: nothing reads this setting. Active task count that
+                          triggers warnings'
                         maximum: 100
                         minimum: 5
                         type: integer
                       max_message_size_bytes:
-                        description: Maximum size of MCP messages in bytes
+                        description: 'Not enforced: nothing reads this setting. Maximum size of MCP messages
+                          in bytes'
                         maximum: 104857600
                         minimum: 1024
                         type: integer
                       max_path_length:
-                        description: Maximum allowed path length for security validation
+                        description: 'Not enforced: nothing reads this setting. Maximum allowed path length
+                          for security validation'
                         maximum: 8192
                         minimum: 256
                         type: integer
                       max_directory_size_mb:
-                        description: Maximum directory size in MB that can be scanned
+                        description: 'Not enforced: nothing reads this setting. Maximum directory size
+                          in MB that can be scanned'
                         maximum: 10240
                         minimum: 10
                         type: integer
                       enable_health_checks:
-                        description: Enable periodic health checks and resource monitoring
+                        description: 'Not enforced: nothing reads this setting. Enable periodic health
+                          checks and resource monitoring'
                         type: boolean
                       health_check_interval_seconds:
-                        description: Interval between health checks in seconds
+                        description: 'Not enforced: nothing reads this setting. Interval between health
+                          checks in seconds'
                         maximum: 300
                         minimum: 10
                         type: integer
                       enable_resource_logging:
-                        description: Enable detailed resource management logging
+                        description: 'Not enforced: nothing reads this setting. Enable detailed resource
+                          management logging'
                         type: boolean
                       log_resource_operations:
-                        description: Log individual resource operations for debugging
+                        description: 'Not enforced: nothing reads this setting. Log individual resource
+                          operations for debugging'
                         type: boolean
                     type: object
                   workspace:
