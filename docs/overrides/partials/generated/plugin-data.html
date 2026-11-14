@@ -28,6 +28,7 @@
       "grype",
       "npm-audit",
       "opengrep",
+      "semgrep",
       "snyk-code",
       "syft",
       "trivy",
@@ -47,11 +48,12 @@
       "grype",
       "npm-audit",
       "opengrep",
+      "semgrep",
       "syft",
       "trivy",
       "zizmor"
     ],
-    "builtin_count": 15,
+    "builtin_count": 16,
     "home": [
       {
         "name": "bandit",
@@ -65,6 +67,17 @@
         "href": "reference/scanners/#bandit"
       },
       {
+        "name": "semgrep",
+        "display": "Semgrep",
+        "category": "code",
+        "icon": "code-braces",
+        "tagline": "Pattern-based code checks",
+        "covers": "Multiple languages",
+        "tag": "SAST",
+        "strip": "plain",
+        "href": "reference/scanners/#semgrep"
+      },
+      {
         "name": "opengrep",
         "display": "Opengrep",
         "category": "code",
@@ -72,7 +85,7 @@
         "tagline": "Pattern-based code checks",
         "covers": "Multiple languages",
         "tag": "SAST",
-        "strip": "plain",
+        "strip": none,
         "href": "reference/scanners/#opengrep"
       },
       {
@@ -153,7 +166,7 @@
         "href": "reference/scanners/#syft"
       }
     ],
-    "home_count": 9,
+    "home_count": 10,
     "categories": [
       {
         "slug": "code",
@@ -180,7 +193,7 @@
       "label": "Code",
       "file": "app.py",
       "icon": "code-braces",
-      "engines": ["Bandit", "Opengrep"],
+      "engines": ["Bandit", "Semgrep"],
       "finding": "Shell command",
       "severity": "High"
     },
