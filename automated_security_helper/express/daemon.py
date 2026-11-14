@@ -41,6 +41,7 @@ import socket
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from automated_security_helper.express import runtime
@@ -273,6 +274,7 @@ class ExpressDaemon:
         self.listener: Optional[socket.socket] = None
         self._lock_fd: Optional[int] = None
         self._socket_inode: Optional[int] = None
+        self._path: Optional[Path] = None
         self.selector = selectors.DefaultSelector()
         self._wakeup_read, self._wakeup_write = os.pipe()
         os.set_blocking(self._wakeup_write, False)
@@ -289,6 +291,11 @@ class ExpressDaemon:
         "a daemon is there, use it" rather than die silently into a cold run.
         """
         path = runtime.socket_path()
+        # Kept: every later use (the retirement marker, the shutdown's unlink)
+        # names the path this daemon BOUND. Recomputing it would re-check the
+        # runtime directory (which can refuse) and re-read os.environ (which a
+        # warm import may have changed), landing beside a different socket.
+        self._path = path
         # The probe/unlink/bind sequence below is serialized across daemons by
         # a sibling lock file: without it, two concurrent autostarts could both
         # see nothing serving, both bind (the second unlinking the first's
@@ -368,7 +375,8 @@ class ExpressDaemon:
 
     def run(self) -> None:
         _log(
-            f"express daemon pid {os.getpid()} serving {runtime.socket_path()} "
+            f"express daemon pid {os.getpid()} serving "
+            f"{self._path if self._path is not None else runtime.socket_path()} "
             f"(ash {self.version}, idle timeout {int(self.idle_timeout)}s)"
         )
         try:
@@ -396,7 +404,11 @@ class ExpressDaemon:
                 # and an autostart backs off while the marker is fresh instead
                 # of paying the whole warm-import cost to retire the same way
                 # on every scan.
-                runtime.mark_retired_for_threads(runtime.socket_path())
+                if self._path is not None:
+                    try:
+                        runtime.mark_retired_for_threads(self._path)
+                    except Exception as exc:  # noqa: BLE001 - best effort
+                        _log(f"could not record the retirement marker: {exc}")
                 return
             while True:
                 for key, _ in self.selector.select(timeout=1.0):
@@ -422,7 +434,7 @@ class ExpressDaemon:
         # lost a race must never unlink a successor's socket (the inode check;
         # see bind()).
         try:
-            path = runtime.socket_path()
+            path = self._path if self._path is not None else runtime.socket_path()
             if self._socket_inode is not None and os.stat(path).st_ino == (
                 self._socket_inode
             ):

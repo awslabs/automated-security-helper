@@ -250,7 +250,10 @@ def _no_daemon_note(path: PathLike, what: str, tail: str) -> str:
     """The line saying why --express has no daemon: the recorded retirement
     cause when a daemon recently retired itself, else that it ``what``."""
     if runtime.recent_retirement(path):
-        return f"ash express: {runtime.RETIRED_FOR_THREADS_TEXT}.{tail}"
+        return (
+            f"ash express: {runtime.RETIRED_FOR_THREADS_TEXT}. "
+            f"'ash express start' tries again now.{tail}"
+        )
     return f"ash express: the daemon {what}; running cold.{tail}"
 
 

@@ -225,11 +225,50 @@ class TestRetiresWhenWarmImportsLeaveThreads:
             "select",
             lambda timeout=None: pytest.fail("the serve loop must not run"),
         )
+        daemon._path = tmp_path / "x.sock"  # what bind() keeps
         daemon.run()
         assert shutdowns == [True]
         assert any("exiting so scans run cold" in line for line in lines), lines
         # The cause is readable beside the socket, for `start` and the backoff.
         assert runtime.recent_retirement(tmp_path / "x.sock") == "threads"
+
+    def test_the_marker_lands_at_the_bound_path_not_a_recomputed_one(
+        self, daemon, monkeypatch, tmp_path
+    ):
+        """socket_path() reads os.environ, which a warm import may have
+        changed: recomputed at retirement time it would name a different
+        socket, and the client's backoff would never see the marker."""
+        from automated_security_helper.express import daemon as daemon_module
+
+        bound = tmp_path / "bound.sock"
+        monkeypatch.setattr(daemon_module, "warm_imports", list)
+        monkeypatch.setattr(daemon_module, "_thread_count", lambda: 2)
+        monkeypatch.setattr(daemon_module, "_log", lambda _m: None)
+        monkeypatch.setattr(
+            runtime, "socket_path", lambda *a, **k: tmp_path / "other.sock"
+        )
+        monkeypatch.setattr(daemon, "_shutdown", lambda: None)
+        daemon._path = bound
+        daemon.run()
+        assert runtime.recent_retirement(bound) == "threads"
+        assert runtime.recent_retirement(tmp_path / "other.sock") is None
+
+    def test_a_refusing_socket_path_at_retirement_does_not_escape_run(
+        self, daemon, monkeypatch, tmp_path
+    ):
+        from automated_security_helper.express import daemon as daemon_module
+
+        def refuse(*_a, **_k):
+            raise runtime.ExpressUnavailable("the runtime directory changed")
+
+        monkeypatch.setattr(daemon_module, "warm_imports", list)
+        monkeypatch.setattr(daemon_module, "_thread_count", lambda: 2)
+        monkeypatch.setattr(daemon_module, "_log", lambda _m: None)
+        monkeypatch.setattr(runtime, "socket_path", refuse)
+        monkeypatch.setattr(daemon, "_shutdown", lambda: None)
+        daemon._path = tmp_path / "bound.sock"
+        daemon.run()  # must return, not raise
+        assert runtime.recent_retirement(tmp_path / "bound.sock") == "threads"
 
 
 class _TickingClock:
