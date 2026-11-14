@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import checkout_env
+
 pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[2]
@@ -73,13 +75,14 @@ print(json.dumps({"source": source, "ash": automated_security_helper.__file__}))
 
 
 def _env() -> dict[str, str]:
+    """The operator directory on PYTHONPATH, behind this checkout, which comes first."""
     env = dict(os.environ)
-    parts = [str(OPERATOR), str(REPO)]
+    parts = [str(OPERATOR)]
     if env.get("PYTHONPATH"):
         parts.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(parts)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    return env
+    return checkout_env(env)
 
 
 def _python(*args: str) -> subprocess.CompletedProcess:

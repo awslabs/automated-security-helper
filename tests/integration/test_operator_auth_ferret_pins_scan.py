@@ -30,6 +30,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.utils.helpers import checkout_env
+
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -110,10 +112,12 @@ def test_pinned_lines_are_suppressed_and_planted_secrets_are_not(
     output = tmp_path / "out"
     ash = shutil.which("ashx", path=str(Path(sys.executable).parent))
     assert ash, f"no ashx entry point beside {sys.executable}"
-    env = {
-        **os.environ,
-        "PATH": os.pathsep.join([str(Path(ferret).parent), os.environ["PATH"]]),
-    }
+    env = checkout_env(
+        {
+            **os.environ,
+            "PATH": os.pathsep.join([str(Path(ferret).parent), os.environ["PATH"]]),
+        }
+    )
     proc = subprocess.run(
         [
             ash,
