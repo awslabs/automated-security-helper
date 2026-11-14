@@ -304,6 +304,33 @@ N1_HEAD="$(sed -n 's/^N1_HEAD=//p' "$N1_ENV" 2>/dev/null || true)"
   exit 1
 }
 echo "   N-1: commit $N1_SHA, packaged by its own packaging/flatpak; N: commit $N1_HEAD"
+# Both builds run flatpak-builder as this user, which in CI is root started by sudo in
+# a checkout the runner user owns. It builds in .flatpak-builder under the working
+# directory, mounts rofiles-fuse there, and then bwrap inside its user namespace could
+# not open the mount:
+#   bwrap: Can't find source path <workspace>/.flatpak-builder/rofiles/rofiles-XXXX/files:
+#   Permission denied
+# (measured on the hosted runner, after the "bwrap can create a sandbox" probe passed).
+# A FUSE mount is open only to the uid that made it unless it is mounted allow_other,
+# and the namespace's root is not that uid. So both builds get flatpak-builder with
+# --disable-rofiles-fuse, which builds in a plain directory, and a state directory under
+# $WORK rather than in the checkout. The N-1 build.sh is that commit's own and cannot be
+# edited here, so the options go in a wrapper first on PATH that both builds pick up. The
+# bundle is the same either way; rofiles-fuse is a speed-up for the build cache.
+SHIM_DIR="$WORK/shim-bin"
+mkdir -m 0755 "$SHIM_DIR"
+cat >"$SHIM_DIR/flatpak-builder" <<SHIM
+#!/bin/sh
+PATH="\$(printf '%s' "\$PATH" | tr ':' '\n' | grep -vxF "$SHIM_DIR" | paste -sd: -)"
+exec flatpak-builder --disable-rofiles-fuse --state-dir="$WORK/flatpak-builder-state" "\$@"
+SHIM
+chmod 0755 "$SHIM_DIR/flatpak-builder"
+PATH="$SHIM_DIR:$PATH"
+export PATH
+[ "$(command -v flatpak-builder)" = "$SHIM_DIR/flatpak-builder" ] || {
+  echo "   FAIL: the flatpak-builder wrapper is not first on PATH" >&2
+  exit 1
+}
 PREV_BUNDLE="$("$PREV_SRC/packaging/flatpak/build.sh" "$PREV_WHEEL" "$OUT/prev")"
 echo "   built N-1: $PREV_BUNDLE ($(du -h "$PREV_BUNDLE" | cut -f1))"
 BUNDLE="$("$REPO/packaging/flatpak/build.sh" "$WHEEL" "$OUT")"
