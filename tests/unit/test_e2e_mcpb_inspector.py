@@ -612,6 +612,30 @@ def test_the_n_minus_one_scan_holds_one_stdio_session():
     assert call, "the upgrade-before scan of N-1 must hold one stdio session"
 
 
+def test_a_cache_with_only_the_lock_file_counts_as_cleaned(tmp_path):
+    """`uv cache clean` keeps the .lock it holds while it works (the MCPB job, run 43554757288)."""
+    (tmp_path / ".lock").write_text("")
+    assert mi.cache_leftovers(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "extra", ["archive-v0", ".lock.old", "wheels-v5"], ids=["dir", "lookalike", "other"]
+)
+def test_anything_besides_the_lock_file_is_a_leftover(tmp_path, extra):
+    (tmp_path / ".lock").write_text("")
+    (tmp_path / extra).mkdir()
+    assert mi.cache_leftovers(tmp_path) == [extra]
+
+
+def test_a_directory_named_lock_is_a_leftover(tmp_path):
+    (tmp_path / ".lock").mkdir()
+    assert mi.cache_leftovers(tmp_path) == [".lock"]
+
+
+def test_a_missing_cache_has_nothing_left(tmp_path):
+    assert mi.cache_leftovers(tmp_path / "gone") == []
+
+
 def test_every_scan_case_holds_one_stdio_session():
     """No scan case may poll over HTTP: each Inspector call there is a session of its own.
 

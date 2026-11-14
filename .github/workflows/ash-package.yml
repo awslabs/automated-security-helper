@@ -1098,13 +1098,34 @@ jobs:
       # in this job at all.
       #
       # Both forms are audited: the copy that was just installed, then the release
-      # formula as published, put in the tap byte for byte.
+      # formula, put in the tap with one addition.
+      #
+      # `brew audit --strict` requires a git `url` that names a tag to also name the
+      # tag's commit (`revision:`), and says so: "Git should specify a full commit
+      # hash in `revision:`". The committed formula cannot carry that hash. It is
+      # written by `cz bump` in the commit that the release tag then names, and a
+      # commit cannot contain its own hash; any other commit's hash would make
+      # Homebrew refuse the checkout of the tag. So the committed line stays
+      # tag-only, and the release audit adds `revision:` from `git rev-parse HEAD`,
+      # which is the commit a release tag names. The step then requires that to be
+      # the only difference.
       - name: Audit the formula against Homebrew's own rules
         run: |
           set -euo pipefail
           brew audit --strict ash/local/ash
           tap_dir="$(brew --repository ash/local)"
           cp Formula/ash.rb "${tap_dir}/Formula/ash.rb"
-          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb"
+          head_commit="$(git rev-parse HEAD)"
+          case "${head_commit}" in
+            *[!0-9a-f]* | "") echo "::error::git rev-parse HEAD gave '${head_commit}'"; exit 1 ;;
+          esac
+          [ "${#head_commit}" -eq 40 ] || { echo "::error::'${head_commit}' is not a full commit hash"; exit 1; }
+          sed -E -i.orig "s|^(  url \"[^\"]+\", tag: \"v[^\"]+\")\$|\\1, revision: \"${head_commit}\"|" "${tap_dir}/Formula/ash.rb"
+          rm -f "${tap_dir:?}/Formula/ash.rb.orig"
+          rc=0
+          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb" || rc=$?
+          [ "${rc}" -eq 1 ] || { echo "::error::the release audit copy differs from Formula/ash.rb by something other than revision (diff exit ${rc})"; exit 1; }
+          [ "$(diff Formula/ash.rb "${tap_dir}/Formula/ash.rb" | grep -c '^>')" -eq 1 ] || { echo "::error::more than one line differs"; exit 1; }
+          grep -q "revision: \"${head_commit}\"" "${tap_dir}/Formula/ash.rb"
           brew audit --strict ash/local/ash
 

@@ -92,6 +92,27 @@ QUEUEING = {
     ),
 }
 
+#: Workflows the v4 line added that still carry the older dialect: they cancel a
+#: superseded `pull_request` run and nothing else, and a push run is keyed on its
+#: own sha, so no push is ever superseded. That differs from the rule at the top of
+#: this file (a newer run on any ref but main and tags cancels), and it is listed as
+#: it is, not as if it met the rule: each entry is pinned to its exact block, so
+#: moving one onto the rule is a change to this table, made on purpose. The group key
+#: is the part that differs, and is kept per workflow for that reason.
+PULL_REQUEST_ONLY = {
+    "ash-e2e.yml": "${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}",
+    "ash-jetbrains-ci.yml": "${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}",
+    "ash-kubernetes-operator.yml": "${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}",
+    "ash-native-packages.yml": "${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}",
+    "ash-vscode-extension.yml": "${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}",
+}
+PULL_REQUEST_ONLY_CANCEL = "${{ github.event_name == 'pull_request' }}"
+
+#: Workflows with no concurrency block at all, so no run is ever superseded: they
+#: fire on a path-filtered push (and on dispatch or workflow_call), build artifacts
+#: or the release assets, and each run's result belongs to its own commit.
+UNCONTROLLED = {"ash-package-formats.yml", "ash-release-assets.yml"}
+
 #: Fires on the pull_request `closed` event and writes the release tag. Its
 #: concurrency lives on the job (group ash-release-tag, never cancelled), which
 #: test_the_tagging_workflow_keeps_its_job_level_queue below pins; a workflow-level
@@ -124,14 +145,39 @@ def test_the_workflow_directory_was_read():
 
 def test_every_workflow_is_classified():
     names = {path.name for path in _workflow_files()}
-    classified = SUPERSEDING | REUSABLE | set(QUEUEING) | TAGGING
+    sets = [
+        SUPERSEDING,
+        REUSABLE,
+        set(QUEUEING),
+        TAGGING,
+        set(PULL_REQUEST_ONLY),
+        UNCONTROLLED,
+    ]
+    classified = set().union(*sets)
     assert names == classified, (
         f"unclassified: {sorted(names - classified)}; "
         f"listed but absent: {sorted(classified - names)}"
     )
-    assert not (SUPERSEDING & REUSABLE), "a workflow belongs to one set"
-    assert not (SUPERSEDING & set(QUEUEING)), "a workflow belongs to one set"
-    assert not (SUPERSEDING & TAGGING), "a workflow belongs to one set"
+    assert sum(len(s) for s in sets) == len(classified), "a workflow belongs to one set"
+
+
+@pytest.mark.parametrize("name", sorted(PULL_REQUEST_ONLY))
+def test_a_pull_request_only_workflow_keeps_exactly_that_block(name: str):
+    concurrency = _load(WORKFLOWS / name).get("concurrency")
+    assert isinstance(concurrency, dict), f"{name} has no workflow-level concurrency"
+    assert concurrency.get("group") == PULL_REQUEST_ONLY[name]
+    assert concurrency.get("cancel-in-progress") == PULL_REQUEST_ONLY_CANCEL, (
+        f"{name} cancel-in-progress is {concurrency.get('cancel-in-progress')!r}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(UNCONTROLLED))
+def test_an_uncontrolled_workflow_has_no_concurrency(name: str):
+    workflow = _load(WORKFLOWS / name)
+    assert "concurrency" not in workflow, f"{name} gained a workflow-level block"
+    assert not any("concurrency" in job for job in workflow["jobs"].values()), (
+        f"{name} gained a job-level concurrency block"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(SUPERSEDING))
@@ -210,9 +256,13 @@ def test_the_tagging_workflow_keeps_its_job_level_queue(name: str):
         "this test pins"
     )
     jobs = workflow["jobs"]
+    # Only the jobs that declare a concurrency group: the workflow's other jobs
+    # (`resolve` reads the version, `assets` builds the release assets) declare none
+    # and run in every release run; adding a group to one of them would show here.
     job_groups = {
-        job_id: (job.get("concurrency") or {}).get("cancel-in-progress")
+        job_id: job["concurrency"].get("cancel-in-progress")
         for job_id, job in jobs.items()
+        if job.get("concurrency")
     }
     assert job_groups == {"tag-and-release": False}, job_groups
     group = jobs["tag-and-release"]["concurrency"].get("group")

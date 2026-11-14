@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
@@ -90,6 +91,29 @@ def entrypoint(request) -> str:
     return body
 
 
+#: What the entrypoint runs besides the stand-ins and shell builtins.
+_ENTRYPOINT_TOOLS = ("sh", "grep", "tr", "cat", "dirname", "mkdir")
+
+
+def _tool_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A directory holding only the tools the entrypoint needs, linked from the host.
+
+    The entrypoint picks `ashx` when `command -v ashx` finds one and falls back to
+    `ash` otherwise. With the host's whole PATH in the child, a machine that has ASH
+    installed (CI does) answers `ashx` with the real command, so the v3 case below,
+    which provides only an `ash` stand-in, ran the real server instead of the
+    stand-in ("MCP dependencies found. Starting MCP server..."). The child's PATH is
+    now the stand-in directory and this one, so the stand-in is the only ASH there.
+    """
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in _ENTRYPOINT_TOOLS:
+        found = shutil.which(name)
+        assert found, f"{name} is not on this host's PATH"
+        (tools / name).symlink_to(found)
+    return tools
+
+
 def _run(
     entrypoint: str,
     tmp_path: pathlib.Path,
@@ -111,7 +135,7 @@ def _run(
     script.write_text(entrypoint, encoding="utf-8")
     argv_file = tmp_path / "argv"
     env = {
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "PATH": f"{bin_dir}{os.pathsep}{_tool_dir(tmp_path)}",
         "HOME": str(tmp_path / "home"),
         "STAND_IN_ARGV": str(argv_file),
         "STAND_IN_FD": "1" if with_fd else "",
