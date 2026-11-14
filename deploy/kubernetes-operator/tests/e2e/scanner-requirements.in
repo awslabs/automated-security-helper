@@ -8,4 +8,4 @@
 # scanner-requirements.txt is resolved against ASH's locked runtime and leaves out every
 # package that runtime already pins. Regenerate it with deploy/kubernetes-operator/relock.sh,
 # never by hand.
-bandit[sarif,toml]>=1.7.0,<2.0.0
+bandit[sarif,toml]>=1.7.8,<2.0.0
