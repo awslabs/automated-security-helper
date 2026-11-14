@@ -10,16 +10,16 @@ ASH's converters, scanners, and reporters are plugins, and so are event subscrib
 | Plugin modules that ship with ASH, under `automated_security_helper.plugin_modules` | when a module list names them (for the MCP server, see [What a plugin can do](#what-a-plugin-can-do)) | the [community plugins](../docs/plugins/community/index.md) (`ferret-scan`, `snyk-code`, and `trivy-repo`) and the [AWS reporters](aws.md) |
 | Third-party packages | when a module list names them | anything you or someone else writes, installed in the same Python environment as ASH |
 
-ASH has no automatic discovery. Installing a package does nothing until a module list names it, and `ash scan` imports none of the optional modules that ship with ASH unless a module list names them.
+ASH has no automatic discovery. Installing a package does nothing until a module list names it, and `ashx scan` imports none of the optional modules that ship with ASH unless a module list names them.
 
 ## Load a plugin module
 
 Name the module in any of these:
 
 - the `ash_plugin_modules` list in an ASH config file ([reference](../reference/configuration.md#ash_plugin_modules));
-- the [`--ash-plugin-modules`](../reference/cli.md#scan--ash-plugin-modules) option of `ash scan` and `ash plugin list`, repeated once per module or given names separated by commas;
-- the `ASH_PLUGIN_MODULES` environment variable, with module names separated by spaces or commas, which `ash scan` and `ash plugin list` read;
-- a config override, `--config-overrides 'ash_plugin_modules+=[module.name]'`, which also works for `ash dependencies install` and `ash report`, the commands that have no `--ash-plugin-modules` option;
+- the [`--ash-plugin-modules`](../reference/cli.md#scan--ash-plugin-modules) option of `ashx scan` and `ashx plugin list`, repeated once per module or given names separated by commas;
+- the `ASH_PLUGIN_MODULES` environment variable, with module names separated by spaces or commas, which `ashx scan` and `ashx plugin list` read;
+- a config override, `--config-overrides 'ash_plugin_modules+=[module.name]'`, which also works for `ashx dependencies install` and `ashx report`, the commands that have no `--ash-plugin-modules` option;
 - the `ash_plugin_modules` parameter of the [Python API](../reference/python-api.md).
 
 This config loads the ferret-scan plugin module:
@@ -33,13 +33,13 @@ ash_plugin_modules:
 To check what a module provides before you scan with it, list the plugins with the module loaded. `ferret-scan` then appears in the scanners table:
 
 ```bash
-ash plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
+ashx plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
 The plugins in the modules that ship with ASH are enabled as soon as their module is loaded, so loading one adds its scanners to a default scan; set `enabled: false` for a plugin in your config to turn it off. The exceptions are the four AWS reporters, which stay off until the operator turns each one on ([AWS reporters](aws.md#enable)). A third-party plugin's config class sets its own default. ASH imports the names from every source together, in order, and a name given twice is imported once. Every source splits an entry on commas, so `"a_ash_plugins, b_ash_plugins"` names two modules. This lists the scanners of two community modules named in one value:
 
 ```bash
-ash plugin list \
+ashx plugin list \
   --ash-plugin-modules "automated_security_helper.plugin_modules.ash_ferret_plugins, automated_security_helper.plugin_modules.ash_trivy_plugins" \
   | grep -E -o "ferret-scan|trivy-repo" | sort -u
 ```
@@ -49,7 +49,7 @@ ferret-scan
 trivy-repo
 ```
 
-`ash plugin list` lists every plugin registered once the modules are imported, which is the set a scan selects from.
+`ashx plugin list` lists every plugin registered once the modules are imported, which is the set a scan selects from.
 
 ## Who may load a module
 
@@ -66,13 +66,13 @@ From a repository's file, ASH drops every entry it cannot find or will not impor
 
 A plugin is Python code that ASH imports into its own process. It runs as the same user as ASH, with the same files, environment variables, and credentials, and its import-time code runs as soon as a module list names it, before any scanner starts. The scanner sandbox ([Enable the scanner sandbox](../docs/scanner-sandbox.md)) confines the tool processes that ASH starts on a scanner's behalf; it does not confine the plugin's own Python code, or a process the plugin starts by other means. Only install plugin packages you trust, and pin their versions as you would any other dependency of your build.
 
-Plugins stay registered for the life of the process that loaded them. In a long-running process such as the MCP server that `ash mcp` starts, do not rely on module lists to keep out a plugin that ships with ASH or is installed in its environment. Give that process only the scanner tools and credentials you are willing to let every scan in it use, and start a new process when you change which plugin modules it loads.
+Plugins stay registered for the life of the process that loaded them. In a long-running process such as the MCP server that `ashx mcp` starts, do not rely on module lists to keep out a plugin that ships with ASH or is installed in its environment. Give that process only the scanner tools and credentials you are willing to let every scan in it use, and start a new process when you change which plugin modules it loads.
 
 ## Package a third-party plugin
 
 - Give the top-level package a name that ends in `ash_plugins`, such as `acme_ash_plugins`; ASH also accepts names under `ash_plugins.`. Other names are not supported, and ASH logs a warning for them.
-- Decorate each plugin class (`@ash_scanner_plugin`, `@ash_reporter_plugin`, or `@ash_converter_plugin`). The decorator registers the class when ASH imports the module, and `ash plugin list` shows every registered plugin. The module-level lists at the end of each how-to's module register nothing and are optional.
-- Give each plugin a config class whose `name` is a fixed string. That name is the key under `scanners`, `reporters`, or `converters` in an ASH config, and the name that `--scanners` and `ash report --format` select. Put the plugin's options in a class derived from the options base for its kind; ASH checks a config's section for the plugin with that class and refuses an option it does not declare ([Write a scanner plugin](write-a-scanner.md#3-scan-with-it)). ASH finds the section by the name with case, punctuation, and the words Scanner, Reporter, and Converter ignored, so give the plugin a name of its own: two plugins of one type whose names read as one that way would read each other's section, and are refused with exit 3, naming both plugins and the modules that define them: a scan and a workspace scan refuse two such scanners, converters, or reporters, and `ash report` and `ash merge` refuse two such reporters. A reporter named `csv_` is refused this way beside the built-in `csv`, and one named `S3` when the [AWS reporters](aws.md), among them `s3`, are loaded. `ash config validate` imports no plugin module, so it does not see this. Two plugins of one type with the very same name, such as a subclass that keeps its base's config, are refused with exit 3 too, naming both classes and the modules that define them: a scan and a workspace scan refuse two such scanners, converters, or reporters, and `ash report` and `ash merge` refuse two such reporters. One class selected twice is one plugin. To run a subclass beside its base, give it a config class of its own with its own `name`, declare it as the subclass's `config` field, and build it in `model_post_init` when no config is given. A reporter subclass also needs its own `extension`; a different extension under the shared name is not enough. Two reporters with names of their own that write one report file are refused with exit 1 by a scan, a workspace scan, and `ash merge`, and without the `model_post_init` the subclass starts from its base's config and writes its base's file. This reporter runs beside the built-in `csv` and writes `ash.copy.csv`:
+- Decorate each plugin class (`@ash_scanner_plugin`, `@ash_reporter_plugin`, or `@ash_converter_plugin`). The decorator registers the class when ASH imports the module, and `ashx plugin list` shows every registered plugin. The module-level lists at the end of each how-to's module register nothing and are optional.
+- Give each plugin a config class whose `name` is a fixed string. That name is the key under `scanners`, `reporters`, or `converters` in an ASH config, and the name that `--scanners` and `ashx report --format` select. Put the plugin's options in a class derived from the options base for its kind; ASH checks a config's section for the plugin with that class and refuses an option it does not declare ([Write a scanner plugin](write-a-scanner.md#3-scan-with-it)). ASH finds the section by the name with case, punctuation, and the words Scanner, Reporter, and Converter ignored, so give the plugin a name of its own: two plugins of one type whose names read as one that way would read each other's section, and are refused with exit 3, naming both plugins and the modules that define them: a scan and a workspace scan refuse two such scanners, converters, or reporters, and `ashx report` and `ashx merge` refuse two such reporters. A reporter named `csv_` is refused this way beside the built-in `csv`, and one named `S3` when the [AWS reporters](aws.md), among them `s3`, are loaded. `ashx config validate` imports no plugin module, so it does not see this. Two plugins of one type with the very same name, such as a subclass that keeps its base's config, are refused with exit 3 too, naming both classes and the modules that define them: a scan and a workspace scan refuse two such scanners, converters, or reporters, and `ashx report` and `ashx merge` refuse two such reporters. One class selected twice is one plugin. To run a subclass beside its base, give it a config class of its own with its own `name`, declare it as the subclass's `config` field, and build it in `model_post_init` when no config is given. A reporter subclass also needs its own `extension`; a different extension under the shared name is not enough. Two reporters with names of their own that write one report file are refused with exit 1 by a scan, a workspace scan, and `ashx merge`, and without the `model_post_init` the subclass starts from its base's config and writes its base's file. This reporter runs beside the built-in `csv` and writes `ash.copy.csv`:
 
     ```python
     from typing import Literal
@@ -108,4 +108,4 @@ Plugins stay registered for the life of the process that loaded them. In a long-
 - [Write a converter plugin](write-a-converter.md) prepares files for the scanners.
 - [Subscribe to scan events](event-subscribers.md) runs a function when a scanner or the whole scan finishes.
 
-Each how-to builds a complete plugin in a package named `acme_ash_plugins` and runs it with `ash scan`.
+Each how-to builds a complete plugin in a package named `acme_ash_plugins` and runs it with `ashx scan`.

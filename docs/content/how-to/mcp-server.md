@@ -1,6 +1,6 @@
 # Run the MCP server
 
-`ash mcp` starts ASH's Model Context Protocol server. An agent or IDE on your machine usually
+`ashx mcp` starts ASH's Model Context Protocol server. An agent or IDE on your machine usually
 starts it for you over stdio, as in [Connect an AI agent to ASH](../getting-started/agents.md).
 This page is for running the server yourself: choosing a transport, limiting what clients can
 reach, serving it over HTTP, and cleaning up after clients. Every option is listed in the
@@ -10,7 +10,7 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
 ## How the server runs scans
 
 - Scans run inside the server process, in local mode, with the scanner tools installed for
-  the user that runs the server. Install them as that user with `ash dependencies install`.
+  the user that runs the server. Install them as that user with `ashx dependencies install`.
   ASH does not start a container for a scan; if the server itself runs in a container, see
   [Run the server in a container](#run-in-a-container).
 - A scan writes its output to `.ash/ash_output` inside the directory it scans, so the server
@@ -46,11 +46,11 @@ reach, serving it over HTTP, and cleaning up after clients. Every option is list
   `Workspace policy is not a valid path: <path>`. Each message shows the NUL as `\x00`, and
   nothing is created.
 - MCP scans never run a tool found inside a scanned or delivered tree, whatever
-  `ASH_ALLOW_IN_TREE_TOOLS` says, and `ash mcp` has no option to allow it. A scanner installed
+  `ASH_ALLOW_IN_TREE_TOOLS` says, and `ashx mcp` has no option to allow it. A scanner installed
   only inside the project, for example in its `.venv`, is reported as MISSING. See
   [Tools inside the scanned directory](../docs/advanced-usage.md#tools-inside-the-scanned-directory).
 
-`ash mcp` exits with code 5 for an unknown option, a value of the wrong type, options that
+`ashx mcp` exits with code 5 for an unknown option, a value of the wrong type, options that
 cannot be combined, or an `ASH_MCP_TRANSPORT` that names no transport, and with code 3 when
 a `--profile` file does not load, is kept inside the MCP workspace root where a client could
 have supplied it (a config the server wrote there itself is fine), or sits inside a git checkout
@@ -58,11 +58,11 @@ under a scan root `ASH_MCP_ALLOWED_ROOTS` grants, or when an HTTP transport cann
 its address. It also
 exits with code 3 when `ASH_CONFIG` names no config file it can load. It exits
 with code 1 when the MCP package is missing or the server fails, and prints the error to
-standard error even with `--quiet`. Ctrl-C stops the server, and `ash mcp` exits with code
+standard error even with `--quiet`. Ctrl-C stops the server, and `ashx mcp` exits with code
 130 on every transport. A stdio server exits with code 0 when the client closes
 the connection, and, on Linux and macOS, when it gets SIGTERM or SIGHUP. An HTTP server that
 gets SIGTERM ends with the signal, which a shell reports as code 143. SIGHUP stops an HTTP
-server the way SIGTERM does, and `ash mcp` then exits with code 0.
+server the way SIGTERM does, and `ashx mcp` then exits with code 0.
 
 ## Choose a transport
 
@@ -122,7 +122,7 @@ afterward, so the client's machine needs uv, git, and network access to GitHub o
 start. Desktop clients often do not see your shell's `PATH`; if the client cannot start the
 server, put the absolute path that `command -v uvx` prints in `command`. The scanner tools are
 not part of that install: install them once for your user with
-`(cd "$(mktemp -d)" && uvx --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ash dependencies install)`,
+`(cd "$(mktemp -d)" && uvx --from=git+https://github.com/awslabs/automated-security-helper@v4.0.0 ashx dependencies install)`,
 or accept `incomplete` scans as described in
 [Connect an AI agent to ASH](../getting-started/agents.md#1-install-ash). Run it from an empty
 directory, as the `cd` does, so that a config in a repository cannot change what it installs.
@@ -207,9 +207,9 @@ in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and no client delivered it (
 ### Run the server in a container {#run-in-a-container}
 
 ASH's container image already hosts the server for the AWS targets: AgentCore and Fargate
-run `ash mcp` over streamable HTTP, as described in [Deploy ASH on AWS](deploy-on-aws.md). That
+run `ashx mcp` over streamable HTTP, as described in [Deploy ASH on AWS](deploy-on-aws.md). That
 is the containerized route these docs cover. This page does not document a local
-`docker run ... ash mcp` over stdio that an agent or IDE could start, so use an installed `ash` or the `uvx` entry above for a client on your own
+`docker run ... ashx mcp` over stdio that an agent or IDE could start, so use an installed `ash` or the `uvx` entry above for a client on your own
 machine. If you want the server in a container of your own, run it over
 [streamable HTTP](#run-over-streamable-http) with an auth header and publish the port only on
 the loopback interface or behind a proxy you control. Scans then run inside that container, in
@@ -233,7 +233,7 @@ server that is reachable only on the loopback interface or through a proxy you c
     ```bash
     export ASH_MCP_TRANSPORT=streamable-http
     export ASH_MCP_ALLOWED_ROOTS="$HOME/src"
-    ash mcp --transport streamable-http --auth-header-name X-ASH-Token --auth-header-value "$TOKEN"
+    ashx mcp --transport streamable-http --auth-header-name X-ASH-Token --auth-header-value "$TOKEN"
     ```
 
     The server prints `Streamable-HTTP MCP server listening on http://127.0.0.1:8000/mcp` to
@@ -248,11 +248,11 @@ server that is reachable only on the loopback interface or through a proxy you c
     ```
 
 `--auth-header-name` and `--auth-header-value` must be given together; one without the other
-is a usage error, and `ash mcp` exits with code 5 before it starts:
+is a usage error, and `ashx mcp` exits with code 5 before it starts:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash mcp --transport streamable-http --auth-header-name X-ASH-Token
+ashx mcp --transport streamable-http --auth-header-name X-ASH-Token
 ```
 
 The header name is matched without regard to case, and every request, on
@@ -264,15 +264,15 @@ your proxy if you need a record.
 
 Always set `ASH_MCP_TRANSPORT` to the transport you serve, `streamable-http` or `sse`. ASH
 ignores the value's case and surrounding whitespace. A value that names no transport, one
-other than `stdio`, `streamable-http`, or `sse`, makes `ash mcp` exit with code 5 before it
+other than `stdio`, `streamable-http`, or `sse`, makes `ashx mcp` exit with code 5 before it
 starts:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ASH_MCP_TRANSPORT=http ash mcp
+ASH_MCP_TRANSPORT=http ashx mcp
 ```
 
-`ash mcp` does not set the variable for you. With it set, ASH applies its rules for remote
+`ashx mcp` does not set the variable for you. With it set, ASH applies its rules for remote
 clients to every call:
 
 - A client can scan, and read results from, only the directories in `ASH_MCP_ALLOWED_ROOTS`
@@ -287,7 +287,7 @@ These rules limit what the server's client can reach. They do not keep clients a
 serve one trusted client per server.
 
 Ctrl-C, SIGTERM, or SIGHUP stops an HTTP server: it stops its running scans and their
-scanners' tools, and `ash mcp` exits with code 130 for Ctrl-C and 0 for SIGHUP, or ends by
+scanners' tools, and `ashx mcp` exits with code 130 for Ctrl-C and 0 for SIGHUP, or ends by
 SIGTERM, which a shell reports as code 143. Before it stops the scans, the server waits for
 the requests clients still hold open, for at most 5 seconds, and then cancels them. The wait is
 bounded so that the whole stop fits inside the grace period a service manager gives before it
@@ -309,7 +309,7 @@ should accept:
 
 <!-- doctest: illustrative reason="starts a server that runs until it is stopped" -->
 ```bash
-ash mcp --transport streamable-http --host 0.0.0.0 --allowed-host ash.example.com \
+ashx mcp --transport streamable-http --host 0.0.0.0 --allowed-host ash.example.com \
   --auth-header-name X-ASH-Token --auth-header-value "$TOKEN"
 ```
 
@@ -322,7 +322,7 @@ them too. ASH does not support browser-based clients. Limit who can reach the po
 firewall or network rules as well.
 
 ASH enforces this. With a non-loopback `--host` and neither `--allowed-host` nor
-`--trust-upstream-host-check`, `ash mcp` refuses to start, because the server would answer any
+`--trust-upstream-host-check`, `ashx mcp` refuses to start, because the server would answer any
 Host and any Origin header. With `--allowed-host`, the server refuses every request that
 carries an Origin header. On a loopback `--host` without `--allowed-host`, it accepts only its
 own address as Host: `127.0.0.1`, `localhost`, or `[::1]` with the port it listens on, and on
@@ -332,11 +332,11 @@ port 80 also without the port. It accepts the same names as `http://` origins.
 and Origin headers itself. With it, ASH accepts any Host and any Origin, so the protection
 against DNS rebinding is only what that proxy or platform provides. It applies only to the
 HTTP transports with a non-loopback `--host`, and it cannot be combined with `--allowed-host`.
-On stdio, with a loopback `--host`, or with `--allowed-host`, `ash mcp` refuses to start:
+On stdio, with a loopback `--host`, or with `--allowed-host`, `ashx mcp` refuses to start:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash mcp --transport streamable-http --trust-upstream-host-check
+ashx mcp --transport streamable-http --trust-upstream-host-check
 ```
 
 ### Behind a load balancer or a managed runtime
@@ -346,11 +346,11 @@ client connects and refuses session IDs it did not issue. `--stateless-http` han
 request on its own instead. It is for load balancers that may send consecutive requests to
 different replicas, and for runtimes that set their own `Mcp-Session-Id`. It is accepted
 only with `--transport streamable-http`; with another transport, the default `stdio`
-included, it is a usage error, and `ash mcp` exits with code 5 before it starts:
+included, it is a usage error, and `ashx mcp` exits with code 5 before it starts:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash mcp --stateless-http
+ashx mcp --stateless-http
 ```
 
 In stateless mode the server issues no session IDs. Use it only where the platform requires
@@ -374,12 +374,12 @@ callers are kept apart only as well as the platform keeps their headers apart. A
 that the value can name one directory: letters, digits, and `.`, `_`, `-`, `~`, `+`, and `=`,
 and not `.` or `..`. It refuses any other value instead of rewriting it, with `error_type`
 `invalid_session_id`. The option applies
-only to `--transport streamable-http --stateless-http`; anywhere else, `ash mcp` refuses to
+only to `--transport streamable-http --stateless-http`; anywhere else, `ashx mcp` refuses to
 start:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash mcp --transport streamable-http --trust-upstream-session-id
+ashx mcp --transport streamable-http --trust-upstream-session-id
 ```
 
 The templates in `deploy/` run the server for you on AWS: see
@@ -396,19 +396,19 @@ not `--stateless-http`. Use it only for a client that cannot use streamable HTTP
 
 | Variable | When unset | Effect |
 |----------|------------|--------|
-| `ASH_MCP_TRANSPORT` | Not set by `ash mcp`. | Set it to `streamable-http` or `sse`, in any case, to apply the remote-client rules above to every call. A value that names no transport stops `ash mcp` from starting, with exit code 5. |
+| `ASH_MCP_TRANSPORT` | Not set by `ashx mcp`. | Set it to `streamable-http` or `sse`, in any case, to apply the remote-client rules above to every call. A value that names no transport stops `ashx mcp` from starting, with exit code 5. |
 | `ASH_MCP_ALLOWED_ROOTS` | Local clients: everything outside the system directories, the filesystem root, and other sessions' workspaces. Remote clients: only delivered source. | Directories, and their subdirectories, that clients may scan and read results from. |
 | `ASH_MCP_ALLOWED_CONFIG_ROOTS` | A remote client may read config only from the scan roots and its session's `config/` directory. | Extra directories remote clients may read config files from, such as a shared policy file. A config file a client names there counts as yours, not the client's, unless a client delivered it. |
 | `ASH_MCP_GIT_ALLOWED_HOSTS` | No host: `set_source_git` clones from nowhere. | The hosts `set_source_git` may clone from, separated by spaces or commas, matched without regard to case. See [Deliver source to the server](#deliver-source-to-the-server). |
 | `ASH_MCP_WORKSPACE_ROOT` | `$XDG_CACHE_HOME/ash-mcp`, or `~/.cache/ash-mcp` | Where each session's workspace lives: delivered source, uploads, and session configs. |
-| `ASH_CONFIG` | The built-in defaults. | The server's own config. Its `global_settings.mcp.runtime_overrides` section is the policy that delivered configs are checked against, and its `mcp-resource-management` section [limits the scans](#limit-how-many-scans-run-and-for-how-long). When it names a path that is not a file, a file the server cannot read, or a config that does not load or validate, `ash mcp` refuses to start, on every transport, with exit code 3. An empty value counts as unset. Keep it outside every git checkout and the directories clients scan: inside one, its sandbox grants and plugin modules do not count ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)). |
+| `ASH_CONFIG` | The built-in defaults. | The server's own config. Its `global_settings.mcp.runtime_overrides` section is the policy that delivered configs are checked against, and its `mcp-resource-management` section [limits the scans](#limit-how-many-scans-run-and-for-how-long). When it names a path that is not a file, a file the server cannot read, or a config that does not load or validate, `ashx mcp` refuses to start, on every transport, with exit code 3. An empty value counts as unset. Keep it outside every git checkout and the directories clients scan: inside one, its sandbox grants and plugin modules do not count ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)). |
 
 A missing `ASH_CONFIG` file stops the server before it serves anything, with an error that
 names the variable and the path:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ASH_CONFIG=/nonexistent ash mcp
+ASH_CONFIG=/nonexistent ashx mcp
 ```
 
 The [environment variable reference](../reference/environment-variables.md) lists every
@@ -417,7 +417,7 @@ variable ASH reads.
 ## Limit how many scans run and for how long
 
 The server enforces two limits from the `mcp-resource-management` section of its own config,
-the file `ASH_CONFIG` names in the environment of the `ash mcp` process. A scanned
+the file `ASH_CONFIG` names in the environment of the `ashx mcp` process. A scanned
 repository's config and a config a client delivers cannot change them. Without `ASH_CONFIG`,
 the defaults apply. The server reads the section again for each scan.
 
@@ -568,7 +568,7 @@ than the server's own:
 - the `gitlab-sast` reporter's `exclude_suppressed`, which leaves suppressed findings out of
   its report
 
-`ash config init` writes the full default list into the config it creates, and the
+`ashx config init` writes the full default list into the config it creates, and the
 [configuration reference](../reference/configuration.md#global_settings.mcp.runtime_overrides.denied_paths)
 shows it. `validate_config` reports each such field as an error of type
 `denied_by_runtime_policy`; for `config_content`, only when a remote client calls it. A
@@ -650,7 +650,7 @@ suppressed findings affect the exit code and each report.
 ### Refuse delivered suppressions too
 
 To refuse delivered suppressions and ignore paths, give the server's config a `denied_paths`
-list of its own: the full default list, as `ash config init` writes it, followed by these two
+list of its own: the full default list, as `ashx config init` writes it, followed by these two
 entries, which say so explicitly:
 
 <!-- doctest: config kind=other reason="two entries to append to the default denied_paths list, not a config on their own" -->
@@ -662,7 +662,7 @@ entries, which say so explicitly:
 A list of your own replaces the default list and is applied exactly as written, so keep every
 default entry, start each one with `/`, and compare your list with the default again after you
 upgrade ASH. A list equal to a default that ASH has shipped, such as the one an earlier
-`ash config init` wrote, still counts as the default, and gets every entry of the current
+`ashx config init` wrote, still counts as the default, and gets every entry of the current
 default list. Any other list is your own, even the default list with one entry added or
 removed, and every entry in it applies as written. While it keeps the default's
 `/global_settings/suppressions` and `/global_settings/ignore_paths` entries, delivered
@@ -686,7 +686,7 @@ server, with `--profile NAME=path/to/ash.yaml` once per profile, on any transpor
 
 <!-- doctest: illustrative reason="starts a server that waits for a client on standard input" -->
 ```bash
-ash mcp --profile strict=/etc/ash/strict.yaml --profile default=/etc/ash/default.yaml
+ashx mcp --profile strict=/etc/ash/strict.yaml --profile default=/etc/ash/default.yaml
 ```
 
 The server loads and validates every profile when it starts. A spec without `=`, a missing
@@ -755,11 +755,11 @@ A client cannot add a profile.
   holds it, removes nothing more and leaves the remaining sessions to its next sweep, so
   another server cannot hold up a stop signal.
 - `--session-workspace-ttl` takes a positive number of seconds and applies only to the HTTP
-  transports. On stdio, `ash mcp` refuses to start with it:
+  transports. On stdio, `ashx mcp` refuses to start with it:
 
     <!-- doctest: run expect-exit=5 -->
     ```bash
-    ash mcp --session-workspace-ttl 3600
+    ashx mcp --session-workspace-ttl 3600
     ```
 
 - The stdio session's workspace is removed when the last stdio server that uses that workspace

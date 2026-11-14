@@ -77,7 +77,7 @@ Put `ash-plugins` on Python's import path, then list the plugins with the module
 
 ```bash
 export PYTHONPATH="$PWD/ash-plugins"
-ash plugin list --ash-plugin-modules acme_ash_plugins
+ashx plugin list --ash-plugin-modules acme_ash_plugins
 ```
 
 The scanners table has a row for the plugin:
@@ -93,7 +93,7 @@ In the same shell:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security
 ```
 
 ASH runs ruff, reads its SARIF, and adds a row to the summary. In a repository with a hardcoded password and a `subprocess` call with `shell=True`, ruff reports both, the scanner is FAILED, and the scan exits with code 2:
@@ -121,7 +121,7 @@ ASH checks the options of every section a loaded plugin reads with the plugin's 
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security \
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security \
   --config-overrides 'scanners.ruff-security.options.selct=S,B'
 ```
 
@@ -131,7 +131,7 @@ ERROR (3) Invalid configuration: Configuration validation failed: scanners.ruff-
 options. Accepted keys: offline, scan_timeout, select, severity_threshold.
 ```
 
-`ash config validate` and `ash config lint` do not import the modules in `ash_plugin_modules`, so they cannot check these options; `ash config lint` names each section it could not check.
+`ashx config validate` and `ashx config lint` do not import the modules in `ash_plugin_modules`, so they cannot check these options; `ashx config lint` names each section it could not check.
 
 ## How ASH runs a scanner
 
@@ -157,7 +157,7 @@ Run the tool only by returning its command from `_execute_scan`. A process you s
 | `self.results_dir` | A directory for this scanner's files, `.ash/ash_output/scanners/<name>/`. Write the tool's output under it, one subdirectory per `target_type`. |
 | `self._ash_output_dirs_inside(target)` | ASH writes its output under the source directory by default. ASH leaves its own files there out of the scan set and drops the results a scanner reports in them, but a tool that walks the whole directory still reads ASH's earlier reports and converted files, so pass each of these paths to the tool's exclude option. They are ASH's output directories inside `target`, relative to it: this run's output directory and an earlier run's `.ash/ash_output`, less those that hold files git tracks, which ASH scans. The list is empty for the converted target. |
 | `ruff check --isolated` | ruff, like many tools, reads its configuration from files in the repository it checks, which would let the repository turn off the rules you selected, so pass the tool's option for ignoring those files. If your plugin takes an option that names a file the tool reads as configuration, use `operator_path` from `automated_security_helper.utils.config_trust`, the check ASH's own scanners use, which accepts the value only when the operator set it and the file is outside the scanned tree. |
-| The module-level list | Optional. The decorator registers the class, and `ash plugin list` shows every registered plugin, listed or not. |
+| The module-level list | Optional. The decorator registers the class, and `ashx plugin list` shows every registered plugin, listed or not. |
 
 ## Declare what the scanner needs under the sandbox
 
@@ -182,11 +182,11 @@ If the read paths or environment variables come from the scanner's own options, 
 
 ## Declare whether the scanner is Python-only
 
-`ash scan --python-only` runs only the scanners that need nothing but Python, and records every other scanner SKIPPED without looking for its tool. A scanner says which it is with the `python_only` class variable. `True` puts it in a `--python-only` run, `False` keeps it out, and a scanner that declares nothing (`None`) counts as Python-only only when it runs its tool through uv (`use_uv_tool`). `ruff-security` runs the `ruff` program from `PATH` and declares nothing, so a `--python-only` run leaves it out. With no other scanner selected, that scan would run no scanner and report itself clean, so ASH refuses it with exit code 5 and names the scanner it left out:
+`ashx scan --python-only` runs only the scanners that need nothing but Python, and records every other scanner SKIPPED without looking for its tool. A scanner says which it is with the `python_only` class variable. `True` puts it in a `--python-only` run, `False` keeps it out, and a scanner that declares nothing (`None`) counts as Python-only only when it runs its tool through uv (`use_uv_tool`). `ruff-security` runs the `ruff` program from `PATH` and declares nothing, so a `--python-only` run leaves it out. With no other scanner selected, that scan would run no scanner and report itself clean, so ASH refuses it with exit code 5 and names the scanner it left out:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security --python-only
+ashx scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security --python-only
 ```
 
 A scanner that does its work in ASH's own process, such as the one in [A scanner with no external tool](#a-scanner-with-no-external-tool), declares `True` in its class body; one that runs a binary, Node.js, or anything else that is not a Python package declares `False`:
@@ -224,7 +224,7 @@ ASH constructs a plugin with keyword arguments, `context` and `config`, so a uni
 
 Each scan logs to its own `ash.log`. ASH knows which scan a line belongs to from the context the line is logged in, and ASH's own scanner threads carry that context. A thread your plugin starts with `threading.Thread`, or a task it submits to a `ThreadPoolExecutor`, starts in an empty context, so its lines belong to no scan. A CLI scan's `ash.log` still takes them, because that scan is the process's only one. The MCP server runs several sessions' scans in one process, so it puts such lines in no scan's `ash.log`, only in the server's own log (stderr, at the level the server was started with — its own log-level option, `INFO` when not given; `quiet` and `simple` name no logging level, so with either it is `ASH_LOG_LEVEL`, or `WARNING` when that is unset — when the server has no handler of its own on that logger). So start every thread your plugin makes with `ash_thread`: when the MCP server runs your plugin, a line from a thread without the scan's context never reaches the scan's `ash.log`.
 
-Under `ash scan`, a line no handler takes reaches stderr at the scan's console level: its flags first, then `ASH_DEBUG` or `ASH_VERBOSE`, then `INFO`, and `ERROR` for `--quiet` and `--simple` unless `--verbose` or `--debug` is also given. `--log-level INFO` reads as the default, so it does not override `ASH_DEBUG` or `ASH_VERBOSE`; every other `--log-level` does. `ASH_LOG_LEVEL` does not change it there; under the MCP server it is the fallback for `quiet` and `simple`.
+Under `ashx scan`, a line no handler takes reaches stderr at the scan's console level: its flags first, then `ASH_DEBUG` or `ASH_VERBOSE`, then `INFO`, and `ERROR` for `--quiet` and `--simple` unless `--verbose` or `--debug` is also given. `--log-level INFO` reads as the default, so it does not override `ASH_DEBUG` or `ASH_VERBOSE`; every other `--log-level` does. `ASH_LOG_LEVEL` does not change it there; under the MCP server it is the fallback for `quiet` and `simple`.
 
 Start the thread with `ash_thread`, which runs the target in a copy of the scan's context, and submit to an executor through a copy the same way:
 

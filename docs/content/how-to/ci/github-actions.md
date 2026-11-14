@@ -87,11 +87,11 @@ affect.
 | `config` | empty | Path to an ASH config file, passed as `--config` and as `ASH_CONFIG`. When empty, ASH finds the config in the checkout. |
 | `config-ref` | empty | Commit, branch, or tag of the scanned repository to read the `config` file from, instead of the checkout. Needs `config`. The workflow writes the file under `$RUNNER_TEMP` and passes it as `--config`, and the tool config files it names by a relative path (`config_file`, and opengrep's and semgrep's `config`) come from the same commit. ASH treats it as the operator's config only while `$RUNNER_TEMP` is outside every git checkout and outside the scanned directory, as it is on GitHub-hosted runners; on a self-hosted runner, keep `$RUNNER_TEMP` outside them. A config that `extends` another file fails, and so does one at that commit that is missing, unless `config-ref-missing` is `defaults`. A value that starts with `-` or holds a space fails the job before git reads it. |
 | `config-ref-missing` | `refuse` | What `config-ref` does when that commit has no `config` file: `refuse` fails the job, and `defaults` scans with ASH's default config and logs a warning, for the pull request that adds a repository's first config. |
-| `skip-unknown-tools` | `false` | With `config-ref`, lets `ash dependencies install` name and skip a requested tool that the installed ASH has no plugin for, instead of failing the install. |
+| `skip-unknown-tools` | `false` | With `config-ref`, lets `ashx dependencies install` name and skip a requested tool that the installed ASH has no plugin for, instead of failing the install. |
 | `output-dir` | `.ash/ash_output` | Output directory. The reporting job downloads the scan's artifact into the same path. |
 | `fail-on-findings` | `true` | Passes `--fail-on-findings` or `--no-fail-on-findings`. Either one overrides `fail_on_findings` in the repository's config. |
 | `verbose` | `true` | Passes `--verbose`. |
-| `ash-args` | empty | More `ash scan` options, on one line; a value of more than one line fails the job (see [How the workflow checks its inputs](#input-checks)). They are split on spaces with no quoting or glob expansion, and passed last, so they override the workflow's own `--mode`, `--config`, `--base-ref`, and fail-on-findings choice. |
+| `ash-args` | empty | More `ashx scan` options, on one line; a value of more than one line fails the job (see [How the workflow checks its inputs](#input-checks)). They are split on spaces with no quoting or glob expansion, and passed last, so they override the workflow's own `--mode`, `--config`, `--base-ref`, and fail-on-findings choice. |
 | `collect-sarif-report` | `true` | Upload `ash.ghas.sarif` to code scanning from the reporting job. It works on pull requests from branches of the same repository only, and is skipped on `merge_group`; for other events set it to `false` and call `upload-ash-sarif.yml`, as in [Upload SARIF](#sarif). |
 | `collect-junit-xml-report` | `true` | Publish `ash.junit.xml` as the check run **ASH Scan JUnit Test Report** from the reporting job. Every actionable finding is a failed test, so the check is red when there are findings. This step does not fail the job. |
 | `post-pr-comment` | `true` | Post `ash.summary.md` as a pull request comment, and update that comment on later runs. |
@@ -116,11 +116,11 @@ reads the artifact, such as one calling `upload-ash-sarif.yml`, only when it is 
 The workflow at v3.7.0 and v3.7.1 has fewer inputs: no `config-ref`, `config-ref-missing`,
 or `skip-unknown-tools`, and of the `install-*` inputs only `install-grype`,
 `install-syft`, and `install-opengrep`, which default to `false` there. The `install-*`
-steps other than cfn-nag's run `ash dependencies install --tool`, which ASH 3.7.1 and
+steps other than cfn-nag's run `ashx dependencies install --tool`, which ASH 3.7.1 and
 earlier do not have, so with `ash-version` set to one of those releases, set those inputs
 to `false`.
 
-The binary tools come from `ash dependencies install`, which downloads the versions that
+The binary tools come from `ashx dependencies install`, which downloads the versions that
 the installed ASH pins and checks each download against its pinned SHA256 before
 installing it. bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH installs
 them from PyPI with `uv tool install` during the scan. detect-secrets is part of ASH, and
@@ -388,7 +388,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          ash dependencies install \
+          ashx dependencies install \
             --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
             --tool grype --tool opengrep --tool syft --tool trivy \
             2>&1 || status=$?
@@ -403,7 +403,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          ash scan --mode local --no-progress \
+          ashx scan --mode local --no-progress \
             --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
             2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
@@ -435,11 +435,11 @@ Notes on the steps:
   finds inside the directory it scans, so an ASH installed into a virtual environment in the
   repository loses the scanners that need `uv`; see
   [Tools inside the scanned directory](../../docs/advanced-usage.md#tools-inside-the-scanned-directory).
-- Run `ash dependencies install` outside the checkout too, as `working-directory` does
+- Run `ashx dependencies install` outside the checkout too, as `working-directory` does
   here, so a config in the repository cannot change what it installs.
 - ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor during the scan with the
   `uv` installed with it, or with a `uv` on `PATH`.
-- `ruby/setup-ruby` is there for cfn-nag, which `ash dependencies install` installs with
+- `ruby/setup-ruby` is there for cfn-nag, which `ashx dependencies install` installs with
   `gem` and which builds native extensions.
 - The three gate flags keep a pull request's own config from turning off the gate for
   findings, incomplete scans, and stale content databases. A branch's config can still
@@ -496,7 +496,7 @@ the install and scan steps of the job above:
     fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
-    ash dependencies install \
+    ashx dependencies install \
       --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks \
       --tool grype --tool opengrep --tool syft --tool trivy \
       2>&1 || status=$?
@@ -526,7 +526,7 @@ the install and scan steps of the job above:
     fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
-    ash scan --mode local --no-progress \
+    ashx scan --mode local --no-progress \
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
       2>&1 || status=$?
     printf '\n::%s::\n' "${token}"
@@ -539,12 +539,12 @@ the install and scan steps of the job above:
     key: ${{ steps.grype-db.outputs.cache-primary-key }}
 ```
 
-Keep `ash dependencies install` after the restore. It checks each binary it finds against
+Keep `ashx dependencies install` after the restore. It checks each binary it finds against
 the pinned SHA256, skips the ones that match, and installs again over any that do not, so a
 restored cache cannot substitute a different tool. Key the tool cache on the ASH version,
 because each version pins its own tool versions. cfn-nag is the exception: it is a Ruby gem,
 not a pinned binary, so it is installed again on every run. Cache `~/.ash/bin` and nothing
-else under `~/.ash`: `ash dependencies install` downloads the cfn-guard rules into
+else under `~/.ash`: `ashx dependencies install` downloads the cfn-guard rules into
 `~/.ash/share/cfn-guard-rules` again on each run, and keeps its install records in
 `~/.ash/install-receipts`.
 
@@ -599,7 +599,7 @@ These two steps replace the checkout and `Run ASH` steps of the job in
     fi
     printf '::stop-commands::%s\n' "${token}"
     status=0
-    ash scan --mode local --no-progress \
+    ashx scan --mode local --no-progress \
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
       "$@" \
       2>&1 || status=$?
@@ -672,7 +672,7 @@ jobs:
           status=0
           {
             export PATH="$(uv tool dir --bin):${PATH}"
-            ash scan --mode nix --no-progress \
+            ashx scan --mode nix --no-progress \
               --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
           } 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"

@@ -387,7 +387,7 @@ def system_ash_problem(path: str = env.SYSTEM_PATH) -> str | None:
     Every runner starts with that PATH after its own directory, so a pipeline that
     skipped its install or broke its PATH line would run such an ash and pass.
     """
-    found = shutil.which("ash", path=path)
+    found = shutil.which("ash", path=path) or shutil.which("ashx", path=path)
     if found is None:
         return None
     return (

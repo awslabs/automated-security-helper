@@ -33,13 +33,13 @@ ash-scan:
     - /opt/ash/bin/pip install --quiet "$INSTALL_SPEC"
     - export PATH="/opt/ash/bin:$PATH"
     - >-
-      (cd "$(mktemp -d)" && ash dependencies install
+      (cd "$(mktemp -d)" && ashx dependencies install
       --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks
       --tool grype --tool opengrep --tool syft --tool trivy)
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ashx scan --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -71,7 +71,7 @@ them all.
 What the `before_script` does:
 
 - Installs Node.js and npm, which cdk-nag and npm-audit need when the repository has files
-  they scan, and Ruby with its headers and libyaml, which `ash dependencies install` needs
+  they scan, and Ruby with its headers and libyaml, which `ashx dependencies install` needs
   to build cfn-nag. Without them, those scanners are SKIPPED in a repository with nothing
   for them to scan, and MISSING in one that has something.
 - Installs ASH into a virtual environment at `/opt/ash`, outside the checkout. ASH does not
@@ -83,11 +83,11 @@ What the `before_script` does:
   cannot change what it installs.
 
 To skip a scanner instead of installing what it needs, drop it from the install list and
-name it in `--exclude-scanners` on `ash scan`, for example
-`ash scan --mode local --no-progress --exclude-scanners cfn-nag`.
+name it in `--exclude-scanners` on `ashx scan`, for example
+`ashx scan --mode local --no-progress --exclude-scanners cfn-nag`.
 
 A merge request pipeline scans the configuration in the branch it scans, so the branch's
-author can change the gate. The three gate flags on `ash scan` keep the branch from turning
+author can change the gate. The three gate flags on `ashx scan` keep the branch from turning
 off the gate for findings, incomplete scans, and stale content databases. The branch's
 config can still raise thresholds, add suppressions, and turn scanners off; to keep those
 yours, pass `--config` with a file outside the checkout. See
@@ -112,7 +112,7 @@ report:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --mode local --no-progress --offline --scanners detect-secrets \
+ashx scan --mode local --no-progress --offline --scanners detect-secrets \
   --output-formats gitlab-sast,junitxml
 ```
 
@@ -140,7 +140,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ashx scan --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -194,7 +194,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ashx scan --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       --changed-files-only --base-ref "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
       || ash_exit=$?
@@ -219,7 +219,7 @@ git switch -q -c add-version
 echo 'VERSION = "1.0"' > version.py
 git add version.py
 git commit -q -m "Add version.py"
-ash scan --mode local --no-progress --offline --scanners detect-secrets \
+ashx scan --mode local --no-progress --offline --scanners detect-secrets \
   --changed-files-only --base-ref main
 ```
 
@@ -253,13 +253,13 @@ ash-scan-uvx:
     - pip install --quiet uv
     - ash() { uvx --python 3.12 --from "$INSTALL_SPEC" ash "$@"; }
     - >-
-      (cd "$(mktemp -d)" && ash dependencies install
+      (cd "$(mktemp -d)" && ashx dependencies install
       --tool actionlint --tool cfn-guard --tool cfn-nag --tool gitleaks
       --tool grype --tool opengrep --tool syft --tool trivy)
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ashx scan --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -286,7 +286,7 @@ the pip recipe when you want a plain `ash` executable on `PATH`.
 
 Nix mode (`--mode nix`) runs the scan inside a Nix shell whose scanner tools come from
 ASH's `flake.nix`, so the job needs no `apt-get` packages for the scanners and no
-`ash dependencies install` step. The job image needs Nix on `PATH`, Python 3.10 or later,
+`ashx dependencies install` step. The job image needs Nix on `PATH`, Python 3.10 or later,
 and git; set the CI/CD variable `NIX_IMAGE` to an image that has them. ASH passes
 `nix-command` and `flakes` on each invocation, so you do not have to enable them in
 `nix.conf`. Nix mode does not install ASH, and cdk-nag runs on the Python environment ASH
@@ -309,7 +309,7 @@ ash-scan-nix:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode nix --no-progress
+      ashx scan --mode nix --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt

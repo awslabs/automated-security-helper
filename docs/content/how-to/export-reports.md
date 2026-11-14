@@ -26,7 +26,7 @@ To write fewer files, pass `--output-formats` (or `-f`) with a comma-separated l
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --scanners detect-secrets --output-formats sarif,junitxml
+ashx scan --scanners detect-secrets --output-formats sarif,junitxml
 ```
 
 When detect-secrets finds a secret, the scan exits 2, and `reports/` holds only the two
@@ -69,7 +69,7 @@ cat > .ashrc.yaml <<'EOF'
 output_formats:
   - sarif
 EOF
-ash scan --scanners detect-secrets
+ashx scan --scanners detect-secrets
 ```
 
 ```bash
@@ -97,13 +97,13 @@ On the command line, the same settings are
 `--config-overrides reporters.spdx.enabled=true --config-overrides reporters.html.enabled=false`.
 
 To produce one more format after a scan, render it from the saved results with
-`ash report`. It runs any loaded reporter, including reporters that are disabled, apart from
+`ashx report`. It runs any loaded reporter, including reporters that are disabled, apart from
 the AWS reporters, which run only when `--config-overrides` turns them on
 ([Rendering a reporter from saved results](../plugins/aws.md#ash-report)), and it prints the
 report alone to standard output:
 
 ```bash
-ash report --format gitlab-sast > gl-sast-report.json
+ashx report --format gitlab-sast > gl-sast-report.json
 ```
 
 ## GitHub code scanning {#github}

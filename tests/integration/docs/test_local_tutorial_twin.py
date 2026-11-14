@@ -14,7 +14,7 @@ but bandit. bandit is the scanner the page's findings come from.
 
 Each scan must exit with the code the page prints below it (``exit code: N``), and
 print the page's ``Exiting due to N actionable findings`` line where it shows one.
-``ash report`` in step 6 must exit 0 and name the rule the page suppresses next.
+``ashx report`` in step 6 must exit 0 and name the rule the page suppresses next.
 
 bandit has to be where a docs session finds tools (docs_runner.session_path): the
 interpreter's bin directory, a directory ASH installs tools into for the invoking user
@@ -147,7 +147,7 @@ def _twin(page) -> tuple[str, list[tuple[str, str]]]:
     name, source = _heredoc_file(project.body)
     config = next(b for b in steps[7] if b.lang in ("yaml", "yml"))
     fix = next(b for b in steps[9] if b.lang == "python")
-    report = next(b for b in steps[6] if b.body.strip() == "ash report")
+    report = next(b for b in steps[6] if b.body.strip() == "ashx report")
     report_sample = next(b.body for b in steps[6] if b.lang == "text")
     rule = re.search(r"Rule ID: (\S+)", report_sample)
     assert rule, "step 6's sample names no rule"

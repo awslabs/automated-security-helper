@@ -4,7 +4,7 @@ cfn-lint and cfn-guard are two builtin CloudFormation scanners. Both read the sa
 
 ## Enabling it
 
-cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--scanners` and `--exclude-scanners` select them as they select any scanner. If cfn-guard is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner. cfn-lint is installed on first use when ASH is online, and is `MISSING` only when that install fails and none is on `PATH`. `ash dependencies install` and the container image provide both.
+cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--scanners` and `--exclude-scanners` select them as they select any scanner. If cfn-guard is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner. cfn-lint is installed on first use when ASH is online, and is `MISSING` only when that install fails and none is on `PATH`. `ashx dependencies install` and the container image provide both.
 
 `--python-only` runs cfn-lint, a Python package ASH runs through uv, and does not run cfn-guard, a native binary.
 
@@ -18,7 +18,7 @@ cfn-lint is a Python package (MIT-0). ASH installs it with `uv tool install 'cfn
 
 <!-- doctest: illustrative reason="installs cfn-lint from PyPI" -->
 ```bash
-ash dependencies install --tool cfn-lint
+ashx dependencies install --tool cfn-lint
 ```
 
 The `sarif` extra is required; it provides the SARIF output format ASH reads. An existing cfn-lint on `PATH` is used when it satisfies that requirement; without uv, any cfn-lint on `PATH` is used as it is. The ASH container image ships cfn-lint, and the Nix flake supplies nixpkgs' cfn-lint with the `sarif` extra.
@@ -132,7 +132,7 @@ cfn-lint is MIT-0 (MIT No Attribution). It is installed as a separate tool and i
 
 <!-- doctest: illustrative reason="downloads cfn-guard and its rules bundle" -->
 ```bash
-ash dependencies install --tool cfn-guard
+ashx dependencies install --tool cfn-guard
 ```
 
 installs two pinned artifacts, each verified against a SHA256 recorded in ASH's source (`automated_security_helper/utils/tool_downloads.py`):
@@ -142,7 +142,7 @@ installs two pinned artifacts, each verified against a SHA256 recorded in ASH's 
 
 A download whose bytes do not match the pinned digest is refused. The ASH container image ships both, installed read-only for the scan user: the rules are in `/usr/share/ash/cfn-guard-rules`, which the image checks at build time is owned by root, as is every directory above it. nixpkgs has no cfn-guard package, so the nix flake packages the same pinned release binary (`nix/cfn-guard.nix`), and the nix shell installs the rules bundle into `ASH_CFN_GUARD_RULES_DIR` on first entry, and again on any entry where the bundle there is not the pinned one: after an ASH upgrade that changes the pin, or when the rule files there no longer match the pinned contents.
 
-`ash dependencies install` keeps a bundle that is already in place only when its rule files match the pinned contents; otherwise it downloads and installs the pinned archive again. Without network access that download fails, and the install stops with a message that names the directory, says its rules do not match the pinned contents, and says that network access, or the ASH container image, is needed. The rules already there are left as they were.
+`ashx dependencies install` keeps a bundle that is already in place only when its rule files match the pinned contents; otherwise it downloads and installs the pinned archive again. Without network access that download fails, and the install stops with a message that names the directory, says its rules do not match the pinned contents, and says that network access, or the ASH container image, is needed. The rules already there are left as they were.
 
 Before every scan ASH checks the installed rule files against the pinned contents in the same way. A rule file that was edited, removed, renamed or added, or is not a regular file, makes the scanner MISSING with the reinstall command rather than scanning with it. Files in that directory without the `.guard` suffix are not part of the bundle and are not read.
 
@@ -235,4 +235,4 @@ One template at a time because one unparseable data file makes cfn-guard exit 25
 
 ### Licenses
 
-cfn-guard and the AWS Guard Rules Registry are both Apache-2.0. Neither is bundled into ASH's Python package; both are downloaded by `ash dependencies install` or shipped in the container image as separate artifacts.
+cfn-guard and the AWS Guard Rules Registry are both Apache-2.0. Neither is bundled into ASH's Python package; both are downloaded by `ashx dependencies install` or shipped in the container image as separate artifacts.

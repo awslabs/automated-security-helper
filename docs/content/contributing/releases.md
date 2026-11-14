@@ -19,7 +19,7 @@ The version is `version` in the `[tool.commitizen]` table of `pyproject.toml`.
 uv run cz version --project
 ```
 
-An installed ASH reports the version in its package metadata with `ash --version`.
+An installed ASH reports the version in its package metadata with `ashx --version`.
 
 Other files pin an ASH tag that users install from: the Homebrew formula, the sources
 of the agent plugins, the install commands in the README and in these docs, the ASH
@@ -125,7 +125,7 @@ A maintainer runs **Actions > ASH - Create Release > Run workflow**. The workflo
    commits all of it as `bump: version <old> → <new>`;
 3. renders the version-pinned pages from their templates and regenerates the JSON
    schemas;
-4. smoke-tests the result (`ash --help`, `ash config validate`, and one unit test file);
+4. smoke-tests the result (`ashx --help`, `ashx config validate`, and one unit test file);
 5. commits the rest as `chore(release): <old> -> <new>` on the branch `release/v<new>`,
    pushes it, and opens a pull request with that title.
 
@@ -235,7 +235,7 @@ placeholders:
 - `{{VERSION}}` is the ref an install command uses, written after a `v` where the command
   names a tag: `@v{{VERSION}}`, `rev: v{{VERSION}}`.
 - `{{RELEASE}}` is the current release number, for text that needs the number itself:
-  what `ash --version` prints, the release that this repository's generated files pin, a
+  what `ashx --version` prints, the release that this repository's generated files pin, a
   release named in a table.
 
 Both render as the release version at a release, so the committed page shows the same
