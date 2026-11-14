@@ -51,6 +51,9 @@ from ash_operator.constants import (
     LABEL_SCAN_NAME,
     LABEL_SCAN_UID,
     OUTPUT_MOUNT,
+    PRIVATE_TMP_INIT_NAME,
+    PRIVATE_TMP_MOUNT,
+    PRIVATE_TMP_VOLUME,
     RESULTS_MOUNT,
     ROLE_COLLECT,
     ROLE_MCP,
@@ -198,6 +201,60 @@ def _hardened_security_context() -> dict[str, Any]:
     }
 
 
+def private_tmp_volume() -> dict[str, Any]:
+    return {"name": PRIVATE_TMP_VOLUME, "emptyDir": {}}
+
+
+def private_tmp_mount() -> dict[str, Any]:
+    return {"name": PRIVATE_TMP_VOLUME, "mountPath": PRIVATE_TMP_MOUNT}
+
+
+def private_tmp_env() -> dict[str, Any]:
+    return {"name": "TMPDIR", "value": PRIVATE_TMP_MOUNT}
+
+
+def private_tmp_init_container(
+    *, image: str, image_pull_policy: str, uid: int, gid: int
+) -> dict[str, Any]:
+    """The init container that makes TMPDIR a directory ASH accepts.
+
+    ASH writes config files for some scanners' tools (bandit among them) and refuses
+    a directory, or a parent of one, that other accounts can write without the sticky
+    bit. The kubelet gives every emptyDir root mode 0777 and the pod's uid does not own
+    it, so no emptyDir under a non-root uid can pass, and the scan came back with the
+    scanner ERROR "No private directory for the config files". This container runs as
+    root for one ``chown`` and one ``chmod``, with every capability dropped but CHOWN,
+    and exits; the scanner container stays non-root and never holds the capability.
+    The product's check is not loosened: it is what made the pod's directory private.
+    """
+    return {
+        "name": PRIVATE_TMP_INIT_NAME,
+        "image": image,
+        "imagePullPolicy": image_pull_policy,
+        "command": [
+            "/bin/sh",
+            "-c",
+            'chown "$0:$1" "$2" && chmod 0700 "$2"',
+            str(uid),
+            str(gid),
+            PRIVATE_TMP_MOUNT,
+        ],
+        "volumeMounts": [private_tmp_mount()],
+        "resources": {
+            "requests": {"cpu": "10m", "memory": "16Mi"},
+            "limits": {"cpu": "100m", "memory": "64Mi"},
+        },
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "privileged": False,
+            "runAsNonRoot": False,
+            "runAsUser": 0,
+            "capabilities": {"drop": ["ALL"], "add": ["CHOWN"]},
+            "seccompProfile": {"type": "RuntimeDefault"},
+        },
+    }
+
+
 def _volumes(
     *,
     configmap_name: str,
@@ -306,6 +363,7 @@ def build_shard_job(
         {"name": "ASH_SOURCE_MOUNT", "value": SOURCE_MOUNT},
         {"name": "ASH_OUTPUT_MOUNT", "value": OUTPUT_MOUNT},
         {"name": "ASH_RESULTS_PREFIX", "value": results_prefix},
+        private_tmp_env(),
     ]
     if has_config:
         env.append({"name": "ASH_CONFIG", "value": CONFIG_PATH})
@@ -348,11 +406,22 @@ def build_shard_job(
                         "fsGroup": int(spec.get("fsGroup") or 1000),
                         "seccompProfile": {"type": "RuntimeDefault"},
                     },
-                    "volumes": _volumes(
-                        configmap_name=configmap_name,
-                        source=spec["source"],
-                        results_claim_name=results_claim_name,
-                    ),
+                    "volumes": [
+                        *_volumes(
+                            configmap_name=configmap_name,
+                            source=spec["source"],
+                            results_claim_name=results_claim_name,
+                        ),
+                        private_tmp_volume(),
+                    ],
+                    "initContainers": [
+                        private_tmp_init_container(
+                            image=spec["image"],
+                            image_pull_policy=spec.get("imagePullPolicy", "IfNotPresent"),
+                            uid=int(spec.get("runAsUser") or 1000),
+                            gid=int(spec.get("fsGroup") or 1000),
+                        )
+                    ],
                     "containers": [
                         {
                             "name": "ash-shard",
@@ -361,7 +430,7 @@ def build_shard_job(
                             "command": ["/bin/sh", f"{CONFIG_MOUNT}/{SHARD_ENTRYPOINT_FILENAME}"],
                             "args": scan_argv,
                             "env": env,
-                            "volumeMounts": _mounts(),
+                            "volumeMounts": [*_mounts(), private_tmp_mount()],
                             "resources": copy.deepcopy(
                                 spec.get("resources") or DEFAULT_SHARD_RESOURCES
                             ),
@@ -422,6 +491,7 @@ def build_collect_job(
     env = [
         {"name": "ASH_CONFIG_MOUNT", "value": CONFIG_MOUNT},
         {"name": "ASH_PYLIB_DIR", "value": f"{TMP_MOUNT}/ash-operator-pylib"},
+        private_tmp_env(),
     ]
     if has_config:
         env.append({"name": "ASH_CONFIG", "value": CONFIG_PATH})
@@ -460,11 +530,22 @@ def build_collect_job(
                         "fsGroup": int(spec.get("fsGroup") or 1000),
                         "seccompProfile": {"type": "RuntimeDefault"},
                     },
-                    "volumes": _volumes(
-                        configmap_name=configmap_name,
-                        source=spec["source"],
-                        results_claim_name=results_claim_name,
-                    ),
+                    "volumes": [
+                        *_volumes(
+                            configmap_name=configmap_name,
+                            source=spec["source"],
+                            results_claim_name=results_claim_name,
+                        ),
+                        private_tmp_volume(),
+                    ],
+                    "initContainers": [
+                        private_tmp_init_container(
+                            image=spec["image"],
+                            image_pull_policy=spec.get("imagePullPolicy", "IfNotPresent"),
+                            uid=int(spec.get("runAsUser") or 1000),
+                            gid=int(spec.get("fsGroup") or 1000),
+                        )
+                    ],
                     "containers": [
                         {
                             "name": "ash-collect",
@@ -476,7 +557,7 @@ def build_collect_job(
                             ],
                             "args": args,
                             "env": env,
-                            "volumeMounts": _mounts(),
+                            "volumeMounts": [*_mounts(), private_tmp_mount()],
                             "resources": copy.deepcopy(
                                 spec.get("collectResources")
                                 or spec.get("resources")
@@ -590,7 +671,7 @@ def build_mcp_deployment(
         auth_value_from_environment=bool(auth_header_name),
     )
 
-    env: list[dict[str, Any]] = []
+    env: list[dict[str, Any]] = [private_tmp_env()]
     if has_config:
         env.append({"name": "ASH_CONFIG", "value": CONFIG_PATH})
     if auth_header_name:
@@ -613,8 +694,12 @@ def build_mcp_deployment(
         env.append({"name": "ASH_MCP_AUTH_REQUIRED", "value": "1"})
 
     labels = {LABEL_MCP_NAME: meta["name"], LABEL_ROLE: ROLE_MCP}
-    volumes: list[dict[str, Any]] = [{"name": "ash-tmp", "emptyDir": {}}]
-    mounts: list[dict[str, Any]] = [{"name": "ash-tmp", "mountPath": TMP_MOUNT}]
+    volumes: list[dict[str, Any]] = [{"name": "ash-tmp", "emptyDir": {}}, private_tmp_volume()]
+    mounts: list[dict[str, Any]] = [
+        {"name": "ash-tmp", "mountPath": TMP_MOUNT},
+        private_tmp_mount(),
+    ]
+    mcp_uid = int(spec.get("runAsUser") or 1000)
     if has_config:
         volumes.append(
             {
@@ -667,6 +752,14 @@ def build_mcp_deployment(
                         "seccompProfile": {"type": "RuntimeDefault"},
                     },
                     "volumes": volumes,
+                    "initContainers": [
+                        private_tmp_init_container(
+                            image=spec["image"],
+                            image_pull_policy=spec.get("imagePullPolicy", "IfNotPresent"),
+                            uid=mcp_uid,
+                            gid=mcp_uid,
+                        )
+                    ],
                     "containers": [
                         {
                             "name": "ash-mcp",

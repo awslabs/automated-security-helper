@@ -14,6 +14,8 @@ from ash_operator.constants import (
     CONFIG_PATH,
     JOB_COMPLETION_INDEX_LABEL,
     OUTPUT_MOUNT,
+    PRIVATE_TMP_INIT_NAME,
+    PRIVATE_TMP_MOUNT,
     SOURCE_MOUNT,
 )
 from ash_operator.contract import build_scan_argv
@@ -650,3 +652,62 @@ class TestDefaultResources:
             for section in default.values():
                 for quantity in section.values():
                     assert quantity in props[key]["description"], (key, quantity)
+
+
+class TestPrivateScratch:
+    """ASH refuses a config-file directory that other accounts could change.
+
+    The kubelet makes an emptyDir root mode 0777 and not owned by the pod's uid, and
+    /tmp and the output mount are two of them, so bandit (the one scanner ASH writes a
+    tool config for) came back ERROR with "No private directory for the config files"
+    and the scan was Incomplete. Each pod gets a scratch directory an init container
+    makes private, and TMPDIR names it. ASH's check is not loosened.
+    """
+
+    @staticmethod
+    def pod(job):
+        return job["spec"]["template"]["spec"]
+
+    @pytest.mark.parametrize(
+        "build", [shard_job, collect_job, mcp_deployment], ids=["shard", "collect", "mcp"]
+    )
+    def test_tmpdir_names_the_private_mount_the_container_has(self, build):
+        pod = self.pod(build())
+        container = pod["containers"][0]
+        env = {e["name"]: e.get("value") for e in container["env"]}
+        assert env.get("TMPDIR") == PRIVATE_TMP_MOUNT
+        mounts = {m["mountPath"]: m["name"] for m in container["volumeMounts"]}
+        assert PRIVATE_TMP_MOUNT in mounts
+        assert mounts[PRIVATE_TMP_MOUNT] in {v["name"] for v in pod["volumes"]}
+
+    @pytest.mark.parametrize(
+        "build", [shard_job, collect_job, mcp_deployment], ids=["shard", "collect", "mcp"]
+    )
+    def test_an_init_container_makes_it_private_to_the_pods_uid(self, build):
+        pod = self.pod(build())
+        init = next(c for c in pod["initContainers"] if c["name"] == PRIVATE_TMP_INIT_NAME)
+        script = " ".join(init["command"])
+        assert "chown" in script and "chmod 0700" in script
+        assert PRIVATE_TMP_MOUNT in init["command"]
+        assert [m["mountPath"] for m in init["volumeMounts"]] == [PRIVATE_TMP_MOUNT]
+        assert init["securityContext"]["capabilities"] == {"drop": ["ALL"], "add": ["CHOWN"]}
+        assert init["securityContext"]["allowPrivilegeEscalation"] is False
+
+    def test_the_directory_is_given_to_the_uid_and_group_the_pod_runs_as(self):
+        pod = self.pod(shard_job({"runAsUser": 2000, "fsGroup": 3000}))
+        init = pod["initContainers"][0]
+        assert init["command"][-3:] == ["2000", "3000", PRIVATE_TMP_MOUNT]
+
+    @pytest.mark.parametrize("build", [shard_job, collect_job], ids=["shard", "collect"])
+    def test_the_scanner_container_itself_stays_non_root_and_unprivileged(self, build):
+        container = self.pod(build())["containers"][0]
+        assert container["securityContext"]["runAsNonRoot"] is True
+        assert "add" not in container["securityContext"]["capabilities"]
+
+    def test_the_mcp_capability_probe_keeps_the_scratch_init_container(self):
+        from ash_operator.mcp_controller import _attach_capability_probe
+
+        deployment = mcp_deployment()
+        _attach_capability_probe(deployment, {})
+        names = [c["name"] for c in deployment["spec"]["template"]["spec"]["initContainers"]]
+        assert names == [PRIVATE_TMP_INIT_NAME, "ash-mcp-capability-probe"]
