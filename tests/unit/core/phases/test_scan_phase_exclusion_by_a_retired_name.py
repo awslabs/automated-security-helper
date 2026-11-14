@@ -146,11 +146,15 @@ def _plugin(class_name: str, config_name: str):
 def _phase(tmp_path, plugins):
     for sub in ("src", "out", "work"):
         (tmp_path / sub).mkdir(exist_ok=True)
+    config = get_default_config()
+    # opengrep is off by default on Windows, where a constructor failure would be
+    # a SKIPPED row; the rows under test are the ones of an enabled scanner.
+    config.scanners.opengrep.enabled = True
     context = PluginContext(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",
         work_dir=tmp_path / "work",
-        config=get_default_config(),
+        config=config,
     )
     aggregated = AshAggregatedResults()
     phase = ScanPhase(

@@ -1829,9 +1829,21 @@ class TestGlobDenialsNameKnownPlugins:
             check=True,
         )
         resolved = json_module.loads(result.stdout.strip().splitlines()[-1])
-        assert resolved == {
+        # A retired scanner name the config still accepts (SCANNER_NAME_ALIASES) is a
+        # spelling a patch can use, so a glob denial has to cover it although no
+        # plugin registers under it: the table holds it beside the plugins.
+        from automated_security_helper.utils.scanner_names import (
+            SCANNER_NAME_ALIASES,
+        )
+
+        expected = {
             section: sorted(keys) for section, keys in _SHIPPED_PLUGIN_KEYS.items()
         }
+        expected["scanners"] = sorted(
+            set(expected["scanners"]) - set(SCANNER_NAME_ALIASES)
+        )
+        assert resolved == expected
+        assert set(SCANNER_NAME_ALIASES) <= set(_SHIPPED_PLUGIN_KEYS["scanners"])
 
     @pytest.mark.integration
     def test_building_the_keys_imports_no_plugin_module(self, tmp_path) -> None:
