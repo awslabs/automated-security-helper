@@ -57,6 +57,13 @@ MCPB_BUNDLE_DEFECTS: Dict[str, Dict[str, str]] = {
         "version": "1.0.0",
         "from": "--from=" + _REPO_GIT + "@v3.4.0",
     },
+    # v3.8.0's bundle launches the right release (`--from=...@v3.8.0 ash mcp`) but still
+    # reports version 1.0.0, so a host that keys an upgrade on the bundle version cannot
+    # tell it from any other 1.0.0 bundle. Read from the tag's committed ash.mcpb.
+    "v3.8.0": {
+        "version": "1.0.0",
+        "from": "--from=" + _REPO_GIT + "@v3.8.0",
+    },
 }
 
 

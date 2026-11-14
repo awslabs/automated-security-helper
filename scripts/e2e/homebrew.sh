@@ -38,8 +38,8 @@
 #             scan with it, point the tap at N, `brew upgrade`, require N linked and the
 #             N-1 keg still present until `brew cleanup` removes it, scan again,
 #             uninstall.
-#   negative  install N from a copy missing the detect-secrets resource. Homebrew installs
-#             with --no-deps, so the install and `ashx --version` still succeed; the
+#   negative  install N from a copy whose `uv sync` leaves out detect-secrets
+#             (--no-install-package), so the install and `ashx --version` still succeed; the
 #             findings case and `brew test` must both fail, and for that reason.
 set -euo pipefail
 
@@ -351,10 +351,10 @@ PY
 
 leg_negative() {
   local broken="$WORK/formula-broken/ash.rb"
-  render "$REPO/Formula/ash.rb" "$HEAD_TARBALL" "$VERSION" "$broken" --drop-resource "$DROPPED_RESOURCE"
+  render "$REPO/Formula/ash.rb" "$HEAD_TARBALL" "$VERSION" "$broken" --omit-package "$DROPPED_RESOURCE"
   use_formula "$broken" "$REPO/Formula/ash.rb"
 
-  say "a formula missing the $DROPPED_RESOURCE resource still installs, because pip runs with --no-deps"
+  say "a formula whose uv sync leaves out $DROPPED_RESOURCE still installs: the package is imported lazily"
   brew install --verbose --build-from-source --formula "$FORMULA"
   local cli="$BREW_BIN/$ASH_CLI_NAME"
   [ -x "$cli" ] || fail "the broken formula linked no $ASH_CLI_NAME, so this control shows nothing about scans"
@@ -381,7 +381,7 @@ leg_negative() {
   say "   OK: brew test failed on its scan, $DROPPED_RESOURCE MISSING (exit $rc)"
 
   uninstall_and_check
-  say "Homebrew negative leg passed: a missing resource fails the scan and brew test"
+  say "Homebrew negative leg passed: a package left out of the install fails the scan and brew test"
 }
 
 "leg_$LEG"

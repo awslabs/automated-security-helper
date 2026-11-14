@@ -652,6 +652,20 @@ def test_only_the_recorded_manifest_of_the_recorded_release_is_exempt(
     assert mi.release_defects.mcpb_bundle_exemption(release, manifest) is None
 
 
+def test_the_shipped_v3_8_0_bundle_is_exempt_and_the_upgrade_passes():
+    shipped = _shipped(source="--from=" + _REPO_GIT + "@v3.8.0")
+    reason = mi.release_defects.mcpb_bundle_exemption("v3.8.0", shipped)
+    assert reason and "1.0.0" in reason and "v3.8.0" in reason
+    unexempt = mi.bundle_upgrade_problems(shipped, _v4_head(), "3.8.0", "4.0.0")
+    assert any("the N-1 bundle's version is '1.0.0'" in p for p in unexempt), unexempt
+    assert (
+        mi.bundle_upgrade_problems(shipped, _v4_head(), "3.8.0", "4.0.0", reason) == []
+    )
+    # Only that manifest: a v3.8.0 bundle launching another release is not covered.
+    other = _shipped(source="--from=" + _REPO_GIT + "@v3.4.0")
+    assert mi.release_defects.mcpb_bundle_exemption("v3.8.0", other) is None
+
+
 def test_the_exemption_never_covers_the_head_bundle():
     reason = mi.release_defects.mcpb_bundle_exemption("v3.7.1", _shipped())
     # A head bundle whose version is not its release still fails, exemption or not.

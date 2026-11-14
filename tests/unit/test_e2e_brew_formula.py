@@ -101,6 +101,22 @@ class TestRenderAgainstTheRealFormula:
         non_blank = [line for line in removed if line.strip()]
         assert len(non_blank) == 1 + 4
 
+    def test_omit_package_changes_only_the_uv_sync_command(self) -> None:
+        # The negative control of the uv-sync formula: the package is left out of the
+        # install and nothing else differs from the plain head copy.
+        formula = FORMULA.read_text(encoding="utf-8")
+        plain = brew_formula.render(formula, TARBALL, "3.7.0", SHA)
+        rendered = brew_formula.render(
+            formula, TARBALL, "3.7.0", SHA, omit=["detect-secrets"]
+        )
+        removed, added = _changed_lines(plain, rendered)
+        assert removed == []
+        assert [line.strip() for line in added] == [
+            '"--no-install-package", "detect-secrets",'
+        ]
+        assert '"--no-install-package", "detect-secrets"' in rendered
+        assert "--no-install-package" not in plain
+
     def test_the_release_formula_test_block_runs_ashx_and_checks_the_ash_alias(
         self,
     ) -> None:
@@ -129,6 +145,10 @@ class TestRenderRefusesTheWrongShape:
         text = '  resource "x" do\n    url "https://example.invalid/x.git", tag: "v1"\n  end\n'
         with pytest.raises(brew_formula.FormulaShapeError, match="found 0"):
             brew_formula.render(text, TARBALL, "3.7.0", SHA)
+
+    def test_omit_package_needs_the_uv_sync_line(self) -> None:
+        with pytest.raises(brew_formula.FormulaShapeError, match="found 0"):
+            brew_formula.omit_package('  url "x"\n', "detect-secrets")
 
     def test_missing_resource(self) -> None:
         formula = FORMULA.read_text(encoding="utf-8")

@@ -268,7 +268,12 @@ PREV_WHEEL="$WORK/dist-prev/automated_security_helper-${PREV_VERSION}-py3-none-a
 [ -f "$HEAD_WHEEL" ] || fail "uv build did not write $HEAD_WHEEL"
 [ -f "$PREV_WHEEL" ] || fail "uv build did not write $PREV_WHEEL"
 uv venv --quiet --python "$PYTHON" "$WORK/venv-host"
-uv pip install --quiet --no-cache --python "$WORK/venv-host/bin/python" "$HEAD_WHEEL"
+# Installed from the export directory, not the wheel built above: a LOCAL build finds its
+# Dockerfile and context from the running package (run_ash_container._local_source_tree),
+# and a package installed from a wheel records no source tree, so `build-image
+# --ash-revision-to-install LOCAL` would refuse. A directory install records it. The
+# wheel is still built and checked, and the install builds its own from the same tree.
+uv pip install --quiet --no-cache --python "$WORK/venv-host/bin/python" "$SRC_HEAD"
 CLI="$WORK/venv-host/bin/$ASH_CLI_NAME"
 [ -x "$CLI" ] || fail "the head wheel installed no $ASH_CLI_NAME console script"
 say "host CLI: $("$CLI" --version)"
@@ -374,7 +379,7 @@ say "   OK: rejected (exit $rc)"
 run_case "$PREV_CLI" "$TAG_UPGRADE" findings upgrade-before
 
 say "upgrade the host CLI to N, then rebuild N over $TAG_UPGRADE"
-uv pip install --quiet --no-cache --python "$UPGRADE_VENV/bin/python" "$HEAD_WHEEL"
+uv pip install --quiet --no-cache --python "$UPGRADE_VENV/bin/python" "$SRC_HEAD"
 UPGRADED_CLI="$UPGRADE_VENV/bin/$ASH_CLI_NAME"
 [ -x "$UPGRADED_CLI" ] || fail "the upgrade left no $ASH_CLI_NAME console script"
 case "$("$UPGRADED_CLI" --version)" in

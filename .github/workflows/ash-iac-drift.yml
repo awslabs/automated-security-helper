@@ -2019,7 +2019,9 @@ jobs:
           # fail under 80%, which a six-file subset cannot meet. -rpfEsxX names
           # every pass, failure, error, skip and xfail in the short test summary,
           # which is what the guard reads. Piped through tee under pipefail, so a
-          # pytest failure still fails this step.
+          # pytest failure still fails this step. --run-integration: the guard suites
+          # that start stub executables carry the integration tier marker, which
+          # conftest skips without it, and this job requires that nothing is skipped.
           uv run pytest \
             tests/unit/test_iac_equivalence_gate.py \
             tests/unit/test_quick_create_links.py \
@@ -2028,7 +2030,7 @@ jobs:
             tests/unit/deploy/test_eks_operator_applier.py \
             tests/unit/test_validate_container_detection_gate.py \
             tests/unit/test_assert_pytest_required_nodes.py \
-            --no-cov -rpfEsxX --color=no 2>&1 | tee "$RUNNER_TEMP/planted-defect-suites.log"
+            --run-integration --no-cov -rpfEsxX --color=no 2>&1 | tee "$RUNNER_TEMP/planted-defect-suites.log"
 
       - name: Require the passed-count floor and every named test
         shell: bash
