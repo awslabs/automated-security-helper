@@ -183,6 +183,20 @@ def express_supported() -> bool:
     )
 
 
+def current_uid() -> int:
+    """This process's user id, where the platform has user ids.
+
+    Express mode is posix-only by design (:func:`express_supported` is False
+    elsewhere, so no daemon, socket or ownership check is reached there). The
+    helper exists so the pure naming and file helpers that run before that
+    gate answers -- the socket key, the marker beside a socket -- do not
+    raise ``AttributeError`` on a platform without ``os.getuid``; a platform
+    without user ids reads as uid 0, and nothing is served for it.
+    """
+    getuid = getattr(os, "getuid", None)
+    return getuid() if getuid is not None else 0
+
+
 def _require_supported() -> None:
     if not express_supported():
         raise ExpressUnavailable(
@@ -415,7 +429,7 @@ def socket_key(
     if version is None:
         version = ash_version()
     if uid is None:
-        uid = os.getuid()
+        uid = current_uid()
     if prefix is None:
         prefix = os.path.realpath(sys.prefix)
     if shape is None:
@@ -453,10 +467,10 @@ def _ensure_private_dir(path: Path) -> Path:
             f"express runtime directory {path} is not a directory reached without "
             "following a link; refusing to place a socket there."
         )
-    if info.st_uid != os.getuid():
+    if info.st_uid != current_uid():
         raise ExpressUnavailable(
             f"express runtime directory {path} is owned by uid {info.st_uid}, not "
-            f"this user ({os.getuid()}); refusing to place a socket there."
+            f"this user ({current_uid()}); refusing to place a socket there."
         )
     if stat_module.S_IMODE(info.st_mode) != 0o700:
         try:
@@ -504,7 +518,7 @@ MAX_SOCKET_PATH_BYTES = 103
 
 def socket_path(environ: Optional[Mapping[str, str]] = None) -> Path:
     """The unix socket path for this uid and ASH installation."""
-    path = runtime_dir(environ) / f"ash-{os.getuid()}-{socket_key()}.sock"
+    path = runtime_dir(environ) / f"ash-{current_uid()}-{socket_key()}.sock"
     encoded = len(os.fsencode(os.fspath(path)))
     if encoded > MAX_SOCKET_PATH_BYTES:
         raise ExpressUnavailable(
@@ -521,6 +535,7 @@ def socket_path(environ: Optional[Mapping[str, str]] = None) -> Path:
 #: socket whose name carries the cause and whose mtime is the retirement.
 RETIRE_BACKOFF_SECONDS = 600.0
 _RETIRED_SUFFIX = ".retired-threads"
+_MARKER_CLOCK_SKEW_SECONDS = 5.0
 
 
 def mark_retired_for_threads(path: "os.PathLike[str] | str") -> None:
@@ -555,7 +570,15 @@ def recent_retirement(
         ).st_mtime
     except OSError:
         return None
-    return "threads" if 0 <= age < RETIRE_BACKOFF_SECONDS else None
+    # A file written a moment ago can carry a modification time slightly AHEAD
+    # of time.time(): the filesystem's clock and the process clock differ in
+    # resolution (about 15 ms on Windows). That is a fresh marker, not an
+    # invalid one; only a stamp well in the future (a skewed clock) is ignored.
+    return (
+        "threads"
+        if -_MARKER_CLOCK_SKEW_SECONDS <= age < RETIRE_BACKOFF_SECONDS
+        else None
+    )
 
 
 RETIRED_FOR_THREADS_TEXT = (
@@ -566,7 +589,7 @@ RETIRED_FOR_THREADS_TEXT = (
 
 def log_path(environ: Optional[Mapping[str, str]] = None) -> Path:
     """Where a daemonized express daemon sends its stdout/stderr."""
-    return runtime_dir(environ) / f"ash-{os.getuid()}-{socket_key()}.log"
+    return runtime_dir(environ) / f"ash-{current_uid()}-{socket_key()}.log"
 
 
 def idle_seconds(environ: Optional[Mapping[str, str]] = None) -> int:
@@ -816,6 +839,6 @@ def peer_uid(sock: socket.socket) -> Optional[int]:
 def peer_is_this_user(sock: socket.socket, uid: Optional[int] = None) -> bool:
     """Whether *sock*'s peer runs as this user. Unreadable reads as no."""
     if uid is None:
-        uid = os.getuid()
+        uid = current_uid()
     peer = peer_uid(sock)
     return peer is not None and peer == uid

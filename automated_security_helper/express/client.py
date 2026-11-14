@@ -108,6 +108,10 @@ def is_scan_invocation(argv: list[str]) -> bool:
     return not any(token in NON_SCAN_SUBCOMMANDS for token in argv)
 
 
+#: Exception types that mean a defect in the code, never an unavailable host.
+_PROGRAMMING_ERRORS = (AttributeError, TypeError, NameError, AssertionError)
+
+
 def delegated_exit_code(
     argv: list[str], environ: Optional[Mapping[str, str]] = None
 ) -> Optional[int]:
@@ -127,6 +131,16 @@ def delegated_exit_code(
         # them): end with the interrupt code, never a traceback and never a
         # cold scan the operator just asked to stop.
         return 130
+    except _PROGRAMMING_ERRORS as exc:
+        # The fallback is still the contract (the scan runs cold), but these
+        # types are defects in ASH, not conditions of the host: they are named
+        # as such on every run, --express or not, so a Windows-only
+        # AttributeError cannot hide behind an unexplained cold start.
+        _note(
+            f"ash express: internal error ({type(exc).__name__}: {exc}); "
+            "falling back to a cold run. This is a bug in ASH express mode."
+        )
+        return None
     except Exception as exc:  # noqa: BLE001 - the fallback is the contract
         if wants_express(argv):
             _note(f"ash express: falling back to a cold run: {exc}")

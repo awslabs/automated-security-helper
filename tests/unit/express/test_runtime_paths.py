@@ -146,6 +146,36 @@ class TestIdleSetting:
         assert runtime.idle_seconds() == runtime.DEFAULT_IDLE_SECONDS
 
 
+class TestPlatformNeutralHelpers:
+    """The naming and marker helpers run before express_supported() answers,
+    so a platform without user ids must still get through them."""
+
+    def test_a_platform_without_getuid_reads_as_uid_zero(self, monkeypatch):
+        monkeypatch.delattr(os, "getuid", raising=False)
+        assert runtime.current_uid() == 0
+        assert len(runtime.socket_key(version="1", prefix="/p")) == 16
+
+    def test_a_marker_stamped_slightly_ahead_of_the_clock_is_fresh(self, tmp_path):
+        import time
+
+        path = tmp_path / "d.sock"
+        runtime.mark_retired_for_threads(path)
+        marker = Path(os.fspath(path) + runtime._RETIRED_SUFFIX)
+        ahead = time.time() + 0.05
+        os.utime(marker, (ahead, ahead))
+        assert runtime.recent_retirement(path) == "threads"
+
+    def test_a_marker_stamped_far_in_the_future_is_ignored(self, tmp_path):
+        import time
+
+        path = tmp_path / "d.sock"
+        runtime.mark_retired_for_threads(path)
+        marker = Path(os.fspath(path) + runtime._RETIRED_SUFFIX)
+        far = time.time() + 3600
+        os.utime(marker, (far, far))
+        assert runtime.recent_retirement(path) is None
+
+
 class TestOwnTreeStamp:
     """The source-tree walk pays only where it buys something: an editable
     install or a checkout, whose code changes with no dist-info change. A

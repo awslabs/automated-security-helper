@@ -639,6 +639,28 @@ class TestControlRequestTimeout:
         assert timeouts == [30.0]
 
 
+class TestProgrammingErrorsAreNamed:
+    def test_an_attribute_error_is_reported_as_a_bug_even_without_express(
+        self, monkeypatch, capsys
+    ):
+        def broken(*_a, **_k):
+            raise AttributeError("module 'os' has no attribute 'getuid'")
+
+        monkeypatch.setattr(client, "_delegated_exit_code", broken)
+        assert client.delegated_exit_code(["scan"], environ={}) is None
+        err = capsys.readouterr().err
+        assert "internal error (AttributeError" in err
+        assert "bug in ASH express mode" in err
+
+    def test_a_host_condition_stays_quiet_without_express(self, monkeypatch, capsys):
+        def refused(*_a, **_k):
+            raise OSError("connection refused")
+
+        monkeypatch.setattr(client, "_delegated_exit_code", refused)
+        assert client.delegated_exit_code(["scan"], environ={}) is None
+        assert capsys.readouterr().err == ""
+
+
 class TestAutostartBacksOffAfterARetirement:
     def test_a_fresh_retirement_marker_stops_the_respawn_and_names_the_cause(
         self, monkeypatch, tmp_path, capsys
