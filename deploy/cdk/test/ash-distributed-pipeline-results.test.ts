@@ -35,7 +35,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { ASH_PARAMETER_NAMES } from '../lib/ash-config';
-import { ASH_S3_SYNC_PATH } from '../lib/ash-container-scripts';
+import { ASH_CLI, ASH_S3_SYNC_PATH } from '../lib/ash-container-scripts';
 import { AshDistributedPipelineStack } from '../lib/ash-distributed-pipeline-stack';
 import { actionMatches, CfnResolver, roleOf, statementsForRole, synth } from './support/cfn';
 import { AshRecord, fakeAshScript, python3, readLines } from './support/gate-harness';
@@ -261,7 +261,9 @@ describe('shard config path', () => {
       fs.mkdirSync(bin);
       fs.mkdirSync(py, { recursive: true });
       const record = path.join(dir, 'ash.jsonl');
-      fs.writeFileSync(path.join(bin, 'ash'), fakeAshScript(python3(), record, 0), { mode: 0o755 });
+      // Named for the command the buildspec runs (ASH_CLI, `ashx`): a fake under the
+      // deprecated name is never invoked, and the run records no scan at all.
+      fs.writeFileSync(path.join(bin, ASH_CLI), fakeAshScript(python3(), record, 0), { mode: 0o755 });
       fs.writeFileSync(
         path.join(py, '__init__.py'),
         [
