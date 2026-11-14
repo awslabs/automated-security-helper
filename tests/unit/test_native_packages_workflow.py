@@ -34,6 +34,7 @@ from typing import Any, Dict
 import pytest
 import yaml
 
+from tests.utils.helpers import iter_repo_files
 from tests.utils.posix_bash import bash_path, run_bash, write_lf
 
 pytestmark = pytest.mark.unit
@@ -481,10 +482,14 @@ def _code_lines(text: str) -> str:
 def _scripts() -> Dict[str, str]:
     found: Dict[str, str] = {}
     for root in ("packaging", "scripts", "editors", ".github/scripts"):
-        for suffix in ("*.sh", "*.ps1", "*.psm1"):
-            for path in (REPO_ROOT / root).rglob(suffix):
-                if "node_modules" in path.parts or "build" in path.parts:
-                    continue
+        # Walked with iter_repo_files, which prunes node_modules and build while it
+        # descends: editors/vscode/node_modules is where npm installs, and a plain
+        # rglob entered it before the filter could drop its files.
+        tree = iter_repo_files(
+            REPO_ROOT / root, skip_dirs=frozenset({"node_modules", "build"})
+        )
+        for path in sorted(tree):
+            if path.suffix in {".sh", ".ps1", ".psm1"}:
                 rel = path.relative_to(REPO_ROOT).as_posix()
                 found[rel] = _code_lines(path.read_text(encoding="utf-8"))
     return found

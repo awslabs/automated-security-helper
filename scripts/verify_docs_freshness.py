@@ -14,6 +14,7 @@ exit code 2 if any check raised and so did not run (an ERROR line names it).
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 from pathlib import Path
@@ -1770,6 +1771,8 @@ _DOCS_PATHS = (
     "PLUGIN_DATA_PARTIAL",
     "HOW_ASH_WORKS_MD",
     "CHOOSE_SCANNERS_MD",
+    "NATIVE_PACKAGES_DOCS_DIR",
+    "DOCS_NAV_YML",
 )
 #: Code files, by their path inside the package, so a rebase never depends on where
 #: the previous one put them.
@@ -1832,6 +1835,21 @@ _MESSAGE_NAME_INSTALL = re.compile(
 # Python trees whose string literals are user-facing. tests/ is excluded because it
 # plants these strings on purpose.
 _PYTHON_MESSAGE_ROOTS = ("automated_security_helper", "scripts", "packaging", ".github")
+
+
+def _python_files(base: Path) -> list[Path]:
+    """Every ``.py`` file under ``base``, never entering an excluded directory.
+
+    ``dirnames`` is pruned in place, so ``scripts/e2e/inspector/node_modules`` (which
+    ``npm ci`` writes) is not walked at all; ``rglob`` listed all of it and dropped
+    the matches afterward. Not a git listing, because the freshness tests also point
+    this at planted trees that are not repositories.
+    """
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_MD_DIRS]
+        found.extend(Path(dirpath) / name for name in filenames if name.endswith(".py"))
+    return sorted(found)
 
 
 def _code_lines(path: Path) -> list[tuple[int, str]]:
@@ -2301,9 +2319,11 @@ def check_no_index_name_install() -> list[str]:
     against it is not on a copyable line, so it is not reported either.
     """
     failures: list[str] = []
+    # The packaging READMEs are documents, so they come from the docs root (REPO_ROOT
+    # is rebased onto it by --docs-root), not from the checkout the code is read from.
     readmes = sorted(
         p
-        for p in PACKAGING_DIR.glob("**/README*")
+        for p in (REPO_ROOT / "packaging").glob("**/README*")
         if p.is_file() and not _EXCLUDED_MD_DIRS.intersection(p.parts)
     )
     for path in sorted(set(collect_md_files()) | set(readmes)):
@@ -2319,7 +2339,7 @@ def check_no_index_name_install() -> list[str]:
         base = REPO_ROOT / root
         if not base.is_dir():
             continue
-        for path in sorted(base.rglob("*.py")):
+        for path in _python_files(base):
             if _EXCLUDED_MD_DIRS.intersection(path.parts):
                 continue
             rel = path.relative_to(REPO_ROOT).as_posix()

@@ -37,7 +37,7 @@ import yaml
 
 from automated_security_helper.utils import content_databases as cdb
 from tests.utils import workflow_commands as wc
-from tests.utils.helpers import checkout_env
+from tests.utils.helpers import checkout_env, iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py"
@@ -195,8 +195,12 @@ class TestTheCommandLine:
 
 def _source_files():
     for root in ("automated_security_helper", "utils", ".github", "scripts"):
-        for path in (REPO_ROOT / root).rglob("*"):
-            if path.is_file() and path.suffix in {
+        # iter_repo_files never enters the tests' scratch tree or node_modules
+        # (scripts/e2e/inspector/node_modules is where npm installs).
+        for path in iter_repo_files(
+            REPO_ROOT / root, skip_dirs=frozenset({"node_modules"})
+        ):
+            if path.suffix in {
                 ".py",
                 ".yml",
                 ".yaml",

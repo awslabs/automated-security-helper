@@ -59,6 +59,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.helpers import iter_repo_files
 from tests.utils.posix_bash import bash_path
 
 pytestmark = pytest.mark.unit
@@ -167,12 +168,15 @@ def _scanned_files() -> list:
     """Every workflow, and every shell and PowerShell script the legs could run."""
     files = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
     for root in ("scripts", "editors", "packaging", ".github/scripts"):
-        for suffix in ("*.sh", "*.ps1", "*.psm1"):
-            files += sorted(
-                p
-                for p in (REPO_ROOT / root).rglob(suffix)
-                if "node_modules" not in p.parts and "build" not in p.parts
+        # iter_repo_files prunes node_modules and build while it descends, so a walk
+        # of editors/ never enters editors/vscode/node_modules.
+        tree = list(
+            iter_repo_files(
+                REPO_ROOT / root, skip_dirs=frozenset({"node_modules", "build"})
             )
+        )
+        for suffix in (".sh", ".ps1", ".psm1"):
+            files += sorted(p for p in tree if p.suffix == suffix)
     return files
 
 
@@ -2422,11 +2426,12 @@ def allowance_site_problems(rel: str, text: str) -> list:
 def test_the_allowance_is_passed_only_where_n_minus_1_is_a_release():
     problems, seen = [], set()
     for root in ("scripts", "packaging", "editors", ".github"):
-        for path in sorted((REPO_ROOT / root).rglob("*")):
-            if (
-                path.suffix not in (".sh", ".ps1", ".yml", ".yaml")
-                or not path.is_file()
-            ):
+        # iter_repo_files lists files only and never enters node_modules.
+        walked = iter_repo_files(
+            REPO_ROOT / root, skip_dirs=frozenset({"node_modules"})
+        )
+        for path in sorted(walked):
+            if path.suffix not in (".sh", ".ps1", ".yml", ".yaml"):
                 continue
             rel = path.relative_to(REPO_ROOT).as_posix()
             text = path.read_text(encoding="utf-8", errors="replace")
