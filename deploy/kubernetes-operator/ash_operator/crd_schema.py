@@ -254,6 +254,21 @@ def _decide_additional_properties(
     return {**trimmed, **_PRESERVE}
 
 
+#: Keywords a structural schema refuses inside an anyOf, oneOf or allOf branch. The
+#: API server rejects the whole CRD ("Forbidden: must be empty to be structural") when
+#: a branch carries a description, so the branch keeps constraints only; descriptions
+#: stay on the structural levels that hold the junctor.
+_FORBIDDEN_IN_BRANCH = ("default", "nullable", "additionalProperties", "type", "description")
+
+
+def _without_branch_metadata(branch: Any) -> Any:
+    """``branch`` without the keywords a junctor branch may not carry."""
+    if isinstance(branch, dict):
+        for forbidden in ("description", "default", "nullable"):
+            branch.pop(forbidden, None)
+    return branch
+
+
 def _structural(node: Any, report: Translation, pointer: str = "") -> Any:
     """Rewrite one inlined JSON Schema node into a structural schema node."""
     if not isinstance(node, dict):
@@ -310,7 +325,7 @@ def _structural(node: Any, report: Translation, pointer: str = "") -> Any:
             for branch in non_null:
                 sub = _structural(branch, report, pointer)
                 if isinstance(sub, dict):
-                    for forbidden in ("default", "nullable", "additionalProperties", "type"):
+                    for forbidden in _FORBIDDEN_IN_BRANCH:
                         sub.pop(forbidden, None)
                     if sub:
                         cleaned.append(sub)
@@ -375,7 +390,8 @@ def _structural(node: Any, report: Translation, pointer: str = "") -> Any:
             continue
         if key in ("allOf", "anyOf", "oneOf") and isinstance(value, list):
             out[key] = [
-                _structural(sub, report, f"{pointer}/{key}/{i}") for i, sub in enumerate(value)
+                _without_branch_metadata(_structural(sub, report, f"{pointer}/{key}/{i}"))
+                for i, sub in enumerate(value)
             ]
             continue
         out[key] = copy.deepcopy(value)

@@ -526,3 +526,47 @@ class TestRenderedSize:
     def test_the_translation_report_is_json_serialisable(self):
         _, report = build_scan_crd()
         json.dumps(report)
+
+
+def _junctor_branches_with_metadata(node, path=""):
+    """Paths of anyOf, oneOf and allOf branches that carry a keyword Kubernetes forbids there."""
+    found = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in ("anyOf", "oneOf", "allOf") and isinstance(value, list):
+                for index, branch in enumerate(value):
+                    branch_path = f"{path}.{key}[{index}]"
+                    if isinstance(branch, dict):
+                        found += [
+                            f"{branch_path}.{forbidden}"
+                            for forbidden in ("description", "default", "nullable")
+                            if forbidden in branch
+                        ]
+                    found += _junctor_branches_with_metadata(branch, branch_path)
+            else:
+                found += _junctor_branches_with_metadata(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            found += _junctor_branches_with_metadata(item, f"{path}[{index}]")
+    return found
+
+
+class TestNoMetadataInsideJunctorBranches:
+    """The API server rejects the whole CRD for one of these, and only a cluster says so.
+
+    A structural schema forbids ``description`` (and ``default``, ``nullable``) inside
+    an anyOf, oneOf or allOf branch: "Forbidden: must be empty to be structural". The
+    config schema's environment-reference arms put a description there, and the CRD
+    that carried them could not be applied; the e2e on kind was the only gate that saw
+    it. Descriptions stay on the structural level that holds the junctor.
+    """
+
+    @pytest.mark.parametrize("build", [build_scan_crd, build_mcp_crd])
+    def test_no_branch_carries_a_description(self, build):
+        built = build()
+        crd = built[0] if isinstance(built, tuple) else built
+        assert _junctor_branches_with_metadata(crd) == []
+
+    def test_the_walker_sees_a_planted_description(self):
+        planted = {"a": {"properties": {"b": {"anyOf": [{"type": "string", "description": "x"}]}}}}
+        assert _junctor_branches_with_metadata(planted)
