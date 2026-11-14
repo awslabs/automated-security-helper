@@ -115,6 +115,20 @@ EXEMPT: Dict[Tuple[str, str], str] = {
         "a planted line inside that gate's own self-test fixture string, written to a "
         "temporary directory and parsed; it is never a workflow step"
     ),
+    (
+        ".github/workflows/ash-repo-docs.yml",
+        'run: uv run python scripts/docs_versions.py deploy --ref "$DEPLOY_REF" --push',
+    ): (
+        "the docs deploy's --push pushes the gh-pages git branch of the documentation "
+        "site; it publishes no container image"
+    ),
+    (
+        "scripts/docs_versions.py",
+        "Why the deploy does not use `mike deploy --push`: a push to main and the deploy of a",
+    ): (
+        "prose in the docs deploy script's docstring naming mike's own --push flag; it "
+        "is not a command and publishes no container image"
+    ),
 }
 
 Hit = Tuple[str, int, str, str]

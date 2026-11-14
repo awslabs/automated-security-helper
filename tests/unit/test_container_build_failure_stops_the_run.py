@@ -49,7 +49,7 @@ def recorded_runner(monkeypatch):
     """
     calls = []
 
-    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
+    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False, env=None):
         argv = [str(a) for a in cmd_list]
         calls.append(argv)
         if "build" in argv:
@@ -126,7 +126,7 @@ class TestFailedBuildStopsTheRun:
         """
         calls = []
 
-        def succeeding(cmd_list, check=True, debug=False, shell=False):
+        def succeeding(cmd_list, check=True, debug=False, shell=False, env=None):
             argv = [str(a) for a in cmd_list]
             calls.append(argv)
             return rac.create_completed_process(

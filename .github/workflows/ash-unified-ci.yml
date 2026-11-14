@@ -480,6 +480,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: setup
         uses: ./.github/actions/setup-ash
         with:
@@ -807,6 +809,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -854,6 +858,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -934,6 +940,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1008,6 +1016,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1105,6 +1115,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1147,6 +1158,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1188,6 +1200,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -1232,6 +1245,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1266,6 +1280,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1296,6 +1311,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1565,6 +1581,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -1580,7 +1598,7 @@ jobs:
         env:
           ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
           ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
-        run: ash build-image --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
+        run: ashx build-image --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
       - name: Check who can write to the image
         shell: bash
         env:
@@ -2450,6 +2468,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"

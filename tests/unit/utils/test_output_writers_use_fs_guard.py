@@ -413,8 +413,6 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _PROJECT_ASH_DIR,
     ),
-    (f"{_ASH}/config/ash_config.py", "AshConfig.save", "open"): (1, _CONFIG),
-    (f"{_ASH}/config/ash_config.py", "AshConfig.save", "write_text"): (1, _CONFIG),
     (f"{_ASH}/config/ash_config.py", "_staged_beside", "os.open"): (
         1,
         _CONFIG_STAGED,
@@ -424,6 +422,14 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         _CONFIG_STAGED,
     ),
     (f"{_ASH}/config/ash_config.py", "_write_checked", "os.replace"): (
+        1,
+        _CONFIG_STAGED,
+    ),
+    (f"{_ASH}/config/ash_config.py", "_replace_with_staged", "os.fdopen"): (
+        1,
+        _CONFIG_STAGED,
+    ),
+    (f"{_ASH}/config/ash_config.py", "_replace_with_staged", "os.replace"): (
         1,
         _CONFIG_STAGED,
     ),

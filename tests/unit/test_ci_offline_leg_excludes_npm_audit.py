@@ -102,7 +102,7 @@ def _install_stand_in(tmp_path: Path) -> tuple[Path, str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "calls"
-    stand_in = bin_dir / "ash"
+    stand_in = bin_dir / "ashx"
     stand_in.write_text(
         "#!/usr/bin/env bash\n"
         f'printf "%s\\0" "$@" "{_ENV_MARK}" >> "{calls}"\n'
@@ -117,8 +117,8 @@ def _install_stand_in(tmp_path: Path) -> tuple[Path, str]:
     )
     stand_in.chmod(0o755)
     path = os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"])
-    assert shutil.which("ash", path=path) == str(stand_in), (
-        "the stand-in is not the ash this PATH resolves"
+    assert shutil.which("ashx", path=path) == str(stand_in), (
+        "the stand-in is not the ashx this PATH resolves"
     )
     return calls, path
 
@@ -901,7 +901,7 @@ def test_the_stand_in_records_ash_variables_and_skips_the_test_inputs(tmp_path):
     """Control for the recorder: an empty record must mean none was set."""
     calls, path = _install_stand_in(tmp_path)
     subprocess.run(
-        [shutil.which("bash") or "bash", "-c", "ash scan --x"],
+        [shutil.which("bash") or "bash", "-c", "ashx scan --x"],
         cwd=tmp_path,
         env={
             "PATH": path,

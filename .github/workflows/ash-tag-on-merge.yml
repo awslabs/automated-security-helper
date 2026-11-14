@@ -321,7 +321,7 @@ jobs:
           sys.exit(0 if curated and curated in notes else 1)
           PY
             then
-              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen without bumping the version (the template includes the file) and merge it as a new chore(release): pull request, or keep this merge commit: create the release by hand with gh release create ${TAG} --target ${MERGE_SHA} and the entry plus the curated notes as its body, after which a run of this job finds the release and exits without publishing. A plain re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
+              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen without bumping the version (the template includes the file) and merge it as a new chore(release): pull request, or keep this merge commit: create the release by hand at ${MERGE_SHA} for ${TAG} with the GitHub CLI's release creation command and the entry plus the curated notes as its body, after which a run of this job finds the release and exits without publishing. A plain re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
               exit 1
             fi
           fi

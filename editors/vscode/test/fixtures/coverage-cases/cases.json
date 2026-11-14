@@ -136,14 +136,16 @@
     {
       "base": "scans/findings/ash_aggregated_results.json",
       "expect": {
-        "coverage_complete": true,
+        "coverage_complete": false,
         "incomplete_converters": [],
-        "incomplete_scanners": [],
-        "no_scanner_ran": false,
+        "incomplete_scanners": [
+          "detect-secrets"
+        ],
+        "no_scanner_ran": true,
         "stale_content_databases": [],
         "unevaluated_rules": []
       },
-      "name": "a failure count with no attempt count is not a claim",
+      "name": "a failure count with no attempt count poisons the pair, so the scanner is in error",
       "set": [
         [
           [
@@ -765,7 +767,7 @@
         "stale_content_databases": [],
         "unevaluated_rules": []
       },
-      "name": "an error-level staleness notification with an empty record is unreadable",
+      "name": "an error-level staleness notification with an empty record is skipped",
       "set": [
         [
           [
@@ -796,14 +798,16 @@
     {
       "base": "scans/clean/ash_aggregated_results.json",
       "expect": {
-        "coverage_complete": true,
+        "coverage_complete": false,
         "incomplete_converters": [],
         "incomplete_scanners": [],
         "no_scanner_ran": false,
-        "stale_content_databases": [],
+        "stale_content_databases": [
+          "grype-db"
+        ],
         "unevaluated_rules": []
       },
-      "name": "a staleness record with no measured_at is unreadable",
+      "name": "a staleness record with no measured_at is kept as a stale database",
       "set": [
         [
           [
@@ -957,14 +961,16 @@
     {
       "base": "scans/clean/ash_aggregated_results.json",
       "expect": {
-        "coverage_complete": true,
+        "coverage_complete": false,
         "incomplete_converters": [],
         "incomplete_scanners": [],
         "no_scanner_ran": false,
-        "stale_content_databases": [],
+        "stale_content_databases": [
+          "grype-db"
+        ],
         "unevaluated_rules": []
       },
-      "name": "a staleness record whose measured_at uses Z as the separator is unreadable",
+      "name": "a staleness record whose measured_at uses Z as the separator is kept as stale",
       "set": [
         [
           [
