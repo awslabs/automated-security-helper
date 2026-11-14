@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_SERVER_PY = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 DOCS_DIR = REPO_ROOT / "docs"
-CLI_REFERENCE_MD = DOCS_DIR / "content" / "docs" / "cli-reference.md"
+CLI_REFERENCE_MD = DOCS_DIR / "content" / "reference" / "cli.md"
 OUTPUT_FORMATS_MD = DOCS_DIR / "content" / "docs" / "output-formats.md"
 DOCS_INDEX_MD = DOCS_DIR / "content" / "index.md"
 DOCS_NAV_YML = DOCS_DIR / "content" / ".nav.yml"
@@ -505,7 +505,7 @@ def compare_inventories(
 # ---------------------------------------------------------------------------
 #
 # "CLI flags in docs match source" grepped scan.py for --flags and required each to
-# appear somewhere in the hand-written docs/content/docs/cli-reference.md. That
+# appear somewhere in the hand-written docs/content/reference/cli.md. That
 # page is gone. Its replacement, docs/content/reference/cli.md, is written by
 # scripts/generate_cli_docs.py from the click tree of every command, and
 # tests/unit/test_generated_docs_freshness.py fails when the page differs from the
@@ -584,7 +584,7 @@ def flag_is_documented(flag: str, docs: str) -> bool:
 def check_cli_flags(
     spellings: set[str] | None = None, docs: str | None = None
 ) -> list[str]:
-    """Verify every option spelling on the scan surface appears in cli-reference.md.
+    """Verify every option spelling on the scan surface appears in reference/cli.md.
 
     Both arguments exist so the negative control in
     tests/unit/test_verify_docs_freshness_cli_flags.py can hand this a docs body
@@ -618,7 +618,7 @@ def check_cli_flags(
         if flag.startswith("--no-") and flag_is_documented("--" + flag[5:], docs):
             continue
         failures.append(
-            f"CLI flag {flag} is exposed by the CLI but missing from cli-reference.md"
+            f"CLI flag {flag} is exposed by the CLI but missing from reference/cli.md"
         )
 
     return failures
