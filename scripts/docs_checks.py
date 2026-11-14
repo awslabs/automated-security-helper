@@ -2066,6 +2066,13 @@ def _command_from_click(cmd: Any, path: tuple[str, ...]) -> CliCommand:
     )
 
 
+#: The name the docs call the command tree by: the first word of every command path
+#: below, which is how the docs' code blocks spell the command they run. It is a
+#: label for matching those blocks, not the program a Python driver starts (that is
+#: CANONICAL_CLI_NAME).
+DOCS_ROOT = "ash"
+
+
 @functools.lru_cache(maxsize=1)
 def load_cli() -> CliCommand:
     """The real command tree, from typer's own conversion of the ASH app."""
@@ -2073,7 +2080,7 @@ def load_cli() -> CliCommand:
 
     from automated_security_helper.cli.main import app
 
-    return _command_from_click(typer.main.get_command(app), ("ash",))
+    return _command_from_click(typer.main.get_command(app), (DOCS_ROOT,))
 
 
 def all_option_names(command: CliCommand) -> set[str]:
@@ -2224,15 +2231,15 @@ def _match_option(
 
 #: (command path, the option's first name) -> the kind of name its value is.
 REGISTRY_OPTIONS = {
-    (("ash",), "--scanners"): "scanner",
-    (("ash",), "--exclude-scanners"): "scanner",
-    (("ash",), "--output-formats"): "output format",
-    (("ash", "scan"), "--scanners"): "scanner",
-    (("ash", "scan"), "--exclude-scanners"): "scanner",
-    (("ash", "scan"), "--output-formats"): "output format",
-    (("ash", "merge"), "--output-formats"): "output format",
-    (("ash", "report"), "--format"): "reporter",
-    (("ash", "dependencies", "install"), "--tool"): "tool",
+    ((DOCS_ROOT,), "--scanners"): "scanner",
+    ((DOCS_ROOT,), "--exclude-scanners"): "scanner",
+    ((DOCS_ROOT,), "--output-formats"): "output format",
+    ((DOCS_ROOT, "scan"), "--scanners"): "scanner",
+    ((DOCS_ROOT, "scan"), "--exclude-scanners"): "scanner",
+    ((DOCS_ROOT, "scan"), "--output-formats"): "output format",
+    ((DOCS_ROOT, "merge"), "--output-formats"): "output format",
+    ((DOCS_ROOT, "report"), "--format"): "reporter",
+    ((DOCS_ROOT, "dependencies", "install"), "--tool"): "tool",
 }
 PLUGIN_KINDS = ("converter", "scanner", "reporter")
 

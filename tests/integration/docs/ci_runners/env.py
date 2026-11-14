@@ -85,6 +85,11 @@ SYSTEM_PATH = os.pathsep.join(
     ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"]
 )
 
+#: The command the documented pipelines run. The docs still spell it ``ash`` (the
+#: deprecated v3 alias), so the stray executables these tests plant or look for on a
+#: PATH carry that name; they are not the CLI under test, which is CANONICAL_CLI_NAME.
+DOCUMENTED_COMMAND = "ash"
+
 #: The image variables the setup actions read to find their prebuilt tools.
 ACT_IMAGE_VARIABLES = ("ImageOS", "ImageVersion")
 

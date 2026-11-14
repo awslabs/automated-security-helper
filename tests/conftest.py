@@ -730,13 +730,11 @@ def _redacting_platform_node(config):
             return None
     except Exception:  # noqa: BLE001 - a name it cannot check is not shown
         replacement = ""
-    real = platform.node
-    platform.node = lambda: replacement
+    from unittest import mock
 
-    def undo() -> None:
-        platform.node = real
-
-    return undo
+    patcher = mock.patch.object(platform, "node", lambda: replacement)
+    patcher.start()
+    return patcher.stop
 
 
 def _report_real_home_writes(session) -> None:
@@ -2783,7 +2781,7 @@ def _argv_of(args: Any) -> List[str]:
 
 #: ASH's console scripts (pyproject.toml's [project.scripts]): each runs the same CLI.
 _ASH_PROGRAMS = frozenset(
-    {"ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
+    {"ashx", "ash", "ashv3", "automated-security-helper", "agentic-security-harness"}
 )
 
 

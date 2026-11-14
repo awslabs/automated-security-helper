@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.core.constants import ASH_EXIT_TERMINATED
 from tests.utils.helpers import checkout_env
 from tests.utils.processes import process_running
@@ -72,10 +73,13 @@ _MODES = {
 
 
 def _ash_executable() -> str:
-    beside = Path(sys.executable).with_name("ash")
-    found = str(beside) if beside.exists() else shutil.which("ash")
+    beside = Path(sys.executable).with_name(CANONICAL_CLI_NAME)
+    found = str(beside) if beside.exists() else shutil.which(CANONICAL_CLI_NAME)
     if not found:
-        pytest.fail("the ash entry point is not installed beside this interpreter")
+        pytest.fail(
+            f"the {CANONICAL_CLI_NAME} entry point is not installed beside this "
+            "interpreter"
+        )
     return found
 
 

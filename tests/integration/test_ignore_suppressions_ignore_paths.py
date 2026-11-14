@@ -30,6 +30,7 @@ from typing import List, Tuple
 import pytest
 import yaml
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from tests.utils.helpers import checkout_env
 
 pytestmark = pytest.mark.integration
@@ -79,8 +80,8 @@ def _ignored_tree(root: Path) -> Path:
 def _scan(
     source: Path, output: Path, scanners: Tuple[str, ...], ignore_suppressions: bool
 ) -> Tuple[int, str]:
-    ash = shutil.which("ash", path=str(Path(sys.executable).parent))
-    assert ash, f"no ash entry point beside {sys.executable}"
+    ash = shutil.which(CANONICAL_CLI_NAME, path=str(Path(sys.executable).parent))
+    assert ash, f"no {CANONICAL_CLI_NAME} entry point beside {sys.executable}"
     command = [
         ash,
         "scan",

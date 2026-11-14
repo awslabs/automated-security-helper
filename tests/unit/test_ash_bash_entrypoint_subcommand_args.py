@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME as ASHX
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 IMAGE = "automated-security-helper:non-root"
@@ -106,14 +108,14 @@ def test_the_mounted_paths_go_in_as_environment_variables(runner, tmp_path):
 
     assert "ASH_SOURCE_DIR=/src" in run_argv
     assert "ASH_OUTPUT_DIR=/out" in run_argv
-    assert _inner_argv(run_argv) == ["ash", *SANDBOX_OFF, "--scanners", "bandit"]
+    assert _inner_argv(run_argv) == [ASHX, *SANDBOX_OFF, "--scanners", "bandit"]
 
 
 @pytest.mark.integration
 def test_a_subcommand_runs_on_its_own_arguments(runner, tmp_path):
     inner = _inner_argv(_run_argv(runner, tmp_path, "report", "--format", "text"))
 
-    assert inner == ["ash", "report", "--format", "text"], (
+    assert inner == [ASHX, "report", "--format", "text"], (
         "report does not take --source-dir, so putting it before 'report' is a usage "
         f"error: {inner}"
     )
@@ -125,12 +127,12 @@ def test_a_subcommand_runs_on_its_own_arguments(runner, tmp_path):
     [
         pytest.param(
             ["report", "--format", "text"],
-            ["ash", "report", "--format", "text"],
+            [ASHX, "report", "--format", "text"],
             id="report-format",
         ),
         pytest.param(
             ["--format", "sarif"],
-            ["ash", *SANDBOX_OFF, "--format", "sarif"],
+            [ASHX, *SANDBOX_OFF, "--format", "sarif"],
             id="scan-format",
         ),
     ],
@@ -152,7 +154,7 @@ def test_format_reaches_ash(runner, tmp_path, args, expected):
 def test_an_option_before_a_subcommand_is_left_where_it_was_typed(runner, tmp_path):
     inner = _inner_argv(_run_argv(runner, tmp_path, "--verbose", "report"))
 
-    assert inner == ["ash", "--verbose", "report"]
+    assert inner == [ASHX, "--verbose", "report"]
 
 
 @pytest.mark.integration
@@ -161,31 +163,27 @@ def test_an_option_before_a_subcommand_is_left_where_it_was_typed(runner, tmp_pa
     [
         pytest.param(
             ["--quiet", "scan"],
-            ["ash", "--quiet", "scan", *SANDBOX_OFF],
+            [ASHX, "--quiet", "scan", *SANDBOX_OFF],
             id="scan-takes-quiet",
         ),
         pytest.param(
-            ["-q"], ["ash", "--quiet", *SANDBOX_OFF], id="bare-scan-takes-quiet"
+            ["-q"], [ASHX, "--quiet", *SANDBOX_OFF], id="bare-scan-takes-quiet"
         ),
-        pytest.param(
-            ["--quiet", "report"], ["ash", "report"], id="report-has-no-quiet"
-        ),
-        pytest.param(
-            ["report", "-q"], ["ash", "report"], id="after-the-subcommand-too"
-        ),
+        pytest.param(["--quiet", "report"], [ASHX, "report"], id="report-has-no-quiet"),
+        pytest.param(["report", "-q"], [ASHX, "report"], id="after-the-subcommand-too"),
         pytest.param(
             ["--no-color", "report"],
-            ["ash", "--no-color", "report"],
+            [ASHX, "--no-color", "report"],
             id="report-takes-color",
         ),
         pytest.param(
             ["-q", "-c", "build-image"],
-            ["ash", "--quiet", "--no-color", "build-image"],
+            [ASHX, "--quiet", "--no-color", "build-image"],
             id="build-image-takes-both",
         ),
         pytest.param(
             ["--quiet", "--no-color", "config", "get"],
-            ["ash", "config", "get"],
+            [ASHX, "config", "get"],
             id="a-group-takes-neither",
         ),
     ],
@@ -209,12 +207,12 @@ def test_the_entrypoints_own_flags_go_only_where_ash_takes_them(
     [
         pytest.param(
             ["-q", "merge", "--results", "scan"],
-            ["ash", "merge", "--results", "scan"],
+            [ASHX, "merge", "--results", "scan"],
             id="a-later-value-names-scan",
         ),
         pytest.param(
             ["--quiet", "scan", "--config", "report"],
-            ["ash", "--quiet", "scan", *SANDBOX_OFF, "--config", "/ash-config/report"],
+            [ASHX, "--quiet", "scan", *SANDBOX_OFF, "--config", "/ash-config/report"],
             id="a-later-value-names-report",
         ),
     ],
@@ -236,32 +234,32 @@ def test_the_subcommand_is_the_first_token_that_names_one(
     [
         pytest.param(
             ["--quiet", "--phases", "report"],
-            ["ash", "--quiet", *SANDBOX_OFF, "--phases", "report"],
+            [ASHX, "--quiet", *SANDBOX_OFF, "--phases", "report"],
             id="a-value-names-report",
         ),
         pytest.param(
             ["-q", "--no-color", "--phases", "inspect"],
-            ["ash", "--quiet", "--no-color", *SANDBOX_OFF, "--phases", "inspect"],
+            [ASHX, "--quiet", "--no-color", *SANDBOX_OFF, "--phases", "inspect"],
             id="a-value-names-inspect",
         ),
         pytest.param(
             ["--quiet", "--phases=report", "report"],
-            ["ash", "--phases=report", "report"],
+            [ASHX, "--phases=report", "report"],
             id="an-attached-value-is-not-the-next-token",
         ),
         pytest.param(
             ["--quiet", "-f", "report", "scan"],
-            ["ash", "--quiet", "-f", "report", "scan", *SANDBOX_OFF],
+            [ASHX, "--quiet", "-f", "report", "scan", *SANDBOX_OFF],
             id="a-short-option-value",
         ),
         pytest.param(
             ["--quiet", "-Pf", "report", "scan"],
-            ["ash", "--quiet", "-Pf", "report", "scan", *SANDBOX_OFF],
+            [ASHX, "--quiet", "-Pf", "report", "scan", *SANDBOX_OFF],
             id="a-value-after-clustered-short-options",
         ),
         pytest.param(
             ["--quiet", "-Pfreport", "report"],
-            ["ash", "-Pfreport", "report"],
+            [ASHX, "-Pfreport", "report"],
             id="a-value-attached-to-clustered-short-options",
         ),
     ],
