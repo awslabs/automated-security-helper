@@ -47,11 +47,16 @@ def _constructors_raise(monkeypatch):
 def _run(tmp_path, plugin, **kwargs):
     for sub in ("src", "out", "work"):
         (tmp_path / sub).mkdir(exist_ok=True)
+    config = get_default_config()
+    # Opengrep is disabled by default on Windows, and a disabled scanner is
+    # excluded before its constructor runs; these cases measure the
+    # constructor-failure path, so the scanner must be selected everywhere.
+    config.scanners.opengrep.enabled = True
     context = PluginContext(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",
         work_dir=tmp_path / "work",
-        config=get_default_config(),
+        config=config,
     )
     aggregated = AshAggregatedResults()
     phase = ScanPhase(
