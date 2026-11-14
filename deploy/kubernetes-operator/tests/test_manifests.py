@@ -508,6 +508,13 @@ class TestMcpShapes:
         assert f"{name}:8000" in given, command
         assert "--trust-upstream-host-check" not in command
 
+    def test_the_default_names_include_what_a_port_forward_sends(self):
+        """`kubectl port-forward svc/<name> 8000` sends Host: localhost:8000."""
+        command = mcp_deployment()["spec"]["template"]["spec"]["containers"][0]["command"]
+        given = [command[i + 1] for i, word in enumerate(command) if word == "--allowed-host"]
+        assert "localhost:8000" in given, command
+        assert "127.0.0.1:8000" in given, command
+
     def test_an_allowed_hosts_the_operator_sets_replaces_the_service_names(self):
         command = mcp_deployment({"image": "ash:local", "allowedHosts": ["Mcp.Example.Com"]})[
             "spec"
