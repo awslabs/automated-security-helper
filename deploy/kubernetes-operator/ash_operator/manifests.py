@@ -530,6 +530,30 @@ def build_results_pvc(*, scan: dict[str, Any], spec: dict[str, Any]) -> dict[str
     }
 
 
+def service_host_names(*, name: str, namespace: str, port: int) -> list[str]:
+    """The Host header values a client of this server's own Service sends.
+
+    ``ashx mcp`` refuses a non-loopback ``--host`` unless it is told how the Host
+    header is checked (``_validate_bind``): the allowlist keeps ASH's own check on,
+    ``--trust-upstream-host-check`` turns it off because something in front checks
+    instead. A ClusterIP Service is a plain TCP forward with no such check, so the
+    server's own check is the only one, and the allowlist is the right answer here: the
+    names the Service answers to inside the cluster, each with the port a client
+    includes in Host. A ``spec.allowedHosts`` the operator sets replaces this list,
+    for a Service reached through an Ingress or another name.
+    """
+    names = [
+        name,
+        f"{name}.{namespace}",
+        f"{name}.{namespace}.svc",
+        f"{name}.{namespace}.svc.cluster.local",
+    ]
+    hosts = [f"{n}:{port}" for n in names]
+    if port == 80:
+        hosts += names
+    return hosts
+
+
 def build_mcp_deployment(
     *, server: dict[str, Any], spec: dict[str, Any], configmap_name: str, has_config: bool
 ) -> dict[str, Any]:
@@ -553,7 +577,8 @@ def build_mcp_deployment(
         port=port,
         mount_path=mount_path,
         stateless_http=bool(spec.get("statelessHttp", False)),
-        allowed_hosts=spec.get("allowedHosts"),
+        allowed_hosts=spec.get("allowedHosts")
+        or service_host_names(name=meta["name"], namespace=meta["namespace"], port=port),
         auth_header_name=auth_header_name,
         auth_value_from_environment=bool(auth_header_name),
     )
