@@ -239,6 +239,56 @@ class TestSocketKeyCarriesTheInterpreterShape:
         # a request from the other shape as stale.
         assert runtime.runtime_fingerprint() == hook_fingerprint
 
+    @pytest.mark.parametrize(
+        "flags",
+        [
+            {"no_user_site": 1, "ignore_environment": 0, "isolated": 0},
+            {"no_user_site": 0, "ignore_environment": 1, "isolated": 0},
+            {"no_user_site": 1, "ignore_environment": 1, "isolated": 1},
+        ],
+        ids=["-s", "-E", "-I"],
+    )
+    def test_a_client_with_import_flags_and_a_default_client_get_different_keys(
+        self, monkeypatch, flags
+    ):
+        """A -s client must not share a daemon with a default one: that daemon
+        would import user-site packages the -s client never sees (warm and cold
+        scans returning different findings). The flags are keyed, and handed to
+        a spawned daemon (interpreter_flags), so each daemon computes its own
+        client's key."""
+        import types
+
+        default = runtime.socket_key(version="1", uid=1, prefix="/p")
+        monkeypatch.setattr(runtime.sys, "flags", types.SimpleNamespace(**flags))
+        flagged = runtime.socket_key(version="1", uid=1, prefix="/p")
+        assert flagged != default
+
+    def test_no_user_site_leaves_the_user_site_out_of_the_package_set(
+        self, monkeypatch
+    ):
+        import types
+
+        import site
+
+        user = site.getusersitepackages()
+        listed = []
+        real_scandir = os.scandir
+
+        def recording_scandir(path):
+            listed.append(os.fspath(path))
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", recording_scandir)
+        runtime._site_entries()
+        listed.clear()
+        monkeypatch.setattr(
+            runtime.sys,
+            "flags",
+            types.SimpleNamespace(no_user_site=1, ignore_environment=0, isolated=0),
+        )
+        runtime._site_entries()
+        assert user not in listed
+
     def test_an_unrelated_variable_does_not_move_the_key(self, monkeypatch):
         before = runtime.socket_key(version="1", uid=1, prefix="/p")
         monkeypatch.setenv("AWS_PROFILE", "other")
@@ -257,6 +307,7 @@ class TestSocketKeyCarriesTheInterpreterShape:
         monkeypatch.setenv("PYTHONPATH", ".")
         monkeypatch.chdir(one)
         key_one = runtime.socket_key(version="1", uid=1, prefix="/p")
+        client_shape = runtime.interpreter_shape()
         scrubbed = runtime.scrubbed_daemon_environment({"PYTHONPATH": "."})
         assert os.path.isabs(scrubbed["PYTHONPATH"])
         assert os.path.samefile(scrubbed["PYTHONPATH"], one)
@@ -266,8 +317,10 @@ class TestSocketKeyCarriesTheInterpreterShape:
         # the client that started it from `one`.
         daemon_environ = {"PYTHONPATH": scrubbed["PYTHONPATH"]}
         monkeypatch.chdir(tmp_path)
-        assert runtime.interpreter_shape(daemon_environ) == (
-            "\x00".join((scrubbed["PYTHONPATH"], "", "", "", ""))
+        assert runtime.interpreter_shape(daemon_environ) == client_shape
+        assert (
+            runtime.socket_key(version="1", uid=1, prefix="/p", shape=client_shape)
+            == key_one
         )
 
     def test_the_daemon_scrub_keeps_every_variable_the_key_reads(self):

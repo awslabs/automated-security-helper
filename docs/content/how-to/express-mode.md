@@ -82,7 +82,15 @@ part of the daemon's socket name: two shells that differ only in those values (a
 pre-commit hook and an IDE terminal, tox and a plain shell) each reach a daemon of
 their own, so neither reads the other's as stale or stops it. Relative `PYTHONPATH`
 entries are made absolute against the directory the client runs in before they are
-used, so the daemon imports the same tree the client names. The
+used, so the daemon imports the same tree the client names. The interpreter flags
+that change what is imported (`-s`, `-E`, `-I`) are part of the socket name the same
+way, and a daemon started for a client is launched with that client's flags, so a
+`python -s` client never shares a daemon with one that sees the user site packages.
+A daemon that finds extra threads in its process after its warm imports cannot fork
+scan children safely, so it retires itself and leaves a marker beside its socket;
+`ash express start` then names that cause, and an implicit start backs off for ten
+minutes instead of launching a daemon that would retire again. The marker clears
+when a daemon binds successfully. The
 client also passes its stdin, stdout and stderr as file descriptors, so the forked
 scan writes to your terminal directly -- progress, colors and prompts behave as a cold
 run's, and nothing of the scan's output travels over the socket. Ctrl-C in the client

@@ -11,6 +11,7 @@ and the ``--express`` autostart/restart choreography, with the socket layer
 replaced by recorded stand-ins (no daemon runs in the unit tier).
 """
 
+import os as os_module
 import signal
 
 import pytest
@@ -516,11 +517,56 @@ class TestSpawnDaemonProcess:
         # would make a spawned daemon's package listing differ from its
         # client's. (-P only drops the cwd entry, which the fingerprint never
         # reads.)
+        # A default client (no import flags of its own) passes none; the
+        # propagation test below covers a client that has them.
         flags = argv[1 : argv.index("-c")]
-        assert not {"-s", "-I", "-E", "-S"} & set(flags), flags
+        if not (
+            sys.flags.no_user_site or sys.flags.ignore_environment or sys.flags.isolated
+        ):
+            assert not {"-s", "-I", "-E", "-S"} & set(flags), flags
         assert argv[-2] == "120.0"
         assert argv[-1] == str(seen["keep_fd"])
         assert seen["cwd"] == str(tmp_path)
+
+    @pytest.mark.parametrize(
+        ("no_user_site", "ignore_environment", "isolated", "expected"),
+        [
+            (0, 0, 0, []),
+            (1, 0, 0, ["-s"]),
+            (0, 1, 0, ["-E"]),
+            (1, 1, 0, ["-s", "-E"]),
+            (1, 1, 1, ["-I"]),
+        ],
+    )
+    def test_a_clients_import_flags_are_handed_to_the_spawned_daemon(
+        self,
+        monkeypatch,
+        tmp_path,
+        no_user_site,
+        ignore_environment,
+        isolated,
+        expected,
+    ):
+        """A client started with -s (a console script whose shebang says
+        ``python -sP``) must get a daemon with -s too, or the daemon imports
+        user-site packages the client never sees: the same scan, different
+        findings, warm against cold. The flags are also in the socket key, so
+        a default client reaches a different daemon altogether."""
+        import types
+
+        monkeypatch.setattr(
+            runtime.sys,
+            "flags",
+            types.SimpleNamespace(
+                no_user_site=no_user_site,
+                ignore_environment=ignore_environment,
+                isolated=isolated,
+            ),
+        )
+        seen = self._spawn(monkeypatch, tmp_path, {})
+        argv = seen["argv"]
+        assert argv[1 : 1 + len(expected)] == expected
+        assert argv[1 + len(expected)] in ("-P", "-c")
 
     def test_the_interpreter_shaping_variables_reach_the_new_interpreter(
         self, monkeypatch, tmp_path
@@ -551,6 +597,61 @@ class TestSpawnDaemonProcess:
         ]
         spawned_path = seen["env"].get("PYTHONPATH")
         assert spawned_path == "/work/ash-checkout"
+
+
+class TestControlRequestTimeout:
+    def test_the_timeout_re_times_the_socket_after_the_connect(self, monkeypatch):
+        timeouts = []
+
+        class _Sock:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def settimeout(self, value):
+                timeouts.append(value)
+
+            def sendall(self, _data):
+                pass
+
+        monkeypatch.setattr(client, "_connect", lambda _p: _Sock())
+        monkeypatch.setattr(runtime, "send_frame", lambda *_: None)
+        monkeypatch.setattr(
+            runtime.FrameReader, "read_frame", lambda self: {"ok": True}
+        )
+        client.control_request("x", {"op": "status"})
+        assert timeouts == [], "no timeout asked: the connect's stays"
+        client.control_request("x", {"op": "status"}, timeout=30.0)
+        assert timeouts == [30.0]
+
+
+class TestAutostartBacksOffAfterARetirement:
+    def test_a_fresh_retirement_marker_stops_the_respawn_and_names_the_cause(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        path = tmp_path / "d.sock"
+        monkeypatch.setattr(runtime, "express_supported", lambda: True)
+        monkeypatch.setattr(runtime, "socket_path", lambda *_: path)
+        monkeypatch.setattr(client, "_connect", lambda _p: None)
+        monkeypatch.setattr(
+            os_module, "fork", lambda: pytest.fail("no daemon may be forked")
+        )
+        runtime.mark_retired_for_threads(path)
+        assert client.delegated_exit_code(["scan", "--express"], environ={}) is None
+        assert "extra threads" in capsys.readouterr().err
+
+    def test_an_old_marker_no_longer_blocks(self, tmp_path):
+        path = tmp_path / "d.sock"
+        runtime.mark_retired_for_threads(path)
+        assert runtime.recent_retirement(path) == "threads"
+        import time
+
+        later = time.time() + runtime.RETIRE_BACKOFF_SECONDS + 1
+        assert runtime.recent_retirement(path, now=later) is None
+        runtime.clear_retirement(path)
+        assert runtime.recent_retirement(path) is None
 
 
 class TestScrubbedDaemonEnvironment:

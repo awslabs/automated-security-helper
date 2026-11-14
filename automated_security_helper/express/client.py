@@ -199,8 +199,9 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
     if sock is None:
         if not autostart(environ):
             _note(
-                "ash express: the daemon did not come up; running cold. Its "
-                f"log is {runtime.log_path()}"
+                _no_daemon_note(
+                    path, "did not come up", f" Its log is {runtime.log_path()}"
+                )
             )
             return None
         sock = await_daemon(path)
@@ -218,7 +219,7 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
     # protocol): restart it once and try again; a second refusal is a cold run.
     stop_daemon(path)
     if not autostart(environ):
-        _note("ash express: the daemon did not come back up; running cold.")
+        _note(_no_daemon_note(path, "did not come back up", ""))
         return None
     sock = await_daemon(path)
     if sock is None:
@@ -229,6 +230,14 @@ def _delegated_exit_code(argv: list[str], environ: Mapping[str, str]) -> Optiona
         return detail
     _note("ash express: the restarted daemon still refused; running cold.")
     return None
+
+
+def _no_daemon_note(path: PathLike, what: str, tail: str) -> str:
+    """The line saying why --express has no daemon: the recorded retirement
+    cause when a daemon recently retired itself, else that it ``what``."""
+    if runtime.recent_retirement(path):
+        return f"ash express: {runtime.RETIRED_FOR_THREADS_TEXT}.{tail}"
+    return f"ash express: the daemon {what}; running cold.{tail}"
 
 
 def _signal_exit_code(pending: list[int]) -> Optional[int]:
@@ -588,19 +597,28 @@ def await_daemon(
     return None
 
 
-def control_request(path: PathLike, frame: dict[str, Any]) -> Optional[dict[str, Any]]:
+def control_request(
+    path: PathLike, frame: dict[str, Any], timeout: Optional[float] = None
+) -> Optional[dict[str, Any]]:
     """Send one control frame (status, stop) and return the daemon's answer.
 
     ``None`` when nothing answers. Every request opens with the one hello byte
     the protocol reserves for the descriptor-passing message, so the daemon's
     handshake consumes it and the frame arrives whole; a control request
     simply attaches no descriptors to it.
+
+    *timeout* re-times the socket after the connect, for the read of the
+    answer: the connect budget (a few seconds) is right for a probe of a daemon
+    that should be up, and wrong for asking a daemon that has just started,
+    which answers only once its warm imports finish (the handshake budget).
     """
     sock = _connect(path)
     if sock is None:
         return None
     try:
         with sock:
+            if timeout is not None:
+                sock.settimeout(timeout)
             sock.sendall(b"\x01")
             runtime.send_frame(sock, frame)
             return runtime.FrameReader(sock).read_frame()
@@ -659,6 +677,11 @@ def autostart(environ: Mapping[str, str]) -> bool:
     binds its socket, which is why the client's wait (:func:`await_daemon`) is
     short.
     """
+    if runtime.recent_retirement(runtime.socket_path()):
+        # A daemon retired itself over threads a moment ago: another would pay
+        # the whole warm-import cost to retire the same way. Back off; the
+        # scan runs cold, and the marker expires on its own.
+        return False
     log_file = runtime.log_path()
     idle = runtime.idle_seconds(dict(environ))
     scrubbed = runtime.scrubbed_daemon_environment(dict(environ))
@@ -790,11 +813,20 @@ def spawn_daemon_process(environ: Mapping[str, str]) -> bool:
     runtime_dir = runtime.runtime_dir()
     ready_read, ready_write = os.pipe()
     os.set_inheritable(ready_write, True)
-    argv = python_code_argv(
+    bootstrap = python_code_argv(
         "import sys\n"
         "from automated_security_helper.express.daemon import serve\n"
         "serve(idle_timeout=float(sys.argv[1]), ready_fd=int(sys.argv[2]))\n"
-    ) + [str(float(idle)), str(ready_write)]
+    )
+    # This client's import flags (-s, -E, -I) go to the daemon's interpreter, so
+    # it imports the package set its client sees and computes its client's
+    # socket key (runtime.interpreter_shape).
+    argv = (
+        bootstrap[:1]
+        + runtime.interpreter_flags()
+        + bootstrap[1:]
+        + [str(float(idle)), str(ready_write)]
+    )
     # The daemon's own stdout/stderr go to the express log file, as the
     # autostart path arranges with its dup2s.
     log = os.open(os.fspath(log_file), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)

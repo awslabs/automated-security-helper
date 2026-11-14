@@ -35,6 +35,7 @@ import os
 import socket
 import struct
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Optional
 
@@ -204,7 +205,10 @@ def _site_directories() -> list[str]:
         import site
 
         directories = list(site.getsitepackages())
-        directories.append(site.getusersitepackages())
+        # An interpreter started with -s or -I never imports from the user
+        # site, so its package set must not list it either.
+        if not sys.flags.no_user_site:
+            directories.append(site.getusersitepackages())
     except Exception:  # noqa: BLE001 - a -S interpreter has no site module
         directories = [
             entry for entry in sys.path if entry and "site-packages" in entry
@@ -340,6 +344,15 @@ def interpreter_shape(environ: Optional[Mapping[str, str]] = None) -> str:
     the scrub, so a daemon computes the same text from its environment that its
     starting client computed from theirs. The names are spelled as literals
     where they are read so the environment-variable reference resolves them.
+
+    The interpreter's own flags are part of it too: a client started with ``-s``
+    (no user site), ``-E`` or ``-I`` (a console script whose shebang says
+    ``python -sP``) imports a different package set than a default one, and a
+    daemon spawned without the flag would import user-site packages its client
+    never sees -- the same command returning different findings warm and cold.
+    The flags are keyed here AND handed to a spawned daemon
+    (:func:`interpreter_flags`), so the daemon's own flags, and therefore the key
+    it computes, are its client's. (A forked autostart inherits them.)
     """
     if environ is None:
         environ = snapshot_environ()
@@ -351,8 +364,30 @@ def interpreter_shape(environ: Optional[Mapping[str, str]] = None) -> str:
             environ.get("PYTHONUSERBASE", ""),
             environ.get("PYTHONNOUSERSITE", ""),
             environ.get("VIRTUAL_ENV", ""),
+            (
+                f"s{sys.flags.no_user_site}E{sys.flags.ignore_environment}"
+                f"I{sys.flags.isolated}"
+            ),
         )
     )
+
+
+def interpreter_flags() -> list[str]:
+    """The option letters that give a new interpreter this one's import flags.
+
+    ``-I`` when this interpreter is isolated (it implies the other two), else
+    ``-s`` and ``-E`` as they are set. A daemon spawned with these has the
+    flags of the client that started it, so it imports the package set that
+    client sees (:func:`interpreter_shape` keys the same flags).
+    """
+    if sys.flags.isolated:
+        return ["-I"]
+    flags = []
+    if sys.flags.no_user_site:
+        flags.append("-s")
+    if sys.flags.ignore_environment:
+        flags.append("-E")
+    return flags
 
 
 def socket_key(
@@ -477,6 +512,56 @@ def socket_path(environ: Optional[Mapping[str, str]] = None) -> Path:
             f"-byte AF_UNIX limit this module binds within: {path}"
         )
     return path
+
+
+#: How long an autostart backs off after a daemon retired itself because its
+#: warm imports left extra threads (a fork of such a process is unsafe). Starting
+#: another one would pay the whole warm-import cost to retire the same way, once
+#: per scan -- per commit in a pre-commit flow. The marker is a file beside the
+#: socket whose name carries the cause and whose mtime is the retirement.
+RETIRE_BACKOFF_SECONDS = 600.0
+_RETIRED_SUFFIX = ".retired-threads"
+
+
+def mark_retired_for_threads(path: "os.PathLike[str] | str") -> None:
+    """Record, beside the socket at *path*, that a daemon retired over threads."""
+    marker = Path(os.fspath(path) + _RETIRED_SUFFIX)
+    try:
+        marker.touch(mode=0o600, exist_ok=True)
+        os.utime(marker)
+    except OSError:
+        pass
+
+
+def clear_retirement(path: "os.PathLike[str] | str") -> None:
+    """Forget a recorded retirement (a daemon that serves has bound the socket)."""
+    try:
+        os.unlink(os.fspath(path) + _RETIRED_SUFFIX)
+    except OSError:
+        pass
+
+
+def recent_retirement(
+    path: "os.PathLike[str] | str", now: Optional[float] = None
+) -> Optional[str]:
+    """The reason a daemon recently retired itself at *path*, or None.
+
+    Fresh means younger than :data:`RETIRE_BACKOFF_SECONDS`. The only reason is
+    ``"threads"``: the warm imports left more than one thread running.
+    """
+    try:
+        age = (time.time() if now is None else now) - os.stat(
+            os.fspath(path) + _RETIRED_SUFFIX
+        ).st_mtime
+    except OSError:
+        return None
+    return "threads" if 0 <= age < RETIRE_BACKOFF_SECONDS else None
+
+
+RETIRED_FOR_THREADS_TEXT = (
+    "the daemon retired itself because its warm imports left extra threads "
+    "running, and a fork of a multi-threaded process is unsafe; scans run cold"
+)
 
 
 def log_path(environ: Optional[Mapping[str, str]] = None) -> Path:

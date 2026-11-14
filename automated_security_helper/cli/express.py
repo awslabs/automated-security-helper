@@ -185,7 +185,19 @@ def start_daemon(
     # just launched (a concurrent start's winner, or a daemon the stop missed,
     # answers too), so the claim is checked against what answers: a daemon
     # this invocation's scans would use has this fingerprint and protocol.
-    running = client.control_request(path, {"op": "status"})
+    # At the handshake budget, not the connect probe's few seconds: a fresh
+    # daemon answers only once its warm imports finish, and a healthy one must
+    # not read as unusable because it was asked too soon.
+    running = client.control_request(
+        path, {"op": "status"}, timeout=runtime.HANDSHAKE_TIMEOUT_SECONDS
+    )
+    if running is None and runtime.recent_retirement(path):
+        echo(
+            f"the express daemon came up and then retired itself: "
+            f"{runtime.RETIRED_FOR_THREADS_TEXT}. Its log is {runtime.log_path()}",
+            err=True,
+        )
+        raise typer.Exit(1)
     if (
         not isinstance(running, dict)
         or not running.get("ok")

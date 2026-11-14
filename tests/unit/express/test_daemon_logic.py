@@ -228,6 +228,8 @@ class TestRetiresWhenWarmImportsLeaveThreads:
         daemon.run()
         assert shutdowns == [True]
         assert any("exiting so scans run cold" in line for line in lines), lines
+        # The cause is readable beside the socket, for `start` and the backoff.
+        assert runtime.recent_retirement(tmp_path / "x.sock") == "threads"
 
 
 class _TickingClock:

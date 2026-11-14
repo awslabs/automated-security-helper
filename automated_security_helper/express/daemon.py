@@ -348,6 +348,8 @@ class ExpressDaemon:
             self._socket_inode = None
         self.listener.listen(64)
         self.listener.setblocking(False)
+        # A daemon that serves has bound: an earlier retirement is history.
+        runtime.clear_retirement(path)
         self.selector.register(self.listener, selectors.EVENT_READ, self._accept)
         self.selector.register(self._wakeup_read, selectors.EVENT_READ, self._drain)
         signal.set_wakeup_fd(self._wakeup_write, warn_on_full_buffer=False)
@@ -389,6 +391,12 @@ class ExpressDaemon:
                     "(a fork of a multi-threaded process is unsafe); exiting so "
                     "scans run cold"
                 )
+                # Said where a client can read it: a marker beside the socket.
+                # `ash express start` names this cause instead of a mismatch,
+                # and an autostart backs off while the marker is fresh instead
+                # of paying the whole warm-import cost to retire the same way
+                # on every scan.
+                runtime.mark_retired_for_threads(runtime.socket_path())
                 return
             while True:
                 for key, _ in self.selector.select(timeout=1.0):

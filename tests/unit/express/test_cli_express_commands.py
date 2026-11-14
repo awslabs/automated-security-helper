@@ -144,7 +144,7 @@ class TestStartLaunchPath:
         monkeypatch.setattr(
             client,
             "control_request",
-            lambda *_: _matching_status() if "spawn" in calls else None,
+            lambda *_, **__: _matching_status() if "spawn" in calls else None,
         )
         monkeypatch.setattr(
             client,
@@ -221,9 +221,12 @@ class TestStartVerifiesWhatItClaims:
         calls = []
         queue = list(answers)
 
-        def control(path, frame):
+        def control(path, frame, timeout=None):
             calls.append(("control", frame["op"]))
+            self.timeouts.append(timeout)
             return queue.pop(0) if len(queue) > 1 else queue[0]
+
+        self.timeouts = []
 
         monkeypatch.setattr(client, "control_request", control)
         monkeypatch.setattr(client, "stop_daemon", lambda path: calls.append("stop"))
@@ -236,6 +239,35 @@ class TestStartVerifiesWhatItClaims:
         monkeypatch.setattr(client, "daemon_lock_is_held", lambda path: False)
         monkeypatch.setattr(runtime, "log_path", lambda: tmp_path / "express.log")
         return calls
+
+    def test_the_post_start_status_query_waits_the_handshake_budget(
+        self, socket_path, tmp_path, monkeypatch
+    ):
+        """A fresh daemon answers only after its warm imports (the handshake
+        budget, 30 s), so the query that decides "started" must not use the
+        connect probe's few seconds. A hermetic slow-import daemon is not
+        feasible in the unit tier; this pins the timeout the start path asks
+        for, and the client test below pins that control_request applies it."""
+        self._wire(monkeypatch, tmp_path, [None, _matching_status()])
+        result = runner.invoke(express_app, ["start"])
+        assert result.exit_code == 0, _all_output(result)
+        # The first query is the pre-start probe (default timeout); the one
+        # after the spawn carries the handshake budget.
+        assert self.timeouts[0] is None
+        assert self.timeouts[-1] == runtime.HANDSHAKE_TIMEOUT_SECONDS
+        assert runtime.HANDSHAKE_TIMEOUT_SECONDS > runtime.CONNECT_TIMEOUT_SECONDS
+
+    def test_a_daemon_that_retired_over_threads_is_named_as_the_cause(
+        self, socket_path, tmp_path, monkeypatch
+    ):
+        self._wire(monkeypatch, tmp_path, [None, None])
+        runtime.mark_retired_for_threads(socket_path)
+        result = runner.invoke(express_app, ["start"])
+        assert result.exit_code == 1, _all_output(result)
+        output = _all_output(result)
+        assert "retired itself" in output and "extra threads" in output
+        assert "fingerprint" not in output
+        assert "express daemon started" not in output
 
     def test_a_stale_daemon_that_survives_the_stop_is_a_failure_not_a_start(
         self, socket_path, tmp_path, monkeypatch

@@ -735,6 +735,13 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
             "O_CREAT and write-only only to probe the flock; no bytes are written"
         ),
     ),
+    (f"{_ASH}/express/runtime.py", "mark_retired_for_threads", "touch"): (
+        1,
+        (
+            "the express runtime directory (an empty marker file beside the "
+            "socket, 0600, whose mtime says when a daemon retired itself)"
+        ),
+    ),
     (f"{_ASH}/express/client.py", "_remove_if_dead", "os.open"): (
         1,
         (
