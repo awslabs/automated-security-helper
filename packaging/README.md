@@ -100,6 +100,7 @@ staged set.
 
 To check a downloaded asset, with the GitHub CLI:
 
+<!-- doctest: illustrative reason="verifies a release asset the reader has downloaded, and needs a GitHub login" -->
 ```bash
 # Any asset, by its file name. The attestation names the workflow that built and
 # attested it, so pin that too.
