@@ -53,7 +53,6 @@ import http.server
 import importlib.util
 import json
 import re
-import ssl
 import sys
 import tempfile
 import threading
@@ -65,6 +64,7 @@ import pytest
 import yaml
 
 from ash_operator.constants import PHASE_FINDINGS
+from tests.e2e.ca_bundle import system_ca_bundle_path
 from tests.e2e.helpers import (
     CLUSTER_NAME,
     GROUP,
@@ -353,9 +353,7 @@ def operator_available() -> bool:
 
 def system_ca_bundle() -> str:
     """A real PEM bundle that did not sign kind's API server certificate."""
-    cafile = ssl.get_default_verify_paths().cafile
-    assert cafile and Path(cafile).is_file(), ssl.get_default_verify_paths()
-    return base64.b64encode(Path(cafile).read_bytes()).decode("ascii")
+    return base64.b64encode(system_ca_bundle_path().read_bytes()).decode("ascii")
 
 
 ASHSCAN_PROBE = {
