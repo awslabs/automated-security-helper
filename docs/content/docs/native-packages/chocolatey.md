@@ -42,7 +42,7 @@ The install script creates a virtualenv in `%ProgramData%\ash\venv`, installs th
 - `ashv3`, deprecated, which warns once on stderr
 - `automated-security-helper`, kept indefinitely and silent
 
-It does not shim `ash`. MSYS2 and Git for Windows ship the Almquist shell as ash.exe, and when that is earlier on `PATH` a bare `ash` reaches the shell instead of ASH.
+It does not shim `ash`. MSYS2 and Git for Windows ship the Almquist shell as an executable named `ash`, and when that is earlier on `PATH` a bare `ash` reaches the shell instead of ASH.
 
 ## Run it
 

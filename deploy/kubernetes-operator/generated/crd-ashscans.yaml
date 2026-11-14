@@ -266,9 +266,7 @@ spec:
                           - MEDIUM
                           - HIGH
                           - CRITICAL
-                        - description: An environment reference, resolved to the variable's value when
-                            the file is loaded.
-                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                        - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                         description: Global minimum severity level to consider findings as failures across
                           all scanners
                       ignore_paths:
@@ -551,9 +549,7 @@ spec:
                           - firejail
                           - landlock
                           - sandbox-exec
-                        - description: An environment reference, resolved to the variable's value when
-                            the file is loaded.
-                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                        - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                         description: 'How scanner subprocesses are confined. ''off'' runs them as plain
                           subprocesses. ''auto'' uses the best sandbox available (Linux: bwrap, then firejail,
                           then landlock; macOS: sandbox-exec). Any other value requires that backend.
@@ -628,9 +624,7 @@ spec:
                     - enum:
                       - fail
                       - warn
-                    - description: An environment reference, resolved to the variable's value when the
-                        file is loaded.
-                      pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                    - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                     description: What a scan does when a scanner's content database (grype's or trivy's
                       vulnerability database, the offline opengrep rulesets) was built longer ago than
                       the bound declared for it in automated_security_helper/utils/content_databases.py.
@@ -680,9 +674,7 @@ spec:
                           - enum:
                             - fail
                             - warn
-                          - description: An environment reference, resolved to the variable's value when
-                              the file is loaded.
-                            pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                          - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           description: The policy this database is held to while the entry is in effect.
                         expiration:
                           description: 'Required. The date (YYYY-MM-DD, UTC) from which the entry no longer
@@ -695,9 +687,7 @@ spec:
                           type: string
                           anyOf:
                           - minLength: 1
-                          - description: An environment reference, resolved to the variable's value when
-                              the file is loaded.
-                            pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                          - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           description: Required. Why this database is held differently.
                       required:
                       - database
@@ -739,9 +729,7 @@ spec:
                         - enum:
                           - ONLINE
                           - OFFLINE
-                        - description: An environment reference, resolved to the variable's value when
-                            the file is loaded.
-                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                        - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                         description: 'Not used: nothing reads this setting, so it changes neither the
                           container image build nor the scan. To scan offline, pass --offline or set ASH_OFFLINE.'
                       tool_install_scripts:
@@ -807,9 +795,7 @@ spec:
                                   anyOf:
                                   - minLength: 1
                                     pattern: ^[a-zA-Z][\w-]+$
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                   description: Name of the component using letters, numbers, underscores
                                     and hyphens. Must begin with a letter.
                                 enabled:
@@ -827,9 +813,7 @@ spec:
                                         - MEDIUM
                                         - HIGH
                                         - CRITICAL
-                                      - description: An environment reference, resolved to the variable's
-                                          value when the file is loaded.
-                                        pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                      - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                       description: Minimum severity level to consider findings as failures.
                                         This is a scanner-level override of the default severity-level
                                         within ASH of MEDIUM.
@@ -917,9 +901,7 @@ spec:
                                           - choco
                                           - custom
                                           - url
-                                        - description: An environment reference, resolved to the variable's
-                                            value when the file is loaded.
-                                          pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                        - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                     required:
                                     - name
                                     type: object
@@ -993,8 +975,7 @@ spec:
                             tool_type:
                               type: string
                               anyOf:
-                              - description: Type of scanner tool.
-                                enum:
+                              - enum:
                                 - SAST
                                 - DAST
                                 - SCA
@@ -1004,9 +985,7 @@ spec:
                                 - SBOM
                                 - CUSTOM
                                 - UNKNOWN
-                              - description: An environment reference, resolved to the variable's value
-                                  when the file is loaded.
-                                pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                              - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                               description: Type of scanner tool.
                             subcommands:
                               description: Subcommands to include when invoking the scanner, e.g. ['scan']
@@ -1067,9 +1046,7 @@ spec:
                             anyOf:
                             - enum:
                               - archive
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1105,9 +1082,7 @@ spec:
                             anyOf:
                             - enum:
                               - jupyter
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1135,9 +1110,7 @@ spec:
                             anyOf:
                             - enum:
                               - actionlint
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1151,9 +1124,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1215,9 +1186,7 @@ spec:
                             anyOf:
                             - enum:
                               - bandit
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1231,9 +1200,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1268,9 +1235,7 @@ spec:
                                 type: string
                                 anyOf:
                                 - pattern: ^(all|low|medium|high)$
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Confidence level for bandit scan (all, low, medium, high)
                               ignore_nosec:
                                 x-kubernetes-preserve-unknown-fields: true
@@ -1337,9 +1302,7 @@ spec:
                             anyOf:
                             - enum:
                               - cdk-nag
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1354,9 +1317,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1409,9 +1370,7 @@ spec:
                             anyOf:
                             - enum:
                               - cfn-guard
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1425,9 +1384,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1481,9 +1438,7 @@ spec:
                             anyOf:
                             - enum:
                               - cfn-lint
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1497,9 +1452,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1600,9 +1553,7 @@ spec:
                             anyOf:
                             - enum:
                               - cfn-nag
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1616,9 +1567,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1643,9 +1592,7 @@ spec:
                             anyOf:
                             - enum:
                               - checkov
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1659,9 +1606,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1748,9 +1693,7 @@ spec:
                                     - gitlab_sast
                                     - sarif
                                     - spdx
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               frameworks:
                                 description: Specific frameworks to include with Checkov. Defaults to
@@ -1795,9 +1738,7 @@ spec:
                                     - sast_typescript
                                     - sast_golang
                                     - 3d_policy
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               skip_frameworks:
                                 description: Specific frameworks to exclude with Checkov. Defaults to
@@ -1842,9 +1783,7 @@ spec:
                                     - sast_typescript
                                     - sast_golang
                                     - 3d_policy
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               skip_ash_output_dir:
                                 x-kubernetes-preserve-unknown-fields: true
@@ -1873,9 +1812,7 @@ spec:
                             anyOf:
                             - enum:
                               - detect-secrets
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -1889,9 +1826,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -1993,9 +1928,7 @@ spec:
                             anyOf:
                             - enum:
                               - gitleaks
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2009,9 +1942,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -2078,9 +2009,7 @@ spec:
                             anyOf:
                             - enum:
                               - grype
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2094,9 +2023,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 nullable: true
                               scan_timeout:
                                 x-kubernetes-preserve-unknown-fields: true
@@ -2133,9 +2060,7 @@ spec:
                             anyOf:
                             - enum:
                               - npm-audit
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2149,9 +2074,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -2181,9 +2104,7 @@ spec:
                             anyOf:
                             - enum:
                               - opengrep
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2197,9 +2118,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -2241,9 +2160,7 @@ spec:
                                     - INFO
                                     - WARNING
                                     - ERROR
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               metrics:
                                 type: string
@@ -2252,9 +2169,7 @@ spec:
                                   - auto
                                   - 'on'
                                   - 'off'
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Configures how usage metrics are sent to the OpenGrep server.
                                   Deprecated in Opengrep v1.7.0+. This configuration is ignored if the
                                   installed version is >= 1.7.0.
@@ -2271,9 +2186,7 @@ spec:
                                   type: string
                                   anyOf:
                                   - pattern: ^[0-9a-fA-F]{64}$
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: SHA256 of the OpenGrep release asset for a custom `version`,
                                   keyed by platform/arch (e.g. linux/amd64). Required for any version
                                   other than the one ASH pins; ignored for the pinned version, whose digests
@@ -2291,9 +2204,7 @@ spec:
                             anyOf:
                             - enum:
                               - syft
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2307,9 +2218,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -2391,9 +2300,7 @@ spec:
                                     - syft-json
                                     - syft-table
                                     - syft-text
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                             type: object
                             description: Configure Syft scanner
@@ -2406,9 +2313,7 @@ spec:
                             anyOf:
                             - enum:
                               - trivy
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2422,9 +2327,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -2460,9 +2363,7 @@ spec:
                                     - misconfig
                                     - secret
                                     - license
-                                  - description: An environment reference, resolved to the variable's
-                                      value when the file is loaded.
-                                    pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                  - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 minItems: 1
                                 type: array
                               license_full:
@@ -2540,9 +2441,7 @@ spec:
                             anyOf:
                             - enum:
                               - zizmor
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2556,9 +2455,7 @@ spec:
                                   - MEDIUM
                                   - HIGH
                                   - CRITICAL
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: Minimum severity level to consider findings as failures.
                                   This is a scanner-level override of the default severity-level within
                                   ASH of MEDIUM.
@@ -2593,9 +2490,7 @@ spec:
                                   - regular
                                   - pedantic
                                   - auditor
-                                - description: An environment reference, resolved to the variable's value
-                                    when the file is loaded.
-                                  pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 description: zizmor persona. `regular` reports the fewest false positives;
                                   `pedantic` adds code-smell findings; `auditor` reports everything, false
                                   positives included.
@@ -2650,9 +2545,7 @@ spec:
                             anyOf:
                             - enum:
                               - csv
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2669,9 +2562,7 @@ spec:
                             anyOf:
                             - enum:
                               - cyclonedx
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2688,9 +2579,7 @@ spec:
                             anyOf:
                             - enum:
                               - gitlab-cyclonedx
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2729,9 +2618,7 @@ spec:
                             anyOf:
                             - enum:
                               - html
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2749,9 +2636,7 @@ spec:
                             anyOf:
                             - enum:
                               - flat-json
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2774,9 +2659,7 @@ spec:
                             anyOf:
                             - enum:
                               - gitlab-sast
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2799,9 +2682,7 @@ spec:
                             anyOf:
                             - enum:
                               - github-ghas
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2832,9 +2713,7 @@ spec:
                             anyOf:
                             - enum:
                               - junitxml
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2853,9 +2732,7 @@ spec:
                             anyOf:
                             - enum:
                               - markdown
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2887,9 +2764,7 @@ spec:
                             anyOf:
                             - enum:
                               - ocsf
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2906,9 +2781,7 @@ spec:
                             anyOf:
                             - enum:
                               - sarif
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2925,9 +2798,7 @@ spec:
                             anyOf:
                             - enum:
                               - spdx
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2945,9 +2816,7 @@ spec:
                             anyOf:
                             - enum:
                               - text
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2975,9 +2844,7 @@ spec:
                             anyOf:
                             - enum:
                               - unused-suppressions
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:
@@ -2996,9 +2863,7 @@ spec:
                             anyOf:
                             - enum:
                               - yaml
-                            - description: An environment reference, resolved to the variable's value
-                                when the file is loaded.
-                              pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                            - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                           enabled:
                             x-kubernetes-preserve-unknown-fields: true
                           options:

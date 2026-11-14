@@ -40,6 +40,9 @@ const STACKS: Array<[string, CfnTemplate]> = [
   ['AshCodeCommitGate', synth((app) => new AshCodeCommitGateStack(app, 'AshCodeCommitGate'))],
 ];
 
+const PROJECT_NAME = 'ash-image-build-project';
+const KEY_ARN = 'arn:aws:kms:us-east-1:000000000000:key/stack-key';
+
 /** A response URL shaped like CloudFormation's: pre-signed, with a signature the checks look for. */
 const SIGNATURE = 'response-url-signature-marker';
 function responseUrl(base = 'https://cloudformation-custom-resource-response-useast1.s3.amazonaws.com'): string {
@@ -152,7 +155,9 @@ function runStarter(template: CfnTemplate, requestType: string, url = responseUr
       RequestId: 'request-1',
       LogicalResourceId: 'ImageBootstrapBuild',
       ResourceType: 'Custom::AshImageBootstrap',
-      ResourceProperties: {},
+      // The starter reads the project and the key from the resource's properties and has
+      // no environment of its own.
+      ResourceProperties: { ProjectName: PROJECT_NAME, KeyArn: KEY_ARN },
     };
     const result = spawnSync(python3(), [path.join(dir, 'driver.py'), path.join(dir, 'index.py'), JSON.stringify(event)], {
       encoding: 'utf-8',
@@ -224,12 +229,11 @@ function buildEnvironment(run: StarterRun): Record<string, string> {
 
 describe.each(STACKS)('%s bootstrap starter', (_name, template) => {
   test('control: a Create starts the image build project, and only that', () => {
-    const { env } = starter(template);
     const run = runStarter(template, 'Create');
 
     expect(run.status).toBe(0);
     const builds = run.calls.filter((c) => c.service === 'codebuild' && c.method === 'start_build');
-    expect(builds.map((c) => c.kwargs.projectName)).toEqual([env.PROJECT_NAME]);
+    expect(builds.map((c) => c.kwargs.projectName)).toEqual([PROJECT_NAME]);
   });
 
   test('control: a Delete answers CloudFormation SUCCESS at the response URL', () => {

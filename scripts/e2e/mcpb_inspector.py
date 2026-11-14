@@ -31,9 +31,9 @@ WHAT IT DOES, IN ORDER
 3. Over stdio, the transport a desktop host uses, the head launch must complete the
    handshake and list the tools a scan needs. Then one scan over stdio, the findings
    case, held to the same verdict as the others (see the next section for how).
-4. The three cases from tests/e2e/fixtures/cases.json over streamable HTTP:
-   `tools/call run_ash_scan`, then `get_scan_progress` until the scan is terminal,
-   then `get_scan_summary`.
+4. The clean and incomplete cases from tests/e2e/fixtures/cases.json, each over one
+   held stdio session like the findings case of step 3: `tools/call run_ash_scan`,
+   then `get_scan_progress` until the scan is terminal, then `get_scan_summary`.
 5. Uninstall. A bundle installs nothing outside the uv cache, so the cache is the
    install. A relaunch with UV_OFFLINE=1 must succeed before `uv cache clean` (the
    control that makes the next step mean something) and must fail after it.
@@ -41,29 +41,29 @@ WHAT IT DOES, IN ORDER
    must fail the handshake; a two-member archive must be refused; and the findings
    case's real output judged as a clean outcome must be rejected.
 
-WHY THE SCAN CASES RUN OVER STREAMABLE HTTP
+WHY THE SCAN CASES HOLD ONE STDIO SESSION
 
 `mcp-inspector --cli` is one-shot: it spawns the server, makes one request, and
 closes the transport, which ends the server process. `run_ash_scan` returns as soon
-as the scan has started and the scan runs inside that process, so over stdio the
-scan dies with it. Measured on 2.8.0; not re-measured on 2.9.0: the reply carried a scan id and
-status "running", the process was gone a moment later, and reports/ was empty. The
-scan registry is in memory, so a second stdio launch cannot poll the first one's
+as the scan has started and the scan runs inside that process, so over one-shot stdio
+the scan dies with it. Measured on 2.8.0; not re-measured on 2.9.0: the reply carried a
+scan id and status "running", the process was gone a moment later, and reports/ was
+empty. The scan registry is in memory, so a second launch cannot poll the first one's
 scan either.
 
-So each case launches the bundle's command with `--transport streamable-http` on a
-loopback port appended, and every Inspector call connects to that one long-lived
-process. Nothing else about the command changes. The stdio launch is still exercised
-by steps 2, 3 and 5 with the command exactly as the bundle has it.
+Streamable HTTP does not cure that. The server keeps a scan under the session that
+started it, and every one-shot Inspector call over HTTP opens a session of its own, so
+the get_scan_progress after a run_ash_scan answered scan_not_found (measured on the
+head bundle, run 43552901838).
 
 A desktop host is not one-shot: it keeps the stdio session open, which is how a scan
-survives there. So step 3 also scans the findings case over stdio with a client of
-this script's own (StdioSession): it launches the bundle's command exactly as the
-bundle has it, keeps the session open, and makes the same run_ash_scan,
-get_scan_progress and get_scan_summary calls the HTTP cases make through the
-Inspector. It is a minimal client on purpose, newline-delimited JSON-RPC as the MCP
-stdio transport defines it, and it refuses anything on the server's stdout that is not
-JSON-RPC, because a desktop host would.
+survives there. So every scan case runs over a client of this script's own
+(StdioSession): it launches the bundle's command exactly as the bundle has it, keeps
+the session open, and makes the run_ash_scan, get_scan_progress and get_scan_summary
+calls. It is a minimal client on purpose, newline-delimited JSON-RPC as the MCP stdio
+transport defines it, and it refuses anything on the server's stdout that is not
+JSON-RPC, because a desktop host would. The HTTP transport stays in run_case for a
+caller that wants it.
 
 `run_ash_workspace_scan` is synchronous and would work over stdio, and it was
 rejected. A workspace answers 2 when a project has findings and an incomplete
@@ -1163,7 +1163,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         head_command = [head_config["command"], *head_config["args"]]
         # One scan over the transport the bundle declares, with the command exactly
         # as the bundle has it, in a session held open the way a desktop host holds it.
-        run_case(
+        outputs = {}
+        outputs["findings"] = run_case(
             inspector,
             head_command,
             server_env,
@@ -1174,8 +1175,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             version,
             transport="stdio",
         )
-        outputs = {}
-        for case_name in ("findings", "clean", "incomplete"):
+        # The other two cases hold a session too. The head server keeps a scan under
+        # the session that started it (a poll from another session answers
+        # scan_not_found), and every one-shot Inspector call over HTTP opens a session
+        # of its own, so run_ash_scan and the get_scan_progress after it never shared one.
+        for case_name in ("clean", "incomplete"):
             outputs[case_name] = run_case(
                 inspector,
                 head_command,
@@ -1185,6 +1189,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 case_name,
                 case_name,
                 version,
+                transport="stdio",
             )
 
         say(
