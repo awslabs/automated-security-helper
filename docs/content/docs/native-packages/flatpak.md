@@ -91,7 +91,7 @@ Without `flatpak uninstall --delete-data`, the virtualenv and anything else the 
 
 ## Offline hosts
 
-Stage a wheelhouse in a directory the sandbox can see, such as `/srv`. Resolve it from ASH's own wheel, on a machine that can reach an index. Do not run `pip download automated-security-helper`: that name on PyPI belongs to an unrelated third party, not to this project.
+Stage a wheelhouse in a directory the sandbox can see, such as `/srv`. Resolve it from ASH's own wheel, on a machine that can reach an index. Do not download ASH by its name from an index: the name `automated-security-helper` on PyPI belongs to an unrelated third party, not to this project.
 
 <!-- doctest: illustrative reason="the wheel's version is the reader's, and the host is offline" -->
 ```bash
