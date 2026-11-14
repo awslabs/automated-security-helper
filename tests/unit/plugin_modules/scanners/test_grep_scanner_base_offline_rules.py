@@ -33,23 +33,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
-)
 
 pytestmark = pytest.mark.unit
 
 
 SCANNERS = [
-    pytest.param(
-        SemgrepScanner,
-        SemgrepScannerConfig,
-        SemgrepScannerConfigOptions,
-        "SEMGREP_RULES_CACHE_DIR",
-        id="semgrep",
-    ),
     pytest.param(
         OpengrepScanner,
         OpengrepScannerConfig,
@@ -236,25 +224,6 @@ def test_a_relative_cache_directory_reaches_the_tool_as_an_absolute_path(
     configs = _configs(scanner)
     assert "rules" not in configs, configs
     assert Path(os.getcwd()) / "rules" in [Path(value) for value in configs], configs
-
-
-def test_semgrep_rules_environment_names_the_cache_absolutely(
-    test_plugin_context, tmp_path, monkeypatch
-):
-    """``SEMGREP_RULES``, which semgrep reads in the source directory, names the
-    validated cache directory, not the relative spelling."""
-    (tmp_path / "rules").mkdir()
-    (tmp_path / "rules" / "ci.yaml").write_text(RULE, encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", "rules")
-
-    scanner = SemgrepScanner(
-        context=test_plugin_context,
-        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=True)),
-    )
-
-    env = scanner.extra_subprocess_env() or {}
-    assert env.get("SEMGREP_RULES") == f"{os.path.join(os.getcwd(), 'rules')}/*"
 
 
 @pytest.mark.parametrize(

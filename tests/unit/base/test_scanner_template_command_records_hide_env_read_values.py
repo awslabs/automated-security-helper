@@ -27,8 +27,8 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.config import resolve_config as resolve_config_module
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.config_validator import REDACTED
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScanner,
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -48,7 +48,7 @@ EMPTY_SARIF = {
     "version": "2.1.0",
     "runs": [
         {
-            "tool": {"driver": {"name": "semgrep", "version": "1.0.0", "rules": []}},
+            "tool": {"driver": {"name": "opengrep", "version": "1.0.0", "rules": []}},
             "results": [],
         }
     ],
@@ -62,11 +62,11 @@ def _scan(
     environment_value=RULESET_FROM_ENVIRONMENT,
     values_hook=None,
 ):
-    """Scan with a fake semgrep, the ``config`` option written as ``config_line``.
+    """Scan with a fake opengrep, the ``config`` option written as ``config_line``.
 
     ``values_hook`` replaces the scanner's ``_values_to_redact`` for the scan.
     """
-    monkeypatch.setenv("ASH_TEST_SEMGREP_RULESET", environment_value)
+    monkeypatch.setenv("ASH_TEST_OPENGREP_RULESET", environment_value)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     config_file = tmp_path / "operator" / ".ash.yaml"
@@ -74,7 +74,7 @@ def _scan(
     config_file.write_text(
         "project_name: command-record-project\n"
         "scanners:\n"
-        "  semgrep:\n"
+        "  opengrep:\n"
         "    enabled: true\n"
         "    options:\n"
         f"      config: {config_line}\n",
@@ -86,9 +86,9 @@ def _scan(
     (source / "app.py").write_text("x = 1\n")
     output = tmp_path / "out"
     output.mkdir()
-    scanner = SemgrepScanner(
+    scanner = OpengrepScanner(
         context=PluginContext(source_dir=source, output_dir=output, config=config),
-        config=config.get_plugin_config(plugin_type="scanner", plugin_name="semgrep"),
+        config=config.get_plugin_config(plugin_type="scanner", plugin_name="opengrep"),
     )
     scanner.dependencies_satisfied = True
     argv = []
@@ -103,7 +103,7 @@ def _scan(
         # The version probe would start the tool; no tool starts in this cell.
         patch.object(scanner, "resolve_deferred_tool_version"),
         patch.object(scanner, "_run_subprocess", side_effect=fake_run),
-        patch.object(SemgrepScanner, "_values_to_redact", values_hook)
+        patch.object(OpengrepScanner, "_values_to_redact", values_hook)
         if values_hook is not None
         else nullcontext(),
     ):
@@ -122,7 +122,7 @@ def _recorded_invocations(report):
 def test_an_option_read_from_the_environment_is_hidden_in_the_recorded_command(
     tmp_path, monkeypatch
 ):
-    report, argv = _scan(tmp_path, monkeypatch, "!ENV ${ASH_TEST_SEMGREP_RULESET}")
+    report, argv = _scan(tmp_path, monkeypatch, "!ENV ${ASH_TEST_OPENGREP_RULESET}")
 
     assert RULESET_FROM_ENVIRONMENT in argv, argv
     invocation, details = _recorded_invocations(report)
@@ -151,7 +151,7 @@ def test_an_environment_value_holding_a_quote_is_hidden_in_the_recorded_command(
     report, argv = _scan(
         tmp_path,
         monkeypatch,
-        "!ENV ${ASH_TEST_SEMGREP_RULESET}",
+        "!ENV ${ASH_TEST_OPENGREP_RULESET}",
         environment_value=RULESET_WITH_QUOTE,
     )
 
@@ -427,7 +427,7 @@ def test_a_failed_values_hook_is_logged_once_without_naming_an_argument(
     lines = _values_hook_lines(warning)
     assert len(lines) == 1, warning.call_args_list
     assert wording in lines[0], lines[0]
-    assert "SemgrepScanner" in lines[0], lines[0]
+    assert "OpengrepScanner" in lines[0], lines[0]
     assert RULESET_WRITTEN_OUT not in lines[0]
     assert "--config" not in lines[0]
     _assert_records_carry_only_the_command(report, argv)

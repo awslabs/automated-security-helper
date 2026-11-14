@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""semgrep and opengrep scan the converted target, and read git-ignored files when asked.
+"""opengrep scans the converted target, and reads git-ignored files when asked.
 
 Both scanners' ``exclude`` option defaults to ``*-converted.py``, the name the jupyter
 converter gives every notebook it converts. The converted target holds nothing else,
@@ -37,23 +37,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
-)
 
 pytestmark = pytest.mark.unit
 
 
 SCANNERS = [
-    pytest.param(
-        SemgrepScanner,
-        SemgrepScannerConfig,
-        SemgrepScannerConfigOptions,
-        "SEMGREP_RULES_CACHE_DIR",
-        id="semgrep",
-    ),
     pytest.param(
         OpengrepScanner,
         OpengrepScannerConfig,

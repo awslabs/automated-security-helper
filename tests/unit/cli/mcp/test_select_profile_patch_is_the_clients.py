@@ -375,10 +375,12 @@ def test_an_override_yaml_value_is_the_clients_too(_server) -> None:
     assert notes
 
 
-# trivy-repo and semgrep are in the always-denied floor (ALWAYS_DENIED_PATHS). On
+# trivy-repo and opengrep are in the always-denied floor (ALWAYS_DENIED_PATHS). On
 # every client route the floor leaves their exclusion options to resolution,
 # which moves them out of the options, and still refuses anything else the
-# change writes in their sections.
+# change writes in their sections. (``semgrep`` is an alias served by opengrep:
+# a profile's ``scanners.semgrep`` section is folded onto ``scanners.opengrep``
+# at load, so a patch addresses the canonical section.)
 
 
 def _off_host_profile() -> Dict[str, Any]:
@@ -386,10 +388,10 @@ def _off_host_profile() -> Dict[str, Any]:
         "project_name": "operator",
         "scanners": {
             "trivy-repo": {"enabled": True, "options": {}},
-            "semgrep": {"enabled": True, "options": {}},
+            "opengrep": {"enabled": True, "options": {}},
         },
         "global_settings": _policy(
-            ["/scanners/trivy-repo/options/**", "/scanners/semgrep/options/**"]
+            ["/scanners/trivy-repo/options/**", "/scanners/opengrep/options/**"]
         ),
     }
 
@@ -455,18 +457,18 @@ def test_a_change_to_an_off_host_scanners_other_option_is_still_refused(
         pytest.param(
             {
                 "op": "add",
-                "path": "/scanners/semgrep/options/exclude/-",
+                "path": "/scanners/opengrep/options/exclude/-",
                 "value": {"x": 1},
             },
-            id="semgrep-dict-entry",
+            id="opengrep-dict-entry",
         ),
         pytest.param(
             {
                 "op": "replace",
-                "path": "/scanners/semgrep/options/exclude",
+                "path": "/scanners/opengrep/options/exclude",
                 "value": "x",
             },
-            id="semgrep-not-a-list",
+            id="opengrep-not-a-list",
         ),
         pytest.param(
             {
@@ -477,8 +479,8 @@ def test_a_change_to_an_off_host_scanners_other_option_is_still_refused(
             id="npm-audit-has-no-move",
         ),
         pytest.param(
-            {"op": "remove", "path": "/scanners/semgrep/options/exclude"},
-            id="semgrep-remove",
+            {"op": "remove", "path": "/scanners/opengrep/options/exclude"},
+            id="opengrep-remove",
         ),
     ],
 )
@@ -500,7 +502,7 @@ def test_a_patch_the_move_does_not_take_is_still_refused(_server, op) -> None:
 def test_a_patched_exclusion_leaves_no_client_value_in_an_off_host_scanners_options(
     _server, isolated_registry, executions, change: str
 ) -> None:
-    """semgrep scans what the client listed, and its findings there are marked."""
+    """opengrep scans what the client listed, and its findings there are marked."""
     document = _off_host_profile()
     _register(_server, document)
     if change == "patch_ops":
@@ -509,7 +511,7 @@ def test_a_patched_exclusion_leaves_no_client_value_in_an_off_host_scanners_opti
             patch_ops=[
                 {
                     "op": "add",
-                    "path": "/scanners/semgrep/options/exclude/-",
+                    "path": "/scanners/opengrep/options/exclude/-",
                     "value": "client-dir",
                 }
             ],
@@ -517,7 +519,7 @@ def test_a_patched_exclusion_leaves_no_client_value_in_an_off_host_scanners_opti
         config = _scanned(_server["target"], SESSION)
     elif change == "override_yaml":
         restated = yaml.safe_load(yaml.safe_dump(document))
-        restated["scanners"]["semgrep"]["options"] = {
+        restated["scanners"]["opengrep"]["options"] = {
             "exclude": ["*-converted.py", "*_report_result.txt", "client-dir"]
         }
         _bind(SESSION, override_yaml=yaml.safe_dump(restated))
@@ -528,14 +530,14 @@ def test_a_patched_exclusion_leaves_no_client_value_in_an_off_host_scanners_opti
             _server["scan_root"],
             SESSION,
             executions,
-            config_overrides=['scanners.semgrep.options.exclude+=["client-dir"]'],
+            config_overrides=['scanners.opengrep.options.exclude+=["client-dir"]'],
         )
 
-    assert "client-dir" not in _options(config, "semgrep").get("exclude", [])
+    assert "client-dir" not in _options(config, "opengrep").get("exclude", [])
     assert [
         (item.scanner, item.option, item.pattern)
         for item in config._client_scanner_exclusions
-    ] == [("semgrep", "exclude", "client-dir")]
+    ] == [("opengrep", "exclude", "client-dir")]
 
 
 # ---------------------------------------------------------------------------

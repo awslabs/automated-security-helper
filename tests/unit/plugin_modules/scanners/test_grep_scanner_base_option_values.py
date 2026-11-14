@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""How the operator's ``exclude`` and ``exclude_rule`` values reach semgrep and opengrep.
+"""How the operator's ``exclude`` and ``exclude_rule`` values reach opengrep.
 
 Both values used to travel as separate argv tokens (``--exclude`` then the pattern),
 which has two holes the class already closed for its own ignore names by writing
@@ -37,23 +37,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
-)
 
 pytestmark = pytest.mark.unit
 
 
 SCANNERS = [
-    pytest.param(
-        SemgrepScanner,
-        SemgrepScannerConfig,
-        SemgrepScannerConfigOptions,
-        "SEMGREP_RULES_CACHE_DIR",
-        id="semgrep",
-    ),
     pytest.param(
         OpengrepScanner,
         OpengrepScannerConfig,

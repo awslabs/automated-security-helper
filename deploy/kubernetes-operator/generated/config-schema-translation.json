@@ -1,17 +1,17 @@
 {
-  "additionalPropertiesDroppedAlongsideProperties": 94,
-  "collapsedOptionals": 58,
-  "constRewrittenToEnum": 33,
+  "additionalPropertiesDroppedAlongsideProperties": 92,
+  "collapsedOptionals": 57,
+  "constRewrittenToEnum": 32,
   "droppedKeywords": {
-    "default": 206,
+    "default": 199,
     "propertyNames": 1,
-    "title": 238
+    "title": 231
   },
   "exclusiveBoundsRewritten": 0,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "78acda6837fa455e",
+  "sourceSchemaSha256": "29caa37967a991e5",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",
@@ -388,22 +388,6 @@
     {
       "path": "/properties/scanners/properties/opengrep/properties/options/properties/offline",
       "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
-    },
-    {
-      "path": "/properties/scanners/properties/semgrep/properties/enabled",
-      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
-    },
-    {
-      "path": "/properties/scanners/properties/semgrep/properties/options/properties/scan_timeout",
-      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
-    },
-    {
-      "path": "/properties/scanners/properties/semgrep/properties/options/properties/offline",
-      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
-    },
-    {
-      "path": "/properties/scanners/properties/semgrep/properties/options/properties/install_timeout",
-      "reason": "a union of 2 branches with types ['integer', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
       "path": "/properties/scanners/properties/syft/properties/enabled",

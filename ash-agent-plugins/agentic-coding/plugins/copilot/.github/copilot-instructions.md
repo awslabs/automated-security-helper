@@ -1,6 +1,6 @@
 # ASH Security Scanner
 
-Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.
+Run ASH (Automated Security Helper) security scans via MCP — Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.
 
 ---
 

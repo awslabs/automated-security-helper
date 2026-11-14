@@ -208,7 +208,7 @@ scanners:
     options:
       severity_threshold: "MEDIUM"
   
-  semgrep:
+  opengrep:
     enabled: true
     options:
       severity_threshold: "MEDIUM"
@@ -2120,7 +2120,7 @@ fi
 
 ## Comparison with Other Scanners
 
-| Feature                 | Trivy            | Bandit        | Semgrep          | Checkov          |
+| Feature                 | Trivy            | Bandit        | Opengrep         | Checkov          |
 | ----------------------- | ---------------- | ------------- | ---------------- | ---------------- |
 | Vulnerability Detection | ✅ Excellent      | ❌ No          | ❌ No             | ❌ No             |
 | IaC Misconfiguration    | ✅ Good           | ❌ No          | ✅ Limited        | ✅ Excellent      |
@@ -2146,7 +2146,7 @@ scanners:
   bandit:
     enabled: true  # Python-specific SAST
   
-  semgrep:
+  opengrep:
     enabled: true  # General SAST rules
   
   checkov:

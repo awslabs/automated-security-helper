@@ -167,11 +167,11 @@ def test_the_affected_scanner_still_registers(probe):
 def test_the_unaffected_scanners_are_all_present(probe):
     """No suffix of the scanner list may be lost either.
 
-    ``scanners/__init__.py`` imports its ten scanners in one module in source
-    order, and detect-secrets is fifth. Before the guard, the five imported after
-    it -- grype, npm-audit, opengrep, semgrep, syft -- went with it.
+    ``scanners/__init__.py`` imports its nine scanners in one module in source
+    order, and detect-secrets is fifth. Before the guard, the four imported after
+    it -- grype, npm-audit, opengrep, syft -- went with it.
     """
-    for name in ("GrypeScanner", "NpmAuditScanner", "SemgrepScanner", "SyftScanner"):
+    for name in ("GrypeScanner", "NpmAuditScanner", "OpengrepScanner", "SyftScanner"):
         assert name in probe["names"]["scanners"], (
             f"{name} has no relation to detect-secrets but was lost with it: "
             f"{probe['names']['scanners']}"

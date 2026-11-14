@@ -460,7 +460,7 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
@@ -469,7 +469,7 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone
@@ -478,7 +478,7 @@
               relative:   gone
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
         Nothing has been scanned. This is a resolution and validation pass only.
@@ -508,7 +508,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
             'trivy',
             'zizmor',
@@ -542,7 +541,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
             'trivy',
             'zizmor',
@@ -576,7 +574,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
             'trivy',
             'zizmor',
@@ -627,7 +624,7 @@
               relative:   api
               config:     ASH default config
               threshold:  MEDIUM
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
@@ -636,7 +633,7 @@
               relative:   web
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
-              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+              scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor
               pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone  [skipped: error]
@@ -672,7 +669,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
             'trivy',
             'zizmor',
@@ -706,7 +702,6 @@
             'grype',
             'npm-audit',
             'opengrep',
-            'semgrep',
             'syft',
             'trivy',
             'zizmor',

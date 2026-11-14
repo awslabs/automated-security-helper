@@ -130,7 +130,6 @@ def stub_env(tmp_path):
         "WITH_RETRY_DELAY": "0",
         "TRIVY_CACHE_DIR": str(tmp_path / "trivy"),
         "GRYPE_DB_CACHE_DIR": str(tmp_path / "grype"),
-        "SEMGREP_RULES_CACHE_DIR": str(tmp_path / "semgrep"),
         "OPENGREP_RULES_CACHE_DIR": str(tmp_path / "opengrep"),
         "OFFLINE_SEMGREP_RULESETS": "p/ci p/secrets",
     }
@@ -214,12 +213,13 @@ class TestGrypeAndRulesetStep:
         )
 
     def test_every_download_landing_passes(self, shell, stub_env):
-        """The control: both rulesets land in both caches, with the fetch time."""
+        """The control: both rulesets land in the opengrep cache, with the fetch time."""
         result = _run(shell, _step(self.STEP), stub_env)
         assert result.returncode == 0, result.stderr
-        for cache in ("SEMGREP_RULES_CACHE_DIR", "OPENGREP_RULES_CACHE_DIR"):
-            names = sorted(p.name for p in Path(stub_env[cache]).iterdir())
-            assert names == [".ash-rules-fetched-at", "ci.yml", "secrets.yml"]
+        names = sorted(
+            p.name for p in Path(stub_env["OPENGREP_RULES_CACHE_DIR"]).iterdir()
+        )
+        assert names == [".ash-rules-fetched-at", "ci.yml", "secrets.yml"]
 
 
 _QUOTED = re.compile(r"'[^']*'" + r'|"(?:[^"\\]|\\.)*"')

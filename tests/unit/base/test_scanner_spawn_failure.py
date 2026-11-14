@@ -42,9 +42,9 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
+from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+    BanditScanner,
+    BanditScannerConfig,
 )
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import (
@@ -71,9 +71,9 @@ class TestSpawnFailureReturnCode:
     def test_is_127_with_the_cause_in_stderr(self, tmp_path):
         with patch(_PLAIN_RUNNER, side_effect=_EFAULT):
             response = run_command_with_output_handling(
-                ["uv", "tool", "run", "semgrep"],
+                ["uv", "tool", "run", "bandit"],
                 results_dir=tmp_path,
-                class_name="SemgrepScanner",
+                class_name="BanditScanner",
             )
 
         assert response["returncode"] == SPAWN_FAILURE_RETURNCODE == 127
@@ -82,7 +82,7 @@ class TestSpawnFailureReturnCode:
         assert "Bad address" in response["stderr"]
         # Scanners default to stderr_preference="write" and read this file to
         # explain the failure, so the cause has to be in it.
-        log = tmp_path / "SemgrepScanner.stderr.log"
+        log = tmp_path / "BanditScanner.stderr.log"
         assert "Bad address" in log.read_text()
 
     @pytest.mark.unit
@@ -192,36 +192,36 @@ def test_uv_tool_runner_carries_the_flag(tmp_path):
         patch.object(UVToolRunner, "uv_availability", return_value=(True, None)),
         patch(_PLAIN_RUNNER, side_effect=_EFAULT),
     ):
-        result = UVToolRunner().run_tool("semgrep", args=["scan"], results_dir=tmp_path)
+        result = UVToolRunner().run_tool("bandit", args=["scan"], results_dir=tmp_path)
 
     assert isinstance(result, SpawnFailedProcess)
     assert result.returncode == 127
 
 
 @pytest.fixture
-def semgrep(tmp_path):
+def bandit(tmp_path):
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("print('x')\n")
     output = tmp_path / "out"
     output.mkdir()
     context = PluginContext(source_dir=source, output_dir=output, config=AshConfig())
-    scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
+    scanner = BanditScanner(context=context, config=BanditScannerConfig())
     scanner.dependencies_satisfied = True
     return scanner, source
 
 
 @pytest.mark.unit
-def test_semgrep_through_uv_is_not_accepted(semgrep):
+def test_uv_backed_scanner_through_uv_is_not_accepted(bandit):
     """The reported case: accepted codes include 1, and a uv that cannot exec
     must still fail the scan, naming the cause rather than the missing SARIF."""
-    scanner, source = semgrep
+    scanner, source = bandit
     assert 1 in scanner.success_exit_codes
     assert scanner.use_uv_tool, "the test must exercise the uv path"
 
     with (
         patch.object(UVToolRunner, "uv_availability", return_value=(True, None)),
-        patch.object(SemgrepScanner, "validate_plugin_dependencies", return_value=True),
+        patch.object(BanditScanner, "validate_plugin_dependencies", return_value=True),
         patch(_PLAIN_RUNNER, side_effect=_EFAULT) as run,
         pytest.raises(ScannerError) as excinfo,
     ):
@@ -243,10 +243,10 @@ def test_semgrep_through_uv_is_not_accepted(semgrep):
 
 
 @pytest.mark.unit
-def test_127_is_never_accepted_even_when_listed(semgrep):
-    scanner, _source = semgrep
+def test_127_is_never_accepted_even_when_listed(bandit):
+    scanner, _source = bandit
     scanner.exit_code = 127
-    with patch.object(SemgrepScanner, "success_exit_codes", {0, 1, 127}):
+    with patch.object(BanditScanner, "success_exit_codes", {0, 1, 127}):
         assert not scanner._exit_code_accepted()
         message = scanner._describe_scan_failure(FileNotFoundError("x"), None)
     assert "not an accepted exit code" in message, message
@@ -884,7 +884,7 @@ def test_run_tool_keeps_a_flagged_responses_flag_and_stderr(
     monkeypatch.chdir(tmp_path)
 
     result = UVToolRunner(uv_executable=sys.executable).run_tool(
-        "semgrep", args=["scan"], results_dir=tmp_path / "results"
+        "bandit", args=["scan"], results_dir=tmp_path / "results"
     )
 
     assert getattr(result, flag, False) is True, (flag, result)

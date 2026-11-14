@@ -5,12 +5,11 @@
 
 Every unit test runs under the tool guard of tests/unit/conftest.py, which fails one
 that starts a guarded tool or leaves a tool's file in its HOME. Building a scanner
-probes its tool: SemgrepScanner runs ``uv --version`` and then ``uv tool run --from
-'semgrep...' semgrep --version``, and OpengrepScanner runs ``opengrep --version``.
+probes its tool: OpengrepScanner runs ``opengrep --version``, and the uv-run scanners
+run ``uv --version`` and then ``uv tool run --from '<spec>' <tool> --version``.
 Unstubbed, the offline-fallback tests here did that on every run, so a run fetched
-and started semgrep wherever uv could reach PyPI, and semgrep and uv wrote
-``~/.cache/semgrep_version``, ``~/.config/.semgrep`` and ``~/.local/share/uv/tools``
-under the HOME of the run.
+and started the tool wherever uv could reach PyPI, and the tool and uv wrote their
+cache and config files under the HOME of the run.
 
 So the check here is stricter. A test fails if the guard recorded any start but
 git's and ASH's workers (a shell, this interpreter, a fork included), and if it left

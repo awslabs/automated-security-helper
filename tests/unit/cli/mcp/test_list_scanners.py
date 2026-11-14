@@ -30,7 +30,6 @@ KNOWN_SCANNERS = {
     "grype",
     "npm_audit",
     "opengrep",
-    "semgrep",
     "snyk_code",
     "syft",
     "trivy_repo",
@@ -52,15 +51,15 @@ VALID_OFFLINE_STRATEGIES = {s.value for s in OfflineStrategy}
 #
 # A snapshot from mcp_list_scanners() run against whatever the host has
 # installed would start a real process per dependency check and version probe:
-# `uv tool run bandit|checkov|detect-secrets|semgrep --version`, `uv tool list`,
+# `uv tool run bandit|checkov|detect-secrets --version`, `uv tool list`,
 # and cfn_nag_scan, grype, npm, opengrep, syft and trivy `--version` -- 18
 # processes on one machine. What the tests below read would then be a fact about
 # that machine, and a unit test cannot depend on which tools a host has.
 #
 # Every tool the scanners ask about is a stand-in: a shell script that logs
 # its argv and prints a version. The stand-in uv reports bandit and checkov as
-# installed and semgrep as not, so the snapshot holds a tool a first scan would
-# install. snyk and node have no stand-in, so snyk_code and cdk_nag report their
+# installed and cfn-lint and zizmor as not, so the snapshot holds a tool a first scan
+# would install. snyk and node have no stand-in, so snyk_code and cdk_nag report their
 # dependencies unsatisfied. The versions are distinct, so each one in the snapshot
 # can be traced to the stand-in that printed it.
 
@@ -79,7 +78,7 @@ PATH_TOOLS = {
 }
 
 #: Every uv-managed scanner's tool, installed or not. Each one is asked about.
-UV_ASKED_TOOLS = ("bandit", "checkov", "semgrep")
+UV_ASKED_TOOLS = ("bandit", "checkov")
 
 #: What the stand-in log records when ASH's uv lookup reached the stand-in.
 WITNESS = "stand-in-witness"
@@ -305,8 +304,8 @@ class TestListScannersSchema:
     def test_returns_list(self, scanners):
         assert isinstance(scanners, list)
 
-    def test_at_least_13_entries(self, scanners):
-        assert len(scanners) >= 13
+    def test_at_least_12_entries(self, scanners):
+        assert len(scanners) >= 12
 
     def test_each_entry_has_required_keys(self, scanners):
         for entry in scanners:
@@ -652,7 +651,7 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
         # No node stand-in, so unsatisfied with or without the cdk extra.
         "cdk_nag": (cdk_nag_version, False, False),
         "cfn_guard": (None, False, False),
-        # uv-managed like semgrep: not installed, present uv, online run.
+        # uv-managed like zizmor: not installed, present uv, online run.
         "cfn_lint": (None, False, True),
         "gitleaks": (None, False, False),
         "zizmor": (None, False, True),
@@ -665,9 +664,6 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
         "grype": ("0.99.5", True, False),
         "npm_audit": ("10.99.6", True, False),
         "opengrep": ("1.99.7", True, False),
-        # Not installed in uv, uv is present and the run is online: a scan
-        # installs it, and the inventory says so instead of installing it.
-        "semgrep": (None, False, True),
         "snyk_code": (None, False, False),
         "syft": ("1.99.8", True, False),
         "trivy_repo": ("0.99.9", True, False),
@@ -709,7 +705,7 @@ class TestMeasuredAgainstTheStandIns:
         assert entry["version"] == UV_INSTALLED_TOOLS["bandit"]
 
     def test_not_every_scanner_reports_the_same_dependency_state(self, scanners):
-        """The stand-ins leave snyk, node and uv's semgrep out on purpose.
+        """The stand-ins leave snyk, node and uv's cfn-lint and zizmor out on purpose.
 
         So a uniform answer across all 13 means the field is not being measured --
         which is the exact shape of the original defect.

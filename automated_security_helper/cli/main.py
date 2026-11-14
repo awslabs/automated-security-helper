@@ -386,8 +386,8 @@ class AshTyperGroup(TyperGroup):
                 )
                 them = "it" if len(not_taken) == 1 else "them"
                 clauses.append(
-                    f"'ash {name}' does not take {spellings}, given before it (see "
-                    f"'ash {name} --help'). Options given before a subcommand are "
+                    f"'ashx {name}' does not take {spellings}, given before it (see "
+                    f"'ashx {name} --help'). Options given before a subcommand are "
                     f"passed to it only when it takes them: drop {them}, give {them} "
                     f"after a subcommand that takes {them}, or leave out '{name}' to "
                     f"scan with {them}."
@@ -398,9 +398,9 @@ class AshTyperGroup(TyperGroup):
                     (opt for opt in target.opts if opt.startswith("--")), target.opts[0]
                 )
                 clauses.append(
-                    f"'ash {name}' takes {typed} as {own}, which means something "
+                    f"'ashx {name}' takes {typed} as {own}, which means something "
                     f"else than it does before the subcommand: give it after "
-                    f"'{name}', as 'ash {name} {own} ...'."
+                    f"'{name}', as 'ashx {name} {own} ...'."
                 )
             ctx.fail(" ".join(clauses))
         return tokens

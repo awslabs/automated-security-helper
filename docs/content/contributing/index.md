@@ -48,7 +48,7 @@ You need git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and
     `uv sync --python 3.12 --extra cdk --extra symbols`.
 
     The scanners are not project dependencies. A scan runs the Python-based ones, such
-    as bandit, checkov, and semgrep, with `uv tool run`, and finds binary ones such as
+    as bandit, checkov, and cfn-lint, with `uv tool run`, and finds binary ones such as
     grype or trivy on your `PATH` or in `~/.ash/bin`, where `ashx dependencies install`
     puts them. See [Manage scanner tools](../docs/advanced-usage.md).
 

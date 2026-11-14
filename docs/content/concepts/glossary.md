@@ -32,7 +32,7 @@ A plugin package that ships with ASH but is not built in, such as the trivy-repo
 
 ## Content database
 
-Data a scanner downloads and matches code against: grype's and trivy's vulnerability databases, and the rulesets semgrep and opengrep use offline. Each has an age bound, and by default a scan fails when one is older than its bound. See [Content databases](content-databases.md).
+Data a scanner downloads and matches code against: grype's and trivy's vulnerability databases, and the rulesets opengrep uses offline. Each has an age bound, and by default a scan fails when one is older than its bound. See [Content databases](content-databases.md).
 
 ## Converter
 

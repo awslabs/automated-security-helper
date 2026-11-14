@@ -85,10 +85,10 @@ INSTALLED_SCANNERS = (
     "cfn-guard",
     "gitleaks",
     "checkov",
-    "semgrep",
+    "opengrep",
     "zizmor",
 )
-#: What the same step installs on Windows: semgrep publishes no Windows build.
+#: What the same step installs on Windows: opengrep is off by default there.
 INSTALLED_SCANNERS_WINDOWS = ("bandit", "checkov")
 
 #: The docs runner, which resolves the directories ``ash dependencies install`` writes to

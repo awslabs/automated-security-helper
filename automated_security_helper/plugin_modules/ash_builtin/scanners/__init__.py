@@ -37,9 +37,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,
 )
@@ -63,7 +60,6 @@ __all__ = [
     "GrypeScanner",
     "NpmAuditScanner",
     "OpengrepScanner",
-    "SemgrepScanner",
     "SyftScanner",
     "TrivyScanner",
     "ZizmorScanner",

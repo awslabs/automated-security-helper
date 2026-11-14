@@ -324,7 +324,6 @@ def _ruleset_case(scanner: str):
 CASES = {
     "grype-db": _grype_case,
     "trivy-db": _trivy_case,
-    "semgrep-offline-rules": _ruleset_case("semgrep"),
     "opengrep-offline-rules": _ruleset_case("opengrep"),
 }
 # The one place a case's tier is written. CASES and CASE_TIERS are two dicts
@@ -334,7 +333,6 @@ CASES = {
 CASE_TIERS = {
     "grype-db": pytest.mark.integration,
     "trivy-db": pytest.mark.integration,
-    "semgrep-offline-rules": pytest.mark.unit,
     "opengrep-offline-rules": pytest.mark.unit,
 }
 assert CASES.keys() == CASE_TIERS.keys(), (
@@ -530,9 +528,7 @@ class TestMeasurement:
         assert record.absent, record.error
 
     @pytest.mark.unit
-    @pytest.mark.parametrize(
-        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
-    )
+    @pytest.mark.parametrize("name", ["opengrep-offline-rules"])
     def test_a_ruleset_with_no_directory_configured_is_absent(self, name):
         record = staleness.measure(
             cdb.get(name), staleness.ProbeContext(env={}), cdb.STALENESS_WARN
@@ -540,9 +536,7 @@ class TestMeasurement:
         assert record.absent and "no offline rules cache directory" in record.error
 
     @pytest.mark.unit
-    @pytest.mark.parametrize(
-        "name", ["semgrep-offline-rules", "opengrep-offline-rules"]
-    )
+    @pytest.mark.parametrize("name", ["opengrep-offline-rules"])
     def test_a_ruleset_directory_without_rules_files_is_absent(self, tmp_path, name):
         cache = tmp_path / "rules"
         cache.mkdir()
@@ -560,7 +554,7 @@ class TestMeasurement:
         fetched = datetime.now(UTC) - timedelta(days=40)
         cache = ruleset_dir(tmp_path / "rules", fetched)
         record = staleness.measure(
-            cdb.get("semgrep-offline-rules"),
+            cdb.get("opengrep-offline-rules"),
             staleness.ProbeContext(env={}, cache_dir=str(cache)),
             cdb.STALENESS_FAIL,
         )
@@ -1253,7 +1247,7 @@ class TestEveryDatabaseIsBoundedAndMeasurable:
     def test_tool_defaults_and_ash_choices_are_told_apart(self):
         assert cdb.get("grype-db").bound_is_tool_default
         assert cdb.get("trivy-db").bound_is_tool_default
-        for name in ("semgrep-offline-rules", "opengrep-offline-rules"):
+        for name in ("opengrep-offline-rules",):
             entry = cdb.get(name)
             assert not entry.bound_is_tool_default
             assert "ASH's own choice" in entry.bound_source
@@ -1264,9 +1258,9 @@ class TestEveryDatabaseIsBoundedAndMeasurable:
     def test_only_grype_is_cacheable_in_ci(self):
         assert [e.name for e in cdb.CONTENT_DATABASES if e.cacheable] == ["grype-db"]
 
-    def test_the_dockerfile_records_the_ruleset_download_time_for_both_caches(self):
+    def test_the_dockerfile_records_the_ruleset_download_time_for_the_cache(self):
         dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-        for env in ("SEMGREP_RULES_CACHE_DIR", "OPENGREP_RULES_CACHE_DIR"):
+        for env in ("OPENGREP_RULES_CACHE_DIR",):
             assert f'"${{{env}}}/{cdb.RULESET_FETCHED_AT_FILE}"' in dockerfile, env
 
 

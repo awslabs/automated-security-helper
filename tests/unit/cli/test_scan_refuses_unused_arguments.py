@@ -325,7 +325,7 @@ class TestOptionsBeforeASubcommand:
         result = _invoke(args)
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
-        assert f"'ash report' does not take {typed}," in _plain(result.output)
+        assert f"'ashx report' does not take {typed}," in _plain(result.output)
 
     @pytest.mark.parametrize(
         "args",

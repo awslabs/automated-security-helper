@@ -513,7 +513,7 @@ class IgnoreFileExclusions(BaseModel):
                 "Whether the scanned repository's .gitignore and .ignore files "
                 "decided which files were scanned. False when the operator set "
                 "honor_ignore_files: false or passed --no-honor-ignore-files. In "
-                "merged results (a workspace scan's, or ash merge's), True only "
+                "merged results (a workspace scan's, or ashx merge's), True only "
                 "when every merged scan honored them; see honored_scan_count."
             )
         ),
@@ -571,7 +571,7 @@ class IgnoreFileExclusions(BaseModel):
             ge=0,
             exclude_if=lambda value: value is None,
             description=(
-                "In merged results (a workspace scan's, or ash merge's) whose "
+                "In merged results (a workspace scan's, or ashx merge's) whose "
                 "scans did not agree, how many of the scan_count merged scans "
                 "honored the ignore files; honored is then False. Absent for a "
                 "single scan, and when every merged scan agreed."

@@ -44,9 +44,10 @@ AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 
 #: What each shipped scanner needs. Python-only: a Python package ASH installs with
-#: uv (bandit, cfn-lint, checkov, semgrep, zizmor) or imports (detect-secrets).
-#: zizmor's wheel carries its native binary, as semgrep's carries semgrep-core.
-PYTHON_ONLY = {"bandit", "cfn-lint", "checkov", "detect-secrets", "semgrep", "zizmor"}
+#: uv (bandit, cfn-lint, checkov, zizmor) or imports (detect-secrets). zizmor's
+#: wheel carries its native binary. opengrep, which also serves the name `semgrep`,
+#: is a native binary and not a uv tool, so it is not here.
+PYTHON_ONLY = {"bandit", "cfn-lint", "checkov", "detect-secrets", "zizmor"}
 NOT_PYTHON_ONLY = {
     "actionlint",  # a native binary, from its pinned release asset
     "cdk-nag",  # Node.js, through jsii
@@ -73,7 +74,7 @@ SHIPPED = [
 
 @pytest.fixture(autouse=True)
 def _no_uv_tool_probe(monkeypatch):
-    """bandit, checkov and semgrep probe their version with `uv tool run` when built.
+    """bandit and checkov probe their version with `uv tool run` when built.
 
     That probe writes under HOME and the XDG cache dir, and checkov's update check
     reaches PyPI. Python-only selection does not depend on the version, so the
@@ -151,11 +152,12 @@ def uv_tool_requests(tmp_path, monkeypatch):
 
 
 def test_building_the_scanners_runs_no_tool(context, uv_tool_requests, no_tool_starts):
-    """checkov's, semgrep's and bandit's version probe runs `uv tool run`.
+    """checkov's and bandit's version probe runs `uv tool run`.
 
     Against a real uv that writes checkov/update_checker_cache.json under the cache
-    dir and .semgrep/settings.yml under HOME, and checkov's update check reaches
-    PyPI, so a test that builds the shipped scanners must not let the probe run.
+    dir, and checkov's update check reaches PyPI, so a test that builds the shipped
+    scanners must not let the probe run. No scanner writes `.semgrep` under HOME
+    now that opengrep serves that name.
     """
     home, asked = uv_tool_requests
 
@@ -230,14 +232,11 @@ def test_python_only_runs_exactly_the_python_only_set(context):
             patch.stopall()
         queued = {name for name, _, _ in executor.call_args.kwargs["scanner_tasks"]}
 
-    # semgrep and opengrep are off by default on Windows (enabled = platform.system()
-    # is not Windows) and a scanner that is not enabled is not queued, so the set
-    # that runs there is the Python-only set without semgrep, and opengrep's row
-    # there is the disabled skip, not the --python-only one.
+    # opengrep is off by default on Windows (enabled = platform.system() is not
+    # Windows), so its row there is the disabled skip, not the --python-only one.
+    # It is not Python-only, so the set that runs is the same on every platform.
     windows = platform.system().lower() == "windows"
-    off_here = {"semgrep"} if windows else set()
-    expected = PYTHON_ONLY - off_here
-    assert queued == expected
+    assert queued == PYTHON_ONLY
     for name in NOT_PYTHON_ONLY:
         row = results.scanner_results[name]
         assert row.status == ScannerStatus.SKIPPED, (name, row)

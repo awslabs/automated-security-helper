@@ -220,11 +220,11 @@ class TestFromSarifResultScannerName:
 
     def test_recovers_scanner_from_tags_when_tool_is_generic(self):
         # When driver name is the generic ASH label, scanner name may live in tags
-        result = _make_result(tags=["semgrep", "security"])
+        result = _make_result(tags=["opengrep", "security"])
         vuln = FlatVulnerability.from_sarif_result(
             result, "AWS Labs - Automated Security Helper", "SAST"
         )
-        assert vuln.scanner == "semgrep"
+        assert vuln.scanner == "opengrep"
 
 
 class TestFromSarifResultTags:

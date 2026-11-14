@@ -6,7 +6,7 @@
 Why this file exists
 --------------------
 Criterion 21 already had tests. Every one of them asserted the return value of
-``policy_for_project`` -- ``resolved.policy_scanners == ("semgrep",)`` and
+``policy_for_project`` -- ``resolved.policy_scanners == ("opengrep",)`` and
 nothing further. That is a fixture pinning the CLASSIFIER, and the classifier
 was never the part that was broken: the field was computed, validated, pushed
 down per project, stored on the plan and printed in ``--dry-run``, and no

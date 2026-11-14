@@ -1,6 +1,6 @@
 {
   "name": "ash",
-  "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
+  "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
   "mcpServers": {
     "ash": {
       "command": "uvx",

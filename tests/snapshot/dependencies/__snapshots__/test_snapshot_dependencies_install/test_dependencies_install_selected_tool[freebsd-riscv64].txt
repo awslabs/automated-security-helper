@@ -1,4 +1,4 @@
-$ ash dependencies install --bin-path bin -t scanner --tool grype --tool semgrep
+$ ash dependencies install --bin-path bin -t scanner --tool grype --tool bandit
 ╭─ ASH Dependency Installer ──╮
 │ Installing ASH dependencies │
 │ Target bin path: bin        │
@@ -6,21 +6,21 @@ $ ash dependencies install --bin-path bin -t scanner --tool grype --tool semgrep
 ╰─────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: unknown, architecture: unknown
-INFO     Loaded 2 converters, 16 scanners, and 15 reporters
-Installing dependencies for scanner plugin: grype
-Installing dependencies for scanner plugin: semgrep
-Running command: uv tool install semgrep>=1.125.0,<2.0.0
+INFO     Loaded 2 converters, 15 scanners, and 15 reporters
+Installing dependencies for scanner plugin: bandit
+Running command: uv tool install bandit[sarif,toml]>=1.7.8,<2.0.0
 Command succeeded with exit code: 0
-                        Dependency installation results
-┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
-┃ Plugin  ┃ Type    ┃ Tool    ┃ Cmds ┃ Failed ┃ Status          ┃ Resolved to ┃
-┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
-│ grype   │ scanner │ grype   │    0 │      0 │ ALREADY PRESENT │ bin/grype   │
-│ semgrep │ scanner │ semgrep │    1 │      0 │ INSTALLED       │ bin/semgrep │
-└─────────┴─────────┴─────────┴──────┴────────┴─────────────────┴─────────────┘
-╭─────────── Installation Complete ───────────╮
-│ Commands run: 1 (0 failed)                  │
-│ Tools verified on PATH: 2 -- grype, semgrep │
-│ No install path on this platform: grype     │
-╰─────────────────────────────────────────────╯
+Installing dependencies for scanner plugin: grype
+                       Dependency installation results
+┏━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ Plugin ┃ Type    ┃ Tool   ┃ Cmds ┃ Failed ┃ Status          ┃ Resolved to ┃
+┡━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ bandit │ scanner │ bandit │    1 │      0 │ INSTALLED       │ bin/bandit  │
+│ grype  │ scanner │ grype  │    0 │      0 │ ALREADY PRESENT │ bin/grype   │
+└────────┴─────────┴────────┴──────┴────────┴─────────────────┴─────────────┘
+╭────────── Installation Complete ───────────╮
+│ Commands run: 1 (0 failed)                 │
+│ Tools verified on PATH: 2 -- bandit, grype │
+│ No install path on this platform: grype    │
+╰────────────────────────────────────────────╯
 [exit code: 0]

@@ -53,7 +53,7 @@ and reuses it for later calls.
 
 - Keep the virtual environment outside the checkout. ASH does not run tools it finds inside
   the directory it scans, and the virtual environment's `bin` holds the `uv` that ASH uses to
-  install bandit, checkov, semgrep, cfn-lint, and zizmor during the scan; see
+  install bandit, checkov, cfn-lint, and zizmor during the scan; see
   [Tools inside the scanned directory](../../docs/advanced-usage.md#tools-inside-the-scanned-directory).
 - Run `ashx dependencies install` outside the checkout too, as the empty directory does here,
   so a config in the repository cannot change what it installs. It downloads the tool
@@ -79,7 +79,7 @@ and reuses it for later calls.
 | Scanners | Needs on the host |
 |---|---|
 | detect-secrets | Nothing; it is part of ASH |
-| bandit, checkov, semgrep, cfn-lint, zizmor | Access to PyPI during the scan |
+| bandit, checkov, cfn-lint, zizmor | Access to PyPI during the scan |
 | grype, syft, opengrep, actionlint, cfn-guard, gitleaks, trivy | The binary, from `ashx dependencies install` |
 | cfn-nag | Ruby, with the headers and a C compiler to build gems, so that `ashx dependencies install` can install it |
 | cdk-nag | The `cdk` extra, which the recipe installs, and Node.js |

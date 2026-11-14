@@ -1,5 +1,5 @@
 $ ash plugin list
-INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Loaded 2 converters, 15 scanners, and 15 reporters
 WARNING  cfn-nag cannot be installed here: RubyGems (`gem`) is not on PATH, no Ruby DevKit
          (RI_DEVKIT is unset), and cfn-nag's `psych` dependency publishes no precompiled gem for
          this Ruby ABI, so it has to build from source. It will be reported as having no install
@@ -31,8 +31,6 @@ ASH Scanners
 │ npm-audit      │ True    │ NpmAuditScanner      │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ opengrep       │ False   │ OpengrepScanner      │ automated_security_helper.plu… │               │
-├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
-│ semgrep        │ False   │ SemgrepScanner       │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤
 │ syft           │ True    │ SyftScanner          │ automated_security_helper.plu… │               │
 ├────────────────┼─────────┼──────────────────────┼────────────────────────────────┼───────────────┤

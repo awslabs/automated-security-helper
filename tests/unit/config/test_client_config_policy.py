@@ -259,15 +259,15 @@ def test_the_default_policy_accepts_an_ash_config_init_file(tmp_path) -> None:
 
 
 def _grep_scanners(enabled: bool) -> AshConfig:
-    """A trusted config with opengrep and semgrep on or off, on any platform.
+    """A trusted config with opengrep on or off, on any platform.
 
-    ``AshConfig()`` has both on everywhere but Windows, where neither scanner
-    runs: ``platform.system()`` picks the default when each config class is
+    ``AshConfig()`` has it on everywhere but Windows, where the scanner does not
+    run: ``platform.system()`` picks the default when the config class is
     defined. A test that compares a file with ``AshConfig()`` reads one base on
     Windows and another elsewhere.
     """
     return AshConfig.model_validate(
-        {"scanners": {name: {"enabled": enabled} for name in ("opengrep", "semgrep")}}
+        {"scanners": {name: {"enabled": enabled} for name in ("opengrep",)}}
     )
 
 
@@ -292,9 +292,9 @@ def test_the_default_policy_accepts_ashs_own_repository_config() -> None:
     plugin_module_trust, and a delivered repository's own suppressions and ignore
     paths are honored (decision point 1), so nothing in it is refused.
 
-    The file turns opengrep and semgrep on, so the trusted config has them on.
-    Both default to off on Windows, where the file's ``enabled: true`` is a change
-    from the default and is refused, as
+    The file turns opengrep on, so the trusted config has it on. It defaults to
+    off on Windows, where the file's ``enabled: true`` is a change from the
+    default and is refused, as
     ``test_ashs_own_config_is_refused_where_its_scanners_are_off`` pins.
     """
     assert _denials_of_ashs_own_config(_grep_scanners(True)) == []
@@ -303,16 +303,13 @@ def test_the_default_policy_accepts_ashs_own_repository_config() -> None:
 def test_ashs_own_config_is_refused_where_its_scanners_are_off() -> None:
     """The refusal Windows meets, pinned where any platform can see it.
 
-    With opengrep and semgrep off in the trusted config, as their defaults are on
-    Windows, the file's two ``enabled: true`` writes are refused and nothing else
-    in it is. The scanner sections stay under denied_paths, so a delivered file
-    cannot turn on a scanner the trusted config leaves off.
+    With opengrep off in the trusted config, as its default is on Windows, the
+    file's ``enabled: true`` write is refused and nothing else in it is. The
+    scanner sections stay under denied_paths, so a delivered file cannot turn on
+    a scanner the trusted config leaves off.
     """
     denials = _denials_of_ashs_own_config(_grep_scanners(False))
-    assert [denial.key for denial in denials] == [
-        "scanners.opengrep.enabled",
-        "scanners.semgrep.enabled",
-    ]
+    assert [denial.key for denial in denials] == ["scanners.opengrep.enabled"]
 
 
 # ---------------------------------------------------------------------------

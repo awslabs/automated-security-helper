@@ -59,7 +59,7 @@ REGISTRY_PATH = (
 
 # Words that mark a cache path as belonging to a scanner that has a content database. A
 # path naming one of these must either be a registered database path or be listed below.
-CONTENT_DB_HINTS = ("grype", "trivy", "semgrep", "opengrep", "vulnerability", "vuln-db")
+CONTENT_DB_HINTS = ("grype", "trivy", "opengrep", "vulnerability", "vuln-db")
 
 # Cache paths that match a hint but are not content databases, and why.
 NOT_CONTENT_DATABASES = {
@@ -304,7 +304,7 @@ def self_test(registry) -> int:
         ),
         (
             "a registered database not declared cacheable in CI",
-            _variant("path: ~/.opengrep/cli/latest", "path: /deps/.semgrep"),
+            _variant("path: ~/.opengrep/cli/latest", "path: /deps/.opengrep"),
             1,
         ),
         (

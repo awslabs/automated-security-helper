@@ -415,7 +415,7 @@ def test_control_versions_a_pair_may_apply_that_fit_another_projects_pin_are_acc
 def test_control_a_pair_no_other_project_pins_has_nothing_to_compare():
     from automated_security_helper.workspace.resolver import _validate_unresolved_pins
 
-    projects = [_held_pins("api"), _held_pins("web", semgrep=">=2.0.0")]
+    projects = [_held_pins("api"), _held_pins("web", checkov=">=2.0.0")]
     held = {"api": {"Snyk_Code": _may_apply(">=1.125.0,<2.0.0")}}
 
     _validate_unresolved_pins(projects, held)
@@ -572,7 +572,7 @@ def test_control_a_pin_recorded_for_another_scanner_is_not_held_against_a_pair()
     from automated_security_helper.workspace.resolver import _validate_unresolved_pins
 
     api, api_held = _project_of("api", PAIR_FIRST, CLASHING_PINS)
-    web = _held_pins("web", **{"snyk-other": ">=2.0.0", "semgrep": ">=2.0.0"})
+    web = _held_pins("web", **{"snyk-other": ">=2.0.0", "checkov": ">=2.0.0"})
 
     _validate_unresolved_pins([api, web], {"api": api_held})
 
@@ -660,16 +660,16 @@ def test_a_workspace_refuses_a_version_a_pair_may_apply_that_clashes_with_a_pin(
 ):
     from automated_security_helper.workspace import resolver
 
-    calls = iter([{"semgrep": _may_apply("<1.0.0")}, {}])
+    calls = iter([{"checkov": _may_apply("<1.0.0")}, {}])
     monkeypatch.setattr(resolver, "_unresolved_pins", lambda config: next(calls))
     workspace = _workspace(
-        tmp_path, {"api": _SEMGREP_ON, "web": _SEMGREP_ON}, policy_scanners=None
+        tmp_path, {"api": _CHECKOV_ON, "web": _CHECKOV_ON}, policy_scanners=None
     )
 
     with pytest.raises(WorkspaceDefinitionError) as refused:
         resolve_workspace(
             workspace,
-            config_overrides=("scanners.semgrep.options.tool_version=>=1.130.0",),
+            config_overrides=("scanners.checkov.options.tool_version=>=1.130.0",),
         )
 
     text = str(refused.value)
@@ -680,27 +680,27 @@ def test_a_workspace_refuses_a_version_a_pair_may_apply_that_clashes_with_a_pin(
 def test_a_pin_the_policy_switches_on_is_held_against_a_pair_another_project_may_apply(
     tmp_path, monkeypatch
 ):
-    """``web`` has semgrep off with a pin, and the workspace policy requires
-    semgrep, so ``web`` runs it with that pin. The pairs ``api`` may apply were
+    """``web`` has checkov off with a pin, and the workspace policy requires
+    checkov, so ``web`` runs it with that pin. The pairs ``api`` may apply were
     held against the pins as the plan recorded them before the policy was known,
     and never against this one."""
     from automated_security_helper.workspace import resolver
 
-    calls = iter([{"semgrep": _may_apply("<1.0.0")}, {}])
+    calls = iter([{"checkov": _may_apply("<1.0.0")}, {}])
     monkeypatch.setattr(resolver, "_unresolved_pins", lambda config: next(calls))
     workspace = _workspace(
         tmp_path,
         {
-            "api": _SEMGREP_ON,
-            "web": _ONE_SECTION + "  semgrep:\n    enabled: false\n",
+            "api": _CHECKOV_ON,
+            "web": _ONE_SECTION + "  checkov:\n    enabled: false\n",
         },
-        policy_scanners=("semgrep",),
+        policy_scanners=("checkov",),
     )
 
     with pytest.raises(WorkspaceDefinitionError) as refused:
         resolve_workspace(
             workspace,
-            config_overrides=("scanners.semgrep.options.tool_version=>=1.130.0",),
+            config_overrides=("scanners.checkov.options.tool_version=>=1.130.0",),
         )
 
     text = str(refused.value)
@@ -718,13 +718,13 @@ def test_control_a_workspace_of_one_project_plans_a_pair_whose_versions_differ(
     from automated_security_helper.workspace import resolver
 
     monkeypatch.setattr(
-        resolver, "_unresolved_pins", lambda config: {"semgrep": _may_apply("<1.0.0")}
+        resolver, "_unresolved_pins", lambda config: {"checkov": _may_apply("<1.0.0")}
     )
-    workspace = _workspace(tmp_path, {"api": _SEMGREP_ON}, policy_scanners=None)
+    workspace = _workspace(tmp_path, {"api": _CHECKOV_ON}, policy_scanners=None)
 
     plan = resolve_workspace(
         workspace,
-        config_overrides=("scanners.semgrep.options.tool_version=>=1.130.0",),
+        config_overrides=("scanners.checkov.options.tool_version=>=1.130.0",),
     )
 
     assert [project.key for project in plan.projects] == ["api"]
@@ -834,11 +834,10 @@ TWIN_FILES = [
 ]
 
 _ONE_SECTION = _THRESHOLD + "scanners:\n  Snyk_Code:\n    enabled: true\n"
-# The pin tests pin semgrep through an override. A pin is recorded only for a
-# scanner that is on, and semgrep's own default is off on Windows (it publishes
-# no Windows build), so the project turns it on in so many words: the override's
-# pin is what the test is about, not the platform.
-_SEMGREP_ON = _ONE_SECTION + "  semgrep:\n    enabled: true\n"
+# The pin tests pin checkov through an override. A pin is recorded only for a
+# scanner that is on, so the project turns it on in so many words: the
+# override's pin is what the test is about, not the scanner's default.
+_CHECKOV_ON = _ONE_SECTION + "  checkov:\n    enabled: true\n"
 
 
 class _FindingOrchestrator:

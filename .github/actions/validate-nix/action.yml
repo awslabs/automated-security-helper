@@ -162,7 +162,6 @@ runs:
             "grype",
             "npm-audit",
             "opengrep",
-            "semgrep",
             "syft",
             "trivy",
             "zizmor",

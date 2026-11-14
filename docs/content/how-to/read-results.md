@@ -64,7 +64,7 @@ Things to know about the output directory:
 After the scan, ASH prints one row per scanner. This scan of a small project ran with
 `--scanners bandit,cdk-nag,detect-secrets,grype` on a machine without grype: bandit
 found an actionable finding, grype's tool was missing, cdk-nag had no CloudFormation
-template to read, and semgrep was not selected (trimmed to four rows):
+template to read, and opengrep was not selected (trimmed to four rows):
 
 ```text
                                                  ASH Scan Results Summary
@@ -74,7 +74,7 @@ template to read, and semgrep was not selected (trimmed to four rows):
 │ bandit         │ 0          │ 0        │ 1    │ 0      │ 2   │ 0    │ 889ms    │ 1          │ FAILED  │ MEDIUM (global) │
 │ cdk-nag        │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ SKIPPED │ MEDIUM (global) │
 │ grype          │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ MISSING │ MEDIUM (global) │
-│ semgrep        │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ SKIPPED │ MEDIUM (global) │
+│ opengrep       │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ SKIPPED │ MEDIUM (global) │
 └────────────────┴────────────┴──────────┴──────┴────────┴─────┴──────┴──────────┴────────────┴─────────┴─────────────────┘
                                                       source-dir: '.'
                                                output-dir: '.ash/ash_output'
@@ -205,7 +205,7 @@ All paths are relative to the output directory.
 
 In `ash_aggregated_results.json`, a scanner's row says why it did not run.
 `missing_reason` on a `MISSING` row gives the reason: the tool that was not found and
-where ASH looked, what the scanner's own check reported (semgrep offline with no rule
+where ASH looked, what the scanner's own check reported (opengrep offline with no rule
 cache, for example), or that the tool was found only inside the scanned directory.
 `skipped_reason` on a `SKIPPED` row names the option
 that left the scanner out, or what it had nothing to scan, as in

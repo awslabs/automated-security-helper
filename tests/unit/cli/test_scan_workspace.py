@@ -273,12 +273,12 @@ def test_project_pins_are_ignored_rather_than_a_workspace_error(tmp_path, no_sca
     _project(
         tmp_path,
         "api",
-        'project_name: api\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
+        'project_name: api\nscanners:\n  bandit:\n    options:\n      tool_version: ">=1.7.0,<2.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        'project_name: web\nscanners:\n  semgrep:\n    options:\n      tool_version: ">=2.0.0"\n',
+        'project_name: web\nscanners:\n  bandit:\n    options:\n      tool_version: ">=2.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 

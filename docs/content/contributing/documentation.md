@@ -434,7 +434,7 @@ In a table, every item of a column headed Scanner, Scanners, Built-in scanners,
 Community plugins, or Community scanners must be one scanner ASH ships, built in or a
 community plugin as the header says. A note in parentheses after a name is ignored. Any other item of several
 words is an error, because nothing can check it: write
-`semgrep, opengrep (as far as their rules cover the language)`, and put longer notes in
+`opengrep (as far as its rules cover the language)`, and put longer notes in
 another column.
 
 ### Links and pages

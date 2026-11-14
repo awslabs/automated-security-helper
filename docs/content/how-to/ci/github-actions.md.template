@@ -122,7 +122,7 @@ to `false`.
 
 The binary tools come from `ashx dependencies install`, which downloads the versions that
 the installed ASH pins and checks each download against its pinned SHA256 before
-installing it. bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH installs
+installing it. bandit, checkov, cfn-lint, and zizmor need no input: ASH installs
 them from PyPI with `uv tool install` during the scan. detect-secrets is part of ASH, and
 cdk-nag and npm-audit use the Node.js and npm that GitHub's Ubuntu runners include.
 
@@ -437,7 +437,7 @@ Notes on the steps:
   [Tools inside the scanned directory](../../docs/advanced-usage.md#tools-inside-the-scanned-directory).
 - Run `ashx dependencies install` outside the checkout too, as `working-directory` does
   here, so a config in the repository cannot change what it installs.
-- ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor during the scan with the
+- ASH installs bandit, checkov, cfn-lint, and zizmor during the scan with the
   `uv` installed with it, or with a `uv` on `PATH`.
 - `ruby/setup-ruby` is there for cfn-nag, which `ashx dependencies install` installs with
   `gem` and which builds native extensions.

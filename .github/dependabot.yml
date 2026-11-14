@@ -154,7 +154,7 @@ updates:
   # them.
   #
   # Scope limit worth knowing before trusting this. Only these five scanner-related packages
-  # are declared in pyproject.toml. bandit, checkov, semgrep, grype, syft, trivy and opengrep
+  # are declared in pyproject.toml. bandit, checkov, grype, syft, trivy and opengrep
   # are installed at runtime via utils/uv_tool_runner.py, so no Dependabot configuration can
   # gate their upgrades. This file narrows the blast radius of the upgrades it can see; it is
   # not a substitute for tests that detect a scanner that has stopped working.

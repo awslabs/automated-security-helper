@@ -687,7 +687,7 @@ def _partial_coverage(metric) -> tuple[int, int] | None:
 
     The tri-state on ``targets_attempted`` is the whole content of this function.
     ``None`` means the scanner does not track per-target outcomes and is making no
-    claim -- bandit, checkov, semgrep, grype, syft, detect-secrets and opengrep
+    claim -- bandit, checkov, grype, syft, detect-secrets and opengrep
     are all in that state (cdk-nag, cfn-nag and npm-audit track targets). Reading
     absence as "attempted 0,
     therefore lost everything" would fail every scan on every repository the
@@ -7228,13 +7228,18 @@ def _compute_exit_code(
         # is SKIPPED clears the loop above having measured nothing.
         #
         # Reachable without any sharding and without any operator error beyond a
-        # single word. Measured on this tree with the repository's own
-        # .ash/.ash.yaml, which sets `semgrep: enabled: true`:
-        # `ashx scan --scanners semgrep` on Windows resolves semgrep against the
-        # registered names, so ScannerSelectionError does not fire; semgrep then
-        # declares the platform unsupported and is recorded SKIPPED; the other nine
-        # are not selected and are SKIPPED too; findings are 0; exit 0. A scan that
-        # ran no scanner reported the tree clean.
+        # single word. Measured, when the semgrep scanner still shipped, on a tree
+        # whose own .ash/.ash.yaml set `semgrep: enabled: true`:
+        # `ashx scan --scanners semgrep` on Windows resolved semgrep against the
+        # registered names, so ScannerSelectionError did not fire; semgrep then
+        # declared the platform unsupported and was recorded SKIPPED; the other nine
+        # were not selected and were SKIPPED too; findings were 0; exit 0. A scan
+        # that ran no scanner reported the tree clean. No builtin declares a
+        # platform unsupported today (opengrep, which serves the semgrep alias,
+        # ships a windows/amd64 build and is merely disabled by default on
+        # Windows through its config default, a different mechanism), but the
+        # shape returns with any future scanner that overrides
+        # unsupported_platform_reason, so the guard stays.
         #
         # .github/scripts/assert_scanners_completed.py already asserted this and
         # caught that case in CI, which is the reason it has to be here as well:

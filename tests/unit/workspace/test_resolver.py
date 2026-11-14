@@ -175,82 +175,80 @@ def _recorded(key, **pins):
 
 def test_incompatible_project_pins_are_ignored_rather_than_refused(tmp_path):
     """A project's own config does not choose tool_version, so its pin is not
-    recorded and cannot conflict with another project's. Each project enables
-    semgrep in so many words (it is off by default on Windows, which publishes no
-    build), so the absence of a pin is the rule at work on every platform and not
-    a scanner that is off."""
+    recorded and cannot conflict with another project's. checkov declares no
+    default ``tool_version``, so a pin of its own could only come from a project's
+    config, and the absence of one is the rule at work."""
     _project(
         tmp_path,
         "api",
-        "project_name: api\nscanners:\n  semgrep:\n    enabled: true\n"
-        '    options:\n      tool_version: ">=1.125.0,<2.0.0"\n',
+        "project_name: api\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=3.2.0,<4.0.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        "project_name: web\nscanners:\n  semgrep:\n    enabled: true\n"
-        '    options:\n      tool_version: ">=2.0.0"\n',
+        "project_name: web\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=4.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
     plan = resolve_workspace(workspace)
 
     projects = _by_key(plan)
-    assert "semgrep" not in projects["api"].scanner_pins
-    assert "semgrep" not in projects["web"].scanner_pins
+    assert "checkov" not in projects["api"].scanner_pins
+    assert "checkov" not in projects["web"].scanner_pins
 
 
 def test_the_operators_override_pins_every_project(tmp_path):
-    """The pin is recorded only for a scanner that is on, and semgrep's own default
-    is off on Windows (it publishes no Windows build), so each project enables it
-    in so many words: the override's pin is the subject, not the platform."""
+    """The pin is recorded only for a scanner that is on, so each project enables
+    checkov in so many words: the override's pin is the subject."""
     _project(
         tmp_path,
         "api",
-        "project_name: api\nscanners:\n  semgrep:\n    enabled: true\n"
-        '    options:\n      tool_version: ">=1.130.0"\n',
+        "project_name: api\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=3.2.0"\n',
     )
     _project(
         tmp_path,
         "web",
-        "project_name: web\nscanners:\n  semgrep:\n    enabled: true\n"
-        '    options:\n      tool_version: ">=2.0.0"\n',
+        "project_name: web\nscanners:\n  checkov:\n    enabled: true\n"
+        '    options:\n      tool_version: ">=4.0.0"\n',
     )
     workspace = _workspace(tmp_path, ["api", "web"])
 
     plan = resolve_workspace(
         workspace,
-        config_overrides=("scanners.semgrep.options.tool_version=>=1.130.0",),
+        config_overrides=("scanners.checkov.options.tool_version=>=3.2.0",),
     )
 
     projects = _by_key(plan)
-    assert projects["api"].scanner_pins["semgrep"] == ">=1.130.0"
-    assert projects["web"].scanner_pins["semgrep"] == ">=1.130.0"
+    assert projects["api"].scanner_pins["checkov"] == ">=3.2.0"
+    assert projects["web"].scanner_pins["checkov"] == ">=3.2.0"
 
 
 def test_incompatible_recorded_pins_refuse_and_name_both_constraints(tmp_path):
     definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
     projects = [
-        _recorded("api", semgrep=">=1.125.0,<2.0.0"),
-        _recorded("web", semgrep=">=2.0.0"),
+        _recorded("api", bandit=">=1.7.0,<2.0.0"),
+        _recorded("web", bandit=">=2.0.0"),
     ]
 
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
         _validate_scanner_pins(definition, projects)
 
     message = str(excinfo.value)
-    assert "semgrep" in message
+    assert "bandit" in message
     assert "api" in message
     assert "web" in message
-    assert ">=1.125.0,<2.0.0" in message
+    assert ">=1.7.0,<2.0.0" in message
     assert ">=2.0.0" in message
 
 
 def test_compatible_but_different_recorded_pins_are_accepted(tmp_path):
     definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
     projects = [
-        _recorded("api", semgrep=">=1.125.0,<2.0.0"),
-        _recorded("web", semgrep=">=1.130.0"),
+        _recorded("api", bandit=">=1.7.0,<2.0.0"),
+        _recorded("web", bandit=">=1.8.0"),
     ]
 
     _validate_scanner_pins(definition, projects)
@@ -261,14 +259,14 @@ def test_recorded_pins_that_cannot_be_proven_compatible_are_refused(tmp_path):
     version it excluded is the outcome worth designing against."""
     definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
     projects = [
-        _recorded("api", semgrep=">=1.125.0rc1"),
-        _recorded("web", semgrep=">=2.0.0"),
+        _recorded("api", bandit=">=1.8.0rc1"),
+        _recorded("web", bandit=">=2.0.0"),
     ]
 
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
         _validate_scanner_pins(definition, projects)
 
-    assert "semgrep" in str(excinfo.value)
+    assert "bandit" in str(excinfo.value)
 
 
 def test_a_single_recorded_pin_is_never_a_conflict(tmp_path):
@@ -276,7 +274,7 @@ def test_a_single_recorded_pin_is_never_a_conflict(tmp_path):
     definition = SimpleNamespace(path=tmp_path / "dev.code-workspace")
 
     _validate_scanner_pins(
-        definition, [_recorded("api", semgrep=">=1.125.0rc1"), _recorded("web")]
+        definition, [_recorded("api", checkov=">=3.2.0rc1"), _recorded("web")]
     )
 
 

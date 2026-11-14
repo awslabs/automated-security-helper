@@ -111,7 +111,7 @@ class TestMarkdownEscaping:
     ):
         pins = checker.load_pins_module()
         monkeypatch.setattr(checker, "_copy_steps", lambda *args, **kwargs: [])
-        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["semgrep"]
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}["opengrep"]
         results = [checker.Result(pin, "9.9.9", "outdated")]
         markdown = checker.render_report(pins, results, markdown=True)
         assert "&lt;new commit>" in markdown

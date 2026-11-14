@@ -75,7 +75,7 @@ class ScannerMetrics(ScannerSeverityCount):
     # reports and its existing row.
     model_config = ConfigDict(str_strip_whitespace=False)
 
-    scanner_name: str  # Name of the scanner (e.g., "bandit", "semgrep")
+    scanner_name: str  # Name of the scanner (e.g., "bandit", "opengrep")
     actionable: int = 0  # Number of findings at or above the threshold severity
     duration: Optional[float] = (
         None  # Time taken by the scanner in seconds, None for skipped/missing scanners
@@ -108,7 +108,7 @@ class ScannerMetrics(ScannerSeverityCount):
     #
     # ``targets_attempted`` keeps the container's tri-state meaning rather than defaulting to 0.
     # None means the scanner does not track per-target outcomes and is making no claim; bandit,
-    # checkov, semgrep, grype, syft, detect-secrets and opengrep are all in that state (cdk-nag,
+    # checkov, grype, syft, detect-secrets and opengrep are all in that state (cdk-nag,
     # cfn-nag and npm-audit track targets). Reading them as "attempted zero" would report every
     # one of them as having evaluated nothing.
     # Strict: a string, float or bool here is a producer bug that lax coercion

@@ -307,8 +307,7 @@ for new capabilities.
 | Scanner | Coverage | Local setup |
 | --- | --- | --- |
 | [Bandit](https://github.com/PyCQA/bandit) | Python code | Managed through uv tool isolation |
-| [Semgrep](https://github.com/semgrep/semgrep) | Application code across multiple languages | Managed through uv tool isolation |
-| [Opengrep](https://github.com/opengrep/opengrep) | Application code with Semgrep-compatible rules | Managed through uv tool isolation |
+| [Opengrep](https://github.com/opengrep/opengrep) | Application code across multiple languages | Pinned binary installed and SHA256-verified by ASH; serves the retired `semgrep` scanner name |
 | [detect-secrets](https://github.com/Yelp/detect-secrets) | Secrets in text files | Included with ASH |
 | [Checkov](https://github.com/bridgecrewio/checkov) | Infrastructure and configuration | Managed through uv tool isolation |
 | [cfn-nag](https://github.com/stelligent/cfn_nag) | CloudFormation | Ruby and cfn-nag |

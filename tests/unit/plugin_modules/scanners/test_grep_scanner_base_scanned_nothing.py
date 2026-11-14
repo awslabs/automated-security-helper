@@ -44,10 +44,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners import (
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScanner,
+    OpengrepScannerConfig,
+    OpengrepScannerConfigOptions,
 )
 
 pytestmark = pytest.mark.unit
@@ -59,16 +59,16 @@ _SARIF: dict = {
 }
 
 
-def _scanner(test_plugin_context, monkeypatch, exclude=None) -> SemgrepScanner:
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
-    monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
+def _scanner(test_plugin_context, monkeypatch, exclude=None) -> OpengrepScanner:
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.setattr(OpengrepScanner, "_scanner_offline", lambda self: False)
     options = (
-        SemgrepScannerConfigOptions(offline=False, exclude=exclude)
+        OpengrepScannerConfigOptions(offline=False, exclude=exclude)
         if exclude is not None
-        else SemgrepScannerConfigOptions(offline=False)
+        else OpengrepScannerConfigOptions(offline=False)
     )
-    return SemgrepScanner(
-        context=test_plugin_context, config=SemgrepScannerConfig(options=options)
+    return OpengrepScanner(
+        context=test_plugin_context, config=OpengrepScannerConfig(options=options)
     )
 
 
@@ -847,11 +847,13 @@ def test_the_output_directories_the_command_excluded_are_recorded(
         work_dir=output / "converted",
         config=get_default_config(),
     )
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
-    monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
-    scanner = SemgrepScanner(
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.setattr(OpengrepScanner, "_scanner_offline", lambda self: False)
+    scanner = OpengrepScanner(
         context=context,
-        config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False)),
+        config=OpengrepScannerConfig(
+            options=OpengrepScannerConfigOptions(offline=False)
+        ),
     )
 
     patterns = scanner._output_dir_exclude_patterns(source)

@@ -4,7 +4,7 @@
 """A delivered config's scanner exclusions are reported, not applied.
 
 An entry a client's delivered config adds to a scanner's own exclusion option
-(bandit ``excluded_paths``, checkov ``skip_path``, opengrep and semgrep
+(bandit ``excluded_paths``, checkov ``skip_path``, opengrep
 ``exclude``, syft ``exclude``, ferret-scan ``exclude_patterns``, trivy-repo
 ``ignore_file``) is moved out of the option before the scanner runs, so the
 scanner sees the files, and each finding of that scanner it would have kept out
@@ -59,11 +59,6 @@ OPERATOR: Dict[str, Any] = {
             "options": {"skip_path": [{"path": "operator-dir", "reason": "op"}]}
         },
         "opengrep": {
-            "options": {
-                "exclude": ["*-converted.py", "*_report_result.txt", "operator-dir"]
-            }
-        },
-        "semgrep": {
             "options": {
                 "exclude": ["*-converted.py", "*_report_result.txt", "operator-dir"]
             }
@@ -232,9 +227,6 @@ CASES = [
         "client-dir",
     ),
     Case(
-        "semgrep", "exclude", "operator-dir", "client-dir", "operator-dir", "client-dir"
-    ),
-    Case(
         "syft",
         "exclude",
         {"path": "./operator-dir/**", "reason": "op"},
@@ -327,11 +319,6 @@ def _scanner_args(case: Case, config: Any, context: Any) -> List[str]:
         from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
             OpengrepScanner as cls,  # type: ignore[assignment]
             OpengrepScannerConfig as cfg,  # type: ignore[assignment]
-        )
-    elif case.scanner == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner as cls,  # type: ignore[assignment]
-            SemgrepScannerConfig as cfg,  # type: ignore[assignment]
         )
     elif case.scanner == "syft":
         from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
@@ -875,7 +862,7 @@ def test_the_operators_own_entries_are_not_moved(case: Case) -> None:
 # A scanner whose whole section a client may not set
 # ---------------------------------------------------------------------------
 #
-# opengrep, semgrep and trivy-repo are in the always-denied floor
+# opengrep and trivy-repo are in the always-denied floor
 # (ALWAYS_DENIED_PATHS) with every other scanner that sends something off the
 # host. Their exclusion options are moved out of the options first, and the
 # floor then checks whatever else the delivered section sets.
@@ -887,7 +874,6 @@ OFF_HOST_SCANNERS = [
     ("detect-secrets", "baseline_file", ".secrets.baseline", None),
     ("npm-audit", "offline", True, None),
     ("opengrep", "config", "p/default", ("exclude", ["client-dir"])),
-    ("semgrep", "config", "p/default", ("exclude", ["client-dir"])),
     ("snyk-code", "honor_tree_exclusions", True, None),
     ("trivy-repo", "scanners", ["vuln"], ("ignore_file", ".trivyignore")),
 ]
@@ -921,7 +907,7 @@ def test_an_off_host_scanners_other_options_are_still_refused(
         assert f"scanners.{scanner}.options.{exclusion[0]}" not in str(outcome)
 
 
-@pytest.mark.parametrize("scanner", ["opengrep", "semgrep", "trivy-repo"])
+@pytest.mark.parametrize("scanner", ["opengrep", "trivy-repo"])
 def test_a_moved_exclusion_leaves_no_client_value_in_an_off_host_scanners_options(
     scanner: str, tmp_path: Path
 ) -> None:
@@ -959,7 +945,7 @@ def test_a_moved_exclusion_leaves_no_client_value_in_an_off_host_scanners_option
 #: whole, and values at an exclusion option's name under a scanner that has no
 #: such option. The floor still refuses each.
 NOT_MOVED = [
-    pytest.param("semgrep", "exclude", [{"not_a_path": 1}], id="semgrep-dict-entry"),
+    pytest.param("opengrep", "exclude", [{"not_a_path": 1}], id="opengrep-dict-entry"),
     pytest.param("opengrep", "exclude", [5], id="opengrep-number-entry"),
     pytest.param("opengrep", "exclude", "client-dir", id="opengrep-not-a-list"),
     pytest.param("trivy-repo", "ignore_file", ["a", "b"], id="trivy-list"),
@@ -1084,7 +1070,6 @@ def test_a_cli_config_outside_the_mcp_workspace_is_unchanged(tmp_path: Path) -> 
 #: its default. They drop findings by rule ID, by a baseline, or by category.
 NON_PATH_EXCLUSIONS = [
     ("opengrep", "exclude_rule", ["python.lang.security.audit.x"]),
-    ("semgrep", "exclude_rule", ["python.lang.security.audit.x"]),
     ("detect-secrets", "baseline_file", ".secrets.baseline"),
     ("bandit", "confidence_level", "high"),
     ("checkov", "frameworks", ["terraform"]),
@@ -1092,8 +1077,6 @@ NON_PATH_EXCLUSIONS = [
     ("opengrep", "config", "p/default"),
     ("opengrep", "patterns", ["$X == $X"]),
     ("opengrep", "severity", ["ERROR"]),
-    ("semgrep", "config", "p/default"),
-    ("semgrep", "severity", ["ERROR"]),
     (
         "detect-secrets",
         "scan_settings",
@@ -1151,9 +1134,6 @@ def _option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScannerConfigOptions,
     )
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScannerConfigOptions,
-    )
     from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
         FerretScannerConfigOptions,
     )
@@ -1185,7 +1165,6 @@ def _option_defaults() -> Dict[tuple, Any]:
         "grype": GrypeScannerConfigOptions(),
         "npm-audit": NpmAuditScannerConfigOptions(),
         "opengrep": OpengrepScannerConfigOptions(),
-        "semgrep": SemgrepScannerConfigOptions(),
         "ferret-scan": FerretScannerConfigOptions(),
         "trivy-repo": TrivyRepoScannerConfigOptions(),
     }
@@ -1333,7 +1312,6 @@ def _scanner_option_models() -> Dict[str, Any]:
         grype_scanner,
         npm_audit_scanner,
         opengrep_scanner,
-        semgrep_scanner,
         syft_scanner,
         trivy_scanner,
         zizmor_scanner,
@@ -1361,7 +1339,6 @@ def _scanner_option_models() -> Dict[str, Any]:
         "grype": grype_scanner.GrypeScannerConfigOptions,
         "npm-audit": npm_audit_scanner.NpmAuditScannerConfigOptions,
         "opengrep": opengrep_scanner.OpengrepScannerConfigOptions,
-        "semgrep": semgrep_scanner.SemgrepScannerConfigOptions,
         "syft": syft_scanner.SyftScannerConfigOptions,
         "trivy": trivy_scanner.TrivyScannerConfigOptions,
         "zizmor": zizmor_scanner.ZizmorScannerConfigOptions,
@@ -1389,8 +1366,14 @@ def test_every_scanner_option_is_classified() -> None:
     )
     from automated_security_helper.config.runtime_patch import _SHIPPED_PLUGIN_KEYS
 
+    from automated_security_helper.utils.scanner_names import SCANNER_NAME_ALIASES
+
     models = _scanner_option_models()
-    assert set(models) == set(_SHIPPED_PLUGIN_KEYS["scanners"])
+    # A retired name stays in the table as a guard for a client that still writes
+    # it; it is no shipped plugin.
+    assert set(models) == set(_SHIPPED_PLUGIN_KEYS["scanners"]) - set(
+        SCANNER_NAME_ALIASES
+    )
     denied = RuntimeOverridesConfig().denied_paths
     marked = {(spec.scanner, spec.option) for spec in SCANNER_EXCLUSION_OPTIONS}
     unclassified = []
@@ -1512,9 +1495,6 @@ def test_the_table_defaults_are_the_scanners_defaults() -> None:
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScannerConfigOptions,
     )
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScannerConfigOptions,
-    )
     from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
         SyftScannerConfigOptions,
     )
@@ -1533,14 +1513,22 @@ def test_the_table_defaults_are_the_scanners_defaults() -> None:
         "bandit": BanditScannerConfigOptions,
         "checkov": CheckovScannerConfigOptions,
         "opengrep": OpengrepScannerConfigOptions,
-        "semgrep": SemgrepScannerConfigOptions,
         "syft": SyftScannerConfigOptions,
         "ferret-scan": FerretScannerConfigOptions,
         "trivy-repo": TrivyRepoScannerConfigOptions,
     }
-    assert {spec.scanner for spec in SCANNER_EXCLUSION_OPTIONS} == set(classes)
+    from automated_security_helper.utils.scanner_names import (
+        SCANNER_NAME_ALIASES,
+        canonical_scanner_name,
+    )
+
+    # A retired name keeps a row as a guard for a client that still writes it, and
+    # its default is the default of the scanner that serves the name.
+    assert {spec.scanner for spec in SCANNER_EXCLUSION_OPTIONS} - set(
+        SCANNER_NAME_ALIASES
+    ) == set(classes)
     for spec in SCANNER_EXCLUSION_OPTIONS:
-        default = getattr(classes[spec.scanner](), spec.option)
+        default = getattr(classes[canonical_scanner_name(spec.scanner)](), spec.option)
         assert _patterns_in(default) == set(spec.default), spec
 
 

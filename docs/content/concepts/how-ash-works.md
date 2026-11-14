@@ -37,12 +37,12 @@ Where the scan runs is a separate choice, the run mode. `local` (the default) ru
 
 ## How scanners are selected
 
-ASH ships 16 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
+ASH ships 15 built-in scanners, all enabled by default except opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
 
 1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ashx scan --config-overrides scanners.<name>.enabled=true` can.
 2. Was it selected? `--scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
 3. Does it need only Python, when `--python-only` is set? A scanner that runs a tool of its own is recorded SKIPPED.
-4. Does it support this platform? A scanner that declares the operating system unsupported (semgrep on Windows) is recorded SKIPPED.
+4. Does it support this platform? A scanner that declares the operating system unsupported is recorded SKIPPED.
 5. Are its dependencies there? A scanner whose tool cannot be found, or is found only inside the scanned directory, is recorded MISSING. A scanner that the scan has nothing for is recorded SKIPPED instead, for example cdk-nag and cfn-nag with no CloudFormation template, or npm-audit with no lockfile beside a `package.json`.
 
 ASH asks the first four before it looks for the scanner's tool, so a scanner they leave out is SKIPPED whether or not its tool is installed.
@@ -75,7 +75,6 @@ The aggregated SARIF has a single run. Each scanner's results are appended to it
 
 ASH does not deduplicate findings, within a scan or across shards. When two scanners report the same problem, the results contain two findings, each with its own scanner name and rule ID. The default scanner set overlaps in several places:
 
-- semgrep and opengrep both run the `p/ci` ruleset;
 - grype and trivy both match dependency manifests against vulnerability advisories;
 - detect-secrets and gitleaks both look for secrets;
 - several scanners evaluate CloudFormation templates.

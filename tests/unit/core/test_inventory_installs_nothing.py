@@ -7,7 +7,7 @@ Why this file exists
 --------------------
 list_scanners, check_installation and ``ash plugin list --show-versions`` all
 describe the scanners through ``core.scanner_inventory.list_scanner_inventory``,
-which runs each scanner's dependency check. For bandit, checkov and semgrep that
+which runs each scanner's dependency check. For bandit and checkov that
 check installs the tool when it is missing: ``uv tool install``, with a
 300-second timeout and retries. Its last fallback, and the version probe, run
 ``uv tool run <tool> --version``, which downloads the tool into uv's cache when
@@ -23,8 +23,8 @@ not cached, so a later scan probes online. A scan installs as a scan always does
 A scanner whose tool a scan would install on first use (uv is present, the scan
 is not offline, the tool is not installed) is reported with
 ``installs_on_first_scan``: check_installation lists it apart from the missing
-dependencies, so on a fresh install it does not report bandit, checkov and
-semgrep as missing when the first scan installs them.
+dependencies, so on a fresh install it does not report bandit and
+checkov as missing when the first scan installs them.
 
 Containment
 -----------
@@ -47,9 +47,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-)
 from tests.utils.env_assertions import environ_names
 from tests.utils.install_containment import (
     GUARDED,
@@ -61,8 +58,8 @@ from tests.utils.install_containment import (
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX stand-ins")
 
-UV_TOOLS = [BanditScanner, CheckovScanner, SemgrepScanner]
-UV_TOOL_NAMES = ["bandit", "checkov", "semgrep"]
+UV_TOOLS = [BanditScanner, CheckovScanner]
+UV_TOOL_NAMES = ["bandit", "checkov"]
 
 
 @pytest.fixture

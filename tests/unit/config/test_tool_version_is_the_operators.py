@@ -47,9 +47,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scan
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
     ZizmorScanner,
 )
@@ -78,7 +75,6 @@ class Plugin(NamedTuple):
 PLUGINS = [
     Plugin("scanner", "scanners", "bandit", BanditScanner, "==1.7.9"),
     Plugin("scanner", "scanners", "checkov", CheckovScanner, "==3.2.100"),
-    Plugin("scanner", "scanners", "semgrep", SemgrepScanner, "==1.125.0"),
     Plugin("converter", "converters", "jupyter", JupyterConverter, "==7.16.1"),
     Plugin("scanner", "scanners", "ferret-scan", FerretScanScanner, "==1.0.1"),
     Plugin("scanner", "scanners", "cfn-lint", CfnLintScanner, "==1.43.3"),
@@ -259,10 +255,10 @@ def test_a_workspace_names_the_project_and_the_key_it_ignored(
     tmp_path: Path, ash_log
 ) -> None:
     """Through resolve_workspace: the warning names the project's own config file."""
-    for key, pin in (("api", "==1.125.0"), ("web", ">=1.130.0")):
+    for key, pin in (("api", "==1.7.9"), ("web", ">=1.8.0")):
         _write(
             tmp_path / key / ".ash" / "ash.yaml",
-            {"scanners": {"semgrep": {"options": {"tool_version": pin}}}},
+            {"scanners": {"bandit": {"options": {"tool_version": pin}}}},
         )
     workspace = tmp_path / "dev.code-workspace"
     workspace.write_text(
@@ -271,12 +267,16 @@ def test_a_workspace_names_the_project_and_the_key_it_ignored(
 
     plan = resolve_workspace(workspace)
 
-    assert all("semgrep" not in project.scanner_pins for project in plan.projects)
+    # bandit carries a default pin of its own; what a project wrote never replaces it.
+    written = {"==1.7.9", ">=1.8.0"}
+    assert all(
+        project.scanner_pins.get("bandit") not in written for project in plan.projects
+    )
     for key in ("api", "web"):
         named = [
             message
             for message in _warnings_naming(
-                ash_log, "scanners.semgrep.options.tool_version"
+                ash_log, "scanners.bandit.options.tool_version"
             )
             if f"/{key}/.ash/ash.yaml" in message
         ]

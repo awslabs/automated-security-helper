@@ -164,7 +164,10 @@ def test_the_roster_is_recorded_for_a_run_that_resolved_the_builtin_set(tmp_path
         f"alias the operator writes in config: {expected}"
     )
     assert "cdk-nag" in expected
-    assert len(expected) >= 10, expected
+    # Nine built-in scanners since the semgrep scanner retired behind the
+    # opengrep alias; the floor is the declared-field count, not the resolved
+    # count, which is the whole point of the roster.
+    assert len(expected) >= 9, expected
 
 
 def test_the_roster_names_a_scanner_that_never_joined_the_resolve(tmp_path):

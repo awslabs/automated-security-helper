@@ -156,8 +156,8 @@ class TestEnumerationCoversEveryPin:
             t for t, e in pins.THIRD_PARTY_LICENSES.items() if e.distribution
         }
         assert {"grype", "opengrep", "syft", "trivy", "uv"} <= set(pins.TOOL_VERSIONS)
-        assert {"bandit", "checkov", "semgrep"} <= uv_tool_pins
-        assert len(checker.enumerate_pins(pins)) >= 9
+        assert {"bandit", "checkov"} <= uv_tool_pins
+        assert len(checker.enumerate_pins(pins)) >= 8
 
     def test_uv_tool_pins_are_looked_up_on_pypi_by_distribution(self, pins):
         by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
@@ -473,7 +473,7 @@ class TestExitCode:
     @pytest.mark.unit
     def test_ahead_does_not_fail(self, monkeypatch, capsys):
         versions = self._pinned_versions()
-        older = dict(versions, semgrep="1.0.0")
+        older = dict(versions, bandit="1.0.0")
         code, out = self._run(
             monkeypatch, capsys, older.__getitem__, ["--fail-on-outdated"]
         )
@@ -715,11 +715,17 @@ class TestBumpGuidance:
             pins, "opengrep", "v9.0.0"
         )
 
-    def test_a_uv_tool_pin_names_its_url_pinned_license_files(self, pins):
-        steps = self._steps(pins, "semgrep", "v9.0.0")
-        assert '_THIRD_PARTY_HASHES["semgrep/LICENSE"]' in steps
-        assert '_THIRD_PARTY_HASHES["semgrep/COPYRIGHT"]' in steps
-        assert "TOOL_VERSIONS" not in steps
+    def test_url_pinned_license_files_are_named(self, pins):
+        steps = self._steps(pins, "opengrep", "v9.0.0")
+        assert '_THIRD_PARTY_HASHES["opengrep/LICENSE"]' in steps
+        assert '_THIRD_PARTY_HASHES["opengrep/COPYRIGHT"]' in steps
+
+    def test_a_uv_tool_pin_never_points_at_the_binary_table(self, pins):
+        """A PyPI-installed (distribution) tool's bump guidance must not tell
+        anyone to edit TOOL_VERSIONS, which holds release-binary pins only.
+        bandit is the distribution pin now that semgrep is retired."""
+        steps = self._steps(pins, "bandit", "9.0.0")
+        assert "TOOL_VERSIONS" not in steps, steps
 
     def test_the_report_points_at_guidance_that_exists(self, pins):
         pin = {p.tool: p for p in checker.enumerate_pins(pins)}["trivy"]

@@ -34,7 +34,7 @@ from tests.utils.helpers import importing_this_checkout
 
 pytestmark = [pytest.mark.integration]
 
-SCANNERS = ["semgrep", "opengrep", "bandit"]
+SCANNERS = ["opengrep", "bandit"]
 
 RULE = """rules:
   - id: scanned-nothing-shell-true
@@ -145,9 +145,6 @@ def _status(results: dict, scanner: str) -> str | None:
 
 EXCLUDE_ALL = """project_name: scanned-nothing
 scanners:
-  semgrep:
-    options:
-      exclude: ["*.py"]
   opengrep:
     options:
       exclude: ["*.py"]
@@ -183,7 +180,7 @@ def _installed(scanner: str) -> None:
         pytest.skip(f"{scanner} is not installed here")
 
 
-@pytest.mark.parametrize("scanner", ["semgrep", "opengrep"])
+@pytest.mark.parametrize("scanner", ["opengrep"])
 def test_excluding_every_file_is_an_error(everything_excluded, scanner):
     _installed(scanner)
     assert _status(everything_excluded, scanner) == "ERROR"

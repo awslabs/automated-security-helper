@@ -20,7 +20,7 @@ from automated_security_helper.config.untrusted_source import SHARD_RECORDED
 
 pytestmark = pytest.mark.unit
 
-_BOTH = "ash merge's --config-overrides or --config"
+_BOTH = "ashx merge's --config-overrides or --config"
 
 
 def test_the_remedy_still_offers_both_options_for_a_setting_that_stays_on_the_host():

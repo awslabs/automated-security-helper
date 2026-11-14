@@ -440,6 +440,7 @@ def display_path(path: Path) -> str:
 #: The subcommands of the CLI. The generated pages take prose from help text and
 #: docstrings that were written when the command was `ash`; the docs spell it with
 #: the v4 entry point, `ashx` (tests/unit/test_docs_name_the_canonical_cli.py).
+#: Bare `ash --<option>` forms (no subcommand) are kept on purpose and not rewritten.
 _CLI_SUBCOMMANDS = (
     "scan",
     "config",
@@ -449,7 +450,7 @@ _CLI_SUBCOMMANDS = (
     "plugin",
     "inspect",
     "merge",
-    "image",
+    "build-image",
     "get-genai-guide",
 )
 _V3_COMMAND = re.compile(

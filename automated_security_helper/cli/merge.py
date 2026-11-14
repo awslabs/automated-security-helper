@@ -2979,7 +2979,7 @@ def verify_verdict_settings_agree(
     raise ShardSettingsDisagreeError(
         "the shards' recorded configurations disagree on settings that decide the "
         "merged verdict:\n  " + "\n  ".join(lines) + "\nOne verdict covers the "
-        "merged scan, so ash merge does not take one shard's value for the others. "
+        "merged scan, so ashx merge does not take one shard's value for the others. "
         "Run every shard with the same configuration, or set the value for all of "
         "them with --config-overrides"
         + (f", or with {', '.join(flags)}" if flags else "")
@@ -3053,7 +3053,7 @@ def warn_on_ignored_operator_verdict_settings(
         # the line quotes the setting's value, which can hold one (an ignore
         # path's reason read with !ENV, say).
         message = (
-            f"ash merge's --config sets {key} to {_shown_setting(value)}, and the "
+            f"ashx merge's --config sets {key} to {_shown_setting(value)}, and the "
             f"shards recorded {_shown_setting(shards.get(key))}. The verdict "
             "follows the shards' own configuration, so their value applies. To "
             "apply yours, pass "
@@ -3130,7 +3130,7 @@ def warn_on_unapplied_operator_settings(
             # option's value, which the operator's config can have read from
             # the environment.
             message = (
-                f"ash merge's --config sets {key}, which does not apply: the shards "
+                f"ashx merge's --config sets {key}, which does not apply: the shards "
                 f"recorded no {section_key} section to take it, and --config supplies "
                 "values for what the shards recorded without adding to it. To apply "
                 f"it, {_apply_hint(key, value)}."

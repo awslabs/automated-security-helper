@@ -77,9 +77,9 @@ It prints a table with one row per scanner and ends with a box like this:
 ```text
 ╭─────────────────────────── Installation Complete ────────────────────────────╮
 │ Commands run: 15 (0 failed)                                                  │
-│ Tools verified on PATH: 17 -- actionlint, bandit, cdk-nag, cfn-guard,        │
+│ Tools verified on PATH: 16 -- actionlint, bandit, cdk-nag, cfn-guard,        │
 │ cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, jupyter,        │
-│ npm-audit, opengrep, semgrep, syft, trivy, zizmor                            │
+│ npm-audit, opengrep, syft, trivy, zizmor                                     │
 │ No install path on this platform: cdk-nag, detect-secrets, npm-audit         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -180,7 +180,6 @@ prints a summary table, then where it wrote the results:
 │ grype          │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 3.0s  │ 0      │ PASSED  │ MED (g) │
 │ npm-audit      │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 160ms │ 0      │ SKIPPED │ MED (g) │
 │ opengrep       │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 5.1s  │ 0      │ PASSED  │ MED (g) │
-│ semgrep        │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 4.7s  │ 0      │ PASSED  │ MED (g) │
 │ syft           │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 1.4s  │ 0      │ PASSED  │ MED (g) │
 │ trivy          │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 458ms │ 0      │ PASSED  │ MED (g) │
 │ zizmor         │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ <1ms  │ 0      │ SKIPPED │ MED (g) │

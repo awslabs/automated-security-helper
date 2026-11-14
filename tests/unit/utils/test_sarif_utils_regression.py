@@ -176,7 +176,7 @@ class TestEmptyRunsInvocationGuard:
             sarif.runs[0].invocations = []
         assert sarif.runs == []
 
-    def test_semgrep_scanner_empty_runs(self):
+    def test_grep_scanner_empty_runs(self):
         sarif = SarifReport(version="2.1.0", runs=[])
         if sarif.runs:
             sarif.runs[0].invocations = []

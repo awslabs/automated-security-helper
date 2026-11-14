@@ -1735,7 +1735,7 @@ async def get_scan_results(
                 - "full" (default): Return all results including raw_results, validation_checkpoints, etc.
                 - "summary": Return only summary data (metadata, findings counts, scanner summaries)
                 - "minimal": Return only basic scan status and completion info
-        scanners: Comma-separated list of scanner names to include (e.g., "bandit,semgrep").
+        scanners: Comma-separated list of scanner names to include (e.g., "bandit,opengrep").
                   If not specified, includes all scanners.
         severities: Comma-separated list of severity levels to include (e.g., "critical,high,medium").
                     Options: critical, high, medium, low, info, suppressed
@@ -2276,7 +2276,7 @@ async def check_installation(ctx: Context) -> Dict[str, Any]:
     PATH, which the server does not need). Each check may run its scanner's
     tool, so this takes seconds. It installs and downloads nothing. A scanner
     whose tool is not installed yet, and that a scan installs with uv when it
-    starts the scanner (not offline, uv present: bandit, checkov, semgrep on a
+    starts the scanner (not offline, uv present: bandit, checkov on a
     fresh install), is listed in installs_on_first_scan rather than
     missing_dependencies, and does not make ready false. ash_command_output names
     the executable's path only for the client that launched the server; a
