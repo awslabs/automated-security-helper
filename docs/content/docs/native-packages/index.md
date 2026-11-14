@@ -4,7 +4,7 @@ ASH builds four OS-native packages besides the wheel: an MSIX for Windows, a Cho
 
 ## Publication status
 
-None of these packages is published to a public feed. Nothing in this repository submits to the Microsoft Store, `microsoft/winget-pkgs`, `community.chocolatey.org` or Flathub. So `winget install ash`, `choco install ash` without a `--source`, and `flatpak install flathub ...` for ASH do not work, and these pages do not tell you to run them.
+None of these packages is published to a public feed. Nothing in this repository submits to the Microsoft Store, `microsoft/winget-pkgs`, `community.chocolatey.org` or Flathub. So `winget install ash`, `choco install ash` without a `choco --source`, and `flatpak install flathub ...` for ASH do not work, and these pages do not tell you to run them.
 
 A GitHub release attaches each of them as a file: the `.msix`, the `.nupkg`, the Flatpak bundle and a winget manifest set rendered for that `.msix`, beside the wheel, the sdist, the MCPB bundle, the `.deb`, the `.rpm`, the VS Code extension and the JetBrains plugin. `packaging/release-assets.py` is the list. So you can download a package from a release, or build it from a checkout, or for the MSIX, download the one a CI run built. Each page below gives the steps.
 
@@ -32,7 +32,8 @@ Each package bundles ASH's own wheel and nothing else. On first use (Chocolatey:
 
 None of the packages contains a scanner. After installing, provision the scanners ASH can install itself:
 
-```
+<!-- doctest: illustrative reason="downloads scanner binaries from their upstream releases" -->
+```bash
 ashx dependencies install
 ```
 

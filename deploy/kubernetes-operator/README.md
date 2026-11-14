@@ -5,7 +5,8 @@ collector. `AshMcpServer` runs ASH's own MCP server as a Deployment behind a
 Service. They share only the config-delivery mechanism, which is why they are two
 kinds and two reconcilers rather than one kind with a mode field.
 
-```
+<!-- doctest: illustrative reason="needs a Kubernetes cluster and this directory's manifests" -->
+```bash
 kubectl apply -f generated/crd-ashscans.yaml -f generated/crd-ashmcpservers.yaml  # the CRDs
 kubectl apply -f manifests/          # namespace, RBAC, operator Deployment
 ```
@@ -18,7 +19,8 @@ To upgrade, run the same two commands from the newer tree, with the newer operat
 image. A finished `AshScan` keeps its status and is not re-run, and a scan in flight
 is merged by the new operator. To uninstall, delete in the reverse order:
 
-```
+<!-- doctest: illustrative reason="deletes custom resources from a Kubernetes cluster" -->
+```bash
 kubectl delete -f generated/crd-ashscans.yaml -f generated/crd-ashmcpservers.yaml  # every AshScan and AshMcpServer, and what they own
 kubectl delete -f manifests/         # namespace, RBAC, operator Deployment
 ```
@@ -50,7 +52,7 @@ contract**: a command line, and a directory layout. Reusing the shard-and-merge
 pattern the two existing CDK backends implement means implementing that contract,
 not importing anything.
 
-```
+```text
 per shard:   ashx scan --source-dir  /workspace/src \
                       --output-dir  /workspace/out \
                       --shard-index K --shard-count N \
@@ -64,7 +66,7 @@ collector:   walk 0..N-1 by index; refuse a short set; then
                       0 clean, 2 findings, 1 incomplete (partial results)
 ```
 
-The program name `ashx` is held in one constant, `ASH_CLI` in
+The program name `ashx` is held in one constant in
 `ash_operator/constants.py`. Every argv builder, the MCP capability probe and the
 e2e harness read it from there, and `tests/test_contract.py` fails if a module
 spells the name itself.
@@ -157,10 +159,10 @@ fixture's three detect-secrets findings came back as six on kind.
 `spec.config` is derived from `AshConfig.model_json_schema()` by
 `ash_operator/crd_schema.py` and written by
 `python -m ash_operator.generate_manifests`. Hand-writing a parallel schema would
-drift from the models the scan actually validates against; `--check` holds the
-committed copies to what the generator emits.
+drift from the models the scan actually validates against; the generator's
+`generate_manifests --check` holds the committed copies to what it emits.
 
-`--check` compares bytes **in memory** and writes nothing. It used to shell out to
+`generate_manifests --check` compares bytes **in memory** and writes nothing. It used to shell out to
 `git status --porcelain --untracked-files=all`, which was the wrong oracle in both
 directions: that query omits *ignored* paths, so an ignore rule touching `generated/`
 would have made the gate print "match byte for byte" over a directory whose content had
@@ -322,11 +324,11 @@ the variable at run time.
 
 It is worth knowing why it is not simply put in argv, because the obvious-looking
 middle road is a security hole and this operator shipped it. An earlier version placed
-the literal string `${ASH_MCP_AUTH_HEADER_VALUE}` in argv and ran
+the literal text of a shell reference to the secret's variable in argv and ran
 `sh -c 'exec "$0" "$@"' <argv>`, expecting the shell to expand it. **A positional
 parameter's value is never re-expanded.** So `ashx mcp` received those 28 characters and
 `hmac.compare_digest`'d every incoming header against them. The auth model inverts:
-anyone sending the literal `${ASH_MCP_AUTH_HEADER_VALUE}` — a constant in a public
+anyone sending that literal reference — a constant in a public
 repository, also readable with `kubectl get deploy -o yaml` — authenticates, and the
 holder of the real secret gets 401. Nothing upstream rescues it: `ashx mcp`'s
 `--auth-header-value` option declares no `envvar=`, so setting the variable alone
@@ -379,7 +381,7 @@ in the probe definition, where `kubectl describe pod` shows it.
 
 The image's `ENTRYPOINT` is:
 
-```
+```text
 kopf run --standalone -m ash_operator.main
 ```
 
@@ -387,6 +389,7 @@ A deployment **must append `--namespace <ns>` as `args`, or set `KOPF_RUN_NAMESP
 and must **not** set `command:` — that would replace the ENTRYPOINT and discard
 `kopf run` entirely. `manifests/operator.yaml` does it with the downward API:
 
+<!-- doctest: config kind=other reason="a fragment of the operator's Kubernetes Deployment manifest" -->
 ```yaml
 args: ["--namespace", "$(WATCH_NAMESPACE)"]
 env:
@@ -395,7 +398,7 @@ env:
 ```
 
 Omitting it does **not** default to the pod's own namespace. Measured on kopf 1.37.2:
-with neither `-n` nor `-A`, kopf logs
+with neither `kopf run -n` nor `kopf run -A`, kopf logs
 `FutureWarning: Absence of either namespaces or cluster-wide flag will become an
 error soon. For now, switching to the cluster-wide mode for backward compatibility.`
 and then every watcher 403s against the namespaced Role —
@@ -407,9 +410,9 @@ stripped, an AshScan still reached `phase: Scanning` and its shard Job ran to
 `Complete 3/3` — and then **hung there with no collector and no verdict**, because the
 Job watcher was dead. Restoring `args` made the operator create the collector
 immediately and the run finished with 12 actionable findings. So a missing
-`--namespace` presents as a scan that appears to be working.
+namespace argument presents as a scan that appears to be working.
 
-If you want cluster-wide operation instead, pass `--all-namespaces` and convert the
+If you want cluster-wide operation instead, pass `kopf run --all-namespaces` and convert the
 namespaced Role to a ClusterRole + ClusterRoleBinding. Picking one of those two without
 the other is the failure above.
 
@@ -455,18 +458,13 @@ write it prevents.
 
 ## Tests
 
-```
+```text
 # unit, no cluster and no docker
 PYTHONPATH=. uv run --no-project --python 3.12 --with ".[test]" python -m pytest tests
 
 # the same with ASH importable, so the equivalence arms run instead of skipping
 PYTHONPATH=. uv run --no-project --python 3.12 --with ../.. --with ".[test]" \
   python -m pytest tests --ignore=tests/e2e
-
-# end to end: builds three images, creates and deletes a kind cluster
-ASH_OPERATOR_E2E=1 ASH_OPERATOR_E2E_CLUSTER=<unique-name> \
-  PYTHONPATH=. uv run --no-project --python 3.12 --with ".[test]" \
-  python -m pytest tests/e2e -v
 
 # the generated CRDs match what the generator emits
 PYTHONPATH=. uv run --no-project --python 3.12 --with ../.. --with ".[test]" \
@@ -477,9 +475,9 @@ uv run --group dev ruff check deploy/kubernetes-operator
 uv run --group dev ruff format --check deploy/kubernetes-operator
 ```
 
-`ASH_OPERATOR_E2E_CLUSTER` and `ASH_OPERATOR_E2E_IMAGE_TAG` name the kind cluster and
-the image tag, so two runs on one host never share either; the workflow sets both
-from the run id. The e2e is skipped unless `ASH_OPERATOR_E2E=1`, and
+The end-to-end suite builds three images and creates and deletes a kind cluster, so it
+is skipped unless its switch is set; how to run it, and the variables, are on the
+[contributor testing page](../../docs/content/contributing/testing.md#run-the-kubernetes-operators-end-to-end-tests).
 `pytest_report_header` prints which mode a run is in, because a suite reporting "all
 passed" while never having stood a cluster up is the same shape as a gate that
 proves nothing.
@@ -578,7 +576,7 @@ run the unit suite.
 Dependabot does not maintain these files, and no entry in `.github/dependabot.yml` covers
 them. Its pip updater regenerates a compiled requirements file with `pip-compile`, passing
 only the options it can read back out of the file, so a regenerated file loses
-`--universal`, `--python-version 3.12`, the ASH runtime constraints and `--no-emit-package`.
+`pip-compile --universal`, `--python-version 3.12`, the ASH runtime constraints and `pip-compile --no-emit-package`.
 For `scanner-requirements.txt` that would re-pin packages ASH's runtime already pins, and
 the image build would then fail on the next routine bump of `uv.lock`. A Dependabot
 security update to one of these files can still arrive, because security updates need no

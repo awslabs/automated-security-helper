@@ -753,7 +753,7 @@ against code that is no longer there. This was hit in development: four new
 assertions failed against a buildspec that had already been changed.
 `jest.config.js` also lists `ts` first, so the invariant is stated where it matters.
 
-`npm test` needs `python3` on `PATH` (or `ASH_TEST_PYTHON` set to an interpreter): the
+`npm test` needs `python3` on `PATH` (the harness in `test/support/` names the variable that points it elsewhere): the
 EKS suite runs the operator installer's inline Python to get the RBAC it builds, and
 fails rather than skips when no interpreter is found.
 

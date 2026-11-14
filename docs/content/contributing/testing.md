@@ -311,6 +311,36 @@ A helper or a tool goes in `tests/utils/` under a name that does not start with 
 The walk guard, the docs checks, and the orphan check list files with git, so the unit
 suite fails in a directory that is not a git work tree. Run it in a clone.
 
+## Run the Kubernetes operator's end-to-end tests
+
+The operator's suite in `deploy/kubernetes-operator/tests/e2e` builds three images and
+creates and deletes a kind cluster, so it is skipped unless `ASH_OPERATOR_E2E=1`. The
+run's header says which mode it is in, because a suite that reports "all passed" without
+having stood a cluster up proves nothing. Two more variables name the kind cluster and the
+image tag, so two runs on one host never share either; the workflow sets both from the run
+id.
+
+<!-- doctest: illustrative reason="builds container images and creates a kind cluster" -->
+```bash
+cd deploy/kubernetes-operator
+ASH_OPERATOR_E2E=1 ASH_OPERATOR_E2E_CLUSTER=<unique-name> \
+  PYTHONPATH=. python -m pytest tests/e2e -v
+```
+
+Run it in an environment that has the operator's own test dependencies, installed as the
+operator README's Tests section installs them for the unit suite.
+
+The variables are `ASH_OPERATOR_E2E_CLUSTER` for the cluster name and
+`ASH_OPERATOR_E2E_IMAGE_TAG` for the image tag.
+
+## Run the VS Code extension's integration tests against a real ASH
+
+`editors/vscode` ships a stub CLI that replays captured runs, so its integration suite
+needs no ASH. To run the same suite against genuine scans, set `ASH_IT_REAL_ASH_DIR` to a
+directory holding an installed ASH: a venv's `bin/`, with both `ashx` and `ash`. The
+channel end-to-end run, `npm run test:e2e-vsix`, needs that variable and a built
+`ash-vscode.vsix`, which `ASH_IT_VSIX` names when it is not in the default place.
+
 ## Test an MCP change locally
 
 The MCP server is `ash mcp`. Its tests are in `tests/unit/cli/mcp/` and

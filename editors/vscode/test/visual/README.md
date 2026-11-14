@@ -8,7 +8,8 @@ suites, and one rule for changing either.
 
 1. Make the change and run the suites. A changed or missing snapshot fails:
 
-   ```
+   <!-- doctest: illustrative reason="runs the extension's jest and pixel suites, which need Node and a display" -->
+   ```bash
    npm run snapshots -- all
    ```
 
@@ -17,26 +18,30 @@ suites, and one rule for changing either.
    `--artifacts <dir>` it leaves the capture and a diff image there.
 3. If the change is intended, rewrite the snapshots:
 
-   ```
+   <!-- doctest: illustrative reason="rewrites the extension's committed snapshots" -->
+   ```bash
    npm run snapshots -- --snapshot-update structural   # or visual, or all
    ```
 
 4. Review `git diff` (for a PNG, open it), then commit the snapshot in the same
    commit as the change, with a trailer saying why the output changed:
 
-   ```
+   <!-- doctest: illustrative reason="commits to the reader's own checkout" -->
+   ```bash
    git commit --trailer "Snapshot-Update: the incomplete-scan warning names the scanner"
    ```
 
-`--snapshot-update` is the same flag core ASH's snapshot suite uses, and like that
-suite's it is refused when `CI` or `GITHUB_ACTIONS` is `true`.
+The `npm run snapshots -- --snapshot-update` flag is the same one core ASH's snapshot
+suite takes (`pytest --snapshot-update`), and like that suite's it is refused when `CI`
+or `GITHUB_ACTIONS` is `true`.
 `test/snapshot-policy.test.ts` fails if any file under `.github/` passes it, or jest's
-`--updateSnapshot`, `--update-snapshot`, `-u`, `--ci=false` or `--no-ci`, or the
-JetBrains plugin's `-Psnapshot-update` in any spelling, or sets
-`ASH_SNAPSHOT_UPDATE`. A flag on the next line of a folded YAML string counts.
+`jest --updateSnapshot`, `jest --update-snapshot`, `jest -u`, `jest --ci=false` or
+`jest --no-ci`, or the JetBrains plugin's `-Psnapshot-update` in any spelling, or sets
+the variable that lets core ASH's suite update a snapshot. A flag on the next line of a
+folded YAML string counts.
 `npm test` is `jest --ci`, so it never writes a snapshot, not even a new one; the
 policy test runs it over a new snapshot to prove that. (`"ci": true` in the jest
-configuration would not: jest's command-line default for `--ci` overrides it.)
+configuration would not: jest's command-line default for `jest --ci` overrides it.)
 
 The `editor-snapshots` job runs `.github/scripts/check-snapshot-trailers.py`
 over the commits of the push (`before..after`, or from the merge base with the
@@ -46,7 +51,7 @@ in a commit that carries no `Snapshot-Update: <reason>`; every such commit needs
 own. A separate commit that only adds the trailer does not count, and the placeholder
 `<why the output changed>` is not a reason. The error message prints the
 `git commit --amend` or `git rebase --exec` command that fixes it. The same job's
-`--orphans` step fails a `.snap` file whose test file is gone, a PNG that no
+`check-snapshot-trailers.py --orphans` step fails a `.snap` file whose test file is gone, a PNG that no
 scenario in `scenarios.json` names, a scenario with no PNG, and any other file in
 a `__snapshots__` directory.
 
@@ -106,8 +111,8 @@ everything that can move a pixel is fixed:
   instant; DejaVu as the only font family installed, checked at build time; VS Code
   1.141.0, the version the integration job also runs, verified against the SHA-256
   its update service publishes.
-- `run.ts`: a 1280x800x24 screen at 96 DPI, `--force-device-scale-factor=1`,
-  software rendering (`--disable-gpu`), the Default Dark Modern theme, DejaVu Sans
+- `run.ts`: a 1280x800x24 screen at 96 DPI, `chromium --force-device-scale-factor=1`,
+  software rendering (`chromium --disable-gpu`), the Default Dark Modern theme, DejaVu Sans
   Mono at 14px with a 20px line height, a solid caret, reduced motion, and every
   setting that would open something on its own or draw something time-dependent
   turned off. The workspace is always `/tmp/ash-visual/sample-project`, because its
@@ -132,12 +137,12 @@ drawn two ways. Both are about Chromium's software renderer redrawing only the
 part of the screen that changed, and both showed up as one anti-aliased edge
 pixel one level of gray off:
 
-- `--disable-partial-raster`. By default Chromium re-rasters only the damaged
+- `chromium --disable-partial-raster`. By default Chromium re-rasters only the damaged
   part of a tile, and its software rasterizer can round an edge pixel
   differently in a partial raster than in a whole one. Before this switch, 4 of
   10 runs failed by one pixel: the top of the Problems toolbar's separator at
   (1218,518), or a part's rounded corner (#5E5E5E against #606060).
-- `--ui-disable-partial-swap`. By default the compositor copies only the damaged
+- `chromium --ui-disable-partial-swap`. By default the compositor copies only the damaged
   rectangle of a frame to the X window, so a pixel on that rectangle's edge can
   keep the value an earlier frame drew. Which frames get drawn depends on how
   much CPU the renderer gets. On two loaded CPUs, 9 of 30 runs without this

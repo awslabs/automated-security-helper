@@ -12,23 +12,26 @@ The Chocolatey package id is `ash`. That is what you pass to `choco`; the comman
 
 A GitHub release attaches `ash.<version>.nupkg`; to use that one, put it in a directory such as `C:\ash-pkg` and go to [Install](#install):
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 gh release download v<version> --repo awslabs/automated-security-helper --pattern '*.nupkg' --dir C:\ash-pkg
 ```
 
 To build it instead, from a checkout, with `uv` and Chocolatey installed:
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 uv build --out-dir dist
 pwsh -File packaging/chocolatey/build.ps1 dist\automated_security_helper-<version>-py3-none-any.whl C:\ash-pkg
 ```
 
-`build.ps1` writes `C:\ash-pkg\ash.<version>.nupkg` and prints its path. It refuses to pack when the version in `ash.nuspec` disagrees with the wheel's.
+The script `packaging/chocolatey/build.ps1` writes `C:\ash-pkg\ash.<version>.nupkg` and prints its path. It refuses to pack when the version in `ash.nuspec` disagrees with the wheel's.
 
 ## Install
 
 Name both your package directory and the community feed as sources. The community feed is only there to satisfy the `python3` dependency:
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 choco install ash --source "C:\ash-pkg;https://community.chocolatey.org/api/v2/"
 ```
@@ -39,10 +42,11 @@ The install script creates a virtualenv in `%ProgramData%\ash\venv`, installs th
 - `ashv3`, deprecated, which warns once on stderr
 - `automated-security-helper`, kept indefinitely and silent
 
-It does not shim `ash`. MSYS2 and Git for Windows ship the Almquist shell as `ash.exe`, and when that is earlier on `PATH` a bare `ash` reaches the shell instead of ASH.
+It does not shim `ash`. MSYS2 and Git for Windows ship the Almquist shell as ash.exe, and when that is earlier on `PATH` a bare `ash` reaches the shell instead of ASH.
 
 ## Run it
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 ashx --version
 ashx dependencies install
@@ -53,6 +57,7 @@ ashx scan --source-dir C:\path\to\repo
 
 Build the newer package into the same directory, then:
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 choco upgrade ash --source "C:\ash-pkg;https://community.chocolatey.org/api/v2/"
 ```
@@ -61,6 +66,7 @@ An upgrade builds a new virtualenv rather than patching the old one.
 
 ## Uninstall
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 choco uninstall ash
 ```
@@ -71,6 +77,7 @@ This removes the shims and the virtualenv in `%ProgramData%\ash`, since Chocolat
 
 Stage a wheelhouse before `choco install`, as Administrator. Resolve it from ASH's own wheel, on a machine that can reach an index. Do not run `pip download automated-security-helper`: that name on PyPI belongs to an unrelated third party, not to this project.
 
+<!-- doctest: illustrative reason="Windows batch commands, which the docs job does not run" -->
 ```bat
 pip download .\automated_security_helper-<version>-py3-none-any.whl -d C:\ash-wheels
 mkdir %ProgramData%\pip
@@ -79,4 +86,4 @@ mkdir %ProgramData%\pip
 >>%ProgramData%\pip\pip.ini echo find-links = C:\ash-wheels
 ```
 
-The `python3` dependency still has to come from somewhere. On a machine with no route to the community feed, install Python 3.10 to 3.13 first and pass `--ignore-dependencies`.
+The `python3` dependency still has to come from somewhere. On a machine with no route to the community feed, install Python 3.10 to 3.13 first and pass `choco install --ignore-dependencies`.

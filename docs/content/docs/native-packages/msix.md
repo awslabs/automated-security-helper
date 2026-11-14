@@ -4,7 +4,7 @@ The MSIX package installs ASH on Windows 10 version 2004 (build 19041) or later 
 
 ## Prerequisites
 
-- Python 3.10, 3.11, 3.12 or 3.13. The package does not carry an interpreter. Its launcher tries `py -3.13`, `-3.12`, `-3.11` and `-3.10`, then `py -3`, `python3` and `python`, and uses the first one whose version is in range. Set `ASH_MSIX_PYTHON` to the full path of an interpreter to skip the search; that path is not version-checked.
+- Python 3.10, 3.11, 3.12 or 3.13. The package does not carry an interpreter. Its launcher tries `py -3.13`, `-3.12`, `-3.11` and `-3.10`, then `py -3`, `python3` and `python`, and uses the first one whose version is in range. The launcher has an interpreter override that skips the search and takes the full path of an interpreter, which is not version-checked; `README.msix` in the package names the variable.
 - A reachable Python index on the first run, or a staged wheelhouse (see [Offline machines](#offline-machines)).
 - An elevated PowerShell for trusting the certificate.
 
@@ -14,29 +14,33 @@ Use one of these:
 
 - Download it from a GitHub release. With the GitHub CLI:
 
+    <!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
     ```powershell
     gh release download v<version> --repo awslabs/automated-security-helper --pattern '*.msix'
     ```
 
 - Download the `.msix` that CI built. Every run of the `ASH - Package` workflow (`ash-package.yml`) that builds the MSIX uploads it as an artifact named `ash-msix-<commit>-attempt-<n>`, kept for 14 days. With the GitHub CLI, signed in:
 
+    <!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
     ```powershell
     gh run download <run-id> --repo awslabs/automated-security-helper --pattern 'ash-msix-*'
     ```
 
 - Build it from a checkout. You need the Windows SDK, which provides `makeappx.exe` and `signtool.exe`, and `uv`:
 
+    <!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
     ```powershell
     uv build --out-dir dist
     pwsh -File packaging/msix/build.ps1 -Wheel dist\automated_security_helper-<version>-py3-none-any.whl
     ```
 
-    The package is written to `build\msix\automated-security-helper-<version>.msix`. With no signing secret set, `build.ps1` signs it with a new throwaway self-signed certificate.
+    The package is written to `build\msix\automated-security-helper-<version>.msix`. With no signing secret set, `packaging/msix/build.ps1` signs it with a new throwaway self-signed certificate.
 
 ## Trust the certificate and install
 
 Run these in an elevated PowerShell. Reading the certificate out of the package means you trust the certificate that signed this file, not one obtained separately.
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 # 1. Read the signing certificate from the package.
 $msix = 'C:\path\to\automated-security-helper-<version>.msix'
@@ -55,6 +59,7 @@ Use `LocalMachine\TrustedPeople`, not the Trusted Root store. The certificate is
 
 ## Run it
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 ashx --version
 ashx dependencies install
@@ -65,11 +70,7 @@ The first `ashx` is slow: it creates a virtualenv under `%LOCALAPPDATA%\Packages
 
 The package registers three app execution aliases: `ashx`, the deprecated `ashv3`, and `automated-security-helper`. It does not register `ash`. An alias is only a name on `PATH`, so if another program claims `ashx` earlier on your `PATH`, use `automated-security-helper`. You can see and turn off each alias under **Settings > Apps > Advanced app settings > App execution aliases**.
 
-If pip fails partway through the first run with a path-length error, point the virtualenv somewhere shorter. A virtualenv you place yourself is not removed on uninstall.
-
-```powershell
-setx ASH_MSIX_VENV C:\ash-venv
-```
+If pip fails partway through the first run with a path-length error, point the virtualenv somewhere shorter. A virtualenv you place yourself is not removed on uninstall. The launcher's virtualenv override, with its `setx` command, is in `README.msix` in the package.
 
 ## File system access
 
@@ -81,12 +82,14 @@ Install the newer `.msix` with `Add-AppxPackage`. A package signed by a differen
 
 ## Uninstall
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 Get-AppxPackage -Name AWSLabs.AutomatedSecurityHelper | Remove-AppxPackage
 ```
 
 Windows deletes the package's per-user state, which includes the default virtualenv. To withdraw the certificate trust afterwards:
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 Get-ChildItem Cert:\LocalMachine\TrustedPeople |
     Where-Object { $_.Subject -like '*ASH Development*' } | Remove-Item
@@ -96,6 +99,7 @@ Get-ChildItem Cert:\LocalMachine\TrustedPeople |
 
 Stage a wheelhouse before the first `ashx`. Resolve it from ASH's own wheel, on a machine that can reach an index. Do not run `pip download automated-security-helper`: that name on PyPI belongs to an unrelated third party, not to this project.
 
+<!-- doctest: illustrative reason="PowerShell commands for Windows, which the docs job does not run" -->
 ```powershell
 pip download .\automated_security_helper-<version>-py3-none-any.whl -d C:\ash-wheels
 setx PIP_NO_INDEX true

@@ -9,7 +9,7 @@ the verdict is `scripts/e2e/assert_outcome.py`.
 `fixtures/cases.json` defines three cases. A channel copies `fixtures/<source>/` into a
 scratch directory and runs:
 
-```
+```text
 ashx scan --source-dir <copy> --output-dir <scratch> --no-progress --scanners <scanners> <args>
 ```
 
@@ -72,14 +72,14 @@ statuses.
 | T2 | venv | detect-secrets,cfn-nag | none | 1 | cfn-nag MISSING (no cfn_nag_scan reachable) |
 | baseline | image | detect-secrets | none | 2 / 0 | as on the venv |
 | T1 | image | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty | 1 | opengrep MISSING, "no rule cache was found" |
-| T1 | image, `--network none` | same | same | 1 | opengrep MISSING |
-| T1 control | image | same | ASH_OFFLINE=YES, cache = a dir with one rule | 2 | opengrep PASSED |
+| T1 | image, `--network none` | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty | 1 | opengrep MISSING |
+| T1 control | image | detect-secrets,opengrep | ASH_OFFLINE=YES, cache = a dir with one rule | 2 | opengrep PASSED |
 | T1 online | image | detect-secrets,opengrep | none | 2 | opengrep PASSED |
 | T2 | image | detect-secrets,cfn-nag | none | 2 | cfn-nag SKIPPED (no templates to scan) |
-| T3 | image | detect-secrets,opengrep, with `.ash/.ash.yaml` setting opengrep `config: /nonexistent/ruleset.yml` | none | 2 | opengrep PASSED; the bad config did not produce an ERROR |
+| T3 | image | detect-secrets,opengrep | none, with `.ash/.ash.yaml` setting opengrep `config: /nonexistent/ruleset.yml` | 2 | opengrep PASSED; the bad config did not produce an ERROR |
 | T1 | venv, Windows simulated | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty | 2 | opengrep SKIPPED, "scanner config disabled" |
-| T1 + override | venv, Windows simulated | detect-secrets,opengrep, `--config-overrides scanners.opengrep.enabled=true` | ASH_OFFLINE=YES, cache empty | 1 | opengrep MISSING |
-| T1 + override | venv | same | same | 1 | opengrep MISSING, as without the override |
+| T1 + override | venv, Windows simulated | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty, `--config-overrides scanners.opengrep.enabled=true` | 1 | opengrep MISSING |
+| T1 + override | venv | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty, `--config-overrides scanners.opengrep.enabled=true` | 1 | opengrep MISSING, as without the override |
 
 "Windows simulated" means the same Linux venv, with `platform.system()` patched to return
 `Windows` while the opengrep scanner module was imported and restored before the scan
@@ -128,8 +128,8 @@ through `run_case.py ... -- --mode container --no-build`:
 | incomplete | none | 2 | opengrep PASSED, online |
 | incomplete | `--offline` | 1 | opengrep MISSING |
 
-`--offline` is the CLI's own switch for this. It passes `-e ASH_OFFLINE=YES` and
-`--network=none` to the container. Inside, opengrep reads offline rules from the
+`--offline` is the CLI's own switch for this. It passes `docker run -e ASH_OFFLINE=YES` and
+`docker run --network=none` to the container. Inside, opengrep reads offline rules from the
 image's `OPENGREP_RULES_CACHE_DIR` (`/deps/.opengrep`), which only an image built with
 `--offline` fills. An image built online has it empty, so opengrep fails closed for
 the same reason as on the other channels. `scripts/e2e/container.sh` adds `--offline`
