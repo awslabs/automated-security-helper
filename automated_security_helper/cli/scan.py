@@ -1017,6 +1017,28 @@ def run_ash_scan_cli_command(
             case_sensitive=False,
         ),
     ] = None,
+    express: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--express/--no-express",
+            rich_help_panel="Execution",
+            help=(
+                "Run this scan on the resident express daemon, starting it if it "
+                "is not running (--express), or force an ordinary cold in-process "
+                "run (--no-express). Without either, a scan uses the daemon "
+                "automatically whenever its socket exists and its ASH version "
+                "matches, and silently runs cold otherwise. Unix only (Linux and "
+                "macOS). The flag is read by the console entry point before this "
+                "command parses, so it applies to CLI invocations: the 'ash' "
+                "console script gets the full saving; 'python -m "
+                "automated_security_helper.cli.main' delegates too but has paid "
+                "the import cost already; scans the MCP server hosts in-process "
+                "never delegate. By the time a scan runs here the decision has "
+                "been made, so this parameter only documents and accepts the "
+                "flag."
+            ),
+        ),
+    ] = None,
     offline_semgrep_rulesets: Annotated[
         str,
         typer.Option(
@@ -1824,8 +1846,17 @@ def run_ash_scan_cli_command(
             "every name in --only-scanners, or drop it and keep --add-scanners."
         )
     if only_scanners is not None and scanners:
+        # ``scanners`` is also filled from ASH_SCANNERS: a pipeline that exports
+        # the variable and passes only --only-scanners must not be told about a
+        # --scanners flag its command line does not carry. click records where
+        # the value came from, and the refusal names that source.
+        legacy_source = (
+            "ASH_SCANNERS (set in the environment)"
+            if _from_environment(ctx, "scanners")
+            else "--scanners"
+        )
         _fail_usage(
-            "--only-scanners cannot be combined with --scanners, which is "
+            f"--only-scanners cannot be combined with {legacy_source}, which is "
             "deprecated: --only-scanners already states the whole scanner "
             "selection. Put every name in --only-scanners, or use "
             "--add-scanners to add to the mode's default set."
@@ -1928,11 +1959,6 @@ def run_ash_scan_cli_command(
     # The output formats were parsed above the workspace block
     # (parsed_output_formats).
 
-    # Call run_ash_scan with all parameters, as a scan the entry point's SIGTERM
-    # handler cancels (core/cancellation.py, "SIGTERM on the CLI"). The scope is
-    # entered here and not inside run_ash_scan because the MCP runner calls
-    # run_ash_scan inside a scope of its own, whose event its registry stops; a
-    # scope installed below the shared frame would shadow it.
     # --staged with nothing staged: say so and exit clean before any engine,
     # plugin or report machinery starts. This is the hook's hot path (a commit
     # touching only files ASH does not scan still runs the hook), so it has to
@@ -1944,9 +1970,8 @@ def run_ash_scan_cli_command(
             staged_files_for_source,
         )
 
-        staged_for_scan = staged_files_for_source(
-            Path(source_dir) if source_dir is not None else Path.cwd()
-        )
+        # source_dir is always set by here (the cwd default above).
+        staged_for_scan = staged_files_for_source(Path(source_dir))
         if staged_for_scan is None:
             echo(
                 "--staged could not read the staged file list: it needs git and "
@@ -1962,6 +1987,11 @@ def run_ash_scan_cli_command(
             )
             raise typer.Exit(0)
 
+    # Call run_ash_scan with all parameters, as a scan the entry point's SIGTERM
+    # handler cancels (core/cancellation.py, "SIGTERM on the CLI"). The scope is
+    # entered here and not inside run_ash_scan because the MCP runner calls
+    # run_ash_scan inside a scope of its own, whose event its registry stops; a
+    # scope installed below the shared frame would shadow it.
     cancel_event = CancelEvent()
     # A second Ctrl-C takes the die-now ending, which never returns to the
     # interrupt arm below, so the word on how the run ended is registered with

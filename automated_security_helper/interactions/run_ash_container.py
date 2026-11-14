@@ -3954,6 +3954,10 @@ CONTAINER_ENV_NOT_PASSED = frozenset(
         "ASH_THIRD_PARTY_DIR",
         "ASH_PINS_DIR",
         "ASH_LOG_TO_STDERR",
+        # Express mode is the host's alone: the daemon and its idle timer live
+        # outside the container, and the child marker must never leak into one.
+        "ASH_EXPRESS_CHILD",
+        "ASH_EXPRESS_IDLE_SECONDS",
         # The host's alone too: an opt-in for tools found inside the scanned tree
         # (utils/subprocess_utils.py), the host's rules bundle root
         # (utils/rules_bundles.py), the `ash dependencies` unknown-tools setting

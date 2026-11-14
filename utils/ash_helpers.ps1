@@ -848,7 +848,7 @@ function Invoke-ASH {
         # the tables against the real commands, and
         # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks these
         # lists against ./ash's and the real commands and options.
-        $ashSubcommands = @('scan', 'build-image', 'report', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin')
+        $ashSubcommands = @('scan', 'build-image', 'report', 'merge', 'mcp', 'get-genai-guide', 'config', 'dependencies', 'inspect', 'plugin', 'express')
         $ashTakesSandbox = @('scan')
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the

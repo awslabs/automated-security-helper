@@ -27,6 +27,7 @@ import typer.utils
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.json_input import CliJsonInputCommand
+from automated_security_helper.cli.json_input import ARGV_ONLY_PARAMETERS
 from automated_security_helper.cli.main import app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
@@ -393,11 +394,18 @@ class TestSkeleton:
             for name, meta in params.items()
             if getattr(meta.default, "hidden", False)
         }
-        expected = {
-            name
-            for name, meta in params.items()
-            if meta.annotation is not typer.Context
-        } - hidden
+        expected = (
+            {
+                name
+                for name, meta in params.items()
+                if meta.annotation is not typer.Context
+            }
+            - hidden
+            # The express flag is read from the raw command line before any
+            # document is opened, so a document key for it could never take
+            # effect; it is kept out of the skeleton (json_input.py).
+            - ARGV_ONLY_PARAMETERS
+        )
         assert hidden == {
             "config_from_scanned_repository",
             "config_file_from_scanned_repository",
@@ -405,6 +413,21 @@ class TestSkeleton:
             "ash_config_from_host",
         }
         assert set(skeleton) == expected
+
+    def test_the_express_key_is_refused_with_the_flag_to_use(self, runner, tmp_path):
+        """The thin client decides express/cold from the raw argv before any
+        JSON document is opened, so an "express" key could only ever be
+        silently ignored -- and a silently ignored "express": false is a scan
+        the operator asked to run cold. It is refused instead, naming the
+        command-line flag."""
+        for key, value in (("express", True), ("--express", False)):
+            params = _write(tmp_path, {key: value})
+            with patch(RUN_ASH_SCAN) as mock_run:
+                result = runner.invoke(app, ["scan", "--cli-json-input", str(params)])
+            assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+            assert "--express" in _flat(result.output)
+            assert "commandline" in _flat(result.output).replace("-", "")
+            assert not mock_run.called
 
     def test_skeleton_does_not_run_the_scan(self, runner):
         with patch(RUN_ASH_SCAN) as mock_run:

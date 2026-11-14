@@ -26,6 +26,7 @@ nav:
       - Run offline: how-to/run-offline.md
       - Choose an integration: integrations.md
       - Run ASH with pre-commit: how-to/pre-commit.md
+      - Express mode: how-to/express-mode.md
       - CI systems:
           - GitHub Actions: how-to/ci/github-actions.md
           - GitLab CI: how-to/ci/gitlab-ci.md

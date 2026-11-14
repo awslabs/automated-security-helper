@@ -39,6 +39,7 @@ PACKAGE_DIRS = frozenset(
         "core",
         "core/phases",
         "core/resource_management",
+        "express",
         "interactions",
         "models",
         "plugin_modules",

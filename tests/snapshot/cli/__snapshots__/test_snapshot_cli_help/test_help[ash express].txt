@@ -1,0 +1,14 @@
+
+ Usage: ash express [OPTIONS] COMMAND [ARGS]...
+
+ Manage the express daemon: a resident warm ASH process that removes startup cost from every scan.
+ Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ start   Start the express daemon for this user and ASH version (idempotent).                     │
+│ stop    Stop the express daemon. A scan it is running is sent SIGTERM.                           │
+│ status  Report whether the express daemon is running, and what it has served.                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -26,6 +26,7 @@ from automated_security_helper.cli.merge import merge_command
 from automated_security_helper.cli.plugin import plugin_app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.report import report_command
+from automated_security_helper.cli.express import express_app
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.utils.console import echo, typer_console
 from automated_security_helper.utils.log import show_debug_locals
@@ -772,6 +773,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(dependencies_app, name="dependencies")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(plugin_app, name="plugin")
+app.add_typer(express_app, name="express")
 
 
 def reset_logging_config():

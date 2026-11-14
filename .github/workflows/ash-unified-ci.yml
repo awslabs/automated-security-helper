@@ -30,22 +30,24 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 455 jobs on a push
-  # to main, 453 on a merge-queue run, where warm-image-layers does not run, and 200 on a
+  # Sized off a count rather than a guess: this workflow expands to 457 jobs on a push
+  # to main, 455 on a merge-queue run, where warm-image-layers does not run, and 202 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
-  # ~920 runner jobs instead of ~459. The duplicate result on a queued merge is the
+  # ~924 runner jobs instead of ~461. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 25 cells + uvx x 5 OS = 105 legs in place of the 25 bundled cells (uvx ran on 3.12
-  # only) -- it would be ~930 against ~464, so running them as one leg per combination
-  # cuts a large share of what this deliberate duplication costs. Most of the 455 is the
+  # only), 80 more legs on each of the two runs -- it would be ~1084 against ~541, so
+  # running them as one leg per combination cuts a large share of what this deliberate
+  # duplication costs. Most of the 457 is the
   # unit-test and integration-test families, which are 360 legs since the suite was split
   # by tier and the slow pools took eight shards: the unit tier is 180 legs (2 Linux
   # images x 5 Python versions x 6 shards, plus 2 macOS images and 1 Windows image x 5 x
   # 8; the notes above unit-test-linux and on unit-test-windows), the integration
   # tier is 180 (the same split) and the e2e tier is 5 (one per runner label,
-  # Python 3.12 only; see the notes on those jobs). The unit family was 200 legs when
+  # Python 3.12 only); the two advisory e2e-express legs are separate from that
+  # five (see the notes on those jobs). The unit family was 200 legs when
   # every OS and Python version ran eight shards of the whole suite, 25 when the tier
   # first ran unsharded and timed out at 30 minutes, 100 while it was cut into four
   # shards, 25 again once each leg's timeout was sized from the measured shard walls, 40
@@ -54,7 +56,7 @@ on:
   # longest pull-request leg near the ~10.5-minute floor the longest scan leg sets. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 455-job push figure is
+  # count rises faster than the test time does. The 457-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -1093,10 +1095,11 @@ jobs:
   # without the base checked out. ensure-cache's failure still fails the run,
   # through required-checks, whose `needs` lists it. Like the unit jobs, these carry no
   # job-level `if:`. The per-job
-  # `max-parallel` caps below stay per job, so the macOS pool can see up to 49 legs
-  # at once on a pull request (24 unit, 24 integration, 1 e2e); the caps were chosen
-  # per job and the repository's macOS concurrency limit is not read from here, so extra
-  # legs queue rather than fail.
+  # `max-parallel` caps below stay per job, so the macOS pool can see up to 50 legs
+  # at once on a pull request (24 unit, 24 integration, 1 e2e, 1 e2e-express), and 51 on
+  # a push to main, where e2e-test-macos also runs its macos-latest leg; the caps were
+  # chosen per job and the repository's macOS concurrency limit is not read from here,
+  # so extra legs queue rather than fail.
   # ASH_REQUIRE_CDK_EXTRA is set by the action, and
   # tests/integration/scanners/test_cdk_nag_real_pack.py carries the integration marker,
   # so the cdk-nag path runs on every OS and Python version here. The separate
@@ -1331,6 +1334,86 @@ jobs:
           python-version: "3.12"
           marker: e2e
 
+  # THE EXPRESS E2E DIMENSION: THE DAEMON HELD TO A COLD RUN, ADVISORY
+  #
+  # Runs the express-mode end-to-end tests (tests/integration/express/test_express_e2e.py,
+  # marked e2e and additionally gated on ASH_E2E_EXPRESS=1 so the required e2e tier
+  # above does not grow): start the resident daemon, run a real scan through it and
+  # the same scan cold, and hold the two to the parity the feature promises -- the
+  # same exit code and the same findings -- plus --no-express, the stale-daemon cold
+  # fallback, idle exit and stop. Two cells only, the arm Linux and pinned macOS
+  # images on one modern Python: the daemon is the same code on every unix, and the
+  # CI wall is under a reduction program, so the OS/Python product stays with the
+  # tiers above. Windows asserts the clean unix-only refusal inside the required e2e
+  # tier instead (the one express e2e test that carries no ASH_E2E_EXPRESS gate).
+  #
+  # Advisory on purpose: continue-on-error, and named in _UNGATED in
+  # assert-required-checks-census.py, so it is in no required-checks list and a red
+  # here is read by a person rather than by the merge gate. It runs pytest directly
+  # instead of through run-unit-tests: that action publishes a `PyTest - ...` check
+  # run per leg and admits only the three tier markers, and this job is neither a
+  # tier nor a check anything requires.
+  e2e-express:
+    name: "e2e-express (${{ matrix.os }})"
+    # No `needs: [ensure-cache]`: the edge was dropped from every caller (the note
+    # above the integration tier), and a restore tolerates a miss.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, macos-15]
+    env:
+      ASH_E2E_EXPRESS: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.13"
+          install-ash: "false"
+      # The same sync the tier jobs run, so the tests import the package the way
+      # every other leg does; the parity scan uses a Python-based scanner, so no
+      # external tool install step is needed.
+      - name: Install dependencies
+        shell: bash
+        run: uv sync --extra cdk --extra symbols
+      - name: Run the express e2e tests
+        shell: bash
+        # -m e2e as the required e2e jobs select, so this leg measures the
+        # same population. -s so the parity test's measured express-vs-cold
+        # wall line lands in the job log, which is this advisory job's whole
+        # product. pytest exits 5 when nothing was collected, which fails the
+        # step -- and the junit count is asserted on top, so a future marker
+        # or path change cannot turn this into a green leg that measured
+        # nothing (advisory means nobody reads it unless it is red).
+        # --run-integration is the only gate flag these cells need: tests/conftest.py
+        # skips integration and e2e tests without it, and skips WITHOUT --run-slow
+        # only tests that carry the slow marker or keyword, which none of these
+        # cells do (measured: five run, two Windows-only skipped, without it). The
+        # required e2e legs pass --run-slow for the slow-marked cells elsewhere in
+        # the tier. The junit file is named here, not left to pytest.ini's addopts,
+        # because the count step below parses exactly this path.
+        run: |
+          uv run pytest tests/integration/express/test_express_e2e.py \
+            --run-integration -m e2e -n 0 -s \
+            --junit-xml=test-results/pytest.junit.xml
+          python3 - <<'COUNT'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("test-results/pytest.junit.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          ran = int(suite.get("tests", "0")) - int(suite.get("skipped", "0"))
+          print(f"express e2e tests executed: {ran}")
+          sys.exit(0 if ran >= 4 else 1)
+          COUNT
+
   # ---------------------------------------------------------------------------
   # Warm the ASH image's layer cache before the scan legs build it
   # ---------------------------------------------------------------------------
@@ -1461,6 +1544,12 @@ jobs:
       # cell queued 19.8 minutes behind the cap) ended run 43449176506 alongside the
       # macOS integration cap; the first-wave queues on every hosted label were seconds,
       # so the cap, not the pools, was the wait.
+      # The cost to OTHER runs was considered: the original cap also existed so these
+      # container-runtime legs would not crowd other runs out of the shared runner
+      # pools, and a pull request now asks for its whole wave at once. It is accepted
+      # under the CI-speed program (this run's wall is the measured gain; concurrent
+      # runs share the organization's concurrency limit and queue rather than fail),
+      # and the caps are deliberately not lowered here.
       max-parallel: 24
       matrix:
         # WHY THERE IS NO `platform` KEY HERE ANY MORE
@@ -2429,6 +2518,17 @@ jobs:
       - name: Install the scanners the docs examples run for real
         run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
       # PATH gains the two install directories for this step only, as on integration-test.
+      #
+      # ASH_REQUIRE_PREINSTALLED_TOOLS and ASH_CFN_GUARD_RULES_DIR, which
+      # integration-test sets beside its install step, are deliberately not set here.
+      # The first turns a pre-installed tool the suite cannot find into a failure at
+      # start; this runner already fails any page whose command exits non-zero, so a
+      # missing tool a page needs is reported by that page. The second points the
+      # scanners at the cfn-guard rules bundle under the install's home, where
+      # tests/conftest.py's private per-test home would otherwise hide it from the
+      # cfn-lint and cfn-guard tests; no docs page asserts on that bundle. The job ran
+      # green without either (run 43519855835, job 132211507167; run 43525041370, job
+      # 132228975054). Add both here if a page starts to depend on the bundle.
       - name: Run the docs examples
         timeout-minutes: 10
         run: |
@@ -2944,8 +3044,8 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 335 check
-  # runs to a pull request (818 to a merge-queue run, which runs the full matrices) and few of
+  # Most jobs above name themselves from their matrix, so this workflow contributes 337 check
+  # runs to a pull request (820 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` and the integration and e2e families means enumerating all 365 of their names -- and then any matrix edit either orphans
@@ -2955,16 +3055,16 @@ jobs:
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. The 186 was measured on pull request 599, the 818 is derived
+  # stale unnoticed. The 186 was measured on pull request 599, the 820 is derived
   # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 335 is this workflow's own contribution to a pull request: the 200 jobs that run there,
+  # 337 is this workflow's own contribution to a pull request: the 202 jobs that run there,
   # plus the 135 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 818: the 453 jobs that run there plus 365 check runs.
+  # the full matrices, is 820: the 455 jobs that run there plus 365 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -3010,33 +3110,36 @@ jobs:
   # 40, +60 on a push; on a pull request 3 Python versions x 4 = 12 legs in place of 3 for
   # each, +18) after the unsharded arm Linux and macOS legs of run 43285884861 became the
   # critical path of the workflow (the note above unit-test-linux): 291 on a push, 289 on
-  # a merge-queue run, and 136 on a pull request. Then run 43449176506 measured the
+  # a merge-queue run, and 136 on a pull request. Then the advisory e2e-express job was
+  # added, two legs on every event (+2): 293 on a push, 291 on a merge-queue run, and 138
+  # on a pull request. Then run 43449176506 measured the
   # pull-request wall at 38m33s, set by a macOS integration cell that waited 11.6 minutes
   # behind its own cap and by the scan matrix's three cap-waves, with the slow-OS shard
   # walls right behind both: the slow pools took eight shards and Linux six (unit and
   # integration, +160 on a push), the standalone integration-test job took four shards of
   # its own (+3) and its docs step became the docs-examples job (+1), and the tier and
-  # scan caps moved so a pull request starts everything in one wave: 455 on a push, 453
-  # on a merge-queue run, and 200 on a pull request.
+  # scan caps moved so a pull request starts everything in one wave: 457 on a push, 455
+  # on a merge-queue run, and 202 on a pull request.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 365 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 455 comes from, per job, on a push to main: lint 1, ensure-cache 5, actionlint 1,
+  # Where 457 comes from, per job, on a push to main: lint 1, ensure-cache 5, actionlint 1,
   # snapshot-trailers 1, unit-test 180, unit-coverage 4,
   # integration-test-linux 60, integration-test-macos 80, integration-test-windows 40,
-  # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, warm-image-layers 2,
+  # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, e2e-express 2, warm-image-layers 2,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 32, homebrew-macos 1,
   # required-checks 1.
   #
-  # Where 200 comes from, per job, on a pull request (the pull-request cover, the note on
+  # Where 202 comes from, per job, on a pull request (the pull-request cover, the note on
   # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 66,
   # unit-coverage 2, integration-test-linux 18, integration-test-macos 24,
   # integration-test-windows 24, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
+  # e2e-express 2,
   # scan-validation 24, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 14,
@@ -3087,7 +3190,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the tier split and the jobs added after
-  # it; the 818 above is the current merge-queue figure and 335 the pull-request one. That
+  # it; the 820 above is the current merge-queue figure and 337 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
