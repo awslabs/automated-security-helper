@@ -744,10 +744,10 @@ version is a directory of the `gh-pages` branch, and `versions.json` at the root
 branch lists them for the version selector in the site header.
 
 - Every push to `main` publishes the version `main`, titled "main (unreleased)". Its
-  pages say that they describe unreleased code, and link to the latest release. Its
+  pages carry no notice or banner. Its
   [version-pinned pages](releases.md#version-pinned-pages) are served as committed,
-  so their install commands pin the current release, and the notice says so: a reader
-  of the `main` docs is advised to install the latest release, never `main`. Where a
+  so their install commands pin the current release: a reader of the `main` docs
+  installs the latest release, never `main`. Where a
   template needs the release number itself, as in a sample of `ash --version` output,
   it writes `{{RELEASE}}`; the ref of an install command is written `v{{VERSION}}`,
   the placeholder the release tooling moves, and the static checks report
@@ -807,8 +807,8 @@ of the branch: a stylesheet, a sitemap, a page no version has, and an old page f
   because 0.0.0 is older;
 - every page of every version configures the version selector and loads the theme
   script that reads `versions.json`;
-- every page of a release carries the outdated notice, every page of `main` carries the
-  unreleased one, and no page carries the other;
+- every page of a release carries the outdated notice, and no page of `main` carries
+  a notice or an announce banner;
 - `latest/` is a copy of 0.0.1, and the other versions name `latest/` as canonical;
 - the version-pinned pages of each release pin that release and no other. On `main`,
   outside tables and `text` blocks, they pin exactly the current release, in every

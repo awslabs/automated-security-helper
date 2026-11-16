@@ -39,6 +39,7 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_explains_its_own_refusal,
     plugin_missing_dependency_reason,
 )
+from automated_security_helper.cli.params import from_environment
 from automated_security_helper.config.named_config import (
     refuse_a_named_config_that_does_not_exist,
 )
@@ -95,7 +96,6 @@ from automated_security_helper.utils.python_child import (
 from automated_security_helper.utils.python_installer import environment_rebuild_note
 from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.subprocess_utils import (
-    _is_anchored,
     _warn_relative_bin_path,
     clear_find_executable_cache,
     find_executable_for_scan,
@@ -993,6 +993,7 @@ def _puts_color_back(command):
 @dependencies_app.command(name="install")
 @_puts_color_back
 def install_dependencies(
+    ctx: typer.Context,
     # A str, not a Path: Typer makes "" Path(""), whose str() is ".", the same as
     # an explicit ".", so `--bin-path "$UNSET_VAR"` installed into the working
     # directory. A blank value (is_blank_bin_path) is no value, and so is the
@@ -1118,10 +1119,17 @@ def install_dependencies(
     target_bin_path: Optional[Path]
     if is_blank_bin_path(bin_path):
         target_bin_path = ASH_BIN_PATH
-    elif bin_path == bin_path_from_environment and not _is_anchored(bin_path):
+    elif (
+        from_environment(ctx, "bin_path")
+        and not is_anchored(bin_path)
+        # A "~" is expanded from the home below, as the environment reading does.
+        and not _is_under_tilde(bin_path)
+    ):
         # A relative ASH_BIN_PATH is not used, here as in a scan's lookups: it is
         # warned about and ~/.ash/bin is the target. A relative --bin-path typed
-        # on the command line is read where it was typed (the branch below).
+        # on the command line is read where it was typed (the branch below), even
+        # when ASH_BIN_PATH holds the same text: the source is asked of click
+        # (cli.params.from_environment), not guessed from the text.
         _warn_relative_bin_path(bin_path)
         target_bin_path = home_bin_path()
     elif _is_under_tilde(bin_path):
@@ -1400,6 +1408,16 @@ def install_dependencies(
         strict=all(candidate[3] for candidate in candidates),
     )
     requested_names = list(dict.fromkeys(tool_resolution.values()))
+    if not all(candidate[3] for candidate in candidates):
+        # Not complete: a plugin known only by building it may be exactly the
+        # spelling typed, which the second pass then selects over the declared
+        # plugin the key-based reading above mapped it to (`--tool semgrep` with
+        # a built-only `semgrep` and a declared `Semgrep`). Taking that
+        # provisional mapping for the option check made a bad option in the
+        # Semgrep section exit 3 for a plugin this run never builds. So the
+        # check reads the names as typed, exactly; every built-only plugin is in
+        # it already (_requested_classes).
+        requested_names = list(dict.fromkeys(aliased.values()))
 
     # Before any plugin is built, as the scan engine and ash report check: an
     # unknown or refused option of a plugin loaded from ash_plugin_modules makes

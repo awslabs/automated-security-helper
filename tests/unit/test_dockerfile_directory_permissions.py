@@ -13,8 +13,9 @@ What each directory gets, and why:
   and writable by root only. Nothing writes to them at scan time.
 - GRYPE_DB_CACHE_DIR (and TRIVY_CACHE_DIR, where the Dockerfile defines it): grype's
   and trivy's database updates write there at scan time
-  (utils/content_db_refresh.py). The ``ci`` stage runs as root; the ``non-root``
-  stage hands the cache to its own user. Owned by one user, not shared.
+  (utils/content_db_refresh.py). The ``non-root`` stage hands the cache to its own
+  user. The ``ci`` stage starts under a UID the platform chooses, so it opens the two
+  caches to every user with the sticky bit, as /src and /out are, and only there.
 - ASH_BIN_PATH in the ``non-root`` stage is handed to that stage's user only for
   its own ``ash dependencies install`` (which puts the user's cfn-nag binstub and a
   copy of the pinned tools there) and is given back to root right after, so the
@@ -52,6 +53,10 @@ DOCKERFILE = REPO_ROOT / "Dockerfile"
 #: The only directories that may be writable by every user, and only with the
 #: sticky bit. See the module docstring.
 SHARED_WRITABLE = frozenset({"/src", "/out"})
+
+#: The two database caches a scan updates, which the ``ci`` stage alone opens to every
+#: user (sticky), because that stage runs under a UID the platform chooses.
+CI_SHARED_CACHES = frozenset({"/deps/.grype", "/deps/.trivy"})
 
 
 class Instruction(NamedTuple):
@@ -253,9 +258,36 @@ def test_no_directory_is_made_writable_by_every_user(instructions, env):
         for chmod in _chmods(instructions, env)
         if _grants_write_to_others(chmod.mode)
         and not (_has_sticky_bit(chmod.mode) and set(chmod.paths) <= SHARED_WRITABLE)
+        and not (
+            chmod.stage == "ci"
+            and _has_sticky_bit(chmod.mode)
+            and set(chmod.paths) <= CI_SHARED_CACHES
+        )
     ]
 
     assert offenders == []
+
+
+def test_the_ci_stage_opens_the_database_caches_for_an_arbitrary_uid(instructions, env):
+    """The ``ci`` stage is for platforms that choose the container's UID, which owns
+    neither cache: left root's at 755, grype's and trivy's database downloads fail
+    with a permission error at scan time. Both caches get 1777 in that stage, and
+    only there (core and non-root keep them closed or hand them to their user)."""
+    assert env["TRIVY_CACHE_DIR"] == "/deps/.trivy"
+    opened = {
+        stage: {
+            path
+            for chmod in _chmods(instructions, env)
+            if chmod.stage == stage
+            and _grants_write_to_others(chmod.mode)
+            and _has_sticky_bit(chmod.mode)
+            for path in chmod.paths
+            if path in CI_SHARED_CACHES
+        }
+        for stage in ("core", "ci", "non-root")
+    }
+
+    assert opened == {"core": set(), "ci": set(CI_SHARED_CACHES), "non-root": set()}
 
 
 @pytest.mark.parametrize(

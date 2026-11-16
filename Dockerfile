@@ -385,8 +385,8 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 # Owned by root and writable by root only: a scan reads the database and the rules
 # in these caches, so they have one owner. The offline build below
 # writes them as root. At scan time only grype's database update writes here,
-# which the ci stage runs as root and for which the non-root stage hands
-# GRYPE_DB_CACHE_DIR to its own user.
+# which the non-root stage hands GRYPE_DB_CACHE_DIR to its own user for and the ci
+# stage, which starts under any UID, opens to every user with the sticky bit.
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
@@ -548,7 +548,8 @@ RUN trivy --version
 # GRYPE_DB_CACHE_DIR is: root's and writable by root only here, handed to the
 # non-root stage's user there because trivy's database update writes it at scan time,
 # and left root's in an offline image, which never updates it. Not mode 777: only
-# /src and /out may be writable by every user (see the chmod of /ash below), and a
+# /src and /out, and in the ci stage the two database caches, with the sticky bit,
+# may be writable by every user (see the chmod of /ash below), and a
 # scan reads the database in this cache. An offline image downloads the
 # vulnerability database into it here; trivy is a default scanner, and offline with no
 # database it is MISSING, which fails the scan. trivy's own bound for that database is
@@ -719,6 +720,18 @@ ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 FROM core AS ci
 
 ENV ASH_TARGET=ci
+
+# This stage is for platforms that start the container under a UID they choose, so
+# the two database caches a scan updates (grype's and trivy's) must be writable by
+# that UID: left at 755 and root's, grype's and trivy's database downloads fail with
+# "permission denied" at scan time. Writable by every user with the sticky bit, as
+# /src and /out are (the chmod of /ash above): one user cannot remove or replace
+# another's files there, and what the build put in them stays root's and read-only
+# (chmod -R u=rwX,go=rX above), an offline image's databases included. Only the two
+# directories themselves are opened, and the rule caches stay closed: nothing
+# writes them at scan time. The non-root stage is built from core and hands the
+# same two directories to its own user instead.
+RUN chmod 1777 ${GRYPE_DB_CACHE_DIR} ${TRIVY_CACHE_DIR}
 
 
 # Final stage: Non-root user final version. This image contains all dependencies
