@@ -30,16 +30,16 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 455 jobs on a push
-  # to main, 453 on a merge-queue run, where warm-image-layers does not run, and 200 on a
+  # Sized off a count rather than a guess: this workflow expands to 456 jobs on a push
+  # to main, 454 on a merge-queue run, where warm-image-layers does not run, and 200 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
-  # ~920 runner jobs instead of ~459. The duplicate result on a queued merge is the
+  # ~922 runner jobs instead of ~460. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 25 cells + uvx x 5 OS = 105 legs in place of the 25 bundled cells (uvx ran on 3.12
   # only) -- it would be ~930 against ~464, so running them as one leg per combination
-  # cuts a large share of what this deliberate duplication costs. Most of the 455 is the
+  # cuts a large share of what this deliberate duplication costs. Most of the 456 is the
   # unit-test and integration-test families, which are 360 legs since the suite was split
   # by tier and the slow pools took eight shards: the unit tier is 180 legs (2 Linux
   # images x 5 Python versions x 6 shards, plus 2 macOS images and 1 Windows image x 5 x
@@ -54,7 +54,7 @@ on:
   # longest pull-request leg near the ~10.5-minute floor the longest scan leg sets. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 455-job push figure is
+  # count rises faster than the test time does. The 456-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -395,13 +395,13 @@ jobs:
   # Why one leg per runner image: the key setup-uv builds is the runner image plus a hash
   # of the dependency files. It does not carry the matrix Python version, because
   # setup-uv looks up the interpreter the image ships before setup-python has run. A leg
-  # per Python version would write each key five times, so the legs are the five images.
+  # per Python version would write each key five times, so the legs are the six images.
   #
   # It saves on every event. A pull request that leaves the dependency files alone finds
   # main's entry by exact key and saves nothing. One that changes them saves one entry per
   # image under its own ref, and its later jobs read those. An entry is about 14 MB on
   # x86_64 Linux and macOS and nearly empty elsewhere, because setup-uv prunes pre-built
-  # wheels before it saves, so five entries per changed dependency set stay far from the
+  # wheels before it saves, so six entries per changed dependency set stay far from the
   # repository's 10 GB cache quota. On 2026-10-06 the unpruned cache in `lint`, one copy
   # per open pull request, was 43 entries and 3.62 GB and put the repository at 10.84 GB.
   #
@@ -422,12 +422,22 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      # All five at once: the jobs that need this one wait for the slowest of them.
-      max-parallel: 5
+      # All six at once: the jobs that need this one wait for the slowest of them.
+      max-parallel: 6
       matrix:
         # The runner images the other jobs set up uv on through setup-ash. The unit-test
-        # jobs use all five, and no job that calls setup-ash uses an image outside them.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15, windows-latest]
+        # jobs use five of them; ubuntu-24.04 is the sixth, the image the finch legs of
+        # scan-validation run on (Finch ships apt packages for the noble suite only, and
+        # ubuntu-latest has moved past it). setup-uv's key carries the runner image, so
+        # those legs read nothing the ubuntu-latest leg saves. No job that calls
+        # setup-ash uses an image outside these six.
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-latest
+          - macos-15
+          - windows-latest
         # THE PULL REQUEST COVER
         #
         # On a pull_request event the `exclude` entries below evaluate to the saturated
@@ -484,6 +494,9 @@ jobs:
         # and inputs as available to `strategy`.
         exclude:
           - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+          # The same x86_64 hosted pool as ubuntu-latest, so a pull request leaves it out
+          # too: its finch legs read the entry main's pushes save, as macos-15's do.
+          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || '' }}
           - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
           - os: ${{ github.event_name == 'pull_request' && 'macos-15' || '' }}
     steps:
@@ -2945,7 +2958,7 @@ jobs:
   # ---------------------------------------------------------------------------
   #
   # Most jobs above name themselves from their matrix, so this workflow contributes 335 check
-  # runs to a pull request (818 to a merge-queue run, which runs the full matrices) and few of
+  # runs to a pull request (819 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` and the integration and e2e families means enumerating all 365 of their names -- and then any matrix edit either orphans
@@ -2955,7 +2968,7 @@ jobs:
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. The 186 was measured on pull request 599, the 818 is derived
+  # stale unnoticed. The 186 was measured on pull request 599, the 819 is derived
   # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
@@ -2964,7 +2977,7 @@ jobs:
   # 335 is this workflow's own contribution to a pull request: the 200 jobs that run there,
   # plus the 135 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 818: the 453 jobs that run there plus 365 check runs.
+  # the full matrices, is 819: the 454 jobs that run there plus 365 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -3017,14 +3030,16 @@ jobs:
   # integration, +160 on a push), the standalone integration-test job took four shards of
   # its own (+3) and its docs step became the docs-examples job (+1), and the tier and
   # scan caps moved so a pull request starts everything in one wave: 455 on a push, 453
-  # on a merge-queue run, and 200 on a pull request.
+  # on a merge-queue run, and 200 on a pull request. Then ensure-cache gained the
+  # ubuntu-24.04 image the finch legs run on (+1): 456 on a push, 454 on a merge-queue
+  # run, and 200 on a pull request, which does not run that leg.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 365 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 455 comes from, per job, on a push to main: lint 1, ensure-cache 5, actionlint 1,
+  # Where 456 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
   # snapshot-trailers 1, unit-test 180, unit-coverage 4,
   # integration-test-linux 60, integration-test-macos 80, integration-test-windows 40,
   # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, warm-image-layers 2,
@@ -3087,7 +3102,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the tier split and the jobs added after
-  # it; the 818 above is the current merge-queue figure and 335 the pull-request one. That
+  # it; the 819 above is the current merge-queue figure and 335 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
