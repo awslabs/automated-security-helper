@@ -14,18 +14,11 @@ from typer.core import TyperGroup
 from typer._click.exceptions import UsageError
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
-from automated_security_helper.cli.config import config_app
-from automated_security_helper.cli.dependencies import dependencies_app
-from automated_security_helper.cli.image import build_ash_image_cli_command
-from automated_security_helper.cli.inspect import inspect_app
 from automated_security_helper.cli.json_input import (
     CliJsonInputCommand,
     usage_error_text,
 )
-from automated_security_helper.cli.merge import merge_command
-from automated_security_helper.cli.plugin import plugin_app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
-from automated_security_helper.cli.report import report_command
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.utils.console import echo, typer_console
 from automated_security_helper.utils.log import show_debug_locals
@@ -195,6 +188,163 @@ def _asks_for_help(command: Any, ctx: Any, args: list[str]) -> bool:
     return any(name in help_names for name, _ in _option_words(args, params))
 
 
+#: Subcommands whose modules import the scan engine, the config model or the
+#: report pipeline, resolved to click commands only when one is actually named
+#: (or the whole tree is walked, as ``--help``, the docs generator and shell
+#: completion do). Importing them here cost every ``ash`` invocation --
+#: ``ash --version`` included -- about a second of module imports that the
+#: invocation never used: cli.config alone pulls config.ash_config, which pulls
+#: every built-in plugin module and the generated SARIF/CycloneDX/OCSF schema
+#: models. Maps the command name to (module path, attribute); the attribute is a
+#: ``typer.Typer`` sub-app or a command function.
+#:
+#: The mcp command takes the other shape of the same idea: a wrapper that
+#: re-declares its options (see ``_mcp_wrapper``). These commands' option lists
+#: are too large for that, so the real module is imported and the click command
+#: built from it on first access instead; nothing is declared twice.
+#: tests/unit/cli/test_version_startup_budget.py pins that none of these modules
+#: is imported by ``import automated_security_helper.cli.main``.
+_LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
+    "build-image": (
+        "automated_security_helper.cli.image",
+        "build_ash_image_cli_command",
+    ),
+    "report": ("automated_security_helper.cli.report", "report_command"),
+    "merge": ("automated_security_helper.cli.merge", "merge_command"),
+    "config": ("automated_security_helper.cli.config", "config_app"),
+    "dependencies": ("automated_security_helper.cli.dependencies", "dependencies_app"),
+    "inspect": ("automated_security_helper.cli.inspect", "inspect_app"),
+    "plugin": ("automated_security_helper.cli.plugin", "plugin_app"),
+}
+
+#: The keyword arguments the eager ``app.command(...)`` registration passed for
+#: each lazily-built command function; a sub-Typer needs none (its own module
+#: carries its help and settings, as it did under ``app.add_typer``).
+_LAZY_COMMAND_KWARGS: dict[str, dict[str, Any]] = {
+    "build-image": {
+        "no_args_is_help": False,
+        "help": """Builds the ASH container image, then scans the current directory with it unless --no-run is given.
+
+It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
+""",
+    },
+    "report": {},
+    "merge": {
+        "help": """Merges the results of a sharded scan into one unified report.
+
+Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
+""",
+    },
+}
+
+#: Root listing order, as the eager registrations produced it: commands in
+#: registration order, then the sub-apps in their add_typer order. Help output
+#: and generated CLI docs are pinned to it (tests/snapshot/cli).
+_COMMAND_ORDER: tuple[str, ...] = (
+    "scan",
+    "build-image",
+    "report",
+    "merge",
+    "mcp",
+    "get-genai-guide",
+    "config",
+    "dependencies",
+    "inspect",
+    "plugin",
+)
+
+
+def _built_lazy_command(name: str) -> Any:
+    """Import the module behind lazy subcommand *name* and build its click command.
+
+    Built exactly as the eager registration built it: a sub-Typer goes through
+    ``typer.main.get_group_from_info`` with a ``TyperInfo`` naming it, which is
+    what ``get_group_from_info`` does for every ``add_typer`` entry, and a command
+    function is registered on a throwaway Typer with the kwargs the eager
+    ``app.command(...)`` call passed, then built with ``get_command_from_info``
+    as ``get_group_from_info`` builds each registered command. Both take the root
+    app's rendering settings, which is where the eager path read them too.
+    """
+    import importlib
+
+    import typer.main
+    from typer.models import TyperInfo
+
+    module_path, attribute = _LAZY_SUBCOMMANDS[name]
+    target = getattr(importlib.import_module(module_path), attribute)
+    if isinstance(target, typer.Typer):
+        return typer.main.get_group_from_info(
+            TyperInfo(typer_instance=target, name=name),
+            pretty_exceptions_short=app.pretty_exceptions_short,
+            rich_markup_mode=app.rich_markup_mode,
+            suggest_commands=app.suggest_commands,
+        )
+    holder = typer.Typer()
+    holder.command(name=name, cls=CliJsonInputCommand, **_LAZY_COMMAND_KWARGS[name])(
+        target
+    )
+    return typer.main.get_command_from_info(
+        holder.registered_commands[0],
+        pretty_exceptions_short=app.pretty_exceptions_short,
+        rich_markup_mode=app.rich_markup_mode,
+    )
+
+
+class _LazyCommands(dict[str, Any]):
+    """The root group's ``commands`` mapping, with the lazy names in it.
+
+    click and typer reach subcommands through this mapping (``get_command`` is
+    ``self.commands.get(name)``, ``list_commands`` iterates ``items()``), and so
+    do the CLI docs generator and the help snapshot tests, which walk
+    ``group.commands`` directly. Making THIS object lazy keeps every one of those
+    readers working unchanged: a lazy name is always present when the mapping is
+    iterated or asked for membership, and its command is imported and built the
+    first time its value is read.
+
+    Iteration follows ``_COMMAND_ORDER`` so ``--help`` lists commands as the
+    eager registrations did; a name outside the table (a test registering an
+    extra command) keeps its insertion order after them.
+    """
+
+    def _ordered_names(self) -> list[str]:
+        names = [n for n in _COMMAND_ORDER if n in self]
+        names += [n for n in super().keys() if n not in _COMMAND_ORDER]
+        names += [n for n in _LAZY_SUBCOMMANDS if n not in names]
+        return names
+
+    def __missing__(self, name: str) -> Any:
+        if name not in _LAZY_SUBCOMMANDS:
+            raise KeyError(name)
+        command = _built_lazy_command(name)
+        self[name] = command
+        return command
+
+    def get(self, name: Any, default: Any = None) -> Any:
+        try:
+            return self[name]
+        except (KeyError, TypeError):
+            # TypeError: an unhashable probe, as dict.get answers it.
+            return default
+
+    def __contains__(self, name: Any) -> bool:
+        return dict.__contains__(self, name) or name in _LAZY_SUBCOMMANDS
+
+    def __iter__(self):
+        return iter(self._ordered_names())
+
+    def __len__(self) -> int:
+        return len(self._ordered_names())
+
+    def keys(self):  # noqa: D102 - dict interface
+        return self._ordered_names()
+
+    def items(self):  # noqa: D102 - dict interface
+        return [(name, self[name]) for name in self._ordered_names()]
+
+    def values(self):  # noqa: D102 - dict interface
+        return [self[name] for name in self._ordered_names()]
+
+
 class AshTyperGroup(TyperGroup):
     """The root ``ash`` group: every usage error in the tree exits ASH_EXIT_USAGE_ERROR.
 
@@ -212,6 +362,12 @@ class AshTyperGroup(TyperGroup):
     a subcommand, its callback returns without scanning, and the options were parsed
     and then dropped: ``ash --source-dir /elsewhere scan`` scanned the working
     directory, and ``ash --output-dir out report`` read the default output directory.
+
+    This class carries the error-code and option-forwarding behavior only. The
+    lazy subcommand resolution lives on ``AshRootTyperGroup`` below, which is the
+    class the real ``app`` is built with: tests build probe groups from THIS class
+    to measure the usage-error behavior, and a probe must report exactly the
+    commands it registered, not ash's.
     """
 
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
@@ -405,9 +561,32 @@ class AshTyperGroup(TyperGroup):
         return tokens
 
 
+class AshRootTyperGroup(AshTyperGroup):
+    """``AshTyperGroup`` plus the lazily resolved subcommands, for ``app`` only.
+
+    Its ``commands`` mapping is a ``_LazyCommands``, so the subcommands in
+    ``_LAZY_SUBCOMMANDS`` resolve on first access rather than at import
+    (``ash --version`` imports none of them); everything that reads the mapping
+    -- ``get_command``, ``list_commands``, the docs generator, the help
+    snapshots -- sees the full command set.
+
+    A separate class, not ``AshTyperGroup.__init__``, because ``_LazyCommands``
+    reads the module-level tables and ``_built_lazy_command`` builds with the
+    root ``app``'s settings: on any other group built from ``AshTyperGroup``
+    (tests build probes from it to measure the usage-error behavior) the lazy
+    names would read as commands the group never registered, a positional
+    ``report`` would parse as a subcommand, and the probe's ``--help`` would
+    import the whole engine.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.commands = _LazyCommands(self.commands)
+
+
 app = typer.Typer(
     name="ash",
-    cls=AshTyperGroup,
+    cls=AshRootTyperGroup,
     help="Automated Security Helper, the agentic security harness · one workflow for your scanners.",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
@@ -427,26 +606,11 @@ app.command(
     no_args_is_help=False,
 )(run_ash_scan_cli_command)
 
-app.command(
-    name="build-image",
-    cls=CliJsonInputCommand,
-    no_args_is_help=False,
-    help="""Builds the ASH container image, then scans the current directory with it unless --no-run is given.
-
-It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
-""",
-)(build_ash_image_cli_command)
-
-app.command(name="report", cls=CliJsonInputCommand)(report_command)
-
-app.command(
-    name="merge",
-    cls=CliJsonInputCommand,
-    help="""Merges the results of a sharded scan into one unified report.
-
-Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
-""",
-)(merge_command)
+# build-image, report, merge, config, dependencies, inspect and plugin are
+# registered lazily: see _LAZY_SUBCOMMANDS above. Their registration kwargs
+# (the build-image and merge help text, CliJsonInputCommand) live in
+# _LAZY_COMMAND_KWARGS so _built_lazy_command registers each exactly as the
+# app.command(...) call here used to.
 
 
 @app.command(name="mcp", help="Start the ASH MCP server (Model Context Protocol)")
@@ -768,10 +932,9 @@ def _echo_encodable(text: str) -> None:
         echo(text.encode(encoding, "backslashreplace").decode(encoding))
 
 
-app.add_typer(config_app, name="config")
-app.add_typer(dependencies_app, name="dependencies")
-app.add_typer(inspect_app, name="inspect")
-app.add_typer(plugin_app, name="plugin")
+# The config, dependencies, inspect and plugin sub-apps are resolved lazily on
+# first access (_LAZY_SUBCOMMANDS above), not add_typer'd here: importing their
+# modules is most of what `ash --version` used to spend its time on.
 
 
 def reset_logging_config():
