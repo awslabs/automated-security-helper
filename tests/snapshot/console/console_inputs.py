@@ -233,9 +233,9 @@ def stale_records() -> list[ContentDbAgeRecord]:
     """One enforced stale database, one warned, and one whose age could not be read."""
     return [
         content_db_record(
-            "semgrep-offline-rules",
+            "trivy-db",
             policy=cdb.STALENESS_FAIL,
-            age=cdb.get("semgrep-offline-rules").max_age + timedelta(days=3, hours=4),
+            age=cdb.get("trivy-db").max_age + timedelta(days=3, hours=4),
         ),
         content_db_record(
             "opengrep-offline-rules",

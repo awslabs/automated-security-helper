@@ -158,7 +158,7 @@ The repository can still affect results in other ways:
   `.secrets.baseline`, whose plugin and filter settings apply unless your file sets
   `scanners.detect-secrets.options.scan_settings.plugins_used`.
   [What the trust model does not protect](../concepts/trust-model.md#not-protected) lists
-  the scanners whose own config files ASH keeps from being read, semgrep's and opengrep's
+  the scanners whose own config files ASH keeps from being read, opengrep's
   `.semgrepignore` included.
 
 When you let ASH read a repository's config file instead, that file can change the

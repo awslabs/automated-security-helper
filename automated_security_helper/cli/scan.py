@@ -953,7 +953,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--offline-semgrep-rulesets",
             rich_help_panel="Execution",
-            help="Specify Semgrep rulesets for use in ASH offline mode",
+            help="Specify rulesets to bake into the opengrep offline cache for ASH offline mode (the flag keeps its historical name; the semgrep scanner is served by the opengrep plugin)",
         ),
     ] = "p/ci",
     strategy: Annotated[
@@ -1172,7 +1172,7 @@ def run_ash_scan_cli_command(
             rich_help_panel="Exit policy",
             help=(
                 "Let the scan pass when a scanner's content database (grype's or "
-                "trivy's vulnerability database, the offline semgrep/opengrep "
+                "trivy's vulnerability database, the offline opengrep "
                 "rulesets) is older than its declared bound -- for grype, "
                 f"{go_duration(get_content_database('grype-db').max_age)} after the "
                 "database was built. Without it such a scan exits 1, except for "

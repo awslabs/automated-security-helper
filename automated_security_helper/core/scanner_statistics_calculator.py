@@ -241,12 +241,27 @@ class ScannerStatisticsCalculator:
             reports = ScannerStatisticsCalculator._own_reports(
                 asharp_model, scanner_name
             )
-            recorded_durations = [
-                report["duration"]
-                for report in reports.values()
-                if isinstance(report.get("duration"), (int, float))
-                and not isinstance(report.get("duration"), bool)
-            ]
+            # A failure container is filed under the key "None" (no target) beside
+            # the per-target reports. When per-target reports exist their durations
+            # are the scanner's time, and the scanner-level report is not added on
+            # top of them; it is read only when it is all there is.
+            target_reports = {
+                key: report
+                for key, report in reports.items()
+                if key is not None and key != "None"
+            }
+
+            def _numeric_durations(candidates: dict) -> list:
+                return [
+                    report["duration"]
+                    for report in candidates.values()
+                    if isinstance(report.get("duration"), (int, float))
+                    and not isinstance(report.get("duration"), bool)
+                ]
+
+            recorded_durations = _numeric_durations(
+                target_reports
+            ) or _numeric_durations(reports)
             if recorded_durations:
                 duration = float(sum(recorded_durations))
                 ASH_LOGGER.debug(
@@ -1666,7 +1681,7 @@ class ScannerStatisticsCalculator:
         ``ScanResultsContainer.targets_attempted``, which is tri-state: absent from a serialized
         report means the scanner does not track per-target outcomes and is making no claim
         (``exclude_none=True`` drops the None), while a present 0 means it tracked and attempted
-        none. Absent must never read as zero -- bandit, checkov, semgrep, grype, syft,
+        none. Absent must never read as zero -- bandit, checkov, grype, syft,
         detect-secrets and opengrep are all in the no-claim state (cdk-nag, cfn-nag and
         npm-audit track targets), and reading them as tracked-zero would turn every row of a
         clean report yellow.

@@ -65,7 +65,7 @@ You can customize the ASH execution by modifying the `ash` command in the build 
 ```yaml
 build:
   commands:
-    - ash --mode container --build-target ci --no-progress --output-dir .ash/ash_output --scanners bandit,semgrep
+    - ash --mode container --build-target ci --no-progress --output-dir .ash/ash_output --scanners bandit,opengrep
 ```
 
 CodeBuild runs the build as root, so the example asks for the `ci` image stage, which

@@ -1284,7 +1284,7 @@ class TestResources:
         # Scanners are named by their config names, the names list_scanners and
         # a config file use.
         assert "bandit" in result
-        assert "semgrep" in result
+        assert "opengrep" in result
 
 
 # ---------------------------------------------------------------------------

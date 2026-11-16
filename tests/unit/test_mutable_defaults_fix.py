@@ -238,7 +238,6 @@ def test_scanner_plugin_scan_signatures_use_none_default():
 
 
 SCANNER_MODULES_WITH_SCAN = [
-    "automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner",
     "automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner",
     "automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner",
     "automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner",

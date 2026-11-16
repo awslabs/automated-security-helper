@@ -95,7 +95,7 @@ def _healthy_scanner(name="bandit"):
     return _Healthy
 
 
-def _run_phase(tmp_path, plugin_classes):
+def _run_phase(tmp_path, plugin_classes, **phase_kwargs):
     """Run ScanPhase over *plugin_classes* against a real validation manager.
 
     The executor is a double because every case here is decided during
@@ -142,7 +142,29 @@ def _run_phase(tmp_path, plugin_classes):
         "automated_security_helper.core.phases.scan_phase.ScannerExecutor"
     ) as executor:
         executor.return_value = double
-        return phase._execute_phase(aggregated_results=aggregated)
+        return phase._execute_phase(aggregated_results=aggregated, **phase_kwargs)
+
+
+def test_a_retired_spelling_that_fails_construction_is_not_an_unmatched_name(tmp_path):
+    """Red before the re-key: the request resolved to ``opengrep`` and missed.
+
+    ``construction_failed`` holds raw lower-cased names, so a scanner declared under
+    the retired spelling ``semgrep`` that raised in its constructor was known as
+    ``semgrep``, while the request for it was keyed through the alias to
+    ``opengrep``. The request then read as matching nothing: a warning said so and
+    the results file listed it under requested_scanners_not_run, though the scanner
+    exists and its ERROR row says why it did not run.
+    """
+    results = _run_phase(
+        tmp_path,
+        [_unconstructable_scanner("semgrep"), _healthy_scanner("bandit")],
+        enabled_scanners=["semgrep"],
+    )
+
+    assert results.metadata.requested_scanners_not_run is None, (
+        results.metadata.requested_scanners_not_run
+    )
+    assert "semgrep" in results.scanner_results
 
 
 def test_a_scanner_that_could_not_be_constructed_is_recorded(tmp_path):

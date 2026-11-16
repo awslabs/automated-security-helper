@@ -67,8 +67,6 @@ statuses.
 | baseline | venv, clean | detect-secrets | none | 0 | detect-secrets PASSED |
 | T1 | venv | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty | 1 | opengrep MISSING |
 | T1 online | venv | detect-secrets,opengrep | none | 1 | opengrep MISSING (binary absent) |
-| T1 semgrep | venv | detect-secrets,semgrep | ASH_OFFLINE=YES | 1 | semgrep MISSING |
-| semgrep online | venv | detect-secrets,semgrep | none | 1 | semgrep ERROR, after ASH tried to provision it through `uv tool` |
 | T2 | venv | detect-secrets,cfn-nag | none | 1 | cfn-nag MISSING (no cfn_nag_scan reachable) |
 | baseline | image | detect-secrets | none | 2 / 0 | as on the venv |
 | T1 | image | detect-secrets,opengrep | ASH_OFFLINE=YES, cache empty | 1 | opengrep MISSING, "no rule cache was found" |
@@ -100,8 +98,8 @@ covers an image built with `--offline`, which sets the variable to a populated c
 
 Rejected:
 
-- semgrep online. ASH installs semgrep through `uv tool` when it can, so the outcome
-  depends on the network and on what the runner already has.
+- opengrep online. ASH installs opengrep when it can, so the outcome depends on the
+  network and on what the runner already has.
 - T2 (cfn-nag). It is MISSING on a bare host only because no `cfn_nag_scan` is
   reachable, and it is SKIPPED in the image when the tree has no templates.
 - T3 (a nonexistent opengrep config). It did not produce an ERROR.

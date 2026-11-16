@@ -7,7 +7,7 @@
 ``config_is_client_supplied`` about each ``.semgrepignore`` it finds. That judgment
 resolves the path; a link loop at the name raises RuntimeError on Python 3.10 to 3.12
 ("Symlink loop from ...") and OSError (ELOOP) on 3.13. Either used to escape the
-constructor, so semgrep and opengrep failed to construct for a tree holding such a
+constructor, so opengrep failed to construct for a tree holding such a
 link. The file is named as the repository's instead.
 
 The judgment is stood in for here: the real one resolves only under an MCP shared
@@ -25,23 +25,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
     OpengrepScannerConfig,
     OpengrepScannerConfigOptions,
 )
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-    SemgrepScanner,
-    SemgrepScannerConfig,
-    SemgrepScannerConfigOptions,
-)
 
 pytestmark = pytest.mark.unit
 
 
 SCANNERS = [
-    pytest.param(
-        SemgrepScanner,
-        SemgrepScannerConfig,
-        SemgrepScannerConfigOptions,
-        "SEMGREP_RULES_CACHE_DIR",
-        id="semgrep",
-    ),
     pytest.param(
         OpengrepScanner,
         OpengrepScannerConfig,
@@ -95,7 +83,7 @@ def test_an_unresolvable_semgrepignore_leaves_the_scanner_constructed(
 
     monkeypatch.setattr(sandbox, "config_is_client_supplied", refuse_to_resolve)
 
-    # Enabled on every platform: the default turns semgrep off on Windows, and a
+    # Enabled on every platform: the default turns opengrep off on Windows, and a
     # disabled scanner never asks about the file, so the stub would never run.
     scanner = scanner_cls(
         context=test_plugin_context,
@@ -121,8 +109,8 @@ def test_the_unresolvable_file_is_named_as_the_repositorys(
     source.mkdir(parents=True, exist_ok=True)
     ignore_file = source / ".semgrepignore"
     ignore_file.write_text("tests/\n", encoding="utf-8")
-    monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
-    monkeypatch.setattr(SemgrepScanner, "_scanner_offline", lambda self: False)
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
+    monkeypatch.setattr(OpengrepScanner, "_scanner_offline", lambda self: False)
     asked = []
 
     def refuse_to_resolve(config_path):
@@ -133,12 +121,12 @@ def test_the_unresolvable_file_is_named_as_the_repositorys(
     # The config's own list of resolution warnings, which the note is appended to.
     warnings = test_plugin_context.config._resolution_warnings
 
-    # Enabled on every platform: the default turns semgrep off on Windows, and a
+    # Enabled on every platform: the default turns opengrep off on Windows, and a
     # disabled scanner writes no note.
-    SemgrepScanner(
+    OpengrepScanner(
         context=test_plugin_context,
-        config=SemgrepScannerConfig(
-            enabled=True, options=SemgrepScannerConfigOptions(offline=False)
+        config=OpengrepScannerConfig(
+            enabled=True, options=OpengrepScannerConfigOptions(offline=False)
         ),
     )
 

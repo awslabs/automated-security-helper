@@ -154,7 +154,7 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Use Trivy alongside other ASH scanners
-uv run ashx --scanners trivy-repo,bandit,semgrep
+uv run ashx --scanners trivy-repo,bandit,opengrep
 ```
 
 ## Output Integration

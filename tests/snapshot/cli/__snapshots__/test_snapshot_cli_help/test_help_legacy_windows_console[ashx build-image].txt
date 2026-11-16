@@ -48,9 +48,14 @@
 │                                                                         Windows). CI            │
 │                                                                         environment variables   │
 │                                                                         do not change it.       │
-│ --offline-semgrep-rule…                          <str>                  Specify Semgrep         │
-│                                                                         rulesets for use in ASH │
-│                                                                         offline mode            │
+│ --offline-semgrep-rule…                          <str>                  Specify rulesets to     │
+│                                                                         bake into the opengrep  │
+│                                                                         offline cache for ASH   │
+│                                                                         offline mode (the flag  │
+│                                                                         keeps its historical    │
+│                                                                         name; the semgrep       │
+│                                                                         scanner is served by    │
+│                                                                         the opengrep plugin)    │
 │                                                                         [default: p/ci]         │
 │ --container-uid          -u                      <str>                  UID to use for the      │
 │                                                                         container user          │

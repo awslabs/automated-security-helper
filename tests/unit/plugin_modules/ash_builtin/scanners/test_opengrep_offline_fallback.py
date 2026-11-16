@@ -7,13 +7,12 @@ When offline=True and OPENGREP_RULES_CACHE_DIR is unset or points to a directory
 with no .yaml/.yml rule files, opengrep cannot run. It must say so in a way the
 scan phase can record, and it must never invoke subprocess.
 
-The assertions here inverted for the reason set out in
-``test_semgrep_offline_fallback``: the verdict used to be raised from
-``_process_config_options``, which runs inside ``model_post_init``, so the
-scanner never became an instance and never reached the hooks that turn "cannot
-run here" into a recorded MISSING row. Both scanners are covered because both
-inherit the single implementation in ``_grep_scanner_base``; the shared-base
-control lives in ``tests/unit/plugin_modules/scanners/test_grep_scanner_base.py``.
+The assertions here inverted when the verdict stopped being raised from
+``_process_config_options``, which runs inside ``model_post_init``: before
+that, the scanner never became an instance and never reached the hooks that
+turn "cannot run here" into a recorded MISSING row. The implementation lives
+in ``_grep_scanner_base``; the shared-base control lives in
+``tests/unit/plugin_modules/scanners/test_grep_scanner_base.py``.
 """
 
 import pytest

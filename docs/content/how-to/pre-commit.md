@@ -128,7 +128,7 @@ both.
 | | Pre-commit hook (`ash`) | CI scan |
 |---|---|---|
 | Mode | `--mode precommit` | `local` by default, or `container` |
-| Scanners | The five in [What the hook runs](#behavior), plus any you add with `--scanners` | Every scanner your configuration enables, including the ones precommit mode leaves out, such as semgrep, opengrep, grype, trivy, and gitleaks |
+| Scanners | The five in [What the hook runs](#behavior), plus any you add with `--scanners` | Every scanner your configuration enables, including the ones precommit mode leaves out, such as opengrep, grype, trivy, and gitleaks |
 | Runs | On the developer's machine, per commit or push | On a clean runner, per pull request or push |
 | Output | Simplified, no progress display | The full summary and report files, for upload as artifacts or SARIF |
 | Cost | 11 to 15 seconds after the first run ([What it costs](#cost)) | Installs the scanner tools each build, or uses an image you prepared |

@@ -39,7 +39,7 @@
     'stderr': '''
       Usage: ashx [OPTIONS] COMMAND [ARGS]...
       Try 'ashx -h' for help.
-      Error: 'ash report' does not take --source-dir, given before it (see 'ash report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
+      Error: 'ashx report' does not take --source-dir, given before it (see 'ashx report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
   
     ''',
     'stdout': '',
@@ -354,7 +354,7 @@
     'stdout': '''
       INFO     Initializing ASH v<ASH_VERSION>
       INFO     Initializing execution engine
-      ERROR (5) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+      ERROR (5) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
   
     ''',
   })

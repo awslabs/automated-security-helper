@@ -1,6 +1,7 @@
-"""Tests for scanner plugins — covers initialization, dependency validation, and scan method for bandit, checkov, semgrep, cfn_nag, cdk_nag, snyk scanners."""
+"""Tests for scanner plugins — covers initialization, dependency validation, and scan method for bandit, checkov, cfn_nag, cdk_nag, snyk scanners."""
 
 from unittest.mock import patch
+
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -138,46 +139,6 @@ class TestCheckovScannerCoverage:
         (scanner_context.source_dir / "main.tf").write_text("resource {}")
         scanner = CheckovScanner(context=scanner_context)
         result = scanner.validate_plugin_dependencies()
-        assert result is True
-
-
-class TestSemgrepScannerCoverage:
-    """Tests for SemgrepScanner initialization."""
-
-    def test_init(self, scanner_context):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner,
-        )
-
-        scanner = SemgrepScanner(context=scanner_context)
-        assert scanner.command == "semgrep"
-
-    def test_validate_dependencies_empty_source(self, scanner_context):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner,
-        )
-
-        scanner = SemgrepScanner(context=scanner_context)
-        result = scanner.validate_plugin_dependencies()
-        # Empty dir should return False
-        assert isinstance(result, bool)
-
-    def test_validate_with_code_files(self, scanner_context):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner,
-        )
-
-        (scanner_context.source_dir / "app.py").write_text("import os")
-        scanner = SemgrepScanner(context=scanner_context)
-        with (
-            patch("platform.system", return_value="Linux"),
-            patch(
-                "automated_security_helper.base.scanner_plugin.find_executable",
-                return_value="/usr/bin/semgrep",
-            ),
-            patch.object(scanner, "_validate_uv_tool_availability", return_value=True),
-        ):
-            result = scanner.validate_plugin_dependencies()
         assert result is True
 
 

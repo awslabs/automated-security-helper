@@ -1,8 +1,8 @@
 ---
 name: "ash-security-scanner"
 displayName: "ASH Security Scanner"
-description: "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies."
-keywords: ["security-scan", "vulnerability-scan", "ash", "sast", "sca", "checkov", "bandit", "semgrep", "grype"]
+description: "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Opengrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies."
+keywords: ["security-scan", "vulnerability-scan", "ash", "sast", "sca", "checkov", "bandit", "opengrep", "semgrep", "grype"]
 author: "AWS Labs"
 ---
 
@@ -105,7 +105,7 @@ ASH runs all nine scanners by default. To run only a subset, edit `.ash/.ash.yam
 
 For result-time filtering by scanner:
 
-- **Python issues** → `scanners="bandit,semgrep"`
+- **Python issues** → `scanners="bandit,opengrep"` (the semgrep scanner was removed in v4; the name `semgrep` is an alias that resolves to opengrep)
 - **Secrets only** → `scanners="detect-secrets"`
 - **IaC review** → `scanners="checkov,cfn_nag,cdk-nag"`
 - **Dependencies** → `scanners="grype,npm-audit"`

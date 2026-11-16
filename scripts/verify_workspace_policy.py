@@ -148,7 +148,6 @@ _ALL_SCANNERS = [
     "grype",
     "npm-audit",
     "opengrep",
-    "semgrep",
     "syft",
 ]
 

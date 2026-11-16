@@ -154,7 +154,13 @@ HISTORICAL_DOCS = frozenset({"CHANGELOG.md"})
 #: the code at that release and of the programs ASH wraps. They are held to the same
 #: checks as the changelog they came from: the 3.8.0 bump moved them out of a skipped
 #: file into an unskipped one and failed lint on text that had not changed.
-HISTORICAL_DOC_DIRS = (".github/release-notes/",)
+#: The gate regression's observed cases are the comments the CodeCommit gate posted on
+#: 2026-08-28, kept as recorded: their scanner tables name the scanners of that day
+#: (semgrep among them), which is the data, not a claim about today's registry.
+HISTORICAL_DOC_DIRS = (
+    ".github/release-notes/",
+    "tests/integration/codecommit_gate_regression/cases/observed-2026-08-28/",
+)
 
 
 def is_historical_doc(rel: str) -> bool:

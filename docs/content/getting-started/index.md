@@ -45,7 +45,7 @@ The agent starts `ashx mcp` on your machine as a local server and runs scans thr
 You need git and ASH on the same machine as the agent, and an agent that can start a local
 MCP server over stdio. Installing the scanner tools first with `ashx dependencies install`
 is optional. Without them, an online scan with the sandbox off installs bandit,
-checkov, semgrep, cfn-lint, and zizmor itself, with the `uv` installed with ASH. A
+checkov, cfn-lint, and zizmor itself, with the `uv` installed with ASH. A
 scanner with nothing to scan, for example cfn-nag in a project without CloudFormation
 templates, shows as SKIPPED, and every other scanner whose tool is missing shows as
 MISSING.

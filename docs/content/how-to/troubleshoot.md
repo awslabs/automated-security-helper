@@ -35,7 +35,7 @@ UV tool execution is required but UV is not available for checkov
 A scanner with nothing to scan in the project, such as cdk-nag with no CloudFormation
 template, npm-audit with no lockfile beside a `package.json`, or actionlint with no
 workflows, shows SKIPPED instead, whether or not its tool is installed. Scanners that
-have no such check, such as grype and semgrep, show MISSING whenever their tool is
+have no such check, such as grype and opengrep, show MISSING whenever their tool is
 missing.
 
 Fix: install the tool, usually with `ashx dependencies install --tool grype` (using the
@@ -78,12 +78,12 @@ ignores both. See
 Symptom: a scanner's row is `ERROR`, and its error names the tool's exit code:
 
 ```text
-Failed to execute semgrep scanner on source: SemgrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not graded (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). No stderr captured; checked .ash/ash_output/scanners/semgrep/source/SemgrepScanner.stderr.log, which the tool did not write. .ash/ash_output/scanners/semgrep/source/results_sarif.sarif reports: Invalid YAML file ...
+Failed to execute opengrep scanner on source: OpengrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not graded (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). No stderr captured; checked .ash/ash_output/scanners/opengrep/source/OpengrepScanner.stderr.log, which the tool did not write. .ash/ash_output/scanners/opengrep/source/results_sarif.sarif reports: Invalid YAML file ...
 ```
 
 Cause: the tool reported that it failed. Each scanner accepts the exit codes its tool uses
 for a run that completed, with or without findings, and nothing else. A failed tool
-can still leave a results file (semgrep exits 7 and writes SARIF holding only error
+can still leave a results file (opengrep exits 7 and writes SARIF holding only error
 notifications when it cannot read a rule configuration; grype exits 1 and writes a
 zero-byte report when it cannot load its database), so ASH does not read the file of
 a run with any other code: an empty or error-only file would otherwise be graded
@@ -96,8 +96,7 @@ a run ASH itself failed to carry out (the scanner's errors name ASH's error).
 | bandit | 0, 1 (issues found) | 2: any error (`bandit/cli/main.py`) |
 | checkov | 0, 1 (failed checks) | 2: the run crashed (`checkov/main.py`) |
 | grype | 0, 2 (a match at or above `grype --fail-on`) | 1: any error, such as a database it cannot load (grype's `cmd/grype/cli` package) |
-| semgrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`semgrep/error.py`) |
-| opengrep | 0, 1 | the same values as semgrep (`src/osemgrep/core/Exit_code.ml`) |
+| opengrep | 0, 1 (findings) | 2: fatal; 3 and up: specific failures, 7 for a rule configuration it cannot read (`src/osemgrep/core/Exit_code.ml`) |
 | trivy, trivy-repo | 0 | 1: any error (trivy's `cmd/trivy` package) |
 | syft | 0 | 1: any error (syft's `cmd/syft` package) |
 | ferret-scan | 0, 3 (coverage cut short under `fail_on_incomplete`: the findings are reported and the row is `ERROR`, as its target counts as failed) | 1: any error |
@@ -121,13 +120,13 @@ both for advisories and for errors and is judged by whether it wrote a report;
 detect-secrets and cdk-nag run in ASH's own worker processes.
 
 Fix: read what the message quotes, and fix what the tool reported: its stderr, or, when
-it wrote none (semgrep and opengrep report a rule file they cannot read only in
-their SARIF), the error-level notifications from its results file, which the
+it wrote none (opengrep reports a rule file it cannot read only in
+its SARIF), the error-level notifications from its results file, which the
 message names. The full text is in the `<Scanner>.stderr.log`, the
 `<Scanner>.stdout.log` and the results file under `scanners/<name>/<target>/` in the
 output directory; the message names the ones the tool wrote.
-For semgrep and opengrep under `--offline`, see
-[Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
+For opengrep under `--offline`, see
+[Seeding the opengrep rule cache](../docs/advanced-usage.md#seeding-the-opengrep-rule-cache).
 For grype, see [What each scanner does offline](run-offline.md#scanners).
 
 The scan exits 1 for an `ERROR` scanner while `fail_on_incomplete_scanners` is on,
@@ -135,13 +134,13 @@ which is the default. With it off, the exit code comes from the findings alone, 
 scan whose only problem is the failed scanner exits 0; see
 [Incomplete scans](set-the-gate.md#incomplete).
 
-### semgrep and opengrep show SKIPPED on Windows
+### opengrep shows SKIPPED on Windows
 
-Cause: both are off by default on Windows, and semgrep publishes no Windows build, so
-it is SKIPPED even when you turn it on. A SKIPPED scanner does not fail the scan, so
-the scan passes without them, as long as another selected scanner runs.
+Cause: opengrep is off by default on Windows, including when a config or
+`--scanners` names it as `semgrep`. A SKIPPED scanner does not fail the scan, so
+the scan passes without it, as long as another selected scanner runs.
 
-Fix: to run them, scan from WSL or in a container. See
+Fix: to run it, scan from WSL or in a container. See
 [Platform limits](../docs/advanced-usage.md#platform-limits).
 
 ## Exit codes
@@ -204,8 +203,8 @@ Cause: each selected scanner had nothing to read, so the scan shows nothing abou
 code. A scanner that reads only some files, such as cfn-nag with no CloudFormation
 template or bandit with no Python file, has nothing to read in a project without them,
 and no scanner has anything to read when the scan set is empty. Two cases are ERROR
-instead, and the error gives a count. semgrep and opengrep are ERROR when their own
-exclusions, rather than `ignore_paths`, left out every file they found. bandit is ERROR
+instead, and the error gives a count. opengrep is ERROR when its own
+exclusions, rather than `ignore_paths`, left out every file it found. bandit is ERROR
 when it scanned no file although Python files that nothing excludes are there; when
 `ignore_paths` or bandit's own `excluded_paths` leave out every Python file, bandit is
 SKIPPED.
@@ -496,10 +495,10 @@ Symptom:
 
 ```text
 ERROR (1) Exiting because 1 content database(s) are past their declared age bound
-  Content database semgrep-offline-rules (semgrep) is stale: downloaded 2026-08-31T22:43:12Z, 40d 0h old, past its 720h bound ...
+  Content database opengrep-offline-rules (opengrep) is stale: downloaded 2026-08-31T22:43:12Z, 40d 0h old, past its 720h bound ...
 ```
 
-Cause: grype, trivy, and offline semgrep and opengrep read databases that go out of
+Cause: grype, trivy, and offline opengrep read databases that go out of
 date. ASH fails a scan whose database is past its age bound, or whose age it cannot
 read; [Content databases](../concepts/content-databases.md) lists the bounds. Online
 scans keep grype's and trivy's databases current, so this usually happens offline or
@@ -507,7 +506,7 @@ with an old image.
 
 Fix: refresh the database. For an offline image, rebuild it with
 `ashx build-image --offline`. For offline rules on your machine, download them again
-([Seeding the semgrep and opengrep rule cache](../docs/advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache)).
+([Seeding the opengrep rule cache](../docs/advanced-usage.md#seeding-the-opengrep-rule-cache)).
 To scan with the old database anyway, pass `--allow-stale-content-db` or set
 `content_db_staleness: warn`: the stale database then no longer fails the scan, and
 every report names it. With `warn`, a scan passes even when a database is missing, so its
@@ -590,14 +589,14 @@ or `pipx ensurepath` (for pipx), then open a new terminal.
 ### `ash` runs a different program on Windows
 
 Symptom: in Git Bash or an MSYS2 shell, `ash --version` prints an error such as
-`ash: 0: Illegal option --`, and `ashx dependencies install` reports
-`cannot open dependencies`.
+`ash: 0: Illegal option --`, and `ash` followed by a subcommand such as
+`dependencies install` reports `cannot open dependencies`.
 
 Cause: Git for Windows and MSYS2 ship an unrelated shell named `ash`, and it comes first
 on your `PATH`.
 
-Fix: use `ashv3` or `automated-security-helper`, which are the same program as ASH's
-`ash`.
+Fix: use `ashx`, `ashv3` or `automated-security-helper`, which are the same program as
+ASH's `ash`.
 
 ### Results differ between your machine and CI
 
@@ -606,7 +605,7 @@ Cause: the two runs differ in something ASH does not control:
 - Scanner versions. A scanner on your `PATH` is used if its version is in range, so
   your machine and CI can run different versions.
 - Database age. grype's and trivy's databases change daily.
-- Platform. On Windows, semgrep and opengrep are SKIPPED.
+- Platform. On Windows, opengrep is SKIPPED.
 - Diff scans. With `--changed-files-only`, ASH reports findings in every file when git
   cannot list the changes: the base ref does not exist, as in a shallow clone, the
   directory is not in a git repository, or git is not installed. The log says which,

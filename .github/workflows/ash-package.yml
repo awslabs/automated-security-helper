@@ -245,7 +245,7 @@ jobs:
 
       # The operator invariant for the whole installer program: no artifact
       # published from this repository may carry third-party scanner source or
-      # assets. ASH invokes bandit, checkov, semgrep, grype, syft, trivy,
+      # assets. ASH invokes bandit, checkov, grype, syft, trivy,
       # opengrep, npm-audit, detect-secrets, cdk-nag and cfn-nag; it redistributes
       # none of them. Two vendored .jsii.tgz bundles (aws-cdk-lib, cdk-nag) lived
       # in the tree until commit 760f3647, so this is a regression guard rather

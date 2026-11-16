@@ -111,7 +111,7 @@ Ubuntu, or with `uv tool install pipx`. On systems whose Python is marked as
 externally managed, such as Ubuntu 24.04, pip refuses to install pipx outside a
 virtual environment. pipx needs the named Python on your `PATH`.
 
-ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv. It uses the `uv`
+ASH installs bandit, checkov, cfn-lint, and zizmor with uv. It uses the `uv`
 that pipx installs into ASH's environment, so a pipx install needs no separate uv.
 
 ## Install with pip
@@ -144,7 +144,7 @@ virtual environment.
     ```
 
 Activate the environment in each new shell before you run `ash`, or run the
-environment's `ash` by its path. Either way, ASH installs bandit, checkov, semgrep,
+environment's `ash` by its path. Either way, ASH installs bandit, checkov,
 cfn-lint, and zizmor with the environment's own `uv`.
 
 Keep the environment outside the scanned directory. During a scan ASH does not run
@@ -319,7 +319,7 @@ The scanner tools and data that ASH installed stay behind. To remove them too:
   are in `share/cfn-guard-rules` next to it.
 - The scanners installed as uv tools. Name the ones `uv tool list` shows, because
   `uv tool uninstall` fails for a name that is not installed:
-  `uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.
+  `uv tool uninstall bandit checkov cfn-lint zizmor nbconvert`.
 - The cfn-nag gem: `gem uninstall cfn-nag`. The gems it depends on stay installed.
 - The scanners' own caches, such as `~/.cache/grype` and `~/.cache/trivy`.
 - The `.ash/ash_output/` directory that each scan writes in the project it scanned.

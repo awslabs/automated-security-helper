@@ -743,12 +743,14 @@ _DENIED_ITEMS: Dict[str, Tuple[str, ...]] = {
         "/content_db_staleness_offline_image_default",
     ),
     "scanner options that drop findings by rule ID, by a baseline, or by a whole category, "
-    "such as `exclude_rule`, `config`, and `severity` of `opengrep` and `semgrep`, checkov's "
+    "such as `exclude_rule`, `config`, and `severity` of `opengrep`, checkov's "
     "`frameworks`, cfn-lint's `ignore_checks`, detect-secrets' `baseline_file` and "
     "`scan_settings`, and trivy's `scanners` and `ignore_unfixed`": (
         "/scanners/opengrep/options/exclude_rule",
         "/scanners/opengrep/options/config",
         "/scanners/opengrep/options/severity",
+        # `semgrep` is a config section name that opengrep serves as an alias; a
+        # delivered config may not reach the same options through the old name.
         "/scanners/semgrep/options/exclude_rule",
         "/scanners/semgrep/options/config",
         "/scanners/semgrep/options/severity",
@@ -1850,7 +1852,7 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     text = _squeezed(result.stdout + result.stderr)
     warning = (
         "Ignoring reporters.s3.options.aws_region, reporters.s3.options.bucket_name, "
-        "reporters.s3.enabled from {path}: ash merge cannot tell that config from the "
+        "reporters.s3.enabled from {path}: ashx merge cannot tell that config from the "
         "scanned repository's own, since the shards do not record which tree was "
         "scanned, and these options choose whether findings are sent"
     )
@@ -7451,7 +7453,7 @@ def test_each_content_database_is_held_to_the_age_bound_the_pages_state(
     read_field = {"grype-db": "`built`", "trivy-db": "`VulnerabilityDB.UpdatedAt`"}
     for name, field in read_field.items():
         assert field in age_read_from[name], (name, age_read_from[name])
-    assert RULESET_FETCHED_AT_FILE in age_read_from["semgrep-offline-rules"], (
+    assert RULESET_FETCHED_AT_FILE in age_read_from["opengrep-offline-rules"], (
         age_read_from
     )
 
@@ -13017,12 +13019,12 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
 _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv.",
+        "ASH installs bandit, checkov, cfn-lint, and zizmor with uv.",
     ),
     (
         "how-to/install.md",
         (
-            "Either way, ASH installs bandit, checkov, semgrep, cfn-lint, and "
+            "Either way, ASH installs bandit, checkov, cfn-lint, and "
             "zizmor with the environment's own `uv`."
         ),
     ),
@@ -13030,14 +13032,14 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
         "getting-started/index.md",
         (
             "Without them, an online scan with the sandbox off installs bandit, "
-            "checkov, semgrep, cfn-lint, and zizmor itself, with the `uv` installed "
+            "checkov, cfn-lint, and zizmor itself, with the `uv` installed "
             "with ASH."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "| bandit, checkov, semgrep, cfn-lint, zizmor | same name | ASH installs "
+            "| bandit, checkov, cfn-lint, zizmor | same name | ASH installs "
             "them with `uv tool` during a scan, or `ashx dependencies install` does it "
             "ahead of time |"
         ),
@@ -13045,7 +13047,7 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/ci/github-actions.md",
         (
-            "bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH "
+            "bandit, checkov, cfn-lint, and zizmor need no input: ASH "
             "installs them from PyPI with `uv tool install` during the scan."
         ),
     ),
@@ -13055,19 +13057,19 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
 _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "`uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.",
+        "`uv tool uninstall bandit checkov cfn-lint zizmor nbconvert`.",
     ),
     (
         "docs/advanced-usage.md",
         (
-            "installs bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert with "
+            "installs bandit, checkov, cfn-lint, zizmor, and nbconvert with "
             "`uv tool install`, within each scanner's accepted version range."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "When bandit, checkov, semgrep, cfn-lint, zizmor, or nbconvert is not "
+            "When bandit, checkov, cfn-lint, zizmor, or nbconvert is not "
             "available, ASH installs it with `uv tool install` during the scan, and the "
             "scan takes longer."
         ),
@@ -13076,14 +13078,14 @@ _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
         "docs/advanced-usage.md",
         (
             "The `uv tool install`, `uv tool run`, and `uv tool list` commands that ASH "
-            "runs for bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert get no "
+            "runs for bandit, checkov, cfn-lint, zizmor, and nbconvert get no "
             "such flag."
         ),
     ),
     (
         "concepts/scanning-untrusted-code.md",
         (
-            "A missing Python tool (bandit, checkov, semgrep, cfn-lint, zizmor, and "
+            "A missing Python tool (bandit, checkov, cfn-lint, zizmor, and "
             "nbconvert for the notebook converter) is installed at scan time with "
             "`uv tool install`"
         ),
@@ -17815,7 +17817,7 @@ def test_every_python_range_the_pages_give_is_requires_python() -> None:
     minors = _install_supported_minors()
     assert minors and minors == list(range(minors[0], minors[-1] + 1)), minors
     ranges = [
-        (str(page.relative_to(CONTENT)), int(match[1]), int(match[2]))
+        (page.relative_to(CONTENT).as_posix(), int(match[1]), int(match[2]))
         for page in sorted(CONTENT.rglob("*.md"))
         for match in re.finditer(
             r"Python 3\.(\d+) to 3\.(\d+)", page.read_text(encoding="utf-8")

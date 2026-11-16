@@ -577,7 +577,6 @@ class TestHostCachesAreNotWrittenInPlace:
                 getattr(cls, "sandbox_requirements", None), SandboxRequirements
             )
         }
-        assert declared["SemgrepScanner"] == ("XDG_CONFIG_HOME",)
         assert declared["OpengrepScanner"] == ("XDG_CONFIG_HOME",)
         assert declared["NpmAuditScanner"] == ("npm_config_cache",)
         assert declared["GrypeScanner"] == ()
@@ -2921,14 +2920,6 @@ class TestSystemTrustRoots:
     @staticmethod
     def _profile(plan):
         return plan.argv[plan.argv.index("-p") + 1].splitlines()
-
-    def test_semgrep_declares_it(self):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-            semgrep_scanner,
-        )
-
-        requirements = semgrep_scanner.SemgrepScanner.sandbox_requirements
-        assert requirements.system_trust_roots is True
 
     def test_the_roots_are_a_read_only_file_named_by_ssl_cert_file(
         self, layout, monkeypatch

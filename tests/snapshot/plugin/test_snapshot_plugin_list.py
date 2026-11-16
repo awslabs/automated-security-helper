@@ -9,7 +9,7 @@ asks whether its tool is installed and which version it is, which is a fact abou
 the machine running the test. It is replaced by a fixed inventory that covers each
 Reachable label (Yes, No, Unknown) and a missing version.
 
-The Enabled column shows the semgrep and opengrep defaults, which are off on
+The Enabled column shows the opengrep default, which is off on
 Windows, so each listing renders once per host.
 """
 
@@ -29,7 +29,6 @@ FAKE_PROBES = {
     "bandit": ("1.8.6", True),
     "checkov": ("3.2.470", True),
     "grype": (None, False),
-    "semgrep": ("1.139.0", None),
     "syft": ("1.33.0", False),
 }
 

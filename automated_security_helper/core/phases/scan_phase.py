@@ -21,6 +21,7 @@ from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
+    _selection_key,
     community_scanner_refusal,
     exclusions_matching_no_scanner,
     refuse_selection_matching_no_scanner,
@@ -59,6 +60,7 @@ from automated_security_helper.utils.sandbox.scope import (
     plugin_probe_scope,
     sandbox_refusal_grades_missing,
 )
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
@@ -214,6 +216,27 @@ def _nothing_to_scan_reason(plugin_instance, values: Iterable[str] = ()) -> str 
     if not (isinstance(reason, str) and reason):
         return None
     return text_without_values(reason, values)
+
+
+def _resolve_scanner_name_aliases(names: List[str]) -> List[str]:
+    """The caller's scanner names with retired names resolved, order kept.
+
+    ``utils/scanner_names.SCANNER_NAME_ALIASES`` names the retired scanners
+    (``semgrep`` is served by the opengrep plugin). The mapping is logged once
+    per name, so a scan asked for ``--scanners semgrep`` says which scanner it
+    ran. Unknown names pass through unchanged for the allowlist check below to
+    warn about or refuse.
+    """
+    resolved = []
+    for name in names:
+        canonical = canonical_scanner_name(name)
+        if canonical != name:
+            ASH_LOGGER.info(
+                f"Scanner name {name} is an alias of the {canonical} plugin; "
+                f"running {canonical}"
+            )
+        resolved.append(canonical)
+    return resolved
 
 
 def _scanner_display_name(plugin_instance) -> str:
@@ -829,6 +852,17 @@ class ScanPhase(EnginePhase):
         # rather than watching a partial scan run to completion and exit 0.
         validate_shard_selection(shard_index, shard_count)
 
+        # Retired scanner names resolve to the plugin that serves them before
+        # anything matches on them (the exclusion subtraction below, the
+        # allowlist check, the shard partition and --exclude-scanners all compare
+        # against registered config names, and an alias is not one).
+        # `--scanners semgrep` therefore selects opengrep instead of refusing with
+        # ScannerSelectionError, with the mapping named. Done first so that what the
+        # operator excluded, which the SKIPPED rows below are told apart by, is the
+        # mapped list: `--exclude-scanners semgrep` excludes opengrep.
+        enabled_scanners = _resolve_scanner_name_aliases(enabled_scanners)
+        excluded_scanners = _resolve_scanner_name_aliases(excluded_scanners)
+
         # The exclusions taken out of the allowlist, as the engine does when it is
         # built. A phase called directly (a library, the MCP tool) with an
         # allowlist its own exclusions empty ran zero scanners and reported clean,
@@ -1030,6 +1064,19 @@ class ScanPhase(EnginePhase):
                             not_selected_reasons.append(
                                 "disabled in the configuration (enabled: false)"
                             )
+                        # A --python-only run leaves out a scanner that is not
+                        # Python-only, so its constructor raising is not a failure
+                        # of this run either. Only the class's own statement can be
+                        # read: is_python_only() is an instance method and this
+                        # scanner has no instance. Every scanner ASH ships states
+                        # ``python_only``; a plugin that leaves it None (derived
+                        # from its instance) is the accepted gap, and its failure is
+                        # recorded ERROR as before.
+                        if (
+                            python_based_plugins_only
+                            and getattr(plugin_class, "python_only", None) is False
+                        ):
+                            not_selected_reasons.append(PYTHON_ONLY_SKIPPED_REASON)
                         if not_selected_reasons:
                             ASH_LOGGER.debug(
                                 f"Scanner {failed_name} could not be constructed "
@@ -1286,11 +1333,19 @@ class ScanPhase(EnginePhase):
             # with spelling advice and turn the failure into a usage error.
             if enabled_scanners and scanner_instances:
                 registered_names = {
-                    _scanner_display_name(instance).lower().strip()
+                    _selection_key(_scanner_display_name(instance))
                     for instance in scanner_instances
                 }
-                known_names = registered_names | construction_failed
-                requested = [(name, name.lower().strip()) for name in enabled_scanners]
+                # construction_failed holds raw lower-cased display names, while
+                # the requested names and registered_names are selection keys
+                # (a retired spelling resolved to the scanner that serves it).
+                # Re-keyed here so a scanner whose retired-spelling name failed
+                # construction is known under the key a request for it resolves
+                # to, and the two refusals below agree on it.
+                known_names = registered_names | {
+                    _selection_key(name) for name in construction_failed
+                }
+                requested = [(name, _selection_key(name)) for name in enabled_scanners]
                 unresolved = [name for name, key in requested if key not in known_names]
                 # The module hint and the refusal text are the engine's too
                 # (core.scanner_selection): one text for the construction-time
@@ -2152,21 +2207,9 @@ class ScanPhase(EnginePhase):
                     # Unguarded, one scanner's failed write ended the whole phase
                     # before any scanner ran. The row below is the record, so it is
                     # written whether or not the container was.
-                    try:
-                        aggregated_results = self._process_results(
-                            results=container,
-                            aggregated_results=aggregated_results,
-                        )
-                    except Exception as write_error:
-                        ASH_LOGGER.error(
-                            f"Could not write the results of scanner {display_name}: "
-                            + error_text(
-                                write_error,
-                                config_environment_values(
-                                    getattr(self.plugin_context, "config", None)
-                                ),
-                            )
-                        )
+                    aggregated_results = self._write_results_guarded(
+                        display_name, container, aggregated_results
+                    )
                     aggregated_results.scanner_results[display_name] = (
                         ScannerTargetStatusInfo(
                             status=ScannerStatus.MISSING,
@@ -2430,16 +2473,20 @@ class ScanPhase(EnginePhase):
 
             # Validate result completeness before finalizing scan results
             self._validate_result_completeness(aggregated_results)
+            # A scanner busy in Python, not waiting on a child process, returns
+            # after a cancel rather than stopping at it, and when it was the last
+            # to start no scanner start was left to check the cancel. A no-op
+            # outside a cancellable scan; see core/cancellation.py. Before the
+            # completion marker below: a cancel that raised after the marker was
+            # written left a cancelled scan with a record of reaching its end, and
+            # the orchestrator's save after a failure then wrote a results file
+            # that read as complete.
+            raise_if_cancelled()
+
             # Unconditional, and after the completeness pass has returned: the
             # pass swallows its own errors, so its checkpoint is not a record
             # that the phase reached its end. The orchestrator reads this one.
             self._record_scan_phase_completed(aggregated_results)
-
-            # A scanner busy in Python, not waiting on a child process, returns
-            # after a cancel rather than stopping at it, and when it was the last
-            # to start no scanner start was left to check the cancel. A no-op
-            # outside a cancellable scan; see core/cancellation.py.
-            raise_if_cancelled()
 
             # The results file is not written here. It used to be, and that was
             # before the engine's changed-files narrowing, final suppression pass,

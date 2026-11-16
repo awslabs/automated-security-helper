@@ -53,7 +53,7 @@ tags. So the spelling is hyphenated (``cfn-nag``, ``detect-secrets``,
 ``core/scanner_inventory.py`` reports for its own table. Matching against a
 snake_cased set would recognize none of the three hyphenated names.
 
-The set covers every scanner ASH ships, which is the sixteen in
+The set covers every scanner ASH ships, which is the fifteen in
 ``plugin_modules/ash_builtin/scanners`` plus the scanners of the in-tree packages
 that ``load_internal_plugins()`` does not load: the vendored three
 (``ferret-scan``, ``snyk-code``, ``trivy-repo``). They are included because their
@@ -114,7 +114,8 @@ the cycle it exists to route around.
 
 from __future__ import annotations
 
-from typing import FrozenSet, Mapping
+import re
+from typing import Dict, FrozenSet, Mapping
 
 #: The tool type (a ``ScannerToolType`` value) of every scanner ASH ships, by
 #: config name. A scanner sets its ``tool_type`` in ``model_post_init``, so the
@@ -136,7 +137,6 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "grype": "SCA",
     "npm-audit": "SCA",
     "opengrep": "SAST",
-    "semgrep": "SAST",
     "snyk-code": "SAST",
     "syft": "SBOM",
     "trivy": "SCA",
@@ -150,3 +150,44 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
 #: Derived-and-compared by tests/unit/utils/test_scanner_names_registry_agreement.py.
 #: Add a scanner to the registry without adding it here and that test fails.
 SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)
+
+
+#: Retired scanner names, each mapped to the shipped scanner that serves it.
+#:
+#: The name on the left is accepted everywhere a scanner name is read -- a
+#: ``scanners.<name>`` config section, ``--scanners`` / ``--exclude-scanners`` --
+#: and resolves to the plugin on the right. It is a general table rather than a
+#: per-name special case so the next retirement is one line here plus its fold
+#: in ``config/ash_config.py``.
+#:
+#: ``semgrep``: the semgrep scanner plugin was removed in v4. opengrep is a fork
+#: of semgrep with the same rule syntax, ``p/ci`` default ruleset and SARIF
+#: output, so a config written for the semgrep scanner runs unchanged against
+#: the opengrep plugin. Alias-only options the opengrep plugin does not declare
+#: (``tool_version``, ``install_timeout``: both described the retired uv-tool
+#: install path) are dropped at the fold, with a log line naming them.
+SCANNER_NAME_ALIASES: Dict[str, str] = {
+    "semgrep": "opengrep",
+}
+
+#: The spellings under which an alias is recognized: ASCII letters, digits and
+#: ``+`` kept, lowered. The same reduction ``AshConfig.get_plugin_config``
+#: applies to a plugin name, restated here because this module imports nothing
+#: from ASH (see the module docstring).
+_NAME_PUNCTUATION = re.compile(r"[^a-zA-Z0-9+]")
+
+
+def _reduced_name(name: str) -> str:
+    return _NAME_PUNCTUATION.sub("", name).lower()
+
+
+def canonical_scanner_name(name: str) -> str:
+    """The scanner name ``name`` selects, with retired names resolved.
+
+    An alias of ``SCANNER_NAME_ALIASES`` (matched case- and
+    punctuation-insensitively, so ``Semgrep`` and ``sem_grep`` count) answers
+    its canonical plugin name; any other name answers itself unchanged, in the
+    caller's own spelling. Callers that log the mapping do so themselves: this
+    module has no logger on purpose.
+    """
+    return SCANNER_NAME_ALIASES.get(_reduced_name(name), name)

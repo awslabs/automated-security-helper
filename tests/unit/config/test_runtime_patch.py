@@ -379,6 +379,7 @@ class TestDefaults:
         model_validate so the schema check covers extras that real plugins add,
         from their own models.
         """
+        from automated_security_helper.utils.scanner_names import SCANNER_NAME_ALIASES
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             FerretScannerConfig,
         )
@@ -430,9 +431,16 @@ class TestDefaults:
             # the dumped dict, the denylist entry is anchored to a real path.
             assert path.startswith("/"), f"non-pointer denied path: {path!r}"
             node: object = dumped
+            previous = ""
             for seg in path[1:].split("/"):
                 if "*" in seg or seg == "-":
                     return True  # wildcard prefix reached — anchor verified
+                if previous == "scanners":
+                    # A retired scanner name (``semgrep``) is an alias of the
+                    # plugin that serves it; its entries guard the alias
+                    # spelling and are anchored at the plugin's own section.
+                    seg = SCANNER_NAME_ALIASES.get(seg, seg)
+                previous = seg
                 if isinstance(node, dict) and seg in node:
                     node = node[seg]
                     continue
@@ -1821,9 +1829,21 @@ class TestGlobDenialsNameKnownPlugins:
             check=True,
         )
         resolved = json_module.loads(result.stdout.strip().splitlines()[-1])
-        assert resolved == {
+        # A retired scanner name the config still accepts (SCANNER_NAME_ALIASES) is a
+        # spelling a patch can use, so a glob denial has to cover it although no
+        # plugin registers under it: the table holds it beside the plugins.
+        from automated_security_helper.utils.scanner_names import (
+            SCANNER_NAME_ALIASES,
+        )
+
+        expected = {
             section: sorted(keys) for section, keys in _SHIPPED_PLUGIN_KEYS.items()
         }
+        expected["scanners"] = sorted(
+            set(expected["scanners"]) - set(SCANNER_NAME_ALIASES)
+        )
+        assert resolved == expected
+        assert set(SCANNER_NAME_ALIASES) <= set(_SHIPPED_PLUGIN_KEYS["scanners"])
 
     @pytest.mark.integration
     def test_building_the_keys_imports_no_plugin_module(self, tmp_path) -> None:

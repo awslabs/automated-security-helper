@@ -758,7 +758,6 @@ def _per_platform(*values) -> list:
 @pytest.mark.parametrize(
     "module, name",
     [
-        ("semgrep_scanner", "SemgrepScannerConfig"),
         ("opengrep_scanner", "OpengrepScannerConfig"),
     ],
 )
@@ -2278,7 +2277,6 @@ def _registry_matching_the_maps(module) -> tuple[dict, set, set]:
     """A registry the curated maps are complete for: built-ins, tool types, reporters."""
     featured = {
         "bandit": "SAST",
-        "semgrep": "SAST",
         "opengrep": "SAST",
         "checkov": "IAC",
         "cdk-nag": "IAC",

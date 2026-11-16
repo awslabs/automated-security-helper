@@ -239,19 +239,19 @@ def test_replace_mode_with_one_sandbox_entry_still_refuses_widening(
 def test_narrowing_the_network_scanners_to_one_that_has_a_network_is_accepted(
     tmp_path,
 ) -> None:
-    """With ``network_scanners`` unset, semgrep's own declared need gives it one."""
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-        SemgrepScanner,
+    """With ``network_scanners`` unset, opengrep's own declared need gives it one."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
     )
 
-    assert SemgrepScanner.sandbox_requirements.network
+    assert OpengrepScanner.sandbox_requirements.network
     rules = ccp.rules_from(AshConfig())
     assert rules.base.sandbox.network_scanners is None
     assert (
-        _denials({"sandbox": {"network_scanners": ["semgrep"]}}, rules, tmp_path) == []
+        _denials({"sandbox": {"network_scanners": ["opengrep"]}}, rules, tmp_path) == []
     )
     assert _denials(
-        {"sandbox": {"network_scanners": ["semgrep", "no-such-scanner"]}},
+        {"sandbox": {"network_scanners": ["opengrep", "no-such-scanner"]}},
         rules,
         tmp_path,
     ) == ["sandbox.network_scanners"]
@@ -262,7 +262,7 @@ def test_narrowing_the_network_scanners_to_one_that_has_a_network_is_accepted(
     [
         (["cfn-guard"], "cfn-guard"),
         (["detect-secrets"], "detect-secrets"),
-        (["semgrep", "cfn-guard"], "cfn-guard"),
+        (["opengrep", "cfn-guard"], "cfn-guard"),
         (["cfn-guard", "detect-secrets"], "cfn-guard, detect-secrets"),
     ],
 )

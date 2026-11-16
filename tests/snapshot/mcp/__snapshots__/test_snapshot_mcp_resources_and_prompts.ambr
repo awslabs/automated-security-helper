@@ -380,7 +380,6 @@
         • grype
         • npm-audit
         • opengrep
-        • semgrep
         • syft
         • trivy
         • zizmor
@@ -432,7 +431,6 @@
         • grype
         • npm-audit
         • opengrep
-        • semgrep
         • syft
         • trivy
         • zizmor

@@ -81,7 +81,7 @@ ashx --mode precommit
 
 ## Scanners
 
-- Code: Bandit, Semgrep, Opengrep
+- Code: Bandit, Opengrep
 - Infrastructure: Checkov, CDK-Nag, CFN-Nag
 - Secrets: detect-secrets
 - Dependencies and software inventory: Grype, npm audit, Syft
@@ -166,7 +166,7 @@ ASH leaves its own output out of the scan, whether or not `.gitignore` lists it:
 <details>
 <summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment.
+Build an offline image with `ashx --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ashx --mode container --offline --no-build` in your air-gapped environment. The `--offline-semgrep-rulesets` flag keeps its historical name but now feeds the opengrep rules cache.
 </details>
 
 <details>

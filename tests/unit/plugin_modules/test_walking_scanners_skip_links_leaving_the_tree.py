@@ -91,7 +91,6 @@ LINK_HANDLING = {
     "syft": EXCLUDES_THE_LINK,
     "trivy-repo": EXCLUDES_THE_LINK,
     "trivy": EXCLUDES_THE_LINK,
-    "semgrep": FOLLOWS_NO_LINK,
     "opengrep": FOLLOWS_NO_LINK,
     # `gitleaks dir` runs without --follow-symlinks.
     "gitleaks": FOLLOWS_NO_LINK,
@@ -124,11 +123,6 @@ SCANNER_CLASSES = {
         "ash_builtin.scanners.opengrep_scanner",
         "OpengrepScanner",
         "Opengrep",
-    ),
-    "semgrep": (
-        "ash_builtin.scanners.semgrep_scanner",
-        "SemgrepScanner",
-        "Semgrep",
     ),
     "syft": ("ash_builtin.scanners.syft_scanner", "SyftScanner", "Syft"),
     "ferret-scan": (
@@ -719,19 +713,12 @@ def test_nothing_is_logged_when_every_link_can_be_given_to_trivy(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# semgrep and opengrep
+# opengrep
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(params=["semgrep", "opengrep"])
+@pytest.fixture(params=["opengrep"])
 def grep_scanner_class(request):
-    if request.param == "semgrep":
-        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
-            SemgrepScanner,
-            SemgrepScannerConfig,
-        )
-
-        return SemgrepScanner, SemgrepScannerConfig
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
         OpengrepScannerConfig,

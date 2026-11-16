@@ -233,7 +233,7 @@ else:
     ├── bandit/
     │   └── source/
     │       └── ASH.ScanResults.json
-    ├── semgrep/
+    ├── opengrep/
     │   └── source/
     │       └── ASH.ScanResults.json
     └── [other scanners]/
@@ -870,10 +870,10 @@ scanners:
       ignore_nosec: false
       config_file: .ash/bandit.yaml
   
-  semgrep:
+  opengrep:
     enabled: true
     options:
-      config: auto  # or specific ruleset like 'p/security-audit'
+      config: p/ci  # or another ruleset like 'p/security-audit'
   
   checkov:
     enabled: true
@@ -1351,7 +1351,7 @@ will install its tool, and `missing_dependencies` names those scanners. It does 
 project's config, and it installs and downloads nothing. When the tool of a scanner that ASH
 installs with uv is missing, the first scan installs it if the server is online and has uv;
 such a scanner is listed in `installs_on_first_scan` and counts toward `ready`, and otherwise
-it is in `missing_dependencies`. Offline, semgrep is also missing when it has no rules cache.
+it is in `missing_dependencies`. Offline, opengrep is also missing when it has no rules cache.
 
 The [MCP tools reference](https://github.com/awslabs/automated-security-helper/blob/main/docs/content/reference/mcp-tools.md)
 lists every tool and its parameters.
@@ -1435,14 +1435,14 @@ actionable_critical = await get_scan_results(
 
 # Specific scanners
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output", scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", scanners="bandit,opengrep"
 )
 
 # Combined filtering - actionable high-priority SAST findings
 high_priority_sast = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
-    scanners="bandit,semgrep",
+    scanners="bandit,opengrep",
     severities="critical,high",
     actionable_only=True,
 )

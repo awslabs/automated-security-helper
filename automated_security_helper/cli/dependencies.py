@@ -85,6 +85,7 @@ from automated_security_helper.utils.log import (
 # the next tag; see escape_markup.
 from automated_security_helper.utils.log import escape_markup as escape
 from automated_security_helper.utils.process_env import set_environ, snapshot_environ
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.python_child import (
     empty_directory,
     python_child,
@@ -264,8 +265,11 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
 
     A deprecated alias, in any case or with blanks around it, maps to its
     replacement and prints one warning to stderr per alias, however many times it
-    was passed. Every other name maps to itself, so an unknown name is still
-    refused by the caller exactly as before.
+    was passed. A retired scanner name resolves through ``canonical_scanner_name``
+    -- the same case- and punctuation-insensitive lookup every other entry point
+    applies, so ``--tool Semgrep`` installs opengrep's tool too. Every other name
+    maps to itself, so an unknown name is still refused by the caller exactly as
+    before.
     """
     resolved: dict[str, str] = {}
     aliases_by_key = _deprecated_aliases_by_key()
@@ -277,6 +281,9 @@ def _resolve_tool_aliases(tools: List[str]) -> dict[str, str]:
             continue
         key = _selection_key(tool)
         replacement = aliases_by_key.get(key)
+        if replacement is None:
+            canonical = canonical_scanner_name(tool.strip())
+            replacement = canonical if canonical != tool.strip() else None
         if replacement is None:
             resolved[tool] = tool.strip()
             continue
@@ -1351,7 +1358,7 @@ def install_dependencies(
                 # The plugin's own section of the resolved config, looked up the way
                 # the scan path looks it up (ExecutionEngine.get_scanner). Without
                 # it every plugin was built from its defaults, so a
-                # `--config-overrides scanners.semgrep.options.tool_version===X`
+                # `--config-overrides scanners.bandit.options.tool_version===X`
                 # reached resolved_config and stopped there: the scanner installed
                 # its default range, and the image carried whatever release PyPI
                 # had that day instead of the version its license entry records.

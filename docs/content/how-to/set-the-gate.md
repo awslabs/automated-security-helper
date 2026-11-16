@@ -50,7 +50,7 @@ The values are uppercase and case-sensitive. `high`, `INFO`, and `NONE` are not 
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ashx --source-dir . --scanners detect-secrets --offline --no-progress \
+ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides global_settings.severity_threshold=high
 ```
 
@@ -69,7 +69,7 @@ ASH does not pass a threshold to trivy, so trivy reports every finding it makes,
 `fail_on_findings: false` in the config, or `--no-fail-on-findings` on the command line, makes findings never fail the scan:
 
 ```bash
-ashx --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
+ash --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
 ```
 
 The flag takes precedence over the config, and `--fail-on-findings` turns the gate back on whatever the config says. The scan still exits 1 when it is incomplete or a database is stale.
@@ -82,7 +82,7 @@ Turn a scanner you cannot run off, or exclude it, rather than turning this gate 
 
 ## Stale content databases {#content-databases}
 
-grype, trivy, and the offline semgrep and opengrep rulesets read databases that age. ASH measures each one after the scanner runs, treats a database it cannot date as stale, and fails the scan when one is past its age bound; [Content databases](../concepts/content-databases.md#which-scanners-use-one) lists the databases and their bounds.
+grype, trivy, and the offline opengrep rulesets read databases that age. ASH measures each one after the scanner runs, treats a database it cannot date as stale, and fails the scan when one is past its age bound; [Content databases](../concepts/content-databases.md#which-scanners-use-one) lists the databases and their bounds.
 
 With `content_db_staleness: fail`, the default, a stale database fails the scan with exit 1, before `fail_on_findings` is considered, and the message says how to refresh it. A scanner that passed against the stale database is recorded ERROR, with the database named, and one that failed its threshold stays FAILED. The scan reports the stale database once, as the cause of the exit code, and does not list the scanner as incomplete as well. With `warn`, the scan continues and the reports carry the warning. To relax one database for a limited time, add an override; it applies until 00:00 UTC on its expiration date and is then ignored with a warning:
 
@@ -117,21 +117,21 @@ Report findings, but fail when the scan is incomplete or a database is stale:
 
 <!-- doctest: illustrative reason="runs every default scanner, which needs each scanner's tool installed" -->
 ```bash
-ashx --source-dir . --no-fail-on-findings
+ash --source-dir . --no-fail-on-findings
 ```
 
 To try it without every scanner's tool, run detect-secrets alone. Its finding is reported, and the scan exits 0:
 
 <!-- doctest: run expect-exit=0 -->
 ```bash
-ashx --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
+ash --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
 ```
 
 Fail on HIGH and CRITICAL findings, with the gate set by the pipeline rather than by the repository:
 
 <!-- doctest: illustrative reason="names a pipeline config file outside the sample project" -->
 ```bash
-ashx --source-dir . --config "$RUNNER_TEMP/ash-gate.yaml" \
+ash --source-dir . --config "$RUNNER_TEMP/ash-gate.yaml" \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
 
@@ -143,6 +143,6 @@ global_settings:
   severity_threshold: HIGH
 ```
 
-To fail on HIGH and above while still using the repository's config, override the threshold instead: `ashx --source-dir . --config-overrides global_settings.severity_threshold=HIGH`.
+To fail on HIGH and above while still using the repository's config, override the threshold instead: `ash --source-dir . --config-overrides global_settings.severity_threshold=HIGH`.
 
 In a sharded scan, gate on `ashx merge`, which recomputes the verdict over all shards; see [Scale to large repositories](scale-large-repos.md).

@@ -292,7 +292,9 @@ class AshScanRealCliTest : BasePlatformTestCase() {
         assertEquals("ASH scan incomplete", warning.title)
         assertTrue(warning.body, warning.body.contains("INCOMPLETE (exit 1)"))
         assertTrue(warning.body, warning.body.contains("Showing the 3 finding(s) it did produce"))
-        assertTrue("must name the scanner that did not run: ${warning.body}", warning.body.contains("$missing (MISSING)"))
+        // The status may carry a reason after it ("opengrep (MISSING, dependencies unavailable)"):
+        // opengrep records its dependencies as unavailable where the retired scanner did not.
+        assertTrue("must name the scanner that did not run: ${warning.body}", warning.body.contains("$missing (MISSING"))
         val incompleteness = pluginIncompleteness()
         assertNotNull("the plugin must read the real status file as incomplete", incompleteness)
         assertTrue(incompleteness!!, incompleteness.contains(missing))

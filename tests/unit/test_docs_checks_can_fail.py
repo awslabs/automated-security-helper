@@ -3596,15 +3596,15 @@ def test_a_plugin_module_that_does_not_import_is_reported_as_skipped(
 ):
     """A broken optional extra is not a finding, and the checks say they skipped it.
 
-    The module that declares the semgrep scanner config is made to raise on import.
-    load_config_models records it instead of dropping it, the semgrep config class is
+    The module that declares the opengrep scanner config is made to raise on import.
+    load_config_models records it instead of dropping it, the opengrep config class is
     missing from the models, the option-tables and config-blocks checks put a note
     in ``notes`` and report no finding for it, and the gate prints the note as a
     ``skipped:`` line under the check, with or without --verbose.
     """
     dc.load_config_models.cache_clear()
     try:
-        broken = dc.load_config_models().plugin_configs["scanners"]["semgrep"]
+        broken = dc.load_config_models().plugin_configs["scanners"]["opengrep"]
         broken_module = broken.__module__
         real_import = dc.importlib.import_module
 
@@ -3619,7 +3619,7 @@ def test_a_plugin_module_that_does_not_import_is_reported_as_skipped(
         assert models.unloaded == {
             broken_module: "ImportError: planted: an optional extra is not installed"
         }
-        assert "semgrep" not in models.plugin_configs["scanners"]
+        assert "opengrep" not in models.plugin_configs["scanners"]
         expected = (
             f"plugin module {broken_module} did not import (ImportError: planted: "
             "an optional extra is not installed), so its plugins' config classes "
@@ -3661,7 +3661,8 @@ def test_every_plugin_module_imports_here():
         models = dc.load_config_models()
         assert models.unloaded == {}
         assert models.skipped_notes() == []
-        assert "semgrep" in models.plugin_configs["scanners"]
+        assert "opengrep" in models.plugin_configs["scanners"]
+        assert "semgrep" not in models.plugin_configs["scanners"]
     finally:
         dc.load_config_models.cache_clear()
 

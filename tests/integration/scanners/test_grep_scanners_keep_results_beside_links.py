@@ -135,7 +135,7 @@ def scan(tmp_path_factory):
     return output
 
 
-@pytest.mark.parametrize("scanner", ["semgrep", "opengrep"])
+@pytest.mark.parametrize("scanner", ["opengrep"])
 def test_the_scanner_still_reports_the_projects_finding(scan, scanner):
     if shutil.which(scanner) is None:
         pytest.skip(f"{scanner} is not installed here")

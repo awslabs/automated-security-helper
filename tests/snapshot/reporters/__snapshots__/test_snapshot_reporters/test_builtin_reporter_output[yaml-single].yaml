@@ -580,22 +580,6 @@ ash_config:
         severity_threshold: null
         sha256: {}
         version: v1.33.1
-    semgrep:
-      enabled: true
-      name: semgrep
-      options:
-        config: p/ci
-        exclude:
-        - '*-converted.py'
-        - '*_report_result.txt'
-        exclude_rule: []
-        install_timeout: 300
-        metrics: auto
-        offline: false
-        scan_timeout: 1800
-        severity: []
-        severity_threshold: null
-        tool_version: null
     syft:
       enabled: true
       name: syft

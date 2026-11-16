@@ -26,7 +26,7 @@ ARG BASE_IMAGE_DIGEST=sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584
 #   docker image inspect --format '{{index .RepoDigests 0}}' public.ecr.aws/docker/library/python:<new tag>
 #
 # This is the multi-arch INDEX digest, not a per-platform manifest digest, which is why one
-# value covers amd64 and arm64. Measured 2026-09-29: public.ecr.aws and docker.io both report
+# value covers amd64 and arm64. Measured 2026-11-13: public.ecr.aws and docker.io both report
 # this digest for this tag, with mediaType application/vnd.oci.image.index.v1+json.
 #
 # It is deliberately NOT folded into BASE_IMAGE as `repo:tag@sha256:...`. That form would let
@@ -209,6 +209,9 @@ FROM ${BASE_IMAGE} AS core
 # the running container, not the shell `RUN` uses at build time.
 ENV SHELL="bash"
 ARG OFFLINE="NO"
+# The historical name is kept so existing build invocations keep working; the
+# rulesets it names are downloaded for the opengrep scanner, which serves the
+# retired semgrep scanner's alias and reads the same registry packs.
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
 ARG ASH_BIN_PATH="/.ash/bin"
 
@@ -380,7 +383,7 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 
 
 #
-# Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
+# Grype/Syft/Opengrep - Also sets default location env vars for root user for CI compat
 #
 # Owned by root and writable by root only: a scan reads the database and the rules
 # in these caches, so they have one owner. The offline build below
@@ -388,10 +391,9 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 # which the ci stage runs as root and for which the non-root stage hands
 # GRYPE_DB_CACHE_DIR to its own user.
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
-ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
-RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
-    chmod 755 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    chmod 755 /deps ${GRYPE_DB_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 #
@@ -482,7 +484,7 @@ RUN gitleaks --version
 #     CONTINUED            <- no TAKEN, exit 0
 #
 # So OFFLINE=YES provisioned nothing on podman or finch: no grype database, no
-# semgrep or opengrep rules cache. CI never caught it because the only offline leg
+# opengrep rules cache. CI never caught it because the only offline leg
 # in the matrix is `oci-runner: docker`, where SHELL is honoured and bash runs it.
 # The exposure was users building offline images with a non-docker runtime.
 #
@@ -502,16 +504,14 @@ RUN gitleaks --version
 # stand-in downloads, and rejects `&&` in any RUN that sets `-e`.
 RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     with-retry 'grype db update'; \
-    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
+    mkdir -p ${OPENGREP_RULES_CACHE_DIR}; \
     for i in $OFFLINE_SEMGREP_RULESETS; do \
-        outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
+        outfile="${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
-        cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
     done; \
     fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
-    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at"; \
     printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at"; \
-    chmod -R u=rwX,go=rX ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
+    chmod -R u=rwX,go=rX ${GRYPE_DB_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
 # Assert the block above actually provisioned something, so a repeat of the defect
@@ -525,11 +525,11 @@ RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
 # re-evaluates the same condition through the same shell would be silenced by
 # whatever silenced the block.
 #
-# Only the semgrep and opengrep caches are asserted non-empty. The grype database
+# Only the opengrep cache is asserted non-empty by name. The grype database
 # lands in GRYPE_DB_CACHE_DIR as a versioned subdirectory whose layout is grype's to
 # change, so this asserts the directory is non-empty rather than naming a file in it.
 RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
-    for d in "${GRYPE_DB_CACHE_DIR}" "${SEMGREP_RULES_CACHE_DIR}" "${OPENGREP_RULES_CACHE_DIR}"; do \
+    for d in "${GRYPE_DB_CACHE_DIR}" "${OPENGREP_RULES_CACHE_DIR}"; do \
         if [ -z "$(ls -A "${d}" 2>/dev/null)" ]; then \
             echo "OFFLINE=YES but ${d} is empty: the offline provisioning step did not run." >&2; \
             echo "If this fired after a Dockerfile edit, check that the RUN above is POSIX sh --" >&2; \
@@ -537,7 +537,7 @@ RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
             exit 1; \
         fi; \
     done; \
-    echo "offline provisioning verified: grype db, semgrep and opengrep caches are all non-empty"; \
+    echo "offline provisioning verified: grype db and opengrep caches are all non-empty"; \
     fi
 
 ARG TRIVY_VERSION="v0.76.2"
@@ -651,7 +651,7 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-# bandit, checkov, semgrep, cfn-lint and zizmor are installed with `uv tool install`, and each scanner's
+# bandit, checkov, cfn-lint and zizmor are installed with `uv tool install`, and each scanner's
 # own default is a version range, so on its own this would install whatever release
 # PyPI had on the day. `--uv-tool-pins` prints the --config-overrides that pin each to
 # the version of its THIRD_PARTY_LICENSES entry, so the license files and the source
@@ -669,10 +669,8 @@ RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
-# The Python tools' license files, read from each installed wheel's dist-info and,
-# for semgrep, whose wheel carries none, fetched from its repository at the pinned
-# commit and checked against their SHA256.
-RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov semgrep zizmor'
+# The Python tools' license files, read from each installed wheel's dist-info.
+RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov zizmor'
 
 # zizmor (builtin scanner) is installed by the line above through `uv tool install`
 # within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.

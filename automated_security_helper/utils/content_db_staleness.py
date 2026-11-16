@@ -9,7 +9,7 @@ A security scanner run against a stale database returns a result that looks exac
 clean one. Measured with grype v0.111.0 under ASH's offline settings: a database built 10 days
 earlier scanned with exit 0 and no warning, and ASH's own offline validator called it "0 days
 old" because it read the file's mtime rather than the database's build time. trivy's
-``--skip-db-update`` does the same, and the offline semgrep and opengrep rulesets never aged
+``--skip-db-update`` does the same, and the offline opengrep ruleset never aged
 out at all. Online, grype and trivy refresh a stale database themselves and fail loudly when
 they cannot; offline nothing did.
 
@@ -775,7 +775,6 @@ def _built_from_ruleset_dir(ctx: ProbeContext) -> tuple[datetime, str]:
 MEASURERS: Dict[str, Callable[[ProbeContext], tuple[datetime, str]]] = {
     "grype-db": _built_from_grype,
     "trivy-db": _built_from_trivy,
-    "semgrep-offline-rules": _built_from_ruleset_dir,
     "opengrep-offline-rules": _built_from_ruleset_dir,
 }
 

@@ -522,7 +522,7 @@ class TestScannerSections:
             {
                 "scanners": {
                     "bandit": {"enabled": False, "options": {"tool_version": ">=2"}},
-                    "semgrep": {"enabled": True, "options": {"tool_version": ">=1"}},
+                    "checkov": {"enabled": True, "options": {"tool_version": ">=1"}},
                 }
             }
         )
@@ -531,14 +531,14 @@ class TestScannerSections:
 
         assert "bandit" not in enabled
         assert "bandit" not in pins
-        assert pins.get("semgrep") == ">=1"
+        assert pins.get("checkov") == ">=1"
 
     def test_the_pin_of_a_disabled_scanner_is_held_for_the_policy(self):
         config = AshConfig.model_validate(
             {
                 "scanners": {
                     "bandit": {"enabled": False, "options": {"tool_version": ">=2"}},
-                    "semgrep": {"enabled": True, "options": {"tool_version": ">=1"}},
+                    "checkov": {"enabled": True, "options": {"tool_version": ">=1"}},
                     "detect-secrets": {"enabled": False},
                 }
             }

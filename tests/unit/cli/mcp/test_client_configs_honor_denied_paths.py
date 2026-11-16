@@ -377,17 +377,17 @@ def test_ashs_own_repository_config_delivered_as_a_tree_scans(_server) -> None:
     source = _upload({".ash/.ash.yaml": own.read_text(encoding="utf-8")})
     config = _scan_resolution(source, None)
     if sys.platform == "win32":
-        # Platform contract: opengrep and semgrep are "Off by default on Windows"
-        # (their ``enabled`` Field default is ``platform.system() != "windows"``),
-        # so the repository file's ``enabled: true`` for both is a non-default value
-        # a client may not set there. The refusal must name exactly those two
-        # fields and nothing else in the file.
+        # Platform contract: opengrep is "Off by default on Windows" (its ``enabled``
+        # Field default is ``platform.system() != "windows"``), so the repository
+        # file's ``enabled: true`` is a non-default value a client may not set
+        # there. The refusal must name exactly that field and nothing else in the
+        # file. The retired ``semgrep`` section is gone from the file.
         assert isinstance(config, Exception), config
         text = str(config)
         assert "scanners.opengrep.enabled" in text, text
-        assert "scanners.semgrep.enabled" in text, text
+        assert "scanners.semgrep.enabled" not in text, text
         listed = text.split("sets fields", 1)[1].split("Remove them", 1)[0]
-        assert listed.count("(path '") == 2, text
+        assert listed.count("(path '") == 1, text
         return
     assert not isinstance(config, Exception), config
 

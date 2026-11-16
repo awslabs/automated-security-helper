@@ -131,12 +131,12 @@ SCRATCH_DIR = "/tmp/ash-build"
 
 ### The scanners' own comments
 
-Most scanners have their own inline syntax. ASH runs bandit, semgrep, opengrep, checkov, cdk-nag, cfn-nag, and detect-secrets in a way that honors it. For cfn-guard, cfn-lint, gitleaks, and zizmor, ASH turns the tools' own ignore comments off unless an operator source turns them on for that scanner, so a repository cannot hide its own findings that way; use ASH's suppressions instead:
+Most scanners have their own inline syntax. ASH runs bandit, opengrep, checkov, cdk-nag, cfn-nag, and detect-secrets in a way that honors it. For cfn-guard, cfn-lint, gitleaks, and zizmor, ASH turns the tools' own ignore comments off unless an operator source turns them on for that scanner, so a repository cannot hide its own findings that way; use ASH's suppressions instead:
 
 | Scanner | Comment | In ASH's results |
 |---|---|---|
 | bandit | `# nosec`, `# nosec B602` | Not reported. Set `scanners.bandit.options.ignore_nosec: true` to make bandit ignore these comments. |
-| semgrep, opengrep | `# nosemgrep`, `# nosemgrep: <rule-id>` | Reported as suppressed |
+| opengrep | `# nosemgrep`, `# nosemgrep: <rule-id>` | Reported as suppressed |
 | checkov | `# checkov:skip=CKV_AWS_18:reason`, or `checkov: skip:` in a CloudFormation resource's `Metadata` | Reported as suppressed, with checkov's reason |
 | cdk-nag | `cdk_nag: rules_to_suppress:` in a resource's `Metadata` | Reported as suppressed, with the reason |
 | cfn-guard | `guard: SuppressedRules:` in a resource's `Metadata` | Reported, unless an operator turns the comments on; then not reported |

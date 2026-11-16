@@ -1515,7 +1515,7 @@ jobs:
           # Windows -- python-local only (Docker disabled on hosted Windows)
           - { os: windows-latest, method: python-local, config-file: default }
 
-          # Offline mode -- validates OFFLINE=YES Docker build (grype db + semgrep rulesets cached at build time)
+          # Offline mode -- validates OFFLINE=YES Docker build (grype db + opengrep rulesets cached at build time)
           - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: docker, offline: true }
 
           # Community plugins -- python-local on all platforms
@@ -1933,7 +1933,7 @@ jobs:
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ashx \
             --config "$PARITY_CONFIG" \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo \
             --require-offline trivy-repo \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
@@ -1945,7 +1945,7 @@ jobs:
           WORK: ${{ runner.temp }}
         run: |
           sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
-            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|trivy|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
+            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|trivy|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
             | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 150 || true
           for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/ash.log; do
             echo "::group::$log (errors and warnings)"
@@ -2318,13 +2318,13 @@ jobs:
       # both tests in test_repo_tool_configs_are_not_read.py skipped.
       # tests/unit/test_integration_job_installs_required_tools.py holds this list.
       #
-      # checkov, semgrep and zizmor are installed here too. The links-leaving-the-tree
+      # checkov and zizmor are installed here too. The links-leaving-the-tree
       # scan runs every scanner with a home of its own, so a uv tool a test installed
       # under the suite's private home is invisible to it and the scanner records
-      # MISSING; a tool on PATH is seen by both. Without these three that test cannot
+      # MISSING; a tool on PATH is seen by both. Without these two that test cannot
       # tell a scanner that could not run from one that should have.
       - name: Install the scanners the integration suite runs for real
-        run: uv run ashx dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+        run: uv run ashx dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool zizmor
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
@@ -2353,7 +2353,7 @@ jobs:
           ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
           ASH_REQUIRE_FERRET_SCAN: "1"
-          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks,checkov,semgrep,zizmor
+          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks,checkov,zizmor
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           export ASH_CFN_GUARD_RULES_DIR="$HOME/.ash/share/cfn-guard-rules"

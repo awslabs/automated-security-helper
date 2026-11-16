@@ -5376,7 +5376,9 @@ def run_ash_container(
         build_target: The image stage to build and run. None means ``non-root``;
             CI environment variables do not change it (see _resolve_build_target).
         offline: Build ASH for offline execution
-        offline_semgrep_rulesets: Specify Semgrep rulesets for use in ASH offline mode
+        offline_semgrep_rulesets: Rulesets baked into the opengrep offline cache
+            (the parameter keeps its historical name; the semgrep scanner is
+            served by the opengrep plugin)
         container_uid: UID to use for the container user
         container_gid: GID to use for the container user
         verbose: Enable verbose logging

@@ -6,9 +6,12 @@
 ``ash dependencies install`` exits 1 when a tool it treats as needed is absent after
 the install, and it treats as needed only what a scan here would run. A scanner
 whose configuration disables it is not selected, and a scanner that declares the
-platform unsupported (``unsupported_platform_reason``, semgrep on Windows) is
-SKIPPED. Neither is looked for, so neither can make the scan fail, and neither fails
-the install: semgrep absent on Windows, or cfn-nag absent with ``enabled: false``.
+platform unsupported (``unsupported_platform_reason``) is SKIPPED. Neither is
+looked for, so neither can make the scan fail, and neither fails the install: a
+scanner absent where it declares the platform unsupported, or cfn-nag absent with
+``enabled: false``. No shipped scanner declares a platform unsupported now (semgrep,
+which did, was retired in favor of opengrep), so these cases give bandit a stand-in
+``unsupported_platform_reason`` that declines Windows, which is the hook's contract.
 
 The other direction is kept on purpose. cfn-nag on Windows without a Ruby DevKit
 declares no install command, and a scan that selects it reports it MISSING and
@@ -25,6 +28,7 @@ commands, with ``run_command`` and ``find_executable`` answered by the scenario.
 from __future__ import annotations
 
 import importlib.util
+import platform
 import re
 import shlex
 import sys
@@ -92,23 +96,39 @@ def _failure_line(out: str) -> str:
     return out.split("Installation Incomplete", 1)[1] if "Incomplete" in out else ""
 
 
+def _bandit_declines_windows(monkeypatch) -> None:
+    """Give bandit the platform decline semgrep used to declare for Windows."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+        BanditScanner,
+    )
+
+    def reason(self):
+        if platform.system().lower() == "windows":
+            return "bandit stand-in publishes no Windows build"
+        return None
+
+    monkeypatch.setattr(BanditScanner, "unsupported_platform_reason", reason)
+
+
 def test_a_scanner_the_scan_skips_on_this_platform_does_not_fail_it(
     project, monkeypatch
 ):
-    run, out = _install(monkeypatch, WINDOWS_AMD64, {"semgrep"})
-    assert "semgrep" not in _failure_line(out), out
+    _bandit_declines_windows(monkeypatch)
+    run, out = _install(monkeypatch, WINDOWS_AMD64, {"bandit"})
+    assert "bandit" not in _failure_line(out), out
     assert run.exit_code == 0, out
     assert (
-        "Not available on this platform: semgrep (semgrep publishes no Windows build)"
-        in out
+        "Not available on this platform: bandit "
+        "(bandit stand-in publishes no Windows build)" in out
     ), out
-    assert _status_of(run.output, "semgrep") == "NOT AVAILABLE ON THIS PLATFORM", out
+    assert _status_of(run.output, "bandit") == "NOT AVAILABLE ON THIS PLATFORM", out
 
 
 def test_the_same_scanner_absent_where_scans_run_it_fails(project, monkeypatch):
-    run, out = _install(monkeypatch, LINUX_AMD64, {"semgrep"})
+    _bandit_declines_windows(monkeypatch)
+    run, out = _install(monkeypatch, LINUX_AMD64, {"bandit"})
     assert run.exit_code == 1, out
-    assert "needed tool(s) still absent after install: semgrep" in out, out
+    assert "needed tool(s) still absent after install: bandit" in out, out
     assert "Not available on this platform" not in out, out
 
 
@@ -208,10 +228,11 @@ def test_the_ci_jobs_install_exactly_the_scanners_their_gate_runs(job, script):
 
 def test_a_requested_tool_counts_even_where_a_scan_skips_it(project, monkeypatch):
     """--tool is an explicit request: its failure is the run's."""
-    run, out = _install(monkeypatch, WINDOWS_AMD64, {"semgrep"}, "--tool", "semgrep")
+    _bandit_declines_windows(monkeypatch)
+    run, out = _install(monkeypatch, WINDOWS_AMD64, {"bandit"}, "--tool", "bandit")
     assert run.exit_code == 1, out
-    assert "requested tool(s) still not on PATH: semgrep" in out, out
-    assert "Not available on this platform: semgrep" in out, out
+    assert "requested tool(s) still not on PATH: bandit" in out, out
+    assert "Not available on this platform: bandit" in out, out
 
 
 def test_a_requested_tool_its_configuration_disables_still_counts(project, monkeypatch):
@@ -250,9 +271,10 @@ def test_a_failed_install_of_a_scanner_the_scan_skips_here_does_not_fail_it(
     project, monkeypatch
 ):
     """The rule itself: the verdict reads only what a scan here would run."""
-    scenario = Scenario(failing_tools=frozenset({"semgrep"}))
+    _bandit_declines_windows(monkeypatch)
+    scenario = Scenario(failing_tools=frozenset({"bandit"}))
     run, out = _run(monkeypatch, WINDOWS_AMD64, scenario)
-    assert any("semgrep" in " ".join(cmd) for cmd in scenario.ran), scenario.ran
+    assert any("bandit" in " ".join(cmd) for cmd in scenario.ran), scenario.ran
     assert re.search(r"Commands run: \d+ \(1 failed\)", out), out
     assert "install command(s) failed" not in out, out
     assert run.exit_code == 0, out
@@ -316,26 +338,26 @@ def test_a_platform_hook_that_raises_is_named_and_the_install_still_runs(
     project, monkeypatch
 ):
     from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-        semgrep_scanner,
+        bandit_scanner,
     )
 
     def _boom(self):
         raise RuntimeError("hook stand-in failed")
 
     monkeypatch.setattr(
-        semgrep_scanner.SemgrepScanner, "unsupported_platform_reason", _boom
+        bandit_scanner.BanditScanner, "unsupported_platform_reason", _boom
     )
     scenario = Scenario()
     _fake_machine(monkeypatch, scenario)
     with simulated_host(monkeypatch, LINUX_AMD64):
         run = run_cli(
-            ["dependencies", "install", "--bin-path", "bin", "--tool", "semgrep"]
+            ["dependencies", "install", "--bin-path", "bin", "--tool", "bandit"]
         )
     out = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", run.output).split())
     assert run.exit_code == 1, out
-    assert "could not tell whether a scan runs semgrep" in out, out
+    assert "could not tell whether a scan runs bandit" in out, out
     assert "Error getting installation commands" not in out, out
-    assert any("semgrep" in " ".join(cmd) for cmd in scenario.ran), scenario.ran
+    assert any("bandit" in " ".join(cmd) for cmd in scenario.ran), scenario.ran
 
 
 def test_no_install_commands_is_said_only_when_none_ran(capsys):
