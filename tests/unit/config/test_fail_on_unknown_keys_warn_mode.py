@@ -224,3 +224,187 @@ class TestOtherModesUntouched:
             BanditScannerConfigOptions.model_validate(
                 {"severity_level": "HIGH"}, context={WARN_UNKNOWN_KEYS: []}
             )
+
+
+class TestV4DeprecationSentence:
+    """The warning names the key, the did-you-mean, and the v4 flip.
+
+    The refusal (fail_on_unknown_keys: true, and the v4 default) keeps its
+    original form: the deprecation sentence belongs to the warning only, since
+    an error needs no notice that it becomes an error.
+    """
+
+    def test_warning_names_the_key_the_suggestion_and_v4(self):
+        config = build_config(
+            _config_data(
+                {
+                    "rule_id": "RULE-1",
+                    "path": "src/app.py",
+                    "reason": "test",
+                    "expirey": "2099-12-31",
+                }
+            )
+        )
+        warnings = [
+            w for w in config._resolution_warnings if "Unknown key 'expirey'" in w
+        ]
+        assert len(warnings) == 1, config._resolution_warnings
+        assert "did you mean 'expires'?" in warnings[0]
+        assert "This will become an error in ASH v4." in warnings[0]
+
+    def test_demo_shaped_unknown_keys_warn_and_are_counted(self):
+        # The one-observability-demo shape with each demo key misspelled: 25
+        # entries with a resource_id-shaped unknown key and one with an
+        # expires-shaped unknown key load with exactly one warning per entry,
+        # and every such entry is inert.
+        suppressions = [
+            {
+                "rule_id": "AwsSolutions-IAM5",
+                "path": "cdk.out/*.template.json",
+                "reason": f"demo suppression {index}",
+                "resorce_id": f"Stack/Construct{index}/Resource",
+            }
+            for index in range(25)
+        ]
+        suppressions.append(
+            {
+                "rule_id": "GHSA-demo-advisory",
+                "path": "package-lock.json",
+                "reason": "accepted dependency advisory",
+                "expirey": "2099-12-31",
+            }
+        )
+        config = build_config(
+            {
+                "project_name": "warn-mode-test",
+                "global_settings": {"suppressions": suppressions},
+            }
+        )
+        warnings = [w for w in config._resolution_warnings if "Unknown key" in w]
+        assert len(warnings) == 26, config._resolution_warnings
+        assert all("ASH v4" in w for w in warnings)
+        assert all(s.has_unknown_keys for s in config.global_settings.suppressions)
+
+    def test_the_demo_keys_themselves_load_with_no_warning(self):
+        # The control for the pair above: the demo keys spelled right are
+        # declared fields, so the config loads with no unknown-key warning and
+        # the entry applies.
+        config = build_config(
+            _config_data(
+                {
+                    "rule_id": "AwsSolutions-IAM5",
+                    "path": "cdk.out/*.template.json",
+                    "reason": "demo",
+                    "resource_id": "Stack/Construct/Resource",
+                    "expires": "2099-12-31",
+                }
+            )
+        )
+        assert not [w for w in config._resolution_warnings if "Unknown key" in w]
+        entry = config.global_settings.suppressions[0]
+        assert entry.has_unknown_keys is False
+        assert entry.scope is not None and entry.scope.resource_id is not None
+
+    def test_known_key_value_errors_still_refuse_in_warn_mode(self):
+        # Warn mode covers unknown KEYS only: a declared key's bad VALUE is
+        # refused exactly as before.
+        with pytest.raises(ValidationError):
+            build_config(
+                _config_data({"path": "a.py", "reason": "r", "expires": "31-12-2099"})
+            )
+        with pytest.raises(ValidationError):
+            build_config(_config_data({"rule_id": "  ", "path": "a.py", "reason": "r"}))
+
+    def test_planted_control_opt_in_refusal_keeps_its_original_form(self):
+        # fail_on_unknown_keys: true still refuses a typo'd key verbatim: the
+        # error names the key and the did-you-mean and carries neither the
+        # inert-entry sentence nor the v4 deprecation sentence.
+        with pytest.raises(ValidationError) as excinfo:
+            build_config(
+                _config_data(
+                    {
+                        "rule_id": "RULE-1",
+                        "path": "src/app.py",
+                        "reason": "test",
+                        "expiraton": "2099-12-31",
+                    },
+                    fail_on_unknown_keys=True,
+                )
+            )
+        message = str(excinfo.value)
+        assert "Unknown key 'expiraton'" in message
+        assert "did you mean 'expires'?" in message
+        assert "applies to nothing" not in message
+        assert "ASH v4" not in message
+
+
+class TestV4GateConstant:
+    """The v4 flip is one module-level constant, read everywhere it matters."""
+
+    def test_the_gate_is_false_on_the_3x_line(self):
+        from automated_security_helper.utils.unknown_keys import (
+            UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
+        )
+
+        assert UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT is False
+
+    def test_the_field_default_reads_the_gate(self):
+        # Today both sides are the False singleton, so this cannot tell the
+        # constant from a literal; its job is the v4 bump, where a field left
+        # at a literal False would no longer match the flipped constant.
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.utils.unknown_keys import (
+            UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
+        )
+
+        assert (
+            AshConfig.model_fields["fail_on_unknown_keys"].default
+            is UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT
+        )
+
+    def test_flipping_the_gate_makes_the_refusal_the_default(self, monkeypatch):
+        # The v4 bump flips the constant; a document that never mentions the
+        # flag then refuses an unknown entry key outright. (The field default
+        # is bound at import, so this exercises the raw-document read, which
+        # runs first and decides the validation context.)
+        from automated_security_helper.utils import unknown_keys
+
+        monkeypatch.setattr(
+            unknown_keys, "UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT", True
+        )
+        with pytest.raises(ValidationError) as excinfo:
+            build_config(
+                _config_data(
+                    {
+                        "rule_id": "RULE-1",
+                        "path": "src/app.py",
+                        "reason": "test",
+                        "expirey": "2099-12-31",
+                    }
+                )
+            )
+        assert "Unknown key 'expirey'" in str(excinfo.value)
+
+    def test_the_flag_stays_the_escape_hatch_after_the_flip(self, monkeypatch):
+        # fail_on_unknown_keys: false keeps warn mode even once the default is
+        # the refusal, so v4 operators can opt back out per config.
+        from automated_security_helper.utils import unknown_keys
+
+        monkeypatch.setattr(
+            unknown_keys, "UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT", True
+        )
+        config = build_config(
+            _config_data(
+                {
+                    "rule_id": "RULE-1",
+                    "path": "src/app.py",
+                    "reason": "test",
+                    "expirey": "2099-12-31",
+                },
+                fail_on_unknown_keys=False,
+            )
+        )
+        warnings = [
+            w for w in config._resolution_warnings if "Unknown key 'expirey'" in w
+        ]
+        assert len(warnings) == 1, config._resolution_warnings

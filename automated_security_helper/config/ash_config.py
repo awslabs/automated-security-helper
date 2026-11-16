@@ -71,7 +71,10 @@ from automated_security_helper.config.plugin_section_names import (
     # before `extends` merges.
     folded_section_name as _folded_section_name,
 )
-from automated_security_helper.utils.unknown_keys import TOLERATE_STORED_CONFIG
+from automated_security_helper.utils.unknown_keys import (
+    TOLERATE_STORED_CONFIG,
+    UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
+)
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -2630,7 +2633,9 @@ class AshConfig(RedactedSection):
                 "set it True now to adopt the error early."
             )
         ),
-    ] = False
+        # The default is the one v4 gate (utils/unknown_keys.py), so the v4
+        # bump flips the field and the raw-document read together.
+    ] = UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT
 
     honor_ignore_files: Annotated[
         bool,
