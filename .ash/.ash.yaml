@@ -578,6 +578,28 @@ global_settings:
         GHSA-45c3-73f7-pv4m (CVE-2026-114605): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: dnspython CVE-2026-128089 / GHSA-vvf4-9x63-8xvv on Python 3.10 (expires 2026-11-27) ===
+    # Same Python 3.10 entry as above. The fixed release 2.9.2 requires Python 3.11, so
+    # the 3.10 entry stays at 2.8.0 and the 3.11 and later entry moves to 2.9.2.
+    # One entry per id spelling, as for CVE-2026-114605.
+    - rule_id: "CVE-2026-128089*"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expires: "2026-11-27"
+      reason: >-
+        CVE-2026-128089 (GHSA-vvf4-9x63-8xvv): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.2. Revisit when requires-python rises or a supporting release ships.
+    - rule_id: "GHSA-vvf4-9x63-8xvv*"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-vvf4-9x63-8xvv (CVE-2026-128089): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.2. Revisit when requires-python rises or a supporting release ships.
     # === Time-boxed: filelock, thirteen advisories with no patched version on Python 3.10 (expires 2026-11-20) ===
     # filelock is affected through 4.2.0 and fixed in 4.2.1, but 4.1.1 and later
     # require Python 3.11 and this project supports 3.10, so uv.lock carries a
