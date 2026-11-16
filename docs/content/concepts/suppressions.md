@@ -57,7 +57,7 @@ Everything about a scope fails closed. An empty `scope`, an empty `engines` map 
 
 ## Unknown keys: warn now, error at v4
 
-A key a suppression or ignore-path entry does not declare is a defect to surface loudly: silently dropped (as ASH did through v3.7.x), a misspelled `rule_id` leaves a suppression covering every rule in its path. Today's default is to warn: the config loads, a warning names the key with a did-you-mean (and, for a key that belongs elsewhere, where it belongs), and the entry it sits in suppresses nothing until it is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error at config load instead. ASH v4 flips that default to true; the flag stays as an escape hatch.
+A key a suppression or ignore-path entry does not declare is a defect to surface loudly: silently dropped (as ASH did through v3.7.x), a misspelled `rule_id` leaves a suppression covering every rule in its path. Today's default is to warn: the config loads, a warning names the key with a did-you-mean (and, for a key that belongs elsewhere, where it belongs), and the entry it sits in suppresses nothing until it is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error at config load instead. ASH v4 flips that default to true; the flag stays as an escape hatch. The warning says so itself: it ends with `This will become an error in ASH v4.`, so a config that warns today is one to fix before v4.
 
 ## Order of application
 

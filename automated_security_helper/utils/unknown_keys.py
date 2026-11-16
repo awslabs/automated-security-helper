@@ -61,12 +61,26 @@ TOLERATE_STORED_CONFIG = "tolerate_stored_config"
 #: silently unread, the original defect class.
 WARN_UNKNOWN_KEYS = "warn_unknown_keys"
 
+#: The v4 flip, in one place. False on the 3.x line: an unknown key in a
+#: suppression or ignore-path entry warns and disables the entry, and
+#: ``fail_on_unknown_keys: true`` adopts the refusal early. Everything that
+#: decides the default reads this constant (the ``fail_on_unknown_keys`` field
+#: default on AshConfig, and the raw-document read in
+#: ``resolve_config._unknown_entry_keys_are_fatal``), so the v4 bump flips it
+#: here and nowhere else; the deprecation sentence the warning then carries
+#: (WARN_UNKNOWN_KEYS_TAIL's last sentence) is removed with the flip, alongside
+#: the ``expiration`` alias (DEPRECATED_KEYS).
+# TODO(v4): flip to True at the ASH v4 version bump.
+UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT: bool = False
+
 #: What the warn-mode warning appends to the refusal's message, so the operator
-#: knows the entry is disabled rather than partially applied, and how to get
-#: the error now.
+#: knows the entry is disabled rather than partially applied, how to get the
+#: error now, and that the error becomes the default (the deprecation sentence
+#: names the release, so a warned config is fixed before the v4 flip).
 WARN_UNKNOWN_KEYS_TAIL = (
     " The entry is kept but applies to nothing until the key is fixed. Set "
-    "fail_on_unknown_keys: true to make this an error."
+    "fail_on_unknown_keys: true to make this an error. This will become an "
+    "error in ASH v4."
 )
 
 #: Accepted keys that are deprecated alias spellings. They still load (the
