@@ -550,6 +550,106 @@ global_settings:
         aws-cdk-lib release bundles 11.0.1 yet. Deploy tooling only, not shipped in the
         wheel or the container image. Revisit when aws-cdk-lib rebundles; see the block
         comment above.
+    # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-11-27) ===
+    # picomatch up to and including 4.0.7 is affected (ReDoS through single-branch
+    # repeated extglobs) and 4.0.7 is the newest release on the registry (read
+    # 2026-11-17), so no upgrade or npm `overrides` pin can remove it;
+    # `npm update picomatch --package-lock-only` is a no-op in both deploy dirs. Every
+    # copy in both lockfiles is a dev dependency ("dev": true) of the deploy tooling
+    # (jest 30, @parcel/watcher, anymatch and micromatch under ts-jest and the jsii
+    # toolchain); none of it ships in the wheel or the container image. One entry per
+    # install path, version pinned, so a new copy or a different version reports again.
+    # The `npm-audit-transitive-<package>` findings whose via chains reach these copies
+    # are covered by these root entries, as the braces block above explains. Revisit
+    # when a picomatch release above 4.0.7 ships.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "2.3.2"
+      package_path: "deploy/cdk/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 in deploy/cdk/package-lock.json, hoisted for
+        anymatch. No patched version exists (newest release is 4.0.7, inside the affected
+        range). Dev dependency of the deploy tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/@parcel/watcher/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/@parcel/watcher/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under @parcel/watcher in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/jest-haste-map/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/jest-haste-map/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-haste-map in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/jest-message-util/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/jest-message-util/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-message-util in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/jest-util/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/jest-util/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-util in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk-constructs/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 in deploy/cdk-constructs/package-lock.json,
+        hoisted for fdir and the jest 30 tree. No patched version exists. Dev dependency of
+        the constructs package's build tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/anymatch/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "2.3.2"
+      package_path: "deploy/cdk-constructs/node_modules/anymatch/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under anymatch in
+        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
+        of the constructs package's build tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/micromatch/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "2.3.2"
+      package_path: "deploy/cdk-constructs/node_modules/micromatch/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under micromatch in
+        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
+        of the constructs package's build tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
     # === Time-boxed: filelock GHSA-v4x8-3wr5-3wq8 on Python 3.10 (expires 2026-11-27) ===
     # uv.lock holds two filelock entries. The one for Python 3.11 and later is at 4.2.1,
     # which is outside the affected range (up to 4.2.0). The one for Python 3.10 stays at
