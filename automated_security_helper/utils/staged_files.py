@@ -147,10 +147,15 @@ def tree_holds_a_file(root: Optional[Path]) -> bool:
     (``ScannerPluginBase.staged_nothing_to_scan_reason``): a converter output
     there means a pattern-scoped scanner may still have input, so nothing is
     decidable and the dependency check runs as today. Any directory entry that
-    is not itself a directory counts -- a regular file, and a symlink too, since
-    reading through one is the producer's concern, not this predicate's. The
-    safe failure is over-reporting: a walk that cannot be read answers True, so
-    an unreadable tree never skips a scanner that might have run.
+    is not itself a real directory counts -- a regular file, and a symlink too,
+    since reading through one is the producer's concern, not this predicate's.
+    A symlink to a DIRECTORY has to be looked for in the walk's dirs list:
+    ``os.walk`` classifies entries with ``isdir``, which follows links, and
+    with ``followlinks`` off (the default) it never descends into one -- so a
+    tree holding only such a link read as empty, although a scan following the
+    link would have had input. The safe failure is over-reporting: a walk that
+    cannot be read answers True, so an unreadable tree never skips a scanner
+    that might have run.
     """
     if root is None:
         return False
@@ -161,9 +166,12 @@ def tree_holds_a_file(root: Optional[Path]) -> bool:
     try:
         if not Path(root).exists():
             return False
-        for _, _, files in os.walk(root, onerror=_raise):
+        for dirpath, dirs, files in os.walk(root, onerror=_raise):
             if files:
                 return True
+            for entry in dirs:
+                if os.path.islink(os.path.join(dirpath, entry)):
+                    return True
     except OSError:
         return True
     return False

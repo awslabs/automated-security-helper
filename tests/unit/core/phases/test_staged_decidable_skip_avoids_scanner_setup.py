@@ -79,6 +79,29 @@ def _recording(scanner_class, calls: list, answer: bool = False):
     return _Recorded
 
 
+class _QuietLogger:
+    """Only the members _run_local_mode calls; a Mock would fabricate more."""
+
+    def verbose(self, *args, **kwargs):
+        pass
+
+    def debug(self, *args, **kwargs):
+        pass
+
+    def info(self, *args, **kwargs):
+        pass
+
+    def warning(self, *args, **kwargs):
+        pass
+
+    def error(self, *args, **kwargs):
+        pass
+
+
+def _logger() -> _QuietLogger:
+    return _QuietLogger()
+
+
 def _context(tmp_path: Path, staged) -> PluginContext:
     source = tmp_path / "source"
     source.mkdir(exist_ok=True)
@@ -126,16 +149,30 @@ class TestDecidableStagedSkipAvoidsSetup:
         assert "--staged" in (row.skipped_reason or ""), row.skipped_reason
         assert incomplete_scanners(results) == []
 
-    def test_the_absent_tool_reads_skipped_not_missing(self, tmp_path):
+    def test_tool_present_and_absent_give_the_same_skipped_row(self, tmp_path):
         """The dependency-failure arm's rule, applied pre-setup: a decidably
-        target-free scanner loses this commit nothing by lacking its tool."""
-        calls: list = []
-        context = _context(tmp_path, staged=["README.md"])
+        target-free scanner loses this commit nothing by lacking its tool --
+        and nothing by having it, either. Whatever the dependency check WOULD
+        have answered, it is not asked, and the row is one and the same. (The
+        other half of the gate -- tool absent WITH a staged .py is MISSING --
+        is test_a_staged_match_runs_the_dependency_check_as_today.)"""
+        rows = {}
+        for answer in (True, False):
+            calls: list = []
+            base = tmp_path / ("present" if answer else "absent")
+            base.mkdir()
+            context = _context(base, staged=["README.md"])
 
-        results = _scan(context, [_recording(BanditScanner, calls, answer=False)])
+            results = _scan(context, [_recording(BanditScanner, calls, answer=answer)])
 
-        assert results.scanner_results["bandit"].status == ScannerStatus.SKIPPED
-        assert incomplete_scanners(results) == []
+            assert calls == [], f"answer={answer}: the check must not be asked"
+            assert incomplete_scanners(results) == []
+            rows[answer] = results.scanner_results["bandit"]
+        for answer, row in rows.items():
+            assert row.status == ScannerStatus.SKIPPED, (answer, row)
+            assert row.dependencies_satisfied is True, (answer, row)
+            assert row.excluded is False, (answer, row)
+        assert rows[True].skipped_reason == rows[False].skipped_reason
 
     def test_a_staged_match_runs_the_dependency_check_as_today(self, tmp_path):
         calls: list = []
@@ -217,6 +254,72 @@ class TestTheHookItself:
 
         assert scanner.staged_nothing_to_scan_reason() is None
 
+    def test_a_symlinked_directory_in_the_converted_tree_blocks_the_answer(
+        self, tmp_path
+    ):
+        """A converted tree holding only a symlink to a directory is not empty:
+        a scan following the link would have input, so no pre-setup skip."""
+        context = _context(tmp_path, staged=["README.md"])
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "member.py").write_text("x = 1\n", encoding="utf-8")
+        (context.work_dir / "link").symlink_to(elsewhere, target_is_directory=True)
+        scanner = BanditScanner(context=context)
+
+        assert scanner.staged_nothing_to_scan_reason() is None
+
+
+class TestTheRealPrecommitPath:
+    def test_a_docs_only_staged_run_skips_bandit_and_checkov_before_setup(
+        self, tmp_path, monkeypatch
+    ):
+        """The whole precommit path, real orchestrator and phases: nothing the
+        earlier phases put in the output tree (the recorded scan set, converter
+        bookkeeping) may land in work_dir and silently defeat the skip, so this
+        asserts it end to end -- bandit and checkov end SKIPPED and their
+        dependency checks are never asked. detect-secrets and the others run
+        their own course; only the two pattern-scoped scanners are observed."""
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _run_local_mode,
+        )
+        from automated_security_helper.core.enums import RunMode
+
+        calls: list = []
+
+        def recording(self) -> bool:
+            calls.append(type(self).__name__)
+            return False
+
+        monkeypatch.setattr(BanditScanner, "validate_plugin_dependencies", recording)
+        monkeypatch.setattr(CheckovScanner, "validate_plugin_dependencies", recording)
+
+        source = tmp_path / "repo"
+        source.mkdir()
+        (source / "README.md").write_text("# docs\n", encoding="utf-8")
+        output = tmp_path / "out"
+        output.mkdir()
+        opts = ScanOptions(
+            source_dir=source,
+            output_dir=output,
+            mode=RunMode.precommit,
+            staged=True,
+            staged_files=["README.md"],
+            progress=False,
+            show_summary=False,
+        )
+
+        results, _ = _run_local_mode(opts, _logger())
+
+        assert calls == [], (
+            "the staged skip is decidable on the real path too, so neither "
+            f"dependency check may run: {calls}"
+        )
+        for name in ("bandit", "checkov"):
+            row = results.scanner_results[name]
+            assert row.status == ScannerStatus.SKIPPED, (name, row)
+            assert "--staged" in (row.skipped_reason or ""), (name, row)
+
 
 class TestTreeHoldsAFile:
     def test_an_empty_tree_holds_nothing(self, tmp_path):
@@ -241,3 +344,28 @@ class TestTreeHoldsAFile:
         (tmp_path / "converted" / "only" / "dirs").mkdir(parents=True)
 
         assert tree_holds_a_file(tmp_path / "converted") is False
+
+    def test_a_symlinked_directory_counts(self, tmp_path):
+        """os.walk does not follow links, so a symlink to a directory appears
+        only in the dirs list -- but a scan following it would have input, so
+        it has to count as content (the unsafe direction otherwise: a tree
+        holding only such a link read as empty and skipped a scanner)."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "member.py").write_text("x = 1\n", encoding="utf-8")
+        converted = tmp_path / "converted"
+        converted.mkdir()
+        (converted / "link").symlink_to(elsewhere, target_is_directory=True)
+
+        assert tree_holds_a_file(converted) is True
+
+    def test_a_dangling_directory_symlink_still_counts(self, tmp_path):
+        """A link is content whatever it points at: this predicate's job is
+        'could a scan have input here', not resolving the link."""
+        converted = tmp_path / "converted"
+        converted.mkdir()
+        (converted / "gone").symlink_to(
+            tmp_path / "never-made", target_is_directory=True
+        )
+
+        assert tree_holds_a_file(converted) is True
