@@ -1,0 +1,9 @@
+
+ Usage: ash express status [OPTIONS]
+
+ Report whether the express daemon is running, and what it has served.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --json          Print the daemon's status object as JSON.                                       │
+│ --help          Show this message and exit.                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

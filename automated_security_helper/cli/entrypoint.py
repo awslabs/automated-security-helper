@@ -834,6 +834,31 @@ def main() -> None:
         install_sigterm_shutdown()
         install_sigint_shutdown()
 
+        # Express mode, before the heavy CLI import: when the resident daemon is
+        # usable for this invocation, the scan runs there (forked from the warm
+        # process, writing to this process's own streams) and this process is
+        # only the thin client, so the import below never happens and its cost
+        # is what express removes. Every other answer is None -- not a scan, no
+        # daemon, --no-express, any failure at all -- and the cold run proceeds
+        # exactly as it always has. The client imports only the standard
+        # library and the light express modules, and it never raises by
+        # contract -- but the try covers the IMPORT too: a broken express
+        # module (a bad partial install, say) must cost warmth, never every
+        # ash command there is, --no-express included. The SystemExit is
+        # raised outside the except so the daemon's exit code is never
+        # mistaken for a failure of the client.
+        code = None
+        try:
+            from automated_security_helper.express.client import (
+                delegated_exit_code,
+            )
+
+            code = delegated_exit_code(sys.argv[1:])
+        except Exception:  # noqa: BLE001 - the cold path is the contract
+            code = None
+        if code is not None:
+            raise SystemExit(code)
+
         from automated_security_helper.cli.main import run_app
 
         run_app()

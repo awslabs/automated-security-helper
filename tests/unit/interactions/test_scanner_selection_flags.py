@@ -439,6 +439,21 @@ class TestCliConflictsAndDeprecation:
         assert "--only-scanners cannot be combined with --scanners" in result.output
         assert "deprecated" in result.output
 
+    def test_the_refusal_names_the_environment_when_that_is_where_scanners_came_from(
+        self, clean_cli_env, monkeypatch
+    ):
+        """A CI job that exports ASH_SCANNERS and passes only --only-scanners
+        has no --scanners on its command line: the refusal says where the
+        value came from instead of blaming a flag nobody typed."""
+        from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+
+        monkeypatch.setenv("ASH_SCANNERS", "grype")
+        result = self._invoke(clean_cli_env, "--only-scanners", "bandit")
+
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert "ASH_SCANNERS" in result.output
+        assert "cannot be combined with --scanners" not in result.output
+
     def test_legacy_scanners_emits_the_deprecation_line_and_still_runs(
         self, clean_cli_env, monkeypatch
     ):

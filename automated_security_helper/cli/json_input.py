@@ -196,18 +196,27 @@ def usage_error_text(exc: UsageError) -> ShownText:
     return shown_on_one_line(exc.format_message())
 
 
+#: Parameters the express client reads from the raw command line before any
+#: JSON document is opened, so a document key could never take effect. They are
+#: kept out of the skeleton and the valid-keys list, and a document that names
+#: one is refused with the flag to use instead (never silently ignored).
+ARGV_ONLY_PARAMETERS = frozenset({"express"})
+
+
 def json_input_parameters(command: Any, ctx: Context) -> list[Parameter]:
     """The parameters a JSON document may set, in definition order.
 
     Every parameter whose value reaches the command function, except hidden
-    options. ``--help`` and the two options this module adds do not reach the
-    function (``expose_value=False``), so they are excluded by the same rule.
+    options and :data:`ARGV_ONLY_PARAMETERS`. ``--help`` and the two options
+    this module adds do not reach the function (``expose_value=False``), so
+    they are excluded by the same rule.
     """
     return [
         param
         for param in command.get_params(ctx)
         if param.expose_value
         and param.name is not None
+        and param.name not in ARGV_ONLY_PARAMETERS
         and not (isinstance(param, TyperOption) and param.hidden)
     ]
 
@@ -498,6 +507,14 @@ def _validated_values(
     for key, value in document.items():
         param = index.get(key)
         if param is None:
+            if key.lstrip("-").replace("-", "_") in ARGV_ONLY_PARAMETERS:
+                flag = "--" + key.lstrip("-").replace("_", "-")
+                raise _refused(
+                    f"{CLI_JSON_INPUT_FLAG}: the key '{key}' in {label} cannot "
+                    f"take effect: {flag} is read from the command line before "
+                    "any document is opened. Put the flag on the command line.",
+                    ctx,
+                )
             valid = ", ".join(p.name for p in params if p.name)
             raise _refused(
                 f"{CLI_JSON_INPUT_FLAG}: unknown key '{key}' in {label}. Valid keys "

@@ -764,6 +764,7 @@ PACKAGE_SUBDIRECTORIES = frozenset(
         "cli",
         "config",
         "core",
+        "express",
         "interactions",
         "models",
         "plugin_modules",

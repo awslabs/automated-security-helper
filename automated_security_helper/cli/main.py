@@ -215,6 +215,7 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     "dependencies": ("automated_security_helper.cli.dependencies", "dependencies_app"),
     "inspect": ("automated_security_helper.cli.inspect", "inspect_app"),
     "plugin": ("automated_security_helper.cli.plugin", "plugin_app"),
+    "express": ("automated_security_helper.cli.express", "express_app"),
 }
 
 #: The keyword arguments the eager ``app.command(...)`` registration passed for
@@ -251,6 +252,7 @@ _COMMAND_ORDER: tuple[str, ...] = (
     "dependencies",
     "inspect",
     "plugin",
+    "express",
 )
 
 
@@ -932,9 +934,10 @@ def _echo_encodable(text: str) -> None:
         echo(text.encode(encoding, "backslashreplace").decode(encoding))
 
 
-# The config, dependencies, inspect and plugin sub-apps are resolved lazily on
-# first access (_LAZY_SUBCOMMANDS above), not add_typer'd here: importing their
-# modules is most of what `ash --version` used to spend its time on.
+# The config, dependencies, inspect, plugin and express sub-apps are resolved
+# lazily on first access (_LAZY_SUBCOMMANDS above), not add_typer'd here:
+# importing their modules is most of what `ash --version` used to spend its
+# time on.
 
 
 def reset_logging_config():

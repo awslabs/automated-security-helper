@@ -79,10 +79,22 @@ global_settings:
       path: tests/unit/plugin_modules/ash_builtin/scanners/test_scanners_name_a_file_that_is_not_utf8.py
       reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
     - rule_id: B103
+      path: tests/unit/express/test_runtime_paths.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B103
       path: tests/unit/utils/test_scan_source.py
       reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
     - rule_id: B108
+      path: tests/integration/express/test_client_daemon_socket.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/integration/express/test_express_e2e.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
       path: tests/unit/characterization/_harness.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/express/test_runtime_paths.py
       reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
     - rule_id: B108
       path: tests/unit/cli/test_mcp_errors_show_controls.py
@@ -355,8 +367,14 @@ global_settings:
       path: tests/unit/workspace/test_a_workspace_path_that_is_not_utf8_is_refused.py
       reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
     - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/express/test_client_delegation.py
+      reason: "False positive. The honored-environment tests name scanner credential variables (SEMGREP_APP_TOKEN) with the made-up value 'token' to pin which names a scan request carries; the heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
       path: tests/utils/tool_guard.py
       reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses; the heuristic reads the name."
+    - rule_id: generic-api-key
+      path: tests/integration/express/test_express_e2e.py
+      reason: "False positive. The parity fixture writes AWS's documented example credential pair into the scanned test tree so cold and express scans have one deterministic finding to agree on. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
       path: tests/snapshot/container/test_snapshot_container_exit_codes.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."

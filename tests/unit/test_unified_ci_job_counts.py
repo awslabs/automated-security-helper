@@ -469,6 +469,31 @@ class TestTheCommentsMatchTheWorkflow:
         assert both == ON_PUSH + ON_MERGE_QUEUE + 2 * iac_jobs
         assert queue_only == ON_MERGE_QUEUE + iac_jobs
 
+        # The counterfactual beside those figures -- what a queued merge would
+        # cost had the bundle's five cheap install methods stayed one leg each
+        # -- derives from the same matrix, so a bundle change moves the
+        # sentence or reds this test instead of leaving a stale figure.
+        counter = _one(
+            r"4 methods x (\d+) cells \+ uvx x (\d+) OS = (\d+) legs in place "
+            r"of the (\d+) bundled cells \(uvx ran on 3\.12 only\), (\d+) more "
+            r"legs on each of the two runs -- it would be ~(\d+) against ~(\d+)",
+            COMMENTS,
+        )
+        cells, oses, split, bundled, extra, counter_both, counter_single = map(
+            int, counter.groups()
+        )
+        bundle = [
+            cell
+            for cell in _cells(JOBS["install-validation"])
+            if cell["method"] == "bundle"
+        ]
+        assert bundled == cells == len(bundle)
+        assert oses == len({cell["os"] for cell in bundle})
+        assert split == 4 * cells + oses
+        assert extra == split - cells
+        assert counter_both == both + 2 * extra
+        assert counter_single == queue_only + extra
+
     def test_the_check_run_note_adds_the_junit_runs_to_the_jobs(self):
         match = _one(
             r"(\d+) is this workflow's own contribution to a pull request: the (\d+) "
@@ -546,8 +571,8 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 212 check",
             "212 is this",
             # (The four-shard unit tier's figures, 291 / 211 / 136, were the current ones
-            # for a while; since the slow pools took eight shards they are stale again
-            # and sit at the end of this list.)
+            # for a while; since the e2e-express legs were added they are stale again
+            # and sit near the end of this list.)
             # Before the Windows unit pool was sharded four ways (unit-test 25 -> 40).
             # ("109 on a pull request" is not in this list: the history sentence in the
             # required-checks note still states it as the superseded figure.)
@@ -555,16 +580,28 @@ class TestTheCommentsMatchTheWorkflow:
             "contributes 157 check",
             "157 is this",
             "~442 runner jobs",
-            # Before the slow pools took eight shards and Linux six (the 2x-wall change:
-            # run 43449176506; the standalone integration-test job sharded, docs-examples
-            # split out, the ensure-cache needs edge dropped).
+            # Before the advisory e2e-express job was added (+2 on every event).
             "expands to 291 jobs",
             "291-job",
             "contributes 211 check",
             "211 is this",
             "~592 runner jobs",
-            # Before ensure-cache gained the ubuntu-24.04 image (push 455 -> 456,
-            # merge-queue 453 -> 454, the merge-queue check figure 818 -> 819).
+            # Before the slow pools took eight shards and Linux six (the 2x-wall change:
+            # run 43449176506; the standalone integration-test job sharded, docs-examples
+            # split out, the ensure-cache needs edge dropped). These are the e2e-express
+            # era's figures, 291-era plus two advisory legs on every event.
+            "expands to 293 jobs",
+            "293-job",
+            "contributes 213 check",
+            "213 is this",
+            "~596 runner jobs",
+            # The phrase the old figure stood in ("~596 runner jobs instead of
+            # ~297."), anchored so an unrelated "~2970" or "~297 s" in a later
+            # comment cannot trip it.
+            "instead of ~297.",
+            # The figures main carried after the wave change but before the
+            # e2e-express legs merged (push 455, merge-queue 453, the
+            # merge-queue check figure 818).
             "expands to 455 jobs",
             "455-job",
             "~920 runner jobs",
@@ -572,6 +609,15 @@ class TestTheCommentsMatchTheWorkflow:
             "the 818 above",
             "(818 to a merge-queue run",
             "Most of the 455 is the",
+            # Before ensure-cache gained the ubuntu-24.04 image (push 457 -> 458,
+            # merge-queue 455 -> 456, the merge-queue check figure 820 -> 821).
+            "expands to 457 jobs",
+            "457-job",
+            "~924 runner jobs",
+            "is 820:",
+            "the 820 above",
+            "(820 to a merge-queue run",
+            "Most of the 457 is the",
         ):
             assert stale not in COMMENTS
 

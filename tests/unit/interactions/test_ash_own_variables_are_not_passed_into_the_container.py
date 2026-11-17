@@ -160,6 +160,9 @@ _KNOWN_DYNAMIC_READS = sorted(
         "config/environment_record.py [get] :: name",
         "core/constants.py [get] :: variable",
         "core/constants.py [get] :: variable",
+        # The express client's completion check reads each name of its one list
+        # (COMPLETION_ENV_NAMES, click's _<PROG>_COMPLETE spellings, none ASH_*).
+        "express/client.py [in-environ] :: name",
         "interactions/container_leftovers.py [get] :: variable",
         "interactions/run_ash_container.py [get] :: name",
         "interactions/run_ash_container.py [get] :: name",

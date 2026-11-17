@@ -51,7 +51,8 @@ could be mistaken for a job key.
 
 JOBS THAT MAY DELIBERATELY GO UNGATED
 -------------------------------------
-``_UNGATED`` below is the named, reasoned exemption list, and today it holds one entry, the image layer-cache warm-up.
+``_UNGATED`` below is the named, reasoned exemption list; today it holds two
+entries, the image layer-cache warm-up and the advisory express-daemon cells.
 The mechanism exists rather than being omitted because there is a legitimate
 case for it -- an advisory job carrying ``continue-on-error``, whose failure is
 information rather than a verdict -- and the alternative when that case arrives
@@ -102,6 +103,19 @@ _UNGATED: dict[str, str] = {
         "fast the scan legs build, never whether they pass: scan-validation runs "
         "under `!cancelled()` whether it succeeded, failed, was skipped or was "
         "cancelled by its concurrency group, and scan-validation itself is gated."
+    ),
+    "e2e-express": (
+        "the advisory express-daemon parity cells, carrying continue-on-error. "
+        "Express mode's contract is the cold fallback at every point BEFORE the "
+        "daemon accepts a scan: a scan is then never wrong because the daemon is "
+        "broken, only slower. (A daemon lost AFTER accepting -- killed mid-scan -- "
+        "is reported to the client and read as exit 1 rather than silently rerun, "
+        "the one express failure a user can see; the parity cells exercise exactly "
+        "that machinery, which is why their verdict is information for the express "
+        "maintainers rather than part of the merge gate.) The express code's "
+        "correctness is gated where every other module's is, by its unit and "
+        "integration tests in the gated tiers, and Windows's unix-only refusal "
+        "runs in the gated e2e tier."
     ),
 }
 
