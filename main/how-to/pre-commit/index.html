@@ -16,7 +16,7 @@
         <link rel="prev" href="../../integrations/">
       
       
-        <link rel="next" href="../ci/github-actions/">
+        <link rel="next" href="../express-mode/">
       
       
         
@@ -758,6 +758,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1364,6 +1366,34 @@ SOFTWARE.
   
   
   
+    <li class="md-nav__item">
+      <a href="../express-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Express mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
     
     
       
@@ -1381,10 +1411,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_15" >
         
           
-          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_15" id="__nav_4_15_label" tabindex="0">
             
   
   
@@ -1402,8 +1432,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_14">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_15">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3719,7 +3749,8 @@ cdk-nag is MISSING in a repository with CloudFormation templates.</p>
 <code>stages: [manual]</code>, the hook runs only when you ask:
 <code>pre-commit run --hook-stage manual ash</code>.</p>
 <h2 id="cost">What it costs<a class="headerlink" href="#cost" title="Permanent link">&para;</a></h2>
-<p>Measured on a repository of three files:</p>
+<p>Measured on a repository of three files, so these times are mostly the fixed cost of a
+run; the scan itself grows with what the commit stages:</p>
 <table>
 <thead>
 <tr>
@@ -3738,9 +3769,21 @@ cdk-nag is MISSING in a repository with CloudFormation templates.</p>
 </tr>
 </tbody>
 </table>
-<p>checkov is the slowest scanner. Scan time grows with the size of the repository, because
-every run scans all of it. The hook environment takes about 650 MB under
+<p>checkov is the slowest scanner. With <code>--staged</code>, which the hook passes by default, scan
+time grows with the size of the commit; without it (a hook you pointed at the whole tree),
+it grows with the size of the repository, because every run scans all of it. The hook
+environment takes about 650 MB under
 <code>~/.cache/pre-commit</code>, and bandit and checkov about 240 MB under <code>~/.local/share/uv</code>.</p>
+<p>About two seconds of every later run is ASH's own startup (the interpreter and the eager
+imports), paid again on each commit. <a href="../express-mode/">Express mode</a> removes it: add
+<code>--express</code> to the hook's <code>args</code>, and the first commit starts a resident warm daemon
+paired with the hook's own environment, which every later hook run forks instead of
+starting cold (Linux and macOS only). The pairing matters: the daemon serves exactly the
+ASH installation that started it, and pre-commit's hook environment is its own
+installation, so a daemon started from your shell's <code>ash</code> is silently ignored by the
+hook -- start it with the hook's flag, not from the shell. The hook's default <code>--staged</code>
+already scopes the scan to the files the commit touches, so the daemon and <code>--staged</code>
+together are the fastest hook shape.</p>
 <h2 id="with-ci">Pre-commit and CI together<a class="headerlink" href="#with-ci" title="Permanent link">&para;</a></h2>
 <p>The pre-commit hook and a CI scan answer different questions, so most repositories run
 both.</p>
@@ -3948,8 +3991,8 @@ may not be set.
     </a>
     
     
-    <a class="ash-pagination__next" href="../ci/github-actions/" rel="next">
-      <span><span class="ash-pagination__direction">NEXT</span>GitHub Actions</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    <a class="ash-pagination__next" href="../express-mode/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Express mode</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
     </a>
     
   </div>

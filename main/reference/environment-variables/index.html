@@ -756,6 +756,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -1166,6 +1168,34 @@ SOFTWARE.
   
   
   
+    <li class="md-nav__item">
+      <a href="../../how-to/express-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Express mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
     
     
       
@@ -1183,10 +1213,10 @@ SOFTWARE.
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_15" >
         
           
-          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_15" id="__nav_4_15_label" tabindex="0">
             
   
   
@@ -1204,8 +1234,8 @@ SOFTWARE.
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4_14">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_15">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -3368,7 +3398,7 @@ SOFTWARE.
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the code that reads each variable by <code>scripts/generate_env_var_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH reads 158 environment variables: 60 of its own (<code>ASH_</code> prefix) and 98 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
+<p>ASH reads 170 environment variables: 62 of its own (<code>ASH_</code> prefix) and 108 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
 <p>Columns:</p>
 <ul>
 <li>Default: the value the code uses when the variable is unset, as written in the code, at each read that supplies one. Where none does, or the only one is an empty string, it is the default of the CLI option the variable sets, or of the configuration key it is the default of. Blank means none of these supplies one (the code checks whether the variable is set, or treats unset as empty).</li>
@@ -3548,6 +3578,20 @@ SOFTWARE.
 <td></td>
 <td><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
 <td>Sets <a href="../cli/#scan--exclude-scanners"><code>ash scan --exclude-scanners</code></a>. Specific scanner names to exclude from running. Takes precedence over scanners parameter.</td>
+</tr>
+<tr>
+<td><code>ASH_EXPRESS_CHILD</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/express/client.py</code> (<code>_delegated_exit_code</code>)</td>
+<td>ASH_EXPRESS_CHILD (the spelling behind runtime.CHILD_ENV) is set in every forked scan child's environment, so a scan already running inside the daemon never delegates to the daemon again. (<code>automated_security_helper/express/client.py</code>, <code>_delegated_exit_code</code>)</td>
+</tr>
+<tr>
+<td><code>ASH_EXPRESS_IDLE_SECONDS</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/express/runtime.py</code> (<code>idle_seconds</code>)</td>
+<td>Environment variable that overrides :data:<code>DEFAULT_IDLE_SECONDS</code> for <code>ash express start</code> and for the daemon an autostart spawns. (<code>automated_security_helper/express/runtime.py</code>)</td>
 </tr>
 <tr>
 <td><code>ASH_GHA_BUILD_CACHE_EXPORT</code></td>
@@ -3921,6 +3965,20 @@ SOFTWARE.
 <td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
 </tr>
 <tr>
+<td><code>COMP_CWORD</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/express/client.py</code> (<code>completion_in_progress</code>)</td>
+<td>click's completion protocol re-invokes the program with <code>_&lt;PROG&gt;_COMPLETE</code> in the environment (<code>_ASH_COMPLETE</code> and the other console-script names), and bash's own machinery exports <code>COMP_WORDS</code>/<code>COMP_CWORD</code>. (<code>automated_security_helper/express/client.py</code>, <code>completion_in_progress</code>)</td>
+</tr>
+<tr>
+<td><code>COMP_WORDS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/express/client.py</code> (<code>completion_in_progress</code>)</td>
+<td>click's completion protocol re-invokes the program with <code>_&lt;PROG&gt;_COMPLETE</code> in the environment (<code>_ASH_COMPLETE</code> and the other console-script names), and bash's own machinery exports <code>COMP_WORDS</code>/<code>COMP_CWORD</code>. (<code>automated_security_helper/express/client.py</code>, <code>completion_in_progress</code>)</td>
+</tr>
+<tr>
 <td><code>CONTAINERD_ADDRESS</code></td>
 <td></td>
 <td></td>
@@ -4069,9 +4127,9 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>HOME</code></td>
-<td></td>
+<td><code>""</code></td>
 <td><code>${ASHUSER_HOME}</code> (non-root)</td>
-<td><code>automated_security_helper/core/constants.py</code> (<code>usable_home</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_policy_home</code>)<br><code>automated_security_helper/utils/sandbox/scope.py</code> (<code>scanner_sandbox_scope</code>)</td>
+<td><code>automated_security_helper/core/constants.py</code> (<code>usable_home</code>)<br><code>automated_security_helper/express/runtime.py</code> (<code>runtime_dir</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_policy_home</code>)<br><code>automated_security_helper/utils/sandbox/scope.py</code> (<code>scanner_sandbox_scope</code>)</td>
 <td>On POSIX it is HOME when HOME is set, not empty, and absolute. (<code>automated_security_helper/core/constants.py</code>, <code>usable_home</code>)</td>
 </tr>
 <tr>
@@ -4159,18 +4217,39 @@ SOFTWARE.
 <td>ASH builds an absolute scan root from the physical working directory, so a root whose text starts with it is rejoined to <code>$PWD</code> from the rest of its text, <code>..</code> and symlinks included. (<code>automated_security_helper/config/sandbox_grants.py</code>, <code>_logical_paths</code>)</td>
 </tr>
 <tr>
+<td><code>PYTHONHOME</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/express/runtime.py</code> (<code>interpreter_shape</code>)</td>
+<td><code>PYTHONPATH</code> (absolute entries, :func:<code>absolute_python_path</code>), <code>PYTHONHOME</code>, <code>PYTHONUSERBASE</code>, <code>PYTHONNOUSERSITE</code> and <code>VIRTUAL_ENV</code> (:data:<code>INTERPRETER_ENV</code>). (<code>automated_security_helper/express/runtime.py</code>, <code>interpreter_shape</code>)</td>
+</tr>
+<tr>
 <td><code>PYTHONIOENCODING</code></td>
 <td><code>""</code></td>
 <td></td>
-<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_stream_codec</code>)<br><code>automated_security_helper/utils/process_env.py</code> (<code>setdefault_environ</code>)</td>
+<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_stream_codec</code>)<br><code>automated_security_helper/express/daemon.py</code> (<code>ExpressDaemon._reopen_std_streams</code>)<br><code>automated_security_helper/utils/process_env.py</code> (<code>setdefault_environ</code>)</td>
 <td>As the interpreter chooses them for the streams it makes at start: <code>PYTHONIOENCODING</code> (<code>encoding[:errors]</code>, unless <code>python -E</code> ignores the environment), UTF-8 under UTF-8 mode (<code>-X utf8</code>, <code>PYTHONUTF8=1</code>), else the locale's codec, <code>None</code> here. (<code>automated_security_helper/cli/entrypoint.py</code>, <code>_stream_codec</code>)</td>
 </tr>
 <tr>
+<td><code>PYTHONNOUSERSITE</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/express/runtime.py</code> (<code>interpreter_shape</code>)</td>
+<td><code>PYTHONPATH</code> (absolute entries, :func:<code>absolute_python_path</code>), <code>PYTHONHOME</code>, <code>PYTHONUSERBASE</code>, <code>PYTHONNOUSERSITE</code> and <code>VIRTUAL_ENV</code> (:data:<code>INTERPRETER_ENV</code>). (<code>automated_security_helper/express/runtime.py</code>, <code>interpreter_shape</code>)</td>
+</tr>
+<tr>
 <td><code>PYTHONPATH</code></td>
+<td><code>""</code></td>
 <td></td>
+<td><code>automated_security_helper/express/runtime.py</code> (<code>interpreter_shape</code>)<br><code>automated_security_helper/interactions/run_ash_nix.py</code> (<code>run_ash_nix</code>)</td>
+<td><code>PYTHONPATH</code> (absolute entries, :func:<code>absolute_python_path</code>), <code>PYTHONHOME</code>, <code>PYTHONUSERBASE</code>, <code>PYTHONNOUSERSITE</code> and <code>VIRTUAL_ENV</code> (:data:<code>INTERPRETER_ENV</code>). (<code>automated_security_helper/express/runtime.py</code>, <code>interpreter_shape</code>)</td>
+</tr>
+<tr>
+<td><code>PYTHONUSERBASE</code></td>
+<td><code>""</code></td>
 <td></td>
-<td><code>automated_security_helper/interactions/run_ash_nix.py</code> (<code>run_ash_nix</code>)</td>
-<td>The operator's own PYTHONPATH, for the inner command to put back on sys.path once the shell's hook has unset PYTHONPATH (OUTER_PYTHONPATH_ENV_VAR). Read from this process's environment: it is what made this ASH importable. (<code>automated_security_helper/interactions/run_ash_nix.py</code>, <code>run_ash_nix</code>)</td>
+<td><code>automated_security_helper/express/runtime.py</code> (<code>interpreter_shape</code>)</td>
+<td><code>PYTHONPATH</code> (absolute entries, :func:<code>absolute_python_path</code>), <code>PYTHONHOME</code>, <code>PYTHONUSERBASE</code>, <code>PYTHONNOUSERSITE</code> and <code>VIRTUAL_ENV</code> (:data:<code>INTERPRETER_ENV</code>). (<code>automated_security_helper/express/runtime.py</code>, <code>interpreter_shape</code>)</td>
 </tr>
 <tr>
 <td><code>PY_COLORS</code></td>
@@ -4390,6 +4469,13 @@ SOFTWARE.
 <td>UV_TOOL_DIR and UV_PYTHON_INSTALL_DIR where set, each screened (_screened_uv_directory), else <code>uv/tools</code> and <code>uv/python</code> under the XDG data home. (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_data_directories</code>)</td>
 </tr>
 <tr>
+<td><code>VIRTUAL_ENV</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/express/runtime.py</code> (<code>interpreter_shape</code>)</td>
+<td><code>PYTHONPATH</code> (absolute entries, :func:<code>absolute_python_path</code>), <code>PYTHONHOME</code>, <code>PYTHONUSERBASE</code>, <code>PYTHONNOUSERSITE</code> and <code>VIRTUAL_ENV</code> (:data:<code>INTERPRETER_ENV</code>). (<code>automated_security_helper/express/runtime.py</code>, <code>interpreter_shape</code>)</td>
+</tr>
+<tr>
 <td><code>WITH_RETRY_DELAY</code></td>
 <td><code>5</code></td>
 <td></td>
@@ -4463,8 +4549,8 @@ SOFTWARE.
 <td><code>XDG_RUNTIME_DIR</code></td>
 <td><code>""</code></td>
 <td></td>
-<td><code>automated_security_helper/utils/package_manager_child.py</code> (<code>_runtime_dir</code>)</td>
-<td><code>$XDG_RUNTIME_DIR/ash</code>, or None when the variable is unset or relative. (<code>automated_security_helper/utils/package_manager_child.py</code>, <code>_runtime_dir</code>)</td>
+<td><code>automated_security_helper/express/runtime.py</code> (<code>runtime_dir</code>)<br><code>automated_security_helper/utils/package_manager_child.py</code> (<code>_runtime_dir</code>)</td>
+<td><code>$XDG_RUNTIME_DIR/ash-express</code> where the variable names a directory (the per-user tmpfs systemd provides, already 0700 and cleared at logout), else <code>~/.ash/run</code>. (<code>automated_security_helper/express/runtime.py</code>, <code>runtime_dir</code>)</td>
 </tr>
 <tr>
 <td><code>YARN_CACHE_FOLDER</code></td>
@@ -4479,6 +4565,34 @@ SOFTWARE.
 <td></td>
 <td><code>utils/ash_helpers.sh</code> (top level)</td>
 <td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>_AGENTIC_SECURITY_HARNESS_COMPLETE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/express/client.py</code> (<code>completion_in_progress</code>)</td>
+<td>click's completion variables for ASH's own console scripts (<code>_&lt;PROG&gt;_COMPLETE</code> with the program name uppercased and <code>-</code> as <code>_</code>). (<code>automated_security_helper/express/client.py</code>)</td>
+</tr>
+<tr>
+<td><code>_ASHV3_COMPLETE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/express/client.py</code> (<code>completion_in_progress</code>)</td>
+<td>click's completion variables for ASH's own console scripts (<code>_&lt;PROG&gt;_COMPLETE</code> with the program name uppercased and <code>-</code> as <code>_</code>). (<code>automated_security_helper/express/client.py</code>)</td>
+</tr>
+<tr>
+<td><code>_ASH_COMPLETE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/express/client.py</code> (<code>completion_in_progress</code>)</td>
+<td>click's completion variables for ASH's own console scripts (<code>_&lt;PROG&gt;_COMPLETE</code> with the program name uppercased and <code>-</code> as <code>_</code>). (<code>automated_security_helper/express/client.py</code>)</td>
+</tr>
+<tr>
+<td><code>_AUTOMATED_SECURITY_HELPER_COMPLETE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/express/client.py</code> (<code>completion_in_progress</code>)</td>
+<td>click's completion variables for ASH's own console scripts (<code>_&lt;PROG&gt;_COMPLETE</code> with the program name uppercased and <code>-</code> as <code>_</code>). (<code>automated_security_helper/express/client.py</code>)</td>
 </tr>
 <tr>
 <td><code>_TYPER_FORCE_DISABLE_TERMINAL</code></td>
@@ -4520,18 +4634,19 @@ SOFTWARE.
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>automated_security_helper/config/environment_record.py (_value_read) [environ.get] value = os.environ.get(name)
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>automated_security_helper/core/constants.py (warn_if_home_unusable) [environ.get] value = os.environ.get(variable)
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, &quot;&quot;)
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name, &quot;&quot;)
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name.upper(), &quot;&quot;)
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>automated_security_helper/utils/process_env.py (restore_environ) [environ.pop] os.environ.pop(key, None)
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>automated_security_helper/utils/sandbox/policy.py (_env_named_read_paths) [environ.get] value = os.environ.get(name, &quot;&quot;)
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>automated_security_helper/utils/sandbox/policy.py (_uv_environment) [environ.get] if path is None or os.environ.get(name):
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/express/runtime.py (apply_request_env) [environ.pop] environ.pop(name, None)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name, &quot;&quot;)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = environ.get(name.upper(), &quot;&quot;)
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>automated_security_helper/utils/process_env.py (restore_environ) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>automated_security_helper/utils/sandbox/policy.py (_env_named_read_paths) [environ.get] value = os.environ.get(name, &quot;&quot;)
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>automated_security_helper/utils/sandbox/policy.py (_uv_environment) [environ.get] if path is None or os.environ.get(name):
 </span></code></pre></div>
 
 
