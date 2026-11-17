@@ -58,7 +58,14 @@ The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommi
 - with `--staged` (which the hook passes), scans the staged files instead of the whole
   repository, so a one-file commit pays for one file. See
   [Staged-file scope](#staged-scope).
-- prints simplified output and writes the usual reports to `.ash/ash_output/`.
+- prints simplified output and writes reports to `.ash/ash_output/`.
+
+Precommit mode writes only the reports the hook actually consumes: the text summary
+and the SARIF report the exit code is computed from, instead of the full report set
+every other mode writes. That is a default, not a cap -- passing `--output-formats`,
+or setting `output_formats` or configuring anything under `reporters` in the ASH
+config file, keeps the full behavior those choices describe, exactly as outside
+precommit mode.
 
 ## Staged-file scope (`--staged`) {#staged-scope}
 
