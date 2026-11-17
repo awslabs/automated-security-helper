@@ -983,6 +983,53 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             self._staged_all_filtered = True
         return kept
 
+    def staged_nothing_to_scan_reason(self) -> Optional[str]:
+        """Why this scanner decidably has nothing to scan under ``--staged``, or None.
+
+        Asked by ``ScanPhase`` BEFORE this scanner's dependency check, so a
+        scanner whose skip is already decided does not pay for its version
+        probes (or get graded MISSING for a tool it was never going to start).
+        The answer must therefore be decidable from the staged list alone:
+
+        * the context carries a non-empty staged scope (every run but
+          ``--mode precommit --staged``, and a run with nothing staged, answers
+          None and keeps today's path);
+        * this scanner declares ``staged_scope_patterns`` -- the same selection
+          its ``scan()`` skips the source target on -- and no staged file
+          matches them. A scanner that declares none reads any file, so nothing
+          is decidable for it;
+        * the converted tree holds no file. The converted target is scanned
+          whole, outside the staged scope (``_staged_scope_paths`` returns None
+          for it), so any converter output at all means this scanner may still
+          have input and nothing is decidable. The convert phase has run by the
+          time this is asked, so the tree's contents are a fact, not a
+          prediction.
+
+        The reason is worded as ``scan()`` words the same skip, so the row
+        reads the same whether the decision was made before setup or after it.
+        None means "cannot tell": the dependency check and ``scan()`` proceed
+        exactly as today.
+        """
+        staged = getattr(self.context, "staged_files", None)
+        if not staged:
+            return None
+        patterns = self.staged_scope_patterns
+        if patterns is None:
+            return None
+        from automated_security_helper.utils.staged_files import (
+            matching_staged_files,
+            tree_holds_a_file,
+        )
+
+        if matching_staged_files(staged, patterns):
+            return None
+        if tree_holds_a_file(getattr(self.context, "work_dir", None)):
+            return None
+        return (
+            f"{self.__class__.__name__} was skipped under --staged: "
+            "no staged file matches what it scans"
+        )
+
     def _staged_targets_in_scan_set(
         self, candidates: List[Path], root: Path
     ) -> List[Path]:

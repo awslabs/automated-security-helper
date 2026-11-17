@@ -80,6 +80,10 @@ scanned and is not listed) and makes it the scan's target set:
   nothing recurses into subdirectories, so a local module that lives in one is read
   only when its own files are staged.
 - a scanner none of whose files are staged is skipped, with a log line saying so.
+  For bandit and checkov that decision is made before their tools are even looked
+  up (the converted tree has to be empty too), so a commit that stages nothing
+  they scan does not pay for their version probes -- and does not need their
+  tools installed.
 - converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
   when nothing staged matches them.
 - suppressions and `ignore_paths` resolve against the same scan root as a whole-repository
