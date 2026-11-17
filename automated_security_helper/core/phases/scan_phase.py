@@ -784,7 +784,7 @@ class ScanPhase(EnginePhase):
         enabled_scanners: List[str] | None = None,
         excluded_scanners: List[str] | None = None,
         parallel: bool = True,
-        max_workers: int = 4,
+        max_workers: int | None = None,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         python_based_plugins_only: bool = False,
         shard_index: int | None = None,
@@ -797,7 +797,10 @@ class ScanPhase(EnginePhase):
         Args:
             enabled_scanners: List of scanner names to enable
             parallel: Whether to run scanners in parallel
-            max_workers: Maximum number of worker threads for parallel execution
+            max_workers: Maximum number of worker threads for parallel
+                execution. None, the default, lets the executor size its pool
+                to the submitted scanner count (ScannerExecutor._pool_size);
+                an explicit value is used exactly.
             global_ignore_paths: List of paths to ignore globally
             shard_index: Zero-based index of this shard, when the scan is split
                 across executors. Requires shard_count.
@@ -2533,7 +2536,7 @@ class ScanPhase(EnginePhase):
             plugin_context=self.plugin_context,
             progress_display=self.progress_display,
             scanner_tasks=getattr(self, "_scanner_tasks", []),
-            max_workers=getattr(self, "_max_workers", 4),
+            max_workers=getattr(self, "_max_workers", None),
             notify_fn=self.notify_event,
             process_results_fn=self._process_results,
         )
@@ -2592,8 +2595,9 @@ class ScanPhase(EnginePhase):
         """Delegate to ScannerExecutor.run_parallel.
 
         The executor runs a single task sequentially, caps the pool at
-        self._max_workers, and records a completed scanner only on success
-        with no error-status container. As in the sequential method,
+        self._max_workers (or sizes it to the task count when that is None;
+        see ScannerExecutor._pool_size), and records a completed scanner
+        only on success with no error-status container. As in the sequential method,
         completions are synced back even when the run ends by raising.
         """
         executor = self._make_executor_for_delegation()

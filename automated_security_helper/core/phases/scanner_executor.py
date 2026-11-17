@@ -2,6 +2,7 @@
 
 import contextvars
 import math
+import os
 import re
 import threading
 import time
@@ -21,6 +22,14 @@ from typing import (
     Tuple,
     cast,
 )
+
+try:
+    # The defaulted scanner-pool size reads the logical CPU count from it
+    # (_pool_size). A project dependency; guarded so an install without it
+    # still scans, on the os.cpu_count() fallback.
+    import psutil
+except ImportError:  # pragma: no cover
+    psutil = None
 
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.scanner_plugin import (
@@ -927,7 +936,10 @@ class ScannerExecutor:
     scanner_tasks:
         List of (scanner_name, plugin_instance, scan_targets) triples.
     max_workers:
-        Thread-pool size for parallel execution.
+        Thread-pool size for parallel execution. None, the default, sizes the
+        pool to the submitted scanner count so every scanner starts at once,
+        capped at ``min(32, cpu + 4)`` where cpu is the logical CPU count
+        (see _pool_size). An explicit value is used exactly.
     notify_fn:
         Optional callable(event_type, **kwargs) wired to the parent phase's
         notify_event.  When None, event notifications are silently skipped.
@@ -941,7 +953,7 @@ class ScannerExecutor:
         plugin_context: Any,
         progress_display: Any,
         scanner_tasks: List[Tuple[str, ScannerPluginBase, List[Dict[str, Any]]]],
-        max_workers: int = 4,
+        max_workers: Optional[int] = None,
         notify_fn: Optional[Callable[..., Any]] = None,
         process_results_fn: Optional[_ResultsFn] = None,
     ) -> None:
@@ -961,6 +973,30 @@ class ScannerExecutor:
         self._cancel_seen = threading.Event()
         # Populated by caller when scanner must respect ignored paths
         self._global_ignore_paths: List[Any] = []
+
+    def _pool_size(self) -> int:
+        """The thread-pool size run_parallel uses.
+
+        An explicit ``max_workers`` is authoritative: a caller that chose a
+        bound (CLI, config, the engine's own sizing) keeps exactly that bound.
+        Defaulted (None), the pool is sized to the submitted scanner count --
+        ``max(len(scanner_tasks), 1)`` -- so every scanner starts at once
+        instead of the last ones waiting for a slot, capped at
+        ``min(32, cpu + 4)`` so a large scanner set on a small host does not
+        spawn an unbounded thread set. The cpu figure is the logical CPU
+        count from ``psutil.cpu_count(logical=True)``, with
+        ``os.cpu_count() or 4`` the fallback when psutil is unavailable or
+        answers None. Scanners spend their time waiting on tool
+        subprocesses, which is why the count, not the CPU count, is the
+        right default size.
+        """
+        if self.max_workers is not None:
+            return self.max_workers
+        cpu = psutil.cpu_count(logical=True) if psutil is not None else None
+        if cpu is None:
+            cpu = os.cpu_count() or 4
+        cap = min(32, cpu + 4)
+        return max(1, min(len(self.scanner_tasks), cap))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -2983,7 +3019,7 @@ class ScannerExecutor:
         remaining_scanners_lock = threading.Lock()
 
         with (
-            ThreadPoolExecutor(max_workers=self.max_workers) as executor,
+            ThreadPoolExecutor(max_workers=self._pool_size()) as executor,
             _cancel_scan_on_interrupt(executor),
         ):
             futures: List[Future[Tuple[List[ScanResultsContainer], bool]]] = []
