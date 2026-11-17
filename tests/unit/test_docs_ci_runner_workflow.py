@@ -1766,7 +1766,7 @@ ADDOPTS_IN_CI = (
     (("--verbose",), ()),
     (("--junit-xml=test-results/pytest.junit.xml",), ("--junit-xml=",)),
     (("--durations=10",), ("--durations=0", "--durations-min=0")),
-    (("-n", "auto"), ("-n", "0")),
+    (("-n", "logical"), ("-n", "0")),
     (("--dist", "worksteal"), ()),
     (("--strict-markers",), ()),
 )

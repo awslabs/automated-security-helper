@@ -29,7 +29,7 @@ try:
     # still scans, on the os.cpu_count() fallback.
     import psutil
 except ImportError:  # pragma: no cover
-    psutil = None
+    psutil = None  # type: ignore[assignment]
 
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.scanner_plugin import (

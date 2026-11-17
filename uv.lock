@@ -229,6 +229,7 @@ dev = [
     { name = "types-boto3-securitylake" },
     { name = "types-boto3-sqs" },
     { name = "types-boto3-sts" },
+    { name = "types-psutil" },
     { name = "types-pyyaml" },
 ]
 
@@ -314,6 +315,7 @@ dev = [
     { name = "types-boto3-securitylake", specifier = ">=1.43,<2.0.0" },
     { name = "types-boto3-sqs", specifier = ">=1.43,<2.0.0" },
     { name = "types-boto3-sts", specifier = ">=1.43.94,<2.0.0" },
+    { name = "types-psutil", specifier = ">=7.0,<8" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20261103" },
 ]
 
@@ -3891,6 +3893,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8d/bb/3f7a7d54e31968944d91c6bba57b0961357798837fba46c2064fa19a4f3e/types_boto3_sts-1.43.94.tar.gz", hash = "sha256:34b317afea4a6debb1c5206dccea04e1ca5f35ec3591a5364f5bb1278b4a565d", size = 16971, upload-time = "2026-09-14T22:12:31.606Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/9b/167cbed60e97fa77cf0fcd7cf8e50cfb6ea73dc4a4ce268227a282076e04/types_boto3_sts-1.43.94-py3-none-any.whl", hash = "sha256:501bf88a2681061ed6b181f8613a0f871f9c2c5e905dfb881cc8b1a407c186e1", size = 21001, upload-time = "2026-09-14T22:12:29.114Z" },
+]
+
+[[package]]
+name = "types-psutil"
+version = "7.2.2.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/97/0a/f48b9b0ab5ba8599fd117309e345152bf82c756c72be2ff0f635780c2792/types_psutil-7.2.2.20260906.tar.gz", hash = "sha256:93abf22cf9a62b915f724e433bde702995ac274865425fd4a76d1d9b5828da1a", size = 27396, upload-time = "2026-09-06T06:35:24.499Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/8d/81a86107486e1c23f5ca21bea1e9e5b18a50754242e7a0b82f41f9ae8384/types_psutil-7.2.2.20260906-py3-none-any.whl", hash = "sha256:db00baf7f96c3f63421c4d3d68d373923094a0dfddf13e922c5c5fbc42488159", size = 33383, upload-time = "2026-09-06T06:35:23.575Z" },
 ]
 
 [[package]]
