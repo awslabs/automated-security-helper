@@ -3729,6 +3729,15 @@ in its ASH config instead of in every clone's hook <code>args</code>:</p>
 <p>A committer can still widen one run with <code>--add-scanners</code>, or override the file entirely
 with <code>--only-scanners</code>. <code>--scanners</code> keeps working with a deprecation warning; it is the
 same additive selection <code>--add-scanners</code> now names explicitly.</p>
+<div class="admonition warning">
+<p class="admonition-title">Upgrading to v3.8.0 with checkov extra formats configured</p>
+<p>An ASH config that sets <code>checkov.additional_formats: [cyclonedx_json]</code> can crash
+checkov on some repositories. From v3.8.0, a scanner that crashes correctly fails
+the run with exit code 1 instead of passing silently, so a hook that passed on
+v3.7.x can start failing after the upgrade. Remove that format from the config, or
+exclude checkov from the hook with <code>--exclude-scanners checkov</code>. Once checkov runs
+without crashing, it can also report a real finding the crashed runs never surfaced.</p>
+</div>
 <h3 id="additional-dependencies">Add Python packages to the hook<a class="headerlink" href="#additional-dependencies" title="Permanent link">&para;</a></h3>
 <p><code>additional_dependencies</code> in your configuration replaces the hook's own list rather than
 adding to it. The <code>ash</code> hook's list is <code>.[cdk]</code>, which installs the <code>cdk</code> extra from the
@@ -3749,33 +3758,52 @@ cdk-nag is MISSING in a repository with CloudFormation templates.</p>
 <code>stages: [manual]</code>, the hook runs only when you ask:
 <code>pre-commit run --hook-stage manual ash</code>.</p>
 <h2 id="cost">What it costs<a class="headerlink" href="#cost" title="Permanent link">&para;</a></h2>
-<p>Measured on a repository of three files, so these times are mostly the fixed cost of a
-run; the scan itself grows with what the commit stages:</p>
+<p>The first run builds the hook environment and installs the scanner tools, which takes 65
+to 150 seconds. The environment takes about 650 MB under <code>~/.cache/pre-commit</code>, and
+bandit and checkov about 240 MB under <code>~/.local/share/uv</code>.</p>
+<p>Every later run's cost scales with the size of the repository unless <code>--staged</code> narrows
+the scan: without the flag, each commit scans the whole tree, however small the change.
+With <code>--staged</code>, which the hook passes, the scan covers the staged files and the time
+grows with the commit instead. checkov is the slowest scanner. Warm-run times, measured
+on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches:</p>
 <table>
 <thead>
 <tr>
-<th>Run</th>
-<th>Time</th>
+<th>Warm run</th>
+<th>10-file repository</th>
+<th>~900-file Python repository</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>First run, with the hook environment and scanner installs</td>
-<td>65 to 150 seconds</td>
+<td><code>--mode precommit</code> on the whole repository (no <code>--staged</code>)</td>
+<td>~6.7 s</td>
+<td>~18 s</td>
 </tr>
 <tr>
-<td>Later runs</td>
-<td>11 to 15 seconds</td>
+<td><code>--mode precommit --staged</code>, one <code>.py</code> file staged</td>
+<td>~4.4 s</td>
+<td>~5.7 s</td>
+</tr>
+<tr>
+<td>The same, with <code>--only-scanners bandit,detect-secrets</code></td>
+<td>~2.8 s</td>
+<td>~3.4 s</td>
+</tr>
+<tr>
+<td><code>--staged</code> with the express daemon warm (<code>--express</code>)</td>
+<td>~3.0 s</td>
+<td>not measured</td>
 </tr>
 </tbody>
 </table>
-<p>checkov is the slowest scanner. With <code>--staged</code>, which the hook passes by default, scan
-time grows with the size of the commit; without it (a hook you pointed at the whole tree),
-it grows with the size of the repository, because every run scans all of it. The hook
-environment takes about 650 MB under
-<code>~/.cache/pre-commit</code>, and bandit and checkov about 240 MB under <code>~/.local/share/uv</code>.</p>
-<p>About two seconds of every later run is ASH's own startup (the interpreter and the eager
-imports), paid again on each commit. <a href="../express-mode/">Express mode</a> removes it: add
+<p>For scale, <code>ash --version</code> alone takes about 0.2 seconds on the same machine. What is
+left of the fastest runs above is the floor every scan pays: starting the interpreter,
+importing ASH, loading the configuration, and setting up the scanners. A <code>--staged</code> run
+whose staged files match no scanner still pays that floor; the scanners are skipped, and
+the wall time is unchanged.</p>
+<p>Part of that floor is ASH's own startup (the interpreter and the eager imports), paid
+again on each commit. <a href="../express-mode/">Express mode</a> removes it: add
 <code>--express</code> to the hook's <code>args</code>, and the first commit starts a resident warm daemon
 paired with the hook's own environment, which every later hook run forks instead of
 starting cold (Linux and macOS only). The pairing matters: the daemon serves exactly the
@@ -3818,7 +3846,7 @@ both.</p>
 </tr>
 <tr>
 <td>Cost</td>
-<td>11 to 15 seconds after the first run (<a href="#cost">What it costs</a>)</td>
+<td>A few seconds per commit after the first run, growing with the staged set (<a href="#cost">What it costs</a>)</td>
 <td>Installs the scanner tools each build, or uses an image you prepared</td>
 </tr>
 </tbody>
