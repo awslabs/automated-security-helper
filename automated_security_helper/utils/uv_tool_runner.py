@@ -987,6 +987,29 @@ _UV_PROBE_CANCEL_POLL_SECONDS = 0.2
 _TOOL_LIST_MEMO_SECONDS = 600.0
 
 
+def _uv_tools_dir() -> Optional[Path]:
+    """uv's tools directory, or None when no home directory can be resolved.
+
+    uv's documented resolution: ``UV_TOOL_DIR``, else
+    ``$XDG_DATA_HOME/uv/tools``, else ``~/.local/share/uv/tools``. Nothing is
+    checked for existence here.
+    """
+    # No get() default: the docs table records UV_TOOL_DIR as read with none
+    # (the sandbox policy's read), and the docs-freshness check holds every
+    # read of a variable to its documented default.
+    named = (os.environ.get("UV_TOOL_DIR") or "").strip()
+    if named:
+        return Path(os.path.expanduser(named))
+    data = os.environ.get("XDG_DATA_HOME", "").strip()
+    root = Path(os.path.expanduser(data)) if data else None
+    if root is None:
+        try:
+            root = Path.home() / ".local" / "share"
+        except RuntimeError:
+            return None
+    return root / "uv" / "tools"
+
+
 def _uv_tools_dir_stamp() -> str:
     """The uv tools directory and its mtime, as a memo-key fragment.
 
@@ -994,31 +1017,69 @@ def _uv_tools_dir_stamp() -> str:
     ``<tools dir>/<tool>``, which moves the directory's mtime whoever runs
     them -- another UVToolRunner instance, another process, a hand-run uv --
     so a memoized listing keyed on this goes stale the moment the listing
-    would change. The directory is uv's documented resolution: ``UV_TOOL_DIR``,
-    else ``$XDG_DATA_HOME/uv/tools``, else ``~/.local/share/uv/tools``. A
+    would change. The directory is ``_uv_tools_dir``'s. A
     layout this does not model (Windows' application directories, a future
     uv) reads "absent" or a directory that never moves, and the memo then
     degrades to its TTL -- never a wrong answer longer than that.
     """
-    # No get() default: the docs table records UV_TOOL_DIR as read with none
-    # (the sandbox policy's read), and the docs-freshness check holds every
-    # read of a variable to its documented default.
-    named = (os.environ.get("UV_TOOL_DIR") or "").strip()
-    if named:
-        base = Path(os.path.expanduser(named))
-    else:
-        data = os.environ.get("XDG_DATA_HOME", "").strip()
-        root = Path(os.path.expanduser(data)) if data else None
-        if root is None:
-            try:
-                root = Path.home() / ".local" / "share"
-            except RuntimeError:
-                return "no-home"
-        base = root / "uv" / "tools"
+    base = _uv_tools_dir()
+    if base is None:
+        return "no-home"
     try:
         return f"{base}\x00{os.stat(base).st_mtime_ns}"
     except OSError:
         return f"{base}\x00absent"
+
+
+def _installed_tool_metadata_version(
+    tool_name: str, package_name: Optional[str]
+) -> Optional[str]:
+    """The version of ``tool_name``'s installed uv tool environment, read from
+    its package metadata without starting the tool, or None.
+
+    ``checkov --version`` imports checkov's whole framework before it prints,
+    about 1.9 s warm; the ``.dist-info`` of the environment uv installed it
+    into answers in milliseconds. The answer is given only when it is the
+    answer the probe would have given: the tool is installed in uv's tools
+    directory, the spec is a plain requirement (no extras, no URL), and the
+    installed version satisfies the spec's constraint, so ``uv tool run
+    --from <spec>`` would resolve to this very environment. Anything else --
+    no installed environment, extras, an unreadable or unsatisfying
+    distribution -- answers None and the caller runs the real probe.
+    """
+    try:
+        from importlib.metadata import Distribution
+
+        from packaging.requirements import Requirement
+
+        requirement = Requirement(package_name or tool_name)
+        if requirement.extras or requirement.url:
+            return None
+        base = _uv_tools_dir()
+        if base is None:
+            return None
+        environment = base / tool_name
+        site_packages = [
+            path
+            for path in (
+                *sorted(environment.glob("lib/python3*/site-packages")),
+                environment / "Lib" / "site-packages",
+            )
+            if path.is_dir()
+        ]
+        if len(site_packages) != 1:
+            return None
+        found = list(
+            Distribution.discover(name=requirement.name, path=[str(site_packages[0])])
+        )
+        if len(found) != 1:
+            return None
+        version = found[0].version
+        if not version or not requirement.specifier.contains(version, prereleases=True):
+            return None
+        return version
+    except Exception:  # noqa: BLE001 -- any trouble means "ask the tool"
+        return None
 
 
 def _signal_name(number: int) -> str:
@@ -1586,8 +1647,22 @@ class UVToolRunner:
         offline: Optional[bool] = None,
         package: Optional[str] = None,
         probe_outcome: Optional[Dict[str, Any]] = None,
+        from_metadata: bool = False,
     ) -> Optional[str]:
         """Get version of a UV tool.
+
+        ``from_metadata`` lets a caller whose tool does not load stevedore
+        plugins (so the probe's first-import cache warming, below, is not owed)
+        take the version from the package metadata of the tool's installed uv
+        environment instead of spawning the tool: ``checkov --version`` costs
+        about 1.9 s because checkov imports its framework first. It applies
+        only when the answer would be the probe's own (see
+        ``_installed_tool_metadata_version``), never to a ``refresh=True`` call,
+        which is the health check that decides a reinstall and must run the
+        tool, and never with ``python_request``. The answer is not memoized
+        (reading it costs less than the memo's lock) and the outcome records
+        ``from_metadata`` with ``ran`` False. When it cannot answer, the call
+        is the probe it always was.
 
         ``package`` is the name the caller assembled ``package_name`` around,
         when it knows it (``checked_requirement``'s own meaning): a constraint
@@ -1684,6 +1759,17 @@ class UVToolRunner:
                 )
                 outcome["error"] = str(error)
                 return None
+
+        if from_metadata and not refresh and not python_request:
+            metadata_version = _installed_tool_metadata_version(tool_name, package_name)
+            if metadata_version is not None:
+                outcome["from_metadata"] = True
+                return _version_shown(
+                    metadata_version,
+                    values,
+                    tool_name=tool_name,
+                    package_name=package_name,
+                )
 
         cache_key = f"{tool_name}::{package_name or ''}"
         if python_request:
