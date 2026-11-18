@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 19 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 21 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -34,6 +34,8 @@ ASH ships 19 scanners. The built-in ones are loaded on every scan. The others ar
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
 | [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | no |
+| [`guarddog`](#guarddog) | SCA | yes | community module `ash_guarddog_plugins` | `guarddog` | yes |
+| [`hadolint`](#hadolint) | IAC | yes | community module `ash_hadolint_plugins` | `hadolint` | no |
 | [`snyk-code`](#snyk-code) | SAST | yes | community module `ash_snyk_plugins` | `snyk` | no |
 | [`trivy-repo`](#trivy-repo) | SAST | yes | community module `ash_trivy_plugins` | `trivy` | no |
 
@@ -522,6 +524,67 @@ Options, under `scanners.ferret-scan.options`. An option not listed here refuses
 | <a id="scanners.ferret-scan.options.ferret_verbose"></a>`ferret_verbose` | boolean | `false` | Enable ferret-scan's verbose output (detailed finding info). This controls ferret-scan's own output, not ASH logging. |
 | <a id="scanners.ferret-scan.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for ferret-scan installation (e.g., '&gt;=1.0.0,&lt;2.0.0', '==1.2.0'). If not specified, uses the plugin's default compatible version range: &gt;=2.4.5,&lt;2.6.0. Supported versions: 2.4.5 to 2.6.0 (exclusive). |
 | <a id="scanners.ferret-scan.options.skip_version_check"></a>`skip_version_check` | boolean | `false` | Skip version compatibility check. Use with caution - incompatible versions may cause unexpected behavior or errors. |
+
+## `guarddog`
+
+GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, RubyGems and crates packages.
+
+- Scanner page: [`guarddog` scanner page](../docs/plugins/community/guarddog-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner`
+- Provided by: community module `ash_guarddog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
+- Enabled by default: yes
+- Tool type: SCA
+- Command: `guarddog`
+- Install: `uv tool install` on first use (`guarddog==3.2.0` with Python `>=3.10,<3.14`)
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.guarddog.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.guarddog -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.guarddog.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.guarddog.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.guarddog.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.guarddog.options.ecosystems"></a>`ecosystems` | list of one of `pypi`, `npm`, `go`, `github_action`, `rubygems`, `crates` | `["pypi", "npm", "go", "github_action", "rubygems", "crates"]` | GuardDog ecosystems to scan. ASH scans every package root of each ecosystem it finds: pypi (setup.py, setup.cfg, pyproject.toml), npm (package.json), go (go.mod), github_action (action.yml, action.yaml), rubygems (\*.gemspec) and crates (Cargo.toml). |
+| <a id="scanners.guarddog.options.verify"></a>`verify` | boolean | `false` | Also run `guarddog <ecosystem> verify` on dependency manifests (requirements.txt, package.json, go.mod, Gemfile.lock, Cargo.lock, GitHub workflow files). This downloads every dependency from its registry and needs network access; with ASH_OFFLINE set the scanner reports ERROR instead of attempting it. |
+| <a id="scanners.guarddog.options.verify_timeout"></a>`verify_timeout` | integer, at least 1 | `600` | Seconds to allow one `guarddog verify` invocation (one manifest) before it is killed and reported as a failed target. |
+| <a id="scanners.guarddog.options.verify_parallelism"></a>`verify_parallelism` | integer, at least 1, at most 64 | `8` | Dependencies `guarddog verify` downloads concurrently (GUARDDOG_PARALLELISM). GuardDog's own default is the CPU count. |
+| <a id="scanners.guarddog.options.sandbox"></a>`sandbox` | one of `auto`, `required`, `disabled` | `auto` | GuardDog's kernel sandbox for `scan` (nono: Landlock on Linux, Seatbelt on macOS), which blocks network access and limits reads to the scanned directory. `auto` uses it where the platform supports it and otherwise scans without it, logging a warning; `required` reports ERROR where it is unavailable; `disabled` never uses it. |
+| <a id="scanners.guarddog.options.rules"></a>`rules` | list of string | `[]` | Run only these GuardDog rules (`guarddog --rules`). Cannot be combined with exclude_rules. Empty runs every rule. |
+| <a id="scanners.guarddog.options.exclude_rules"></a>`exclude_rules` | list of string | `[]` | GuardDog rules to skip (`guarddog --exclude-rules`). |
+| <a id="scanners.guarddog.options.include_capabilities"></a>`include_capabilities` | boolean | `false` | Also report every GuardDog capability match (capability-\* rules, e.g. 'spawns a process') at INFO severity, including one a risk also used: GuardDog's JSON names the capability rule a risk used, not which match. They are context rather than findings: ordinary code matches them. |
+| <a id="scanners.guarddog.options.excluded_paths"></a>`excluded_paths` | list of mapping | `[]` | Paths (globs relative to the source directory) to leave out of the files GuardDog is given. |
+| <a id="scanners.guarddog.options.max_hits"></a>`max_hits` | integer or null, at least 0 | `null` | Hits each GuardDog source-code rule may report in one package root (or one dependency, under verify) before GuardDog stops evaluating it. Unset keeps GuardDog's own limit for each rule (1, 3 or 5 in GuardDog 3.2.0); 0 removes every limit. Set in a config in the scanned tree or by an MCP client, it only raises limits: a rule whose own limit is higher keeps it. |
+| <a id="scanners.guarddog.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for guarddog installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint, which is the GuardDog release the result parser is tested against. A value that is not a version constraint is ignored with a warning. |
+| <a id="scanners.guarddog.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
+
+## `hadolint`
+
+- Scanner page: [`hadolint` scanner page](../docs/plugins/community/hadolint-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner`
+- Provided by: community module `ash_hadolint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
+- Enabled by default: yes
+- Tool type: IAC
+- Command: `hadolint`
+- Install: pinned, checksum-verified release of `hadolint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.hadolint.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.hadolint -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.hadolint.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.hadolint.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.hadolint.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.hadolint.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a hadolint configuration file; a relative path is taken from the source directory. The file has to be outside the scanned tree. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. When it is not used, hadolint gets an empty config, so a .hadolint.yaml in the scanned repository is not read. A path that is used and does not exist fails the scan rather than running with hadolint's defaults. |
 
 ## `snyk-code`
 

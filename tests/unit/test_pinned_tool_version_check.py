@@ -739,6 +739,8 @@ def _kind(pins: Any, tool: str) -> str:
         return "uv-tool"
     if entry is not None and getattr(entry, "bundled_in", None):
         return "bundled-library"
+    if entry is not None and _dockerfile_args(tool):
+        return "dockerfile-arg"
     return "unknown"
 
 
@@ -950,17 +952,20 @@ class TestBumpStepsNameEveryValueABumpChanges:
         kinds = {p.tool: _kind(pins, p.tool) for p in checker.enumerate_pins(pins)}
         assert "unknown" not in kinds.values(), kinds
         assert set(kinds.values()) == {
+            "bundled-library",
+            "dockerfile-arg",
             "gem",
             "release-binary",
             "rules-bundle",
             "uv-tool",
         }
         # The script's own list: each kind it knows has a real pin above, so the
-        # parametrized test covers it, and each has its own steps. The one kind with
-        # no shipped pin today is the bundled library (its entries left with the
-        # GuardDog plugin and return with it); TestBundledLibrariesAreListedButNotLookedUp
-        # covers that kind on planted entries until then.
-        assert set(checker.PIN_KINDS) == set(kinds.values()) | {checker.BUNDLED_LIBRARY}
+        # parametrized test covers it, and each has its own steps. The bundled
+        # library's shipped pins are the GuardDog plugin's dependency closure
+        # (pygit2's libgit2, libssh2, OpenSSL and PCRE, and yara-python's yara);
+        # TestBundledLibrariesAreListedButNotLookedUp also covers that kind on
+        # planted entries, so it holds whether or not those pins are present.
+        assert set(checker.PIN_KINDS) == set(kinds.values())
         assert set(checker._KIND_STEPS) == set(checker.PIN_KINDS)
 
     @pytest.mark.unit
@@ -1222,16 +1227,12 @@ class TestBundledLibrariesAreListedButNotLookedUp:
     wheel's), so comparing it with its project's latest release would make the
     scheduled check red with a bump nobody can make. It is listed as held instead.
 
-    The shipped inventory carries no such entry today. The entries this class once
-    named by hand (pygit2 and the libraries its wheel bundles: libgit2, libssh2,
-    OpenSSL and PCRE) arrived with the GuardDog community plugin and left with it
-    when that plugin moved to its own pull request for licensing review (the
-    "refactor(plugins): move the hadolint and guarddog scanner plugins to a
-    separate PR" step of the #727 squash), while ``ThirdPartyLicense.bundled_in``
-    and the checker's held arm stayed. So each test plants an entry of the shape it
-    checks into its own copy of the pins module, and reads the shipped table only
-    for whatever bundled entries it does carry, so the tests hold whether or not
-    those pins are back.
+    The shipped inventory carries these entries again with the GuardDog community
+    plugin: pygit2 and the libraries its wheel bundles (libgit2, libssh2, OpenSSL
+    and PCRE), and the yara yara-python bundles. Each test still plants an entry
+    of the shape it checks into its own copy of the pins module, and reads the
+    shipped table only for whatever bundled entries it does carry, so the tests
+    hold whether or not those pins are present.
     """
 
     WHEEL = "planted-wheel"
@@ -1321,3 +1322,17 @@ class TestBundledLibrariesAreListedButNotLookedUp:
         )
         assert looked_up == [self.WHEEL]
         assert [(r.status, r.latest) for r in results] == [("outdated", "9.9.9")]
+
+    def test_pygit2_itself_is_still_checked(self, pins):
+        """The shipped wheel that sets the bundled versions is checked, unlike
+        the libraries it bundles. pygit2 is pinned as the Dockerfile's
+        PYGIT2_VERSION argument, so it is looked up on GitHub, where the planted
+        wheel above (a uv-tool pin with a distribution) is looked up on PyPI:
+        both are ordinary, checked pins, each on its own index."""
+        by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
+        assert "pygit2" in by_tool, (
+            "pygit2 is pinned (the Dockerfile's PYGIT2_VERSION and its license "
+            "entry), but the script reports no pin for it, so a bump of the "
+            "wheel and of everything it bundles would never be flagged"
+        )
+        assert by_tool["pygit2"].ecosystem == checker.GITHUB
