@@ -53,6 +53,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -228,15 +229,74 @@ def _stop(process: subprocess.Popen) -> None:
         process.wait()
 
 
+def _pids_written(tmp_path: Path) -> Optional[Dict[str, int]]:
+    """The tool's and its child's pids, or None while either is still unwritten.
+
+    Path.write_text creates the file before it writes into it, so each pid file
+    exists, empty, for a moment before it holds the pid; and TOOL's own wait for
+    grandchild.pid breaks on existence, so tool.pid can be complete while
+    grandchild.pid is still empty. On a loaded runner a reader that took
+    existence for content read '' here, once per platform (int('') at the read).
+    Content is the signal, as in the lifecycle test's CHILD, which touches its
+    gate file only after the pid is written.
+    """
+    pids: Dict[str, int] = {}
+    for name in ("tool", "grandchild"):
+        path = tmp_path / f"{name}.pid"
+        text = path.read_text() if path.exists() else ""
+        if not text:
+            return None
+        pids[name] = int(text)
+    return pids
+
+
 def _wait_for_tree(tmp_path: Path) -> Dict[str, int]:
     deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    while not (tmp_path / "tool.pid").exists():
-        assert time.monotonic() < deadline, "the scanner's tool never started"
+    while (pids := _pids_written(tmp_path)) is None:
+        assert time.monotonic() < deadline, (
+            "the scanner's tool and its child never wrote their pids"
+        )
         time.sleep(0.05)
-    return {
-        name: int((tmp_path / f"{name}.pid").read_text())
-        for name in ("tool", "grandchild")
-    }
+    return pids
+
+
+#: The moment a pid-file writer was preempted between creating its file and
+#: writing into it, held still: one file complete, the other existing and
+#: empty. The first ordering is TOOL caught before its own write; the second
+#: is TOOL's existence-gated wait letting it finish while the grandchild's
+#: write is still open. CI hit each once, as int('') at _wait_for_tree's read.
+_PARTIAL_WRITES = {
+    "tool-pid-still-empty": {"tool.pid": "", "grandchild.pid": "202"},
+    "grandchild-pid-still-empty": {"tool.pid": "101", "grandchild.pid": ""},
+}
+
+_COMPLETE_PIDS = {"tool.pid": "101", "grandchild.pid": "202"}
+
+
+@pytest.mark.parametrize("partial", list(_PARTIAL_WRITES))
+def test_wait_for_tree_waits_out_a_pid_file_created_but_not_yet_written(
+    tmp_path, partial
+):
+    """A pid file that exists holds its pid only once its writer has written it.
+
+    _wait_for_tree returns the written pids, however late the writer lands,
+    rather than reading existence as content.
+    """
+    for name, text in _PARTIAL_WRITES[partial].items():
+        (tmp_path / name).write_text(text)
+
+    def _writer_lands() -> None:
+        for name, text in _PARTIAL_WRITES[partial].items():
+            if not text:
+                (tmp_path / name).write_text(_COMPLETE_PIDS[name])
+
+    timer = threading.Timer(0.3, _writer_lands)
+    timer.start()
+    try:
+        assert _wait_for_tree(tmp_path) == {"tool": 101, "grandchild": 202}
+    finally:
+        timer.cancel()
+        timer.join()
 
 
 def _kill_leftovers(pids: Dict[str, int]) -> None:
