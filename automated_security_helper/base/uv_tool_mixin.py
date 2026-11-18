@@ -547,6 +547,7 @@ class UVToolMixin:
                 offline=self._is_offline_mode(),
                 package=self._uv_package(),
                 **self._uv_python_kwargs(),
+                **self._uv_metadata_kwargs(),
             )
             if version:
                 self._plugin_log(
@@ -2874,6 +2875,28 @@ class UVToolMixin:
         """
         python_request = self._get_tool_python_request()
         return {"python_request": python_request} if python_request else {}
+
+    def _tool_version_from_metadata(self) -> bool:
+        """Whether the version may be read from the tool's package metadata.
+
+        False, the default, keeps the ``<tool> --version`` probe, which also
+        warms a stevedore entry-point cache once for tools that load plugins
+        through it (see ``_uv_tool_version_cache``). Override it to return True
+        for a tool that does not use stevedore and whose ``--version`` is slow
+        (checkov imports its framework before printing it): the recorded
+        version is then read from the installed environment's ``.dist-info``
+        when that is the environment the probe would resolve, and probed as
+        before when it is not. The install health check is not affected.
+        """
+        return False
+
+    def _uv_metadata_kwargs(self) -> Dict[str, Any]:
+        """``{"from_metadata": True}`` for the runner calls, or ``{}`` when unset.
+
+        Empty when unset, so every plugin that does not opt in calls the
+        runner with exactly the arguments it did before.
+        """
+        return {"from_metadata": True} if self._tool_version_from_metadata() else {}
 
     def _get_tool_with_dependencies(self) -> Optional[List[str]]:
         """Get additional dependencies to install with the tool using --with flag.

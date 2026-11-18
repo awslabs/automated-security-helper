@@ -679,6 +679,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         )
         super().model_post_init(context)
 
+    def _tool_version_from_metadata(self) -> bool:
+        """checkov loads no stevedore plugins, and ``checkov --version`` takes
+        about 1.9 s warm (it imports its framework first), so the recorded
+        version is read from the installed environment's metadata."""
+        return True
+
     def _get_tool_version_constraint(self) -> str | None:
         """Get version constraint for checkov installation.
 
