@@ -3645,8 +3645,14 @@ writes a <code>.ash/.gitignore</code> that ignores it, or add the line yourself:
 <li>with <code>--staged</code> (which the hook passes), scans the staged files instead of the whole
   repository, so a one-file commit pays for one file. See
   <a href="#staged-scope">Staged-file scope</a>.</li>
-<li>prints simplified output and writes the usual reports to <code>.ash/ash_output/</code>.</li>
+<li>prints simplified output and writes reports to <code>.ash/ash_output/</code>.</li>
 </ul>
+<p>Precommit mode writes only the reports the hook actually consumes: the text summary
+and the SARIF report the exit code is computed from, instead of the full report set
+every other mode writes. That is a default, not a cap -- passing <code>--output-formats</code>,
+or setting <code>output_formats</code> or configuring anything under <code>reporters</code> in the ASH
+config file, keeps the full behavior those choices describe, exactly as outside
+precommit mode.</p>
 <h2 id="staged-scope">Staged-file scope (<code>--staged</code>)<a class="headerlink" href="#staged-scope" title="Permanent link">&para;</a></h2>
 <p><code>--staged</code> reads the staged file list from <code>git diff --cached</code> (added, copied, modified
 and renamed entries; a rename is scanned at its new path; a deleted file cannot be
@@ -3658,7 +3664,11 @@ scanned and is not listed) and makes it the scan's target set:</p>
   siblings, so same-directory <code>variables.tf</code> defaults and <code>locals</code> still resolve;
   nothing recurses into subdirectories, so a local module that lives in one is read
   only when its own files are staged.</li>
-<li>a scanner none of whose files are staged is skipped, with a log line saying so.</li>
+<li>a scanner none of whose files are staged is skipped, with a log line saying so.
+  For bandit and checkov that decision is made before their tools are even looked
+  up (the converted tree has to be empty too), so a commit that stages nothing
+  they scan does not pay for their version probes -- and does not need their
+  tools installed.</li>
 <li>converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
   when nothing staged matches them.</li>
 <li>suppressions and <code>ignore_paths</code> resolve against the same scan root as a whole-repository
