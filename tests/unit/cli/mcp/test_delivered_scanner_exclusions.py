@@ -1192,6 +1192,10 @@ NON_PATH_EXCLUSIONS = [
     ("ferret-scan", "max_live_bytes", "1KB"),
     ("hadolint", "config_file", "/etc/hadolint.yaml"),
     ("hadolint", "offline", True),
+    ("betterleaks", "config_file", "/etc/betterleaks.toml"),
+    ("betterleaks", "honor_inline_ignores", True),
+    ("betterleaks", "honor_tree_ignore_files", True),
+    ("betterleaks", "offline", True),
     ("guarddog", "ecosystems", ["pypi"]),
     ("guarddog", "rules", ["threat-runtime-obfuscation-base64exec"]),
     ("guarddog", "exclude_rules", ["threat-runtime-obfuscation-base64exec"]),
@@ -1239,6 +1243,9 @@ def _option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
         FerretScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+        BetterleaksScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
         GuardDogScannerConfigOptions,
     )
@@ -1277,6 +1284,7 @@ def _option_defaults() -> Dict[tuple, Any]:
         "ferret-scan": FerretScannerConfigOptions(),
         "guarddog": GuardDogScannerConfigOptions(),
         "hadolint": HadolintScannerConfigOptions(),
+        "betterleaks": BetterleaksScannerConfigOptions(),
         "trivy-repo": TrivyRepoScannerConfigOptions(),
     }
     defaults: Dict[tuple, Any] = {}
@@ -1448,6 +1456,9 @@ def _scanner_option_models() -> Dict[str, Any]:
     from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
         guarddog_scanner,
     )
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins import (
+        betterleaks_scanner,
+    )
     from automated_security_helper.plugin_modules.ash_hadolint_plugins import (
         hadolint_scanner,
     )
@@ -1480,6 +1491,7 @@ def _scanner_option_models() -> Dict[str, Any]:
         "trivy-repo": trivy_repo_scanner.TrivyRepoScannerConfigOptions,
         "guarddog": guarddog_scanner.GuardDogScannerConfigOptions,
         "hadolint": hadolint_scanner.HadolintScannerConfigOptions,
+        "betterleaks": betterleaks_scanner.BetterleaksScannerConfigOptions,
     }
 
 
@@ -1557,6 +1569,9 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
         GuardDogScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+        BetterleaksScannerConfigOptions,
+    )
     from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
         HadolintScannerConfigOptions,
     )
@@ -1574,6 +1589,7 @@ def _denied_plugin_option_defaults() -> Dict[tuple, Any]:
         ("ferret-scan", FerretScannerConfigOptions()),
         ("guarddog", GuardDogScannerConfigOptions()),
         ("hadolint", HadolintScannerConfigOptions()),
+        ("betterleaks", BetterleaksScannerConfigOptions()),
         ("snyk-code", SnykCodeScannerConfigOptions()),
         ("trivy-repo", TrivyRepoScannerConfigOptions()),
     ):

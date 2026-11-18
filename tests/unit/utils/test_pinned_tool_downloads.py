@@ -1175,6 +1175,7 @@ class TestAssetResolution:
     def test_downloadable_tools(self):
         assert downloadable_tools() == [
             "actionlint",
+            "betterleaks",
             "cfn-guard",
             "gitleaks",
             "grype",

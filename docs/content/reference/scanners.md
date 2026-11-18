@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 21 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 22 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -33,6 +33,7 @@ ASH ships 21 scanners. The built-in ones are loaded on every scan. The others ar
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
+| [`betterleaks`](#betterleaks) | SECRETS | yes | community module `ash_betterleaks_plugins` | `betterleaks` | no |
 | [`ferret-scan`](#ferret-scan) | SECRETS | yes | community module `ash_ferret_plugins` | `ferret-scan` | no |
 | [`guarddog`](#guarddog) | SCA | yes | community module `ash_guarddog_plugins` | `guarddog` | yes |
 | [`hadolint`](#hadolint) | IAC | yes | community module `ash_hadolint_plugins` | `hadolint` | no |
@@ -192,7 +193,7 @@ Options, under `scanners.cfn-lint.options`. An option not listed here refuses th
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `cfn_nag_scan`
-- Install: `gem install cfn-nag -v 0.8.10` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: none declared
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -479,6 +480,32 @@ Options, under `scanners.zizmor.options`. An option not listed here refuses the 
 | <a id="scanners.zizmor.options.honor_inline_ignores"></a>`honor_inline_ignores` | boolean | `false` | Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
 | <a id="scanners.zizmor.options.tool_version"></a>`tool_version` | string or null | `">=1.29.0,<2.0.0"` | Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces. Another value: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default applies. |
 | <a id="scanners.zizmor.options.install_timeout"></a>`install_timeout` | integer | `300` | Timeout in seconds for tool installation |
+
+## `betterleaks`
+
+- Scanner page: [`betterleaks` scanner page](../docs/plugins/community/betterleaks-plugin.md)
+- Class: `automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner.BetterleaksScanner`
+- Provided by: community module `ash_betterleaks_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
+- Enabled by default: yes
+- Tool type: SECRETS
+- Command: `betterleaks`
+- Install: pinned, checksum-verified release of `betterleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Offline strategy: `bundled`
+- Network in the sandbox, by default: no
+- Environment passed into the sandbox: none beyond the baseline
+- Environment set under sandbox-exec: none
+
+Options, under `scanners.betterleaks.options`. An option not listed here refuses the configuration.
+
+<!-- doctest: options of=scanners.betterleaks -->
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| <a id="scanners.betterleaks.options.severity_threshold"></a>`severity_threshold` | one of `ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or null | `null` | Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM. |
+| <a id="scanners.betterleaks.options.scan_timeout"></a>`scan_timeout` | integer or null, at least 1 | `1800` | Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes. |
+| <a id="scanners.betterleaks.options.offline"></a>`offline` | boolean | `false` | Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline. |
+| <a id="scanners.betterleaks.options.config_file"></a>`config_file` | path, string, or null | `null` | Path to a Betterleaks TOML config. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Its rules and filters apply on top of ASH suppressions. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Unset, Betterleaks uses BETTERLEAKS_CONFIG or BETTERLEAKS_CONFIG_TOML (or the GITLEAKS\_ names of them) from the environment if one is set, else its default rules; a .betterleaks.toml or .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan. |
+| <a id="scanners.betterleaks.options.honor_inline_ignores"></a>`honor_inline_ignores` | boolean | `false` | Honor inline `betterleaks:allow` and `gitleaks:allow` comments. Off by default: ASH runs `betterleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
+| <a id="scanners.betterleaks.options.honor_tree_ignore_files"></a>`honor_tree_ignore_files` | boolean | `false` | Run Betterleaks over a tree that holds a .betterleaksignore or .gitleaksignore, which Betterleaks always reads and which drops the findings it lists before ASH sees them, so they are neither reported nor counted as suppressed. Off by default: such a tree fails the scan before Betterleaks runs. Move the entries to ASH suppressions, or turn this on. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning. |
 
 ## `ferret-scan`
 

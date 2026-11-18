@@ -588,6 +588,14 @@ ARG HADOLINT_VERSION="v2.15.1"
 RUN with-retry 'install-pinned-tool hadolint -b /usr/local/bin'
 RUN hadolint --version
 
+# betterleaks, the community secret scanner by gitleaks' author, from its pinned
+# release asset (an archive, like gitleaks). ASH runs it as a separate process. It is
+# MIT-licensed, so its entry in THIRD_PARTY_LICENSES installs its LICENSE under
+# ${ASH_THIRD_PARTY_DIR}/betterleaks.
+ARG BETTERLEAKS_VERSION="v1.10.1"
+RUN with-retry 'install-pinned-tool betterleaks -b /usr/local/bin'
+RUN betterleaks --version
+
 # cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
 # templates against. The binary comes from its pinned release asset like the tools
 # above. The rules archive is pinned the same way (RULES_BUNDLES in
@@ -697,7 +705,7 @@ ENV _ASH_EXEC_MODE="local"
 # (GuardDog's uv tool among them) are installed and pinned too, and the image carries
 # them; a scan in the image still loads a module only when it is listed. trivy-repo,
 # snyk and ferret are not in the list: their tools come another way.
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
@@ -844,7 +852,7 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float. The same community
 # modules are loaded for it; an ARG does not reach a stage built FROM another, so it
 # is declared again (a unit test keeps the two equal).
-ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \

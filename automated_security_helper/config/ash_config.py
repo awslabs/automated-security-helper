@@ -1478,6 +1478,13 @@ class RuntimeOverridesConfig(RedactedSection):
         # GuardDog's own kernel sandbox. Its excluded_paths is marked and
         # re-applied to the results instead (config/client_scanner_exclusions.py).
         "/scanners/hadolint/options/config_file",
+        # And betterleaks, a secret scanner like gitleaks: its config file is the
+        # operator's alone, and whether it applies the .betterleaksignore and
+        # .gitleaksignore in the scanned tree (honor_tree_ignore_files) and the
+        # inline allow comments in its files (honor_inline_ignores, below) drops
+        # findings before ASH's suppressions see them.
+        "/scanners/betterleaks/options/config_file",
+        "/scanners/betterleaks/options/honor_tree_ignore_files",
         "/scanners/guarddog/options/ecosystems",
         "/scanners/guarddog/options/rules",
         "/scanners/guarddog/options/exclude_rules",
@@ -1489,6 +1496,7 @@ class RuntimeOverridesConfig(RedactedSection):
         # Whether cfn-lint, gitleaks and zizmor honor the ignore comments and
         # template metadata in the files they scan, which drop findings before
         # ASH's suppressions see them.
+        "/scanners/betterleaks/options/honor_inline_ignores",
         "/scanners/cfn-lint/options/honor_inline_ignores",
         "/scanners/gitleaks/options/honor_inline_ignores",
         "/scanners/zizmor/options/honor_inline_ignores",
