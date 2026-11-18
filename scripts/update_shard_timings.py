@@ -52,10 +52,13 @@ import argparse
 import json
 import re
 import sys
-import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+# defusedxml, not xml.etree: the stdlib parsers accept external entities and
+# entity expansion, and this script reads junit files from downloaded CI artifacts.
+from defusedxml import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
