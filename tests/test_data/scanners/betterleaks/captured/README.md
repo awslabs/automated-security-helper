@@ -7,7 +7,7 @@ binary.
 
 Argv, from the directory of each input (the working directory ASH uses):
 
-```
+```text
 betterleaks dir --report-format=sarif --report-path=<file> --redact=100 --exit-code=2 \
   --no-banner --no-color --gitleaks-ignore-path=<empty directory> --ignore-gitleaks-allow \
   --config=<min.toml> -- .

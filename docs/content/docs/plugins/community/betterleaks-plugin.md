@@ -37,7 +37,7 @@ Betterleaks runs beside the builtin `gitleaks` scanner, not instead of it, so a 
 
 ## What is scanned
 
-Betterleaks is handed the whole target and walks it itself, skipping what its rules and filters exclude. Its default rules are compiled into the binary. A finding is reported at the file and line, with the secret replaced by `REDACTED` in the report and the log: ASH passes `--redact=100` and rewrites any snippet that is not `REDACTED`.
+Betterleaks is handed the whole target and walks it itself, skipping what its rules and filters exclude. Its default rules are compiled into the binary. A finding is reported at the file and line, with the secret replaced by `REDACTED` in the report and the log: ASH passes `betterleaks --redact=100` and rewrites any snippet that is not `REDACTED`.
 
 ASH's own output directory sits inside the source tree by default, so Betterleaks reads it; ASH drops every result under it, except for a file the repository committed there. Betterleaks opens archives to a depth of 8 and decodes encoded text to a depth of 5 by default. It makes no network calls with these flags.
 
@@ -67,17 +67,17 @@ scanners:
       severity_threshold: null
 ```
 
-Betterleaks reads a `.betterleaks.toml` or `.gitleaks.toml` from the scanned tree only with `--unsafe-auto-load-config`, which ASH never passes, so the scanned repository does not choose the rules. One of those files in the tree is noted in the scan log and not read. A relative `BETTERLEAKS_CONFIG` (or `GITLEAKS_CONFIG`) in your environment is anchored to the directory ASH runs in and passed with `--config`, because Betterleaks would otherwise read it from the scanned tree. Under `--sandbox` these variables, and a `config_file` outside the scanned tree, are not passed in.
+Betterleaks reads a `.betterleaks.toml` or `.gitleaks.toml` from the scanned tree only with `betterleaks --unsafe-auto-load-config`, which ASH never passes, so the scanned repository does not choose the rules. One of those files in the tree is noted in the scan log and not read. A relative `BETTERLEAKS_CONFIG` (or `GITLEAKS_CONFIG`) in your environment is anchored to the directory ASH runs in and passed with `--config`, because Betterleaks would otherwise read it from the scanned tree. Under `--sandbox` these variables, and a `config_file` outside the scanned tree, are not passed in.
 
-Everything Betterleaks' configuration supports works in your `config_file`: rules, the global and per-rule `prefilter` and `filter` expressions, and the rest of its [config reference](https://github.com/betterleaks/betterleaks/blob/main/docs/config.md). A secret-validation block in a rule only runs with `--validation`, which ASH does not pass.
+Everything Betterleaks' configuration supports works in your `config_file`: rules, the global and per-rule `prefilter` and `filter` expressions, and the rest of its [config reference](https://github.com/betterleaks/betterleaks/blob/main/docs/config.md). A secret-validation block in a rule only runs with `betterleaks --validation`, which ASH does not pass.
 
 ## Ignore files
 
-A `.betterleaksignore` (or a `.gitleaksignore`) at the root of the scan path lists finding fingerprints, `<file>:<rule>:<line>`, which Betterleaks drops before it writes its report. It reads that file whatever `--gitleaks-ignore-path` says, so ASH cannot turn it off. What it hides would be neither reported nor counted as suppressed.
+A `.betterleaksignore` (or a `.gitleaksignore`) at the root of the scan path lists finding fingerprints, `<file>:<rule>:<line>`, which Betterleaks drops before it writes its report. It reads that file whatever `betterleaks --gitleaks-ignore-path` says, so ASH cannot turn it off. What it hides would be neither reported nor counted as suppressed.
 
 So a scan whose tree holds either file fails before Betterleaks runs, with a message naming the file. Move its entries to [ASH suppressions](../../../concepts/suppressions.md), which are reported and counted, or set `scanners.betterleaks.options.honor_tree_ignore_files: true` in a config outside the scanned tree to accept the file. ASH's gitleaks scanner instead re-scans the files such a file names and adds the dropped findings back; the Betterleaks plugin does not.
 
-The same holds for inline `betterleaks:allow` and `gitleaks:allow` comments: ASH passes `--ignore-gitleaks-allow` so they hide nothing, unless `honor_inline_ignores` is set by the operator.
+The same holds for inline `betterleaks:allow` and `gitleaks:allow` comments: ASH passes `betterleaks --ignore-gitleaks-allow` so they hide nothing, unless `honor_inline_ignores` is set by the operator.
 
 ## Severity
 
@@ -88,11 +88,11 @@ Betterleaks results carry no level. Every result is `error` in SARIF and CRITICA
 | | gitleaks (builtin scanner) | Betterleaks (this plugin) |
 |---|---|---|
 | Command | `gitleaks dir` | `betterleaks dir` |
-| Config in the scanned tree | read by default; ASH passes a default-rules config to prevent it | not read unless `--unsafe-auto-load-config`, which ASH never passes |
+| Config in the scanned tree | read by default; ASH passes a default-rules config to prevent it | not read unless `betterleaks --unsafe-auto-load-config`, which ASH never passes |
 | Config environment variables | `GITLEAKS_CONFIG`, `GITLEAKS_CONFIG_TOML` | `BETTERLEAKS_CONFIG`, `BETTERLEAKS_CONFIG_TOML`, with the `GITLEAKS_` names as the fallback |
 | Ignore file | `.gitleaksignore`; ASH re-scans what it names | `.betterleaksignore` first, else `.gitleaksignore`; a tree that holds one fails the scan |
 | Baseline file | `baseline_path` option | not offered |
-| Exit codes | 0 clean, 1 failure or leaks, `--exit-code=2` for leaks | the same; an unknown flag exits 126 |
+| Exit codes | 0 clean, 1 failure or leaks, `gitleaks --exit-code=2` for leaks | the same; an unknown flag exits 126 |
 | SARIF `semanticVersion` | `v8.0.0`, dropped by ASH | `v8.0.0`, dropped by ASH |
 | `--version` | `8.30.1` | `betterleaks version 1.10.1` |
 
