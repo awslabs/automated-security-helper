@@ -124,6 +124,16 @@ global_settings:
         the file still reports; the inline pragma on each line is detect-secrets', which
         ferret-scan does not read.
     - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_betterleaks_plugins/test_betterleaks_scanner.py
+      line_start: 746
+      line_end: 746
+      reason: >-
+        False positive. The line holds the commit the betterleaks v1.10.1 tag points at,
+        which the pinned-release test compares against the Dockerfile's pin. It is a
+        public commit id, not a credential. Pinned to the one line so a value added
+        elsewhere in the file still reports; the inline pragma on the line is
+        detect-secrets', which ferret-scan does not read.
+    - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugin_modules/ash_snyk_plugins/test_snyk_code_scanner_behavior.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET

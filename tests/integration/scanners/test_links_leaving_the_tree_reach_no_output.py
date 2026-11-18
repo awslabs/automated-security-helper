@@ -158,6 +158,7 @@ PLUGIN_MODULES = [
     # results, so a scanner here that is not listed would never be checked.
     "automated_security_helper.plugin_modules.ash_hadolint_plugins",
     "automated_security_helper.plugin_modules.ash_guarddog_plugins",
+    "automated_security_helper.plugin_modules.ash_betterleaks_plugins",
 ]
 
 
@@ -495,6 +496,8 @@ CONTROLS = {
         in_tree="templates/insecure.yaml",
     ),
     "hadolint": Control(commands=("hadolint",), in_tree="images/Dockerfile"),
+    # Reads the fabricated token gitleaks reports: its rules are the same.
+    "betterleaks": Control(commands=("betterleaks",), in_tree="gitleaks_settings.py"),
     "guarddog": Control(
         commands=("guarddog",), uv_tool=True, in_tree="pypi_suspicious/setup.py"
     ),
