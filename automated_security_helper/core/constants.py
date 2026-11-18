@@ -488,6 +488,22 @@ PRECOMMIT_MODE_SCANNERS: Tuple[str, ...] = (
     "npm-audit",
 )
 
+# The report formats `--mode precommit` writes when nothing else chose any: what
+# the pre-commit hook actually consumes. The hook (.pre-commit-hooks.yaml) reads
+# the exit code and the console; the exit code itself is derived from the SARIF
+# report this run writes (run_ash_scan._gating_actionable_count reads the
+# persisted file because it serializes every suppression pass), and `text` is
+# the one human-readable report a committer opens after a failed hook. The
+# other report formats cost a precommit run time for files no hook reads;
+# every other mode keeps the full default set. An explicit choice always wins:
+# `--output-formats`, a config file's `output_formats`, or a config file that
+# configures `reporters` at all each keep today's behavior
+# (run_ash_scan._precommit_output_formats applies this).
+PRECOMMIT_MODE_OUTPUT_FORMATS: Tuple[str, ...] = (
+    "text",
+    "sarif",
+)
+
 # The environment variable names an ASH config file may interpolate.
 #
 # Why there is a bound at all

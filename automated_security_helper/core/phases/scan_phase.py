@@ -216,6 +216,35 @@ def _nothing_to_scan_reason(plugin_instance, values: Iterable[str] = ()) -> str 
     return text_without_values(reason, values)
 
 
+def _staged_nothing_to_scan_reason(
+    plugin_instance, values: Iterable[str] = ()
+) -> str | None:
+    """``ScannerPluginBase.staged_nothing_to_scan_reason``, guarded for any plugin.
+
+    The same guard discipline as :func:`_nothing_to_scan_reason`, for the same
+    reason with the sign flipped: this answer SKIPS a scanner before its
+    dependency check runs, so anything short of a clear, string-typed "no staged
+    file matches what this scans" (a plugin without the hook, a test double
+    answering with a Mock, a hook that raises) must leave the scanner on
+    today's path, dependency check and all.
+    """
+    ask = getattr(plugin_instance, "staged_nothing_to_scan_reason", None)
+    if not callable(ask):
+        return None
+    try:
+        reason = ask()
+    except Exception as e:
+        ASH_LOGGER.warning(
+            f"{type(plugin_instance).__name__}.staged_nothing_to_scan_reason() "
+            f"raised {type(e).__name__}: {error_text(e, values)}; "
+            "the scanner is judged on its dependencies, as without a staged scope"
+        )
+        return None
+    if not (isinstance(reason, str) and reason):
+        return None
+    return text_without_values(reason, values)
+
+
 def _scanner_display_name(plugin_instance) -> str:
     """Return the name a scanner is identified by everywhere in this phase.
 
@@ -776,6 +805,63 @@ class ScanPhase(EnginePhase):
         # between the two left the scanner counted as excluded and, with no row,
         # recorded MISSING as one that "left filtering with no status".
         excluded_scanner_names.append(display_name)
+        return aggregated_results
+
+    def _record_nothing_to_scan(
+        self,
+        display_name: str,
+        nothing_reason: str,
+        nothing_to_scan_names: List[str],
+        aggregated_results: AshAggregatedResults,
+    ) -> AshAggregatedResults:
+        """Record *display_name* as SKIPPED because it has nothing to scan.
+
+        One recording path for the two points that make this decision -- the
+        staged pre-setup skip (a decidable staged no-match, before the
+        dependency check runs) and the dependency-failure arm (the tool is
+        absent AND the scanner's own selection finds nothing). A copy of this
+        bookkeeping at each would be a chance for the two rows to diverge.
+
+        ``targets_attempted=0`` is the claim "looked, found nothing", which the
+        unified metrics read as SKIPPED; ``excluded`` stays False because
+        nothing deselected it, and ``dependencies_satisfied`` True because the
+        tool was not needed. Guarded write: unguarded, a failed write of the
+        row's file reached the handler of this scanner's filtering, and a
+        scanner that had nothing to scan was recorded MISSING.
+        """
+        nothing_to_scan_names.append(display_name)
+        # ash.log keeps the reason as given, home directory included, as for
+        # MISSING; the results get it written with the home directory as ~.
+        stored_nothing_reason = home_as_tilde(nothing_reason)
+        self.validation_manager.update_scanner_state(
+            display_name,
+            registration_status="registered",
+            enablement_status="excluded",
+            enablement_reason=(f"Nothing to scan: {stored_nothing_reason}"),
+            queued_for_execution=False,
+            execution_completed=False,
+        )
+        aggregated_results = self._write_results_guarded(
+            display_name,
+            ScanResultsContainer(
+                scanner_name=display_name,
+                status=ScannerStatus.SKIPPED,
+                duration=None,
+                targets_attempted=0,
+                # Explicit, so the serialized report (dumped exclude_unset)
+                # carries the full claim rather than an attempt count with no
+                # failure accounting.
+                targets_failed=0,
+                skipped_reason=stored_nothing_reason,
+            ),
+            aggregated_results,
+        )
+        aggregated_results.scanner_results[display_name] = ScannerTargetStatusInfo(
+            status=ScannerStatus.SKIPPED,
+            dependencies_satisfied=True,
+            excluded=False,
+            skipped_reason=stored_nothing_reason,
+        )
         return aggregated_results
 
     def _execute_phase(
@@ -1746,6 +1832,41 @@ class ScanPhase(EnginePhase):
                             )
                             continue
 
+                        # Under --mode precommit --staged, a scanner whose skip
+                        # is already decided -- it declares the patterns its
+                        # scan() skips the source target on, no staged file
+                        # matches them, and the converted tree is empty -- is
+                        # recorded SKIPPED here, BEFORE its dependency check,
+                        # because the check's version probes cost a commit real
+                        # time for a tool that was never going to start. This is
+                        # the dependency-failure arm's rule ("a scanner with
+                        # nothing to scan loses this scan nothing by lacking its
+                        # tool") applied as soon as the answer is decidable: the
+                        # row it writes is the same SKIPPED row, whether the
+                        # tool is present or absent.
+                        staged_nothing = _staged_nothing_to_scan_reason(
+                            plugin_instance,
+                            plugin_environment_values(
+                                plugin_instance,
+                                config_environment_values(
+                                    getattr(self.plugin_context, "config", None)
+                                ),
+                            ),
+                        )
+                        if staged_nothing is not None:
+                            ASH_LOGGER.info(
+                                f"{staged_nothing}. Its dependency check was "
+                                "not run: SKIPPED",
+                                extra=NO_MARKUP,
+                            )
+                            aggregated_results = self._record_nothing_to_scan(
+                                display_name,
+                                staged_nothing,
+                                nothing_to_scan_names,
+                                aggregated_results,
+                            )
+                            continue
+
                         # Check dependencies early. Not under a sandbox
                         # refusal the executor grades ERROR -- a backend the
                         # operator named that is unavailable, or a refusal
@@ -1842,53 +1963,11 @@ class ScanPhase(EnginePhase):
                                     "dependencies cost this scan nothing: SKIPPED",
                                     extra=NO_MARKUP,
                                 )
-                                nothing_to_scan_names.append(display_name)
-                                # ash.log keeps the reason as given, home directory
-                                # included, as for MISSING below; the results get it
-                                # written with the home directory as ~.
-                                stored_nothing_reason = home_as_tilde(nothing_reason)
-                                self.validation_manager.update_scanner_state(
+                                aggregated_results = self._record_nothing_to_scan(
                                     display_name,
-                                    registration_status="registered",
-                                    enablement_status="excluded",
-                                    enablement_reason=(
-                                        f"Nothing to scan: {stored_nothing_reason}"
-                                    ),
-                                    queued_for_execution=False,
-                                    execution_completed=False,
-                                )
-                                # targets_attempted=0 is the claim "looked, found
-                                # nothing", which the unified metrics read as
-                                # SKIPPED; excluded stays False because nothing
-                                # deselected it, and dependencies_satisfied True
-                                # because the tool was not needed.
-                                # Guarded: unguarded, a failed write of the
-                                # row's file reached the handler of this
-                                # scanner's filtering, and a scanner that had
-                                # nothing to scan was recorded MISSING.
-                                aggregated_results = self._write_results_guarded(
-                                    display_name,
-                                    ScanResultsContainer(
-                                        scanner_name=display_name,
-                                        status=ScannerStatus.SKIPPED,
-                                        duration=None,
-                                        targets_attempted=0,
-                                        # Explicit, so the serialized report
-                                        # (dumped exclude_unset) carries the
-                                        # full claim rather than an attempt
-                                        # count with no failure accounting.
-                                        targets_failed=0,
-                                        skipped_reason=stored_nothing_reason,
-                                    ),
+                                    nothing_reason,
+                                    nothing_to_scan_names,
                                     aggregated_results,
-                                )
-                                aggregated_results.scanner_results[display_name] = (
-                                    ScannerTargetStatusInfo(
-                                        status=ScannerStatus.SKIPPED,
-                                        dependencies_satisfied=True,
-                                        excluded=False,
-                                        skipped_reason=stored_nothing_reason,
-                                    )
                                 )
                                 continue
 
