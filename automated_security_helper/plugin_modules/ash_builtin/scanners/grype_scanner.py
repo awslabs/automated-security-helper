@@ -21,6 +21,7 @@ from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import empty_tool_config
@@ -224,9 +225,12 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
             " ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree.",
         ),
     ] = None
-    severity_threshold: Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = (
-        None
-    )
+    severity_threshold: Annotated[
+        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
+        Field(
+            description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {SHIPPED_SEVERITY_LEVEL}."
+        ),
+    ] = None
     offline: Annotated[
         bool,
         Field(
