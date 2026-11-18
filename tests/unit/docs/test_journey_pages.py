@@ -103,6 +103,13 @@ body:
   - sample: |
       awslabs/automated-security-helper v{{RELEASE}}
   - prose: |
+      Save a file named `.ashrc.yaml` with this content:
+  - block:
+      twin: {kind: save, path: .ashrc.yaml}
+      lang: yaml
+      body: |
+        global_settings: {}
+  - prose: |
       Install `v{{VERSION}}` and you are done.
 """
 
@@ -140,6 +147,45 @@ REFUSED_JOURNEYS = {
             "  - prose: |\n      Install `v{{VERSION}}`"
         ),
         "the project file defines no function missing()",
+    ),
+    "a save path the step's prose never names": (
+        "      Save a file named `.ashrc.yaml` with this content:\n",
+        "      Save a file with this content:\n",
+        "twin.path '.ashrc.yaml' does not appear in the prose that introduces this step",
+    ),
+    "a save path with a parent component": (
+        "path: .ashrc.yaml}",
+        "path: a/../b.yaml}",
+        "twin.path must be a relative file path",
+    ),
+    "a save path with a shell character": (
+        "path: .ashrc.yaml}",
+        "path: .ashrc.yaml;x}",
+        "twin.path must be a relative file path",
+    ),
+    "a save text with a line that is exactly EOF": (
+        "        global_settings: {}\n",
+        "        global_settings: {}\n        EOF\n",
+        "the save text has a line that is exactly EOF",
+    ),
+    "a project file with a line that is exactly EOF": (
+        "            return d\n        EOF\n",
+        "            return d\n        EOF\n        more\n        EOF\n",
+        "the project's file text has a line that is exactly EOF",
+    ),
+    "a fix text with a line that is exactly EOF": (
+        "  - prose: |\n      Install `v{{VERSION}}`",
+        (
+            "  - block:\n"
+            "      twin: {kind: fix, file-from: project, replaces-function: archive}\n"
+            "      lang: python\n"
+            "      body: |\n"
+            "        def archive(d):\n"
+            "            return d\n"
+            "        EOF\n"
+            "  - prose: |\n      Install `v{{VERSION}}`"
+        ),
+        "the fix text has a line that is exactly EOF",
     ),
     "a key schema v1 does not have": (
         "schema: 1\n",
@@ -251,6 +297,21 @@ def test_the_committed_journey_renders_the_committed_template() -> None:
     generator = _module("_ash_journey_pages", SCRIPT)
     _journey, text = generator.render_checked(JOURNEY, REPO_ROOT)
     assert text == TEMPLATE.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_the_committed_journey_saves_the_file_its_prose_names() -> None:
+    """The twin's save step writes the canonical config name the page tells the reader to create."""
+    generator = _module("_ash_journey_pages", SCRIPT)
+    journey = generator.load_journey(JOURNEY)
+    saves = [
+        (index, segment["block"]["twin"]["path"])
+        for index, segment in enumerate(journey["body"])
+        if segment.get("block", {}).get("twin", {}).get("kind") == "save"
+    ]
+    assert [path for _index, path in saves] == [".ashrc.yaml"]
+    index, path = saves[0]
+    assert path in generator._intro_prose(journey["body"], index)
 
 
 @pytest.mark.unit

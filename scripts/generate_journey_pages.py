@@ -75,6 +75,10 @@ Each refusal names the segment and is a ``--check`` failure:
   (up to the next twin step), or whose block echoes ``exit code`` and has no sample
   showing it; a report step whose sample does not show its ``rule-id``;
 * a fix step that replaces a function the project's file does not define;
+* a save step whose ``path`` does not appear in the prose that introduces the step,
+  whose path holds a character outside ``A-Za-z0-9_./-`` or a ``..`` component, or
+  a project, save or fix text with a line that is exactly ``EOF`` (the twin writes
+  each through a heredoc that line would end);
 * a marker key that is not one the docs runner reads, an unknown key anywhere in
   the file, a YAML anchor, alias or merge key;
 * a render that does not parse back, through ``scripts/docs_checks.py``, to the
@@ -91,7 +95,7 @@ import argparse
 import importlib.util
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -119,6 +123,8 @@ _TWIN_KINDS: dict[str, frozenset[str]] = {
 }
 #: A marker value that needs no quotes in a doctest marker.
 _SAFE_VALUE = re.compile(r"[A-Za-z0-9_@%+,./:-]+")
+#: A save path is written into a shell script, so it is limited to plain path characters.
+_TWIN_PATH = re.compile(r"[A-Za-z0-9_./-]+")
 _MODE = re.compile(r"[a-z][a-z-]*")
 _LANG = re.compile(r"[A-Za-z0-9_+.-]+")
 _EXIT_LINE = re.compile(r"^exit code: (\d+)$", re.MULTILINE)
@@ -301,11 +307,14 @@ def _check_twin_fields(twin: Any, block: dict, where: str) -> None:
         path = twin.get("path")
         if (
             not isinstance(path, str)
-            or not path
+            or not _TWIN_PATH.fullmatch(path)
             or path.startswith("/")
-            or ".." in path
+            or ".." in PurePosixPath(path).parts
         ):
-            raise JourneyError(f"{where}: twin.path must be a relative file path")
+            raise JourneyError(
+                f"{where}: twin.path must be a relative file path of letters, "
+                f"digits and _ . / - with no '..' component, got {path!r}"
+            )
         if lang not in {"yaml", "yml"}:
             raise JourneyError(f"{where}: a save step is a YAML block, not {lang!r}")
     elif kind == "fix":
@@ -385,6 +394,25 @@ def _check_agreement(body: list[dict], index: int) -> None:
                 )
 
 
+def _intro_prose(body: list[dict], index: int) -> str:
+    """The prose segment that introduces the block at ``index``: the nearest one before
+    it, looking back no further than the previous twin step."""
+    for segment in reversed(body[:index]):
+        if "prose" in segment:
+            return segment["prose"]
+        if "twin" in segment.get("block", {}):
+            break
+    return ""
+
+
+def _refuse_heredoc_terminator(text: str, where: str, what: str) -> None:
+    if any(line == "EOF" for line in text.splitlines()):
+        raise JourneyError(
+            f"{where}: {what} has a line that is exactly EOF, which would end the "
+            "heredoc the twin writes it with; change that line"
+        )
+
+
 def _check_twin_steps(body: list[dict]) -> None:
     project: dict | None = None
     for index, segment in enumerate(body):
@@ -393,10 +421,26 @@ def _check_twin_steps(body: list[dict]) -> None:
             continue
         twin = block["twin"]
         where = _where(index, segment)
+        if twin["kind"] == "save":
+            _refuse_heredoc_terminator(block["body"], where, "the save text")
+            if twin["path"] not in _intro_prose(body, index):
+                raise JourneyError(
+                    f"{where}: twin.path {twin['path']!r} does not appear in the "
+                    "prose that introduces this step, so the twin would write a "
+                    "file the page never tells the reader to create; name that "
+                    "file in the prose, or change twin.path to the file it names"
+                )
+        elif twin["kind"] == "fix":
+            _refuse_heredoc_terminator(block["body"], where, "the fix text")
         if twin["kind"] == "project":
             if project is not None:
                 raise JourneyError(f"{where}: a journey has one project step")
             project = block
+            if sum(1 for line in block["body"].splitlines() if line == "EOF") > 1:
+                raise JourneyError(
+                    f"{where}: the project's file text has a line that is exactly "
+                    "EOF, which would end the heredoc early; change that line"
+                )
             try:
                 heredoc_file(block_body(block))
             except JourneyError as exc:

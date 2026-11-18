@@ -39,6 +39,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import posixpath
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -128,15 +129,16 @@ def _twin(journey: dict) -> tuple[str, list[tuple[str, str]]]:
         elif claim["kind"] == "report":
             run(body, "0", claim["rule-id"])
         elif claim["kind"] == "save":
-            directory = posixpath.dirname(claim["path"]) or "."
+            directory = shlex.quote(posixpath.dirname(claim["path"]) or ".")
             run(
-                f"mkdir -p {directory}\ncat > {claim['path']} <<'EOF'\n{body}\nEOF",
+                f"mkdir -p {directory}\n"
+                f"cat > {shlex.quote(claim['path'])} <<'EOF'\n{body}\nEOF",
                 "0",
                 "",
             )
         else:
             fixed = journeys.replace_function(source, body)
-            run(f"cat > {name} <<'EOF'\n{fixed.rstrip()}\nEOF", "0", "")
+            run(f"cat > {shlex.quote(name)} <<'EOF'\n{fixed.rstrip()}\nEOF", "0", "")
     return "# Twin of the local tutorial\n\n" + "\n".join(parts), expectations
 
 

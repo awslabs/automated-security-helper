@@ -307,7 +307,7 @@ body:
       B324 is a false positive here, because the hash only names cache entries. In
       `ash-tutorial`, create a file named `.ashrc.yaml` with this content:
   - block:
-      twin: {kind: save, path: .ash/.ash.yaml}
+      twin: {kind: save, path: .ashrc.yaml}
       lang: yaml
       body: |
         global_settings:
