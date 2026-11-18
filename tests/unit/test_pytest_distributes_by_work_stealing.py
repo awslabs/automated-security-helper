@@ -14,8 +14,9 @@ no test relies on it; nothing in the suite or CI did when it was added.
 
 What this asserts
 -----------------
-1. pytest.ini's addopts has ``--dist worksteal`` and still ``-n auto``: the worker
-   count is left to the host, and no cap is committed (``--maxprocesses`` or a fixed
+1. pytest.ini's addopts has ``--dist worksteal`` and still ``-n logical`` (the
+   pre-psutil meaning of ``auto``; see the pytest.ini comment): the worker count is
+   left to the host, and no cap is committed (``--maxprocesses`` or a fixed
    ``-n``); a local cap belongs on the command line.
 2. No test, conftest or CI invocation asks for grouping, which worksteal would
    silently ignore.
@@ -50,9 +51,9 @@ def test_addopts_steal_work_and_leave_the_worker_count_to_the_host():
     opts = _addopts()
     pairs = list(zip(opts, opts[1:]))
     assert ("--dist", "worksteal") in pairs, opts
-    assert ("-n", "auto") in pairs, opts
+    assert ("-n", "logical") in pairs, opts
     assert not any(o.startswith("--maxprocesses") for o in opts), opts
-    assert [b for a, b in pairs if a in ("-n", "--numprocesses")] == ["auto"], opts
+    assert [b for a, b in pairs if a in ("-n", "--numprocesses")] == ["logical"], opts
 
 
 def test_nothing_asks_for_grouping_that_worksteal_ignores():

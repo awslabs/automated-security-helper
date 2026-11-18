@@ -44,6 +44,7 @@ from __future__ import annotations
 import multiprocessing
 import operator
 import os
+import pickle
 import re
 import signal
 import subprocess
@@ -712,6 +713,24 @@ def test_a_budget_with_no_bound_runs_in_the_worker(pass_budget):
     assert budget.worker_pid == pid
     assert budget.timed_out == ()
     assert budget.remaining(1.0) == 1.0
+
+
+def test_an_unpicklable_request_leaves_the_worker_in_step():
+    """A request that cannot be pickled raises in the caller, as itself, before
+    anything is sent, and the healthy worker is kept (the class docstring's
+    promise). The pickling error used to be caught with the pipe errors, which
+    killed the worker and renamed the caller's own mistake a worker failure."""
+    worker = exclusions_module._EvaluationWorker()
+    try:
+        first = worker.evaluate(5.0, 5.0, "s", os.getpid, ())
+
+        with pytest.raises((pickle.PicklingError, AttributeError, TypeError)):
+            worker.evaluate(5.0, 5.0, "s", operator.add, (lambda: 1, 2))
+
+        assert worker.pid == first
+        assert worker.evaluate(5.0, 5.0, "s", operator.add, (2, 3)) == 5
+    finally:
+        worker.close()
 
 
 def test_a_null_scan_timeout_gives_a_client_pattern_a_finite_wait():

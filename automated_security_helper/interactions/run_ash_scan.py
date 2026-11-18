@@ -61,6 +61,7 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_CODES,
     ASH_EXIT_USAGE_ERROR,
     ASH_WORK_DIR_NAME,
+    PRECOMMIT_MODE_OUTPUT_FORMATS,
     PRECOMMIT_MODE_SCANNERS,
     is_offline_mode,
 )
@@ -6317,6 +6318,80 @@ def _folded_scanner_allowlist(opts: ScanOptions) -> List[str]:
     return list(opts.scanners or []) + list(opts.add_scanners or [])
 
 
+def _config_chooses_reports(opts: ScanOptions) -> bool:
+    """Whether the resolved configuration makes any report choice of its own.
+
+    True when the config file (or an ``--config-overrides`` entry) sets
+    ``output_formats`` or writes anything under ``reporters``: either is an
+    explicit choice about what this scan reports, and the precommit default
+    below must not override it. A ``reporters`` section counts whole rather
+    than key by key because a reporter an operator enabled there (``reporters.
+    gitlab-sast.enabled: true``) has to run, and the format allowlist the mode
+    default installs would silently filter it out.
+
+    Read as :func:`_resolved_precommit_config` reads the ``precommit`` section:
+    the host-side resolution, because the choice has to exist before
+    ``ASHScanOrchestrator.create`` is called with the formats. A resolution
+    that fails answers True -- the conservative side, which keeps today's
+    behavior -- and the orchestrator's own resolve then refuses the unloadable
+    config with exit 3 before any reporter matters.
+    """
+    overridden = {
+        override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        for override in opts.config_overrides or []
+    }
+    if any(
+        key in ("output_formats", "reporters")
+        or key.startswith(("output_formats.", "reporters."))
+        for key in overridden
+    ):
+        return True
+    try:
+        config, from_file = _host_resolved_config(opts)
+    except Exception:
+        return True
+    if not from_file:
+        return False
+    from automated_security_helper.config.recorded_config import _sets
+
+    return _sets(config, ["output_formats"]) or _sets(config, ["reporters"])
+
+
+def _precommit_output_formats(opts: ScanOptions, logger) -> List[ExportFormat]:
+    """The ``--output-formats`` value the orchestrator is created with.
+
+    Precommit mode defaults to writing only the reports the pre-commit hook
+    consumes (``PRECOMMIT_MODE_OUTPUT_FORMATS``: the text summary, and the
+    SARIF report the exit code is derived from), because the hook reads the
+    exit code and the console and nothing reads the other report files, while
+    writing them costs every commit time. Any explicit choice wins unchanged,
+    lowest to highest:
+
+    1. The mode default, in precommit mode only; every other mode keeps the
+       full configured report set (an empty list here means "no filter").
+    2. The config file: setting ``output_formats``, or configuring anything
+       under ``reporters``, keeps today's behavior (the config's own choice,
+       with no mode default on top). See :func:`_config_chooses_reports`.
+    3. The command line: ``--output-formats`` is handed through as given,
+       whatever the mode or the config says.
+
+    docs/content/how-to/pre-commit.md documents the precommit default.
+    """
+    if opts.output_formats:
+        return list(opts.output_formats)
+    if opts.mode != RunMode.precommit:
+        return []
+    if _config_chooses_reports(opts):
+        return []
+    formats = [ExportFormat(name) for name in PRECOMMIT_MODE_OUTPUT_FORMATS]
+    logger.verbose(
+        "precommit mode writes only the reports the hook reads: "
+        f"{[fmt.value for fmt in formats]}. Pass --output-formats, or set "
+        "output_formats or reporters in the ASH config, to choose others."
+    )
+    return formats
+
+
 def _staged_findings_filter_set(source_dir: Path, staged_files: List[str]) -> Set[Path]:
     """The staged files as resolved absolute paths, for the engine's filter.
 
@@ -6390,6 +6465,7 @@ def _run_local_mode(
             )
 
         final_scanners = _selected_scanners(opts, logger)
+        final_output_formats = _precommit_output_formats(opts, logger)
 
         # --mode precommit --staged: the staged files are the scan's target set.
         # Read here, once, and handed to the orchestrator, which limits the
@@ -6450,7 +6526,7 @@ def _run_local_mode(
                 else ExecutionStrategy.SEQUENTIAL
             ),
             no_cleanup=not opts.cleanup,
-            output_formats=opts.output_formats or [],
+            output_formats=final_output_formats,
             show_progress=final_show_progress,
             simple_mode=opts.simple,
             show_summary=opts.show_summary,

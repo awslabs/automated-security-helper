@@ -6,12 +6,12 @@ ASH has three ways to keep a finding from failing a scan, and they differ in wha
 
 | | Suppression | Ignore path | Scanner exclusion |
 |---|---|---|---|
-| Set in | `global_settings.suppressions`, or an inline `ash-ignore` comment | `global_settings.ignore_paths` | the scanner's options, such as bandit `excluded_paths`, checkov `skip_path`, semgrep and opengrep `exclude`, and syft `exclude` |
+| Set in | `global_settings.suppressions`, or an inline `ash-ignore` comment | `global_settings.ignore_paths` | the scanner's options, such as bandit `excluded_paths`, checkov `skip_path`, semgrep and opengrep `exclude`, syft `exclude`, and guarddog `excluded_paths` |
 | Matches | a path, optionally narrowed by rule ID, line range, package, or symbol | a path | what the scanner's tool matches |
 | Is the file scanned? | Yes | Passed to every scanner; some skip the files, others scan them | No |
 | Is the finding in the results? | Yes, marked suppressed with the reason | No | No, it never existed |
 | Counts toward the gate? | No | No | No |
-| Expiration | Enforced | Enforced | Enforced for bandit `excluded_paths`, checkov `skip_path`, and syft `exclude`; none for the others |
+| Expiration | Enforced | Enforced | Enforced for bandit `excluded_paths`, checkov `skip_path`, syft `exclude`, and guarddog `excluded_paths`; none for the others |
 
 A scanner's own inline suppression comment works one of two ways, depending on the tool. bandit (`# nosec`) and detect-secrets (`# pragma: allowlist secret`) drop the finding, so ASH never sees it, as with a scanner exclusion. semgrep and opengrep (`# nosemgrep`) and checkov (`checkov:skip=<check>:<reason>`) report the finding with a SARIF suppression, and ASH keeps it in the results as a suppressed finding with the tool's justification, which can be empty. Either way the finding does not count toward the gate. For other scanners, see the tool's own documentation.
 

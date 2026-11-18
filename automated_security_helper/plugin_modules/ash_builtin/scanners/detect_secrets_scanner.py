@@ -1938,13 +1938,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         for; with no root, in the path as given.
 
         The patterns are the baseline's, so the scanned repository's or a
-        delivered config's, and they run here in ASH's own process, before the
-        worker and its time limit start. ``timeout`` is the scanner's
-        ``scan_timeout``: the whole filter runs under it in a child process
-        (``evaluated_within``, ``files_kept_by_patterns``), and a filter still
-        running at the deadline is killed and raises ScannerError naming
-        ``source``. None runs it unbounded, inline, as ``scan_timeout: null``
-        runs the scan.
+        delivered config's, and they run here before the worker and its time
+        limit start. ``timeout`` is the scanner's ``scan_timeout``: the whole
+        filter runs under it in a child process (``evaluated_within``,
+        ``files_kept_by_patterns``), and a filter still running at the deadline
+        is killed and raises ScannerError naming ``source``. None
+        (``scan_timeout: null`` leaves the SCAN unbounded) still runs the
+        filter in the child under the scanners' default ``scan_timeout``
+        (``evaluated_within``'s ``_unbounded_ceiling``), never without a
+        deadline and never inline: the pattern is the client's, and inline it
+        would hold this process's interpreter lock for the whole search.
 
         Args:
             files: List of file paths to filter.
