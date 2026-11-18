@@ -2702,6 +2702,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2766,6 +2770,62 @@ SOFTWARE.
     
   
     ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GuardDog scanner (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hadolint (community plugin)
   
 
     
@@ -3569,17 +3629,17 @@ shows how to turn them on and off.</p>
 <tr>
 <td>Python dependencies (<code>requirements.txt</code>, lockfiles)</td>
 <td>grype, trivy, syft</td>
-<td>trivy-repo</td>
+<td>guarddog, trivy-repo</td>
 </tr>
 <tr>
 <td>npm, Yarn, and pnpm dependencies</td>
 <td>npm-audit, grype, trivy, syft</td>
-<td>trivy-repo</td>
+<td>guarddog, trivy-repo</td>
 </tr>
 <tr>
 <td>Other dependency manifests and lockfiles (<code>go.mod</code>, <code>pom.xml</code>, and the others grype and trivy recognize)</td>
 <td>grype, trivy, syft</td>
-<td>trivy-repo</td>
+<td>guarddog, trivy-repo</td>
 </tr>
 <tr>
 <td>CloudFormation templates</td>
@@ -3604,7 +3664,7 @@ shows how to turn them on and off.</p>
 <tr>
 <td>Dockerfiles</td>
 <td>checkov</td>
-<td>trivy-repo</td>
+<td>hadolint, trivy-repo</td>
 </tr>
 <tr>
 <td>GitHub Actions workflows</td>
@@ -3614,7 +3674,7 @@ shows how to turn them on and off.</p>
 <tr>
 <td>Composite actions (<code>action.yml</code>)</td>
 <td>zizmor</td>
-<td></td>
+<td>guarddog</td>
 </tr>
 <tr>
 <td>Secrets, in any file</td>
@@ -3776,6 +3836,20 @@ them to the tool.</p>
 <td>ferret-scan</td>
 <td>Secrets</td>
 <td>Whole directory, including files <code>.gitignore</code> excludes</td>
+<td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td>guarddog</td>
+<td>SCA</td>
+<td>Selected files: for each directory that holds a package manifest (<code>setup.py</code>, <code>package.json</code>, <code>go.mod</code>, <code>action.yml</code>, a <code>*.gemspec</code>, <code>Cargo.toml</code>, and the others the <a href="../../docs/plugins/community/guarddog-plugin/">GuardDog page</a> lists), a temporary copy of the files in the scan set under it</td>
+<td>yes</td>
+<td>no</td>
+</tr>
+<tr>
+<td>hadolint</td>
+<td>IaC</td>
+<td>Selected files: Dockerfiles, named <code>Dockerfile</code>, <code>Containerfile</code>, <code>*.Dockerfile</code>, or <code>Dockerfile.*</code>, with that exact capitalization</td>
 <td>no</td>
 <td>no</td>
 </tr>

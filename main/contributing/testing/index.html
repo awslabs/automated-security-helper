@@ -2537,6 +2537,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2601,6 +2605,62 @@ SOFTWARE.
     
   
     ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GuardDog scanner (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hadolint (community plugin)
   
 
     
@@ -3781,7 +3841,7 @@ the <code>integration</code> marker. A test marked <code>slow</code> is skipped 
 <code>pytest --run-slow</code>. Both flags only lift the skip; they do not collect anything the
 default run does not. To run the suite the way the <code>integration-test</code> CI job does:</p>
 <!-- doctest: illustrative reason="runs the integration suite in a checkout of this repository" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/integration<span class="w"> </span>tests/unit/cli/mcp/test_source_delivery_scan_e2e.py<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/integration<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--ignore<span class="o">=</span>tests/integration/docs<span class="w"> </span>--run-integration<span class="w"> </span>--run-slow<span class="w"> </span>-n<span class="w"> </span><span class="m">0</span>
 </span></code></pre></div>
 <p>The job runs <code>tests/integration/docs</code>, the docs examples, as a separate step; see

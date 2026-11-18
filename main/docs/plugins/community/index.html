@@ -2541,6 +2541,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2605,6 +2609,62 @@ SOFTWARE.
     
   
     ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="guarddog-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GuardDog scanner (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="hadolint-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hadolint (community plugin)
   
 
     
@@ -3391,10 +3451,12 @@ SOFTWARE.
 <h3 id="security-scanners">Security Scanners<a class="headerlink" href="#security-scanners" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong><a href="ferret-scan-plugin/">Ferret Scan Plugin</a></strong> - Integrates Ferret Scan for comprehensive sensitive data detection (credit cards, passports, SSNs, API keys, secrets, and more)</li>
+<li><strong><a href="guarddog-plugin/">GuardDog Plugin</a></strong> (<code>ash_guarddog_plugins</code>) - Malicious-package heuristics for PyPI, npm, Go, GitHub Actions, RubyGems and crates packages (pending licensing review)</li>
+<li><strong><a href="hadolint-plugin/">hadolint Plugin</a></strong> (<code>ash_hadolint_plugins</code>) - Lints Dockerfiles and Containerfiles with hadolint and its ShellCheck integration (pending licensing review)</li>
 <li><strong><a href="snyk-plugin/">Snyk Code Plugin</a></strong> - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities</li>
 <li><strong><a href="trivy-plugin/">Trivy Plugin</a></strong> - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning</li>
 </ul>
-<p>These three ship inside ASH. Each takes part in a scan only when that scan names its
+<p>These five ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in <code>ash_plugin_modules</code> or <code>--ash-plugin-modules</code>, as its page shows.
 The MCP <code>list_scanners</code> tool reports them either way; listing one does not add it to
 any scan.</p>
@@ -3470,7 +3532,7 @@ any scan.</p>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>my_plugin
 </span></code></pre></div>
 <blockquote>
-<p>[!CAUTION] &gt; <strong>Community Plugin Security</strong>: The community plugins listed above ship with ASH, in <code>automated_security_helper/plugin_modules</code>, and need no separate package. <code>ash scan</code> loads one only when its module is listed in <code>ash_plugin_modules</code> or passed with <code>--ash-plugin-modules</code>. Each runs an external tool: the container image includes trivy, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with <code>pip install</code>), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.</p>
+<p>[!CAUTION] &gt; <strong>Community Plugin Security</strong>: The community plugins listed above ship with ASH, in <code>automated_security_helper/plugin_modules</code>, and need no separate package. <code>ash scan</code> loads one only when its module is listed in <code>ash_plugin_modules</code> or passed with <code>--ash-plugin-modules</code>. Each runs an external tool: the container image includes trivy, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with <code>pip install</code>), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.</p>
 </blockquote>
 
 

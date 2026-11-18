@@ -113,6 +113,14 @@
          <lastmod>2026-11-18</lastmod>
     </url>
     <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/guarddog-plugin/</loc>
+         <lastmod>2026-11-18</lastmod>
+    </url>
+    <url>
+         <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/hadolint-plugin/</loc>
+         <lastmod>2026-11-18</lastmod>
+    </url>
+    <url>
          <loc>https://awslabs.github.io/automated-security-helper/latest/docs/plugins/community/snyk-plugin-setup/</loc>
          <lastmod>2026-11-18</lastmod>
     </url>

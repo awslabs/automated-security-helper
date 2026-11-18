@@ -2802,6 +2802,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2866,6 +2870,62 @@ SOFTWARE.
     
   
     ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GuardDog scanner (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hadolint (community plugin)
   
 
     
@@ -4342,8 +4402,8 @@ client:</p>
   suppression carries <code>properties.clientSupplied: true</code>.</li>
 <li>Files under a delivered ignore path are still scanned. Their findings are kept and marked
   suppressed instead of being dropped.</li>
-<li>Path exclusions in scanner options, such as bandit's <code>excluded_paths</code>, are taken out of the
-  options and handled the same way, and a delivered <code>scanners.trivy-repo.options.ignore_file</code>
+<li>Path exclusions in scanner options, such as bandit's and guarddog's <code>excluded_paths</code>, are
+  taken out of the options and handled the same way, and a delivered <code>scanners.trivy-repo.options.ignore_file</code>
   becomes marked suppressions instead of being passed to trivy. <a href="../../concepts/trust-model/#client-supplied">Configuration trust
   model</a> says how each is matched.</li>
 </ul>

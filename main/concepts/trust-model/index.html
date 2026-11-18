@@ -2669,6 +2669,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2733,6 +2737,62 @@ SOFTWARE.
     
   
     ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/guarddog-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GuardDog scanner (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/hadolint-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hadolint (community plugin)
   
 
     
@@ -3618,7 +3678,7 @@ SOFTWARE.
 </span></code></pre></div>
 <p>The default list also names <code>sandbox</code>, <code>ash_plugin_modules</code>, <code>global_settings.mcp</code>, suppressions, and ignore paths, and delivered files are checked differently for those. Sandbox settings and plugin modules may restrict the server's own but not widen them: a delivered file whose own <code>sandbox</code> section gives a scanner a network or an <code>extra_read_paths</code> entry the server's config does not, or sets a sandbox mode other than the server's when the server's mode is not <code>off</code>, or whose own <code>ash_plugin_modules</code> list loads a module the table above keeps out, is refused the same way. Any other sandbox grant or module a delivered file asks for is dropped, as for a repository file. A delivered file's <code>global_settings.mcp</code> section has no effect, and suppressions and ignore paths are honored and marked, as described next. Under the default policy a delivered config can still disable scanners, turn the reporters that write only local files on or off and set their options, apart from <code>gitlab-sast</code>'s <code>exclude_suppressed</code>, and raise severity thresholds. It cannot turn a reporter that sends findings off the host on or off: its <code>enabled: false</code> for one of them is not refused, but it has no effect, and each runs as the server's config says, or by the reporter's own default where that config sets nothing. <a href="../../how-to/mcp-server/">Run the MCP server</a> covers running the server.</p>
 <h2 id="client-supplied">Client-supplied suppressions and ignore paths<a class="headerlink" href="#client-supplied" title="Permanent link">&para;</a></h2>
-<p>In a scan whose config includes an MCP-client file, each suppression and ignore path that file sets is marked <code>client_supplied: true</code>, unless it matches an entry from an operator source. Per-scanner path exclusions that file sets (bandit <code>excluded_paths</code>, checkov <code>skip_path</code>, semgrep and opengrep <code>exclude</code>, syft <code>exclude</code>, and ferret-scan <code>exclude_patterns</code>) are taken out of the scanner's options and handled the same way. Each is matched the way its scanner reads it: a bandit entry as the <code>**/&lt;path&gt;/**</code> glob ASH passes bandit, against the file's absolute path; a checkov entry as a regular expression found in, or a substring of, the absolute path of the file or of a directory above it; and the others as globs that match the path or any directory in it. A finding the matching misses is reported unsuppressed, never hidden. A delivered <code>scanners.trivy-repo.options.ignore_file</code> is not passed to trivy. When it is a regular file inside the scanned tree, each unexpired ID in it suppresses and marks the trivy-repo findings with that rule ID; any other file, including a symbolic link, is not read.</p>
+<p>In a scan whose config includes an MCP-client file, each suppression and ignore path that file sets is marked <code>client_supplied: true</code>, unless it matches an entry from an operator source. Per-scanner path exclusions that file sets (bandit <code>excluded_paths</code>, checkov <code>skip_path</code>, semgrep and opengrep <code>exclude</code>, syft <code>exclude</code>, ferret-scan <code>exclude_patterns</code>, and guarddog <code>excluded_paths</code>) are taken out of the scanner's options and handled the same way. Each is matched the way its scanner reads it: a bandit entry as the <code>**/&lt;path&gt;/**</code> glob ASH passes bandit, against the file's absolute path; a checkov entry as a regular expression found in, or a substring of, the absolute path of the file or of a directory above it; a guarddog entry as a path pattern matched against the whole path of the file relative to the scanned directory, as GuardDog's own filter does, so a directory name alone matches no file; and the others as globs that match the path or any directory in it. A finding the matching misses is reported unsuppressed, never hidden. A delivered <code>scanners.trivy-repo.options.ignore_file</code> is not passed to trivy. When it is a regular file inside the scanned tree, each unexpired ID in it suppresses and marks the trivy-repo findings with that rule ID; any other file, including a symbolic link, is not read.</p>
 <p>The mark changes what the entry does. A client-supplied ignore path or exclusion does not keep files from being scanned or converted. The files are scanned, and each finding the entry would have hidden is kept in the results as a suppressed finding. Like every suppressed finding, it does not count toward <code>fail_on_findings</code>.</p>
 <p>The mark shows up in:</p>
 <ul>

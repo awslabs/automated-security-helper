@@ -2835,6 +2835,10 @@ SOFTWARE.
       
         
       
+        
+      
+        
+      
     
     
     
@@ -2899,6 +2903,62 @@ SOFTWARE.
     
   
     ASH Ferret Scan Plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/community/guarddog-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GuardDog scanner (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/community/hadolint-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hadolint (community plugin)
   
 
     
@@ -4314,12 +4374,15 @@ skipped for lacking a declaration, and never run unsandboxed.</p>
 <li>trivy-repo shares the builtin trivy's declaration: a network, the database cache and
   the <code>TRIVY_</code> variables.</li>
 <li>ferret-scan asks only for its <code>FERRET_</code> variables.</li>
+<li>hadolint and GuardDog take the strict default. hadolint's <code>HADOLINT_*</code> variables
+  and user-level config are not passed in, and GuardDog's <code>verify</code> runs without a
+  network.</li>
 </ul>
 <p>A file outside the source tree that a scanner option names is not mounted (cfn-guard's
 <code>rules_paths</code> needs no mount: ASH copies those rules into the scanner run's own
 directory above): a
 <code>config_file</code> of actionlint, gitleaks, cfn-lint,
-zizmor, trivy or trivy-repo, gitleaks' <code>baseline_path</code>, trivy's <code>ignore_file</code>, a
+zizmor, trivy, trivy-repo or hadolint, gitleaks' <code>baseline_path</code>, trivy's <code>ignore_file</code>, a
 <code>secret_config_file</code> of trivy or trivy-repo, trivy-repo's <code>module_dir</code>, or a
 path-valued actionlint <code>shellcheck</code> or <code>pyflakes</code>. Nor do gitleaks' <code>GITLEAKS_*</code> variables or
 zizmor's GitHub token reach a sandbox. Grants derived from options or the environment
@@ -4580,7 +4643,9 @@ another name refers to (see <a href="#what-a-sandboxed-scanner-can-do">What a sa
 <li>Kernel defects. All backends share the host kernel.</li>
 </ul>
 <h2 id="missing">When a scanner cannot be sandboxed<a class="headerlink" href="#missing" title="Permanent link">&para;</a></h2>
-<p>ASH records a scanner it cannot sandbox as <code>MISSING</code>, and under the default
+<p>Under <code>--sandbox auto</code>, ASH records a scanner it cannot sandbox because no backend
+works as <code>MISSING</code>; a backend you named that is unavailable, or a sandbox refused for
+a reason other than availability, is <code>ERROR</code>. Either way, under the default
 <code>fail_on_incomplete_scanners</code> the scan exits 1. The reason is in the scan output, in
 <code>ash.log</code>, and in the scanner's <code>missing_reason</code> in <code>ash_aggregated_results.json</code>:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ERROR    bandit not run: scanner sandbox unavailable: firejail is not installed
@@ -4771,13 +4836,13 @@ options above. The command still exits 0, and the only sign is a warning that
 options, without <code>--quiet</code>, and requires a mount namespace other than ASH's own, since
 every sandbox firejail builds has one. When the command reports ASH's namespace, or
 firejail prints that warning, firejail is unavailable with that reason:
-<code>--sandbox firejail</code> records each scanner <code>MISSING</code>, and <code>--sandbox auto</code> moves on to
-Landlock.</p>
+<code>--sandbox firejail</code> records each scanner <code>ERROR</code> with that reason, and <code>--sandbox auto</code>
+moves on to Landlock.</p>
 <h3 id="linux-landlock">Linux: Landlock<a class="headerlink" href="#linux-landlock" title="Permanent link">&para;</a></h3>
 <p>Landlock is an unprivileged kernel LSM, so this mode needs nothing installed. It
 needs Landlock ABI 3 (Linux 6.2) or later, the first that controls truncation: on an
 older kernel a scanner could truncate files it may only read, so ASH reports
-Landlock unavailable there. <code>--sandbox landlock</code> then records each scanner <code>MISSING</code>
+Landlock unavailable there. <code>--sandbox landlock</code> then records each scanner <code>ERROR</code>
 with the ABI in the reason, and <code>auto</code> does not use it. ASH starts a small wrapper
 (<code>utils/sandbox/landlock_exec.py</code>, standard library only) that restricts itself and
 then <code>exec</code>s the scanner:</p>
@@ -4906,8 +4971,9 @@ unified log says which service it was:</p>
 documents SBPL as private. It still works on current macOS and is what Apple's own
 tools and several other developer tools use, but a future macOS could remove or change
 it without notice. ASH probes it at startup like every other backend, so removal would
-show up as "sandbox-exec unavailable" and <code>MISSING</code> scanners, not as an unsandboxed
-scan.</p>
+show up as "sandbox-exec unavailable": <code>ERROR</code> scanners under <code>--sandbox sandbox-exec</code>
+and <code>MISSING</code> ones under <code>auto</code>, which has no other macOS backend, not as an
+unsandboxed scan.</p>
 <h3 id="windows">Windows<a class="headerlink" href="#windows" title="Permanent link">&para;</a></h3>
 <p>There is no sandbox backend on Windows. With <code>--sandbox auto</code>, every scanner is
 reported <code>MISSING</code> with:</p>
