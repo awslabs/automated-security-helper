@@ -565,6 +565,9 @@ class TestTheWeeklyRunWhenOneRepositoryRefusesTheToken:
                         "ruby_version": ">= 0",
                     }
                 ]
+            elif pin.ecosystem == checker.BUNDLED:
+                # Listed as held and never looked up: its version is its wheel's.
+                continue
             else:
                 raise AssertionError(f"no fake upstream for {pin.ecosystem}")
         assert _TRIVY_LATEST in answers, "trivy is no longer a GitHub-release pin"
