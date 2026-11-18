@@ -2,7 +2,7 @@ import re
 import threading
 from typing import Annotated, Any, ClassVar, FrozenSet, Literal, Set, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler
+from pydantic import ConfigDict, Field, ValidatorFunctionWrapHandler
 from pydantic import ValidationError, ValidationInfo, WrapValidator, model_validator
 from pydantic_core import PydanticUseDefault
 
@@ -143,14 +143,6 @@ def report_file_name(key: str) -> WrapValidator:
         raise PydanticUseDefault from None
 
     return WrapValidator(_validate)
-
-
-class BuilderOptionsBase(BaseModel):
-    """Base class for builder options."""
-
-    model_config = ConfigDict(
-        extra="allow", arbitrary_types_allowed=True, hide_input_in_errors=True
-    )
 
 
 class PluginOptionsBase(RedactedSection):

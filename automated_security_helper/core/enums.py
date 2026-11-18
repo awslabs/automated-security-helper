@@ -48,11 +48,6 @@ class PackageManager(str, Enum):
     URL = "url"  # For direct URL downloads
 
 
-class ConfigFormat(str, Enum):
-    json = "json"
-    yaml = "yaml"
-
-
 class ExecutionPhase(str, Enum):
     """Phases of ASH execution."""
 
