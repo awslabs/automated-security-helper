@@ -1,56 +1,54 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Claims of the six docs pages that no claims test, runnable block or inventory held.
+"""Claims of six docs pages that no claims test, runnable block or inventory held.
 
-A coverage audit found these pages with none of the three: how-to/deploy-on-aws.md,
-integrations.md, reference/configuration.md, and developer-guide/interface-design.md,
-interface-review.md and high-end-design-review.md. Each test here follows the pattern of
-test_page_claims.py, in two halves: ``assert_on_page`` checks that the sentence is still
-on its page, and the test then probes the code, the committed deployment templates or the
-assets that make it true. A test goes red when either half moves.
+A classification of the docs found these pages with nothing that runs against the
+sentences they make about behavior: how-to/deploy-on-aws.md, how-to/aidlc-workflows.md,
+how-to/express-mode.md, integrations.md, and the two builtin scanner pages
+docs/plugins/builtin/gitleaks.md and docs/plugins/builtin/zizmor.md. Each test here
+follows the pattern of test_page_claims.py, in two halves: ``assert_on_page`` checks that
+the sentence is still on its page, and the test then probes the code, the committed
+deployment templates or the plugin files that make it true. A test goes red when either
+half moves.
 
-What each page now has pinned, and where a claim on it is not pinned:
+What each page has pinned, and where a claim on it is not:
 
-- how-to/deploy-on-aws.md: the five targets and the template and module each names, the
-  ``AshVersion`` default and the Terraform ``ash_version`` that has none, the ingress CIDR
-  that rejects ``0.0.0.0/0``, the empty auth-header defaults, the sandbox backends the
-  image lacks, ``ash mcp --stateless-http``, and the unpublished ``ASHScanStep``. Not
-  pinned: the network defaults of the Terraform modules, and what a deployed stack does.
-- integrations.md: what each pre-commit hook runs, the sixteen agent platforms and their
+- deploy-on-aws: the five targets and the template and module each names, the
+  ``AshVersion`` default and the Terraform ``ash_version`` that has none, the ingress
+  CIDR that rejects ``0.0.0.0/0``, the empty auth-header defaults, the sandbox backends
+  the image lacks, ``ash mcp --stateless-http``, and the unpublished ``ASHScanStep``.
+  Not pinned: the network defaults of the Terraform modules, and what a deployed stack
+  does.
+- aidlc-workflows: the plugin directory, its manifest and the two checkpoint commands,
+  its rules, and the suppression fields the page tells an agent to record. Not pinned:
+  anything AI-DLC itself does (its commands are that project's).
+- express-mode: the idle default and its two settings, the options of ``ash express``
+  and of ``ash scan``, the private socket directory, the environment the daemon keeps
+  and the one marker a request drops. Not pinned: forking, the handshake and the
+  fallback, which need a running daemon.
+- integrations: what each pre-commit hook runs, the sixteen agent platforms and their
   directories, ``ash-mode`` of the reusable workflow, the three ways to name plugin
   modules, and the AWS reporters the page lists.
-- reference/configuration.md: the order in which discovery looks for a config file, the
-  names read only from the source directory, the ``[tool.ash]`` rule for pyproject.toml,
-  and the bounds on an ``extends`` chain. The tables of keys are generated from the
-  models and held fresh by scripts/generate_config_reference.py --check.
-- developer-guide/interface-design.md: the palette of the three surfaces, the footer
-  credit, the motion timings, the vendored Anime.js and the canonical editor workflow.
-  The site stylesheet declares no critical color and no dark low color, although the
-  page says the site stylesheet declares the palette's variables; that gap is recorded
-  in ``SITE_STYLESHEET_LACKS`` and not asserted either way.
-- developer-guide/interface-review.md: the files it names, the commands of its surface
-  inventory and the nineteen reporters of its table.
-- developer-guide/high-end-design-review.md: the nineteen shipped reporters it lists.
-  Not pinned: its seven navigation groups (Start here, Scan & triage, ...), which are
-  not the top-level entries of docs/content/.nav.yml (Who uses ASH, Getting started,
-  How-to guides, Concepts, Reference, Plugins, Contributing, FAQ, Support).
+- gitleaks and zizmor: the options and their defaults, the flags ASH always passes, the
+  exit codes that count as success, and for zizmor the environment variables removed
+  and the severity table. Not pinned: the re-scan of a ``.gitleaksignore`` and every
+  sandbox behavior.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import pytest
 import yaml
 
-from tests.snapshot.support.reporter_catalog import (
-    AWS_REPORTER_NAMES,
-    BUILTIN_REPORTER_NAMES,
-)
+from tests.snapshot.support.reporter_catalog import AWS_REPORTER_NAMES
 from tests.unit.docs.test_page_claims import CONTENT, assert_on_page
 
 pytestmark = pytest.mark.unit
@@ -58,29 +56,21 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEPLOY_PAGE = "how-to/deploy-on-aws.md"
 INTEGRATIONS_PAGE = "integrations.md"
-CONFIGURATION_PAGE = "reference/configuration.md"
-INTERFACE_DESIGN = "developer-guide/interface-design.md"
-INTERFACE_REVIEW = "developer-guide/interface-review.md"
-HIGH_END_REVIEW = "developer-guide/high-end-design-review.md"
+AIDLC_PAGE = "how-to/aidlc-workflows.md"
+EXPRESS_PAGE = "how-to/express-mode.md"
+GITLEAKS_PAGE = "docs/plugins/builtin/gitleaks.md"
+ZIZMOR_PAGE = "docs/plugins/builtin/zizmor.md"
 
 CDK_TEMPLATES = REPO_ROOT / "deploy" / "cdk" / "templates"
 TERRAFORM_MODULES = REPO_ROOT / "deploy" / "terraform" / "modules"
-SITE_STYLESHEET = CONTENT / "assets" / "stylesheets" / "ash.css"
-REPORT_STYLESHEET = (
+AIDLC_PLUGIN = REPO_ROOT / "examples" / "aidlc-workflows" / "ash-scan"
+SCANNERS = (
     REPO_ROOT
     / "automated_security_helper"
     / "plugin_modules"
     / "ash_builtin"
-    / "reporters"
-    / "assets"
-    / "ash-report.css"
+    / "scanners"
 )
-
-#: Colors of the page's palette table that the site stylesheet does not carry: critical
-#: and error (both themes) and the dark low-severity color. The page says the site and
-#: offline report styles both declare the palette's variables; the offline report
-#: stylesheet carries every color, the site stylesheet all but these three.
-SITE_STYLESHEET_LACKS = frozenset({"#ff7a7a", "#db0000", "#f2cd54"})
 
 
 def _page_lines(page: str) -> List[str]:
@@ -112,6 +102,10 @@ def _click_commands():
     from typer.main import get_command
 
     return get_command(app)
+
+
+def _options(command) -> set:
+    return {opt for p in command.params for opt in (*p.opts, *p.secondary_opts)}
 
 
 # --------------------------------------------------------------------------- #
@@ -221,8 +215,7 @@ def test_the_stateless_mcp_option_the_page_relies_on_exists():
         "The targets need options that no release up to 3.7.1 has: stateless MCP "
         "(`ash mcp --stateless-http`)",
     )
-    options = {opt for p in _click_commands().commands["mcp"].params for opt in p.opts}
-    assert "--stateless-http" in options
+    assert "--stateless-http" in _options(_click_commands().commands["mcp"])
 
 
 def test_the_scan_step_construct_exists_and_is_not_published():
@@ -322,306 +315,287 @@ def test_the_aws_reporters_the_page_lists_are_registered():
 
 
 # --------------------------------------------------------------------------- #
-# reference/configuration.md
+# how-to/aidlc-workflows.md
 # --------------------------------------------------------------------------- #
 
 
-def _the_discovery_list_on_the_page() -> List[str]:
-    lines = _page_lines(CONFIGURATION_PAGE)
-    start = next(
-        i for i, line in enumerate(lines) if line.startswith("## Where ASH finds")
-    )
-    listed = []
-    for line in lines[start + 1 :]:
-        if line.startswith("## "):
-            break
-        found = re.match(r"^\d+\. `([^`]+)`$", line)
-        if found:
-            listed.append(found.group(1))
-    return listed
-
-
-def _every_source(directory: Path) -> None:
-    """Every file discovery looks for, present in ``directory``."""
-    from automated_security_helper.core.constants import (
-        ASH_CONFIG_FILE_NAMES,
-        ASH_RC_FILE_NAMES,
-    )
-
-    for name in ASH_CONFIG_FILE_NAMES:
-        (directory / ".ash").mkdir(exist_ok=True)
-        (directory / name).write_text("project_name: a\n", encoding="utf-8")
-        (directory / ".ash" / name).write_text("project_name: a\n", encoding="utf-8")
-    for name in ASH_RC_FILE_NAMES:
-        (directory / name).write_text("", encoding="utf-8")
-    (directory / "pyproject.toml").write_text("[tool.ash]\n", encoding="utf-8")
-
-
-def test_discovery_looks_for_a_config_file_in_the_order_the_page_lists(tmp_path):
+def test_the_aidlc_plugin_the_page_points_to_is_there_and_named_as_the_page_says():
     assert_on_page(
-        CONFIGURATION_PAGE,
-        "Otherwise ASH looks in the scan's source directory and uses the first of "
-        "these it finds.",
+        AIDLC_PAGE,
+        "ASH's repository ships an AI-DLC plugin,",
     )
-    from automated_security_helper.config.config_sources import discovery_candidates
+    manifest = json.loads(
+        (AIDLC_PLUGIN / ".aidlc-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    assert manifest["name"] == "ash-scan"
+    assert manifest["dependencies"] == ["core"]
 
-    _every_source(tmp_path)
-    found = [str(p.relative_to(tmp_path)) for p in discovery_candidates(tmp_path)]
-    assert found == _the_discovery_list_on_the_page()
-    assert len(found) == 21
 
-
-def test_the_first_source_wins_and_the_others_are_ignored_with_a_warning(tmp_path):
+def test_the_plugin_runs_the_two_scans_at_the_two_checkpoints_the_page_names():
     assert_on_page(
-        CONFIGURATION_PAGE,
-        "Sources are never merged: every other one that exists is ignored, with a "
-        "warning naming it.",
+        AIDLC_PAGE,
+        "the developer agent runs `ash --mode precommit --no-progress` and fixes "
+        "actionable findings, or records suppressions with reasons and expiration "
+        "dates, before the Unit's completion handoff.",
     )
-    from automated_security_helper.config.config_sources import (
-        discover_config_source,
-        discovery_warnings,
-    )
-
-    _every_source(tmp_path)
-    discovery = discover_config_source(tmp_path)
-    assert discovery.selected.path.name == ".ash.yml"
-    assert len(discovery.ignored) == 20
-    warnings = "\n".join(discovery_warnings(discovery))
-    assert "ashrc.json" in warnings and ".ash.yaml" in warnings
-
-
-def test_the_rc_names_and_pyproject_are_read_from_the_source_directory_only(tmp_path):
     assert_on_page(
-        CONFIGURATION_PAGE,
-        "These are read from the source directory only, never from `.ash/`: "
-        "`.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`, `.ashrc.json`, `ashrc.toml`, "
-        "`ashrc.yaml`, `ashrc.yml`, `ashrc.json`, `pyproject.toml`.",
+        AIDLC_PAGE,
+        "the quality agent runs a full `ash scan --no-progress`, copies the scanner "
+        "table into the stage summary for the approval gate, and does not proceed "
+        "while the scan exits 1 or 2.",
     )
-    from automated_security_helper.config.config_sources import discover_config_source
-    from automated_security_helper.core.constants import ASH_RC_FILE_NAMES
+    construction = AIDLC_PLUGIN / "contributions" / "construction"
+    generation = (construction / "code-generation.md").read_text(encoding="utf-8")
+    assert "ash --mode precommit --no-progress" in generation
+    build = (construction / "build-and-test.md").read_text(encoding="utf-8")
+    assert "ash scan --no-progress" in build
 
-    (tmp_path / ".ash").mkdir()
-    for name in (*ASH_RC_FILE_NAMES, "pyproject.toml"):
-        (tmp_path / ".ash" / name).write_text("[tool.ash]\n", encoding="utf-8")
-    assert discover_config_source(tmp_path).selected is None
+    commands = _click_commands()
+    assert "--no-progress" in _options(commands.commands["scan"])
+    mode = next(p for p in commands.commands["scan"].params if "--mode" in p.opts)
+    assert "precommit" in list(getattr(mode.type, "choices", []))
 
 
-def test_pyproject_is_a_source_only_with_a_tool_ash_table(tmp_path):
+def test_the_plugin_rules_keep_the_habits_the_page_lists_and_ship_no_compose_hook():
     assert_on_page(
-        CONFIGURATION_PAGE,
-        "`pyproject.toml` counts only when it has a `[tool.ash]` table; one without "
-        "it is not a configuration source.",
+        AIDLC_PAGE,
+        "a short rules file keeps the ASH habits in front of the agent: read the exit "
+        "code, never loosen the gate to pass, never commit `.ash/ash_output/`.",
     )
-    from automated_security_helper.config.config_sources import discover_config_source
-
-    (tmp_path / "pyproject.toml").write_text("[tool.other]\nx = 1\n", encoding="utf-8")
-    assert discover_config_source(tmp_path).selected is None
-    (tmp_path / "pyproject.toml").write_text("[tool.ash]\n", encoding="utf-8")
-    selected = discover_config_source(tmp_path).selected
-    assert selected is not None and selected.path == tmp_path / "pyproject.toml"
-
-
-def test_an_extends_chain_is_bounded_as_the_page_says():
     assert_on_page(
-        CONFIGURATION_PAGE,
-        "A chain may be at most 10 levels deep and read at most 50 files.",
+        AIDLC_PAGE,
+        "Validation notes that the plugin ships no `hooks/compose.ts`; that is "
+        "expected.",
     )
-    from automated_security_helper.core.constants import (
-        ASH_CONFIG_EXTENDS_MAX_DEPTH,
-        ASH_CONFIG_EXTENDS_MAX_FILES,
+    rules = " ".join(
+        (AIDLC_PLUGIN / "memory" / "rules.md").read_text(encoding="utf-8").split()
     )
+    assert "Read the exit code" in rules
+    assert "Never turn off `fail_on_findings`" in rules
+    assert "never commit it" in rules and ".ash/ash_output/" in rules
+    assert not (AIDLC_PLUGIN / "hooks" / "compose.ts").exists()
 
-    assert (ASH_CONFIG_EXTENDS_MAX_DEPTH, ASH_CONFIG_EXTENDS_MAX_FILES) == (10, 50)
+
+def test_a_suppression_takes_the_reason_and_expires_the_page_says_agents_record():
+    assert_on_page(
+        AIDLC_PAGE,
+        "a finding it accepts becomes an entry under `global_settings.suppressions` "
+        "with a reason and an `expires` date",
+    )
+    from automated_security_helper.models.core import AshSuppression
+
+    fields = AshSuppression.model_fields
+    assert "reason" in fields and "expires" in fields
 
 
 # --------------------------------------------------------------------------- #
-# developer-guide/interface-design.md, interface-review.md, high-end-design-review.md
+# how-to/express-mode.md
 # --------------------------------------------------------------------------- #
 
-#: The page's palette roles, and the key of the terminal palette (ui_theme.COLORS).
-PALETTE_KEYS = {
-    "Background": "background",
-    "Surface": "surface",
-    "Text": "foreground",
-    "Muted text": "muted",
-    "Action and focus": "accent",
-    "Critical and error": "critical",
-    "High severity": "high",
-    "Medium severity": "medium",
-    "Low severity": "low",
-    "Information": "info",
-    "Success": "success",
-}
+unix_only = pytest.mark.skipif(
+    os.name == "nt", reason="express mode is unix only, as the page says"
+)
 
 
-def _palette() -> List[Tuple[str, str, str]]:
-    """(role, dark, light) from the page's table."""
-    return [
-        (row[0], _code(row[1]), _code(row[2]))
-        for row in _table_rows(INTERFACE_DESIGN, "| Role |")
-    ]
-
-
-def test_the_palette_table_is_the_terminal_palette_in_its_dark_column():
+def test_the_daemon_idles_out_after_30_minutes_and_two_settings_change_that():
     assert_on_page(
-        INTERFACE_DESIGN,
-        "`automated_security_helper/utils/ui_theme.py` is the terminal palette and "
-        "theme adapter.",
+        EXPRESS_PAGE,
+        "The daemon retires itself after 30 minutes without a request (configure "
+        "with the `--idle-seconds` option of `ash express start`, or the "
+        "`ASH_EXPRESS_IDLE_SECONDS` environment variable)",
     )
-    from automated_security_helper.utils.ui_theme import COLORS
+    from automated_security_helper.express import runtime
 
-    palette = _palette()
-    assert [role for role, _d, _l in palette] == list(PALETTE_KEYS)
-    for role, dark, _light in palette:
-        assert COLORS[PALETTE_KEYS[role]] == dark, role
+    assert runtime.DEFAULT_IDLE_SECONDS == 30 * 60
+    assert runtime.IDLE_ENV == "ASH_EXPRESS_IDLE_SECONDS"
+    assert runtime.idle_seconds({}) == 1800
+    assert runtime.idle_seconds({runtime.IDLE_ENV: "60"}) == 60
+    start = _click_commands().commands["express"].commands["start"]
+    assert {"--idle-seconds", "--foreground"} <= _options(start)
 
 
-def test_the_report_stylesheet_carries_every_color_of_the_palette():
+def test_the_express_commands_and_scan_flags_the_page_uses_exist():
     assert_on_page(
-        INTERFACE_DESIGN,
-        "Check all three surfaces when changing a semantic color.",
+        EXPRESS_PAGE,
+        "Or manage it explicitly -- `start` is idempotent, takes `--idle-seconds` and "
+        "`--foreground`, and `status` takes `--json` for scripts:",
     )
-    css = REPORT_STYLESHEET.read_text(encoding="utf-8").lower()
-    for role, dark, light in _palette():
-        assert dark in css and light in css, role
+    express = _click_commands().commands["express"]
+    assert {"start", "status", "stop"} <= set(express.commands)
+    assert "--json" in _options(express.commands["status"])
+    assert {"--express", "--no-express"} <= _options(_click_commands().commands["scan"])
 
 
-def test_the_site_stylesheet_carries_the_palette_colors_it_uses():
-    css = SITE_STYLESHEET.read_text(encoding="utf-8").lower()
-    for role, dark, light in _palette():
-        for color in (dark, light):
-            if color not in SITE_STYLESHEET_LACKS:
-                assert color in css, f"{role}: {color}"
-
-
-def test_the_footer_credit_is_the_one_the_pages_give():
-    from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
-
-    assert_on_page(INTERFACE_DESIGN, f"Footer: `{FOOTER_CREDIT}`.")
-    assert_on_page(HIGH_END_REVIEW, f"`{FOOTER_CREDIT}` in human-facing footers.")
-
-
-def test_the_motion_timings_are_the_ones_the_site_stylesheet_declares():
+@unix_only
+def test_the_socket_lives_in_a_private_directory_the_page_names(tmp_path):
     assert_on_page(
-        INTERFACE_DESIGN,
-        "Use the shared custom easing curves and role-based timings: 160ms feedback, "
-        "320ms menu entrance, 180ms exit, 40ms stagger, and 240ms section reveal.",
+        EXPRESS_PAGE,
+        "It lives in a **0700 directory owned by you** (`$XDG_RUNTIME_DIR/ash-express`, "
+        "or `~/.ash/run`), and the socket file itself is 0600.",
     )
-    css = SITE_STYLESHEET.read_text(encoding="utf-8")
-    for name, value in {
-        "feedback": "160ms",
-        "enter": "320ms",
-        "exit": "180ms",
-        "reveal": "240ms",
-    }.items():
-        assert re.search(rf"--ash-{name}:\s*{value};", css), name
+    from automated_security_helper.express import runtime
+
+    runtime_base = tmp_path / "xdg"
+    runtime_base.mkdir()
+    directory = runtime.runtime_dir({"XDG_RUNTIME_DIR": str(runtime_base)})
+    assert directory == runtime_base / "ash-express"
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+
+    home = tmp_path / "home"
+    home.mkdir()
+    fallback = runtime.runtime_dir({"HOME": str(home)})
+    assert fallback == home / ".ash" / "run"
+    assert stat.S_IMODE(fallback.stat().st_mode) == 0o700
 
 
-def test_the_animation_library_is_vendored_at_the_version_the_page_names():
+def test_the_daemon_keeps_the_environment_the_page_lists_and_a_request_drops_one_marker():
     assert_on_page(
-        INTERFACE_DESIGN,
-        "Light Phosphor icons and Anime.js 4.5.0 use MIT licenses.",
+        EXPRESS_PAGE,
+        "`PYTHONPATH`, `PYTHONHOME`, `PYTHONUSERBASE`, `PYTHONNOUSERSITE` and "
+        "`VIRTUAL_ENV`.",
     )
     assert_on_page(
-        INTERFACE_DESIGN,
-        "Run `npm run vendor:motion` in `docs/ui-tests` to rebuild the module and its "
-        "notice.",
+        EXPRESS_PAGE,
+        "minus ASH's internal express child marker.",
     )
-    tests_dir = REPO_ROOT / "docs" / "ui-tests"
-    package = json.loads((tests_dir / "package.json").read_text(encoding="utf-8"))
-    assert package["scripts"]["vendor:motion"] == "node vendor-motion.cjs"
-    assert '"4.5.0"' in (tests_dir / "vendor-motion.cjs").read_text(encoding="utf-8")
-    licenses = CONTENT / "assets" / "licenses"
-    assert "Anime.js 4.5.0" in (licenses / "asset-provenance.txt").read_text(
-        encoding="utf-8"
-    )
-    assert (licenses / "animejs-MIT.txt").is_file()
-    assert (licenses / "phosphor-MIT.txt").is_file()
+    from automated_security_helper.express import runtime
+
+    kept = {
+        "PATH": "/usr/bin",
+        "HOME": "/home/x",
+        "PYTHONHOME": "/py",
+        "PYTHONUSERBASE": "/ub",
+        "PYTHONNOUSERSITE": "1",
+        "VIRTUAL_ENV": "/venv",
+    }
+    dropped = {"AWS_PROFILE": "p", "GIT_INDEX_FILE": "/i", "LD_PRELOAD": "/x.so"}
+    scrubbed = runtime.scrubbed_daemon_environment({**kept, **dropped})
+    assert scrubbed == kept
+    assert runtime.REQUEST_ENV_DENYLIST == frozenset({"ASH_EXPRESS_CHILD"})
 
 
-def test_the_human_report_outcome_comes_from_the_report_content_emitter():
+# --------------------------------------------------------------------------- #
+# docs/plugins/builtin/gitleaks.md
+# --------------------------------------------------------------------------- #
+
+
+def test_gitleaks_is_on_by_default_and_its_options_default_as_the_page_shows():
     assert_on_page(
-        INTERFACE_DESIGN,
-        "`ReportContentEmitter.get_scan_summary()` supplies the factual outcome for "
-        "human reports.",
+        GITLEAKS_PAGE,
+        "Gitleaks is a builtin scanner, enabled by default: a default scan runs it.",
     )
-    from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
-        ReportContentEmitter,
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+        GitleaksScannerConfig,
+        GitleaksScannerConfigOptions,
     )
 
-    assert callable(getattr(ReportContentEmitter, "get_scan_summary", None))
+    assert GitleaksScannerConfig.model_fields["enabled"].default is True
+    options = GitleaksScannerConfigOptions()
+    assert options.config_file is None
+    assert options.baseline_path is None
+    assert options.honor_inline_ignores is False
+    assert options.max_target_megabytes is None
+    assert options.scan_timeout == 1800
+    assert options.severity_threshold is None
 
 
-def test_the_canonical_editor_workflow_lives_where_the_page_says():
+def test_gitleaks_is_run_the_way_the_page_says_and_exits_2_for_leaks():
     assert_on_page(
-        INTERFACE_DESIGN,
-        "Edit the canonical editor workflow under "
-        "`ash-agent-plugins/agentic-coding/transpiler/_base/` and rebuild the "
-        "integrations.",
-    )
-    base = REPO_ROOT / "ash-agent-plugins" / "agentic-coding" / "transpiler" / "_base"
-    assert base.is_dir() and any(base.iterdir())
-
-
-def test_the_files_the_interface_review_points_to_exist():
-    assert_on_page(
-        INTERFACE_REVIEW,
-        "`scripts/preview_interfaces.py` and `docs/ui-tests/` make the human "
-        "interfaces reproducible from repository fixtures.",
+        GITLEAKS_PAGE,
+        "ASH always runs `gitleaks --redact=100`, so gitleaks writes `REDACTED` in "
+        "place of each secret in its report and its log.",
     )
     assert_on_page(
-        INTERFACE_REVIEW,
-        "Every shipped reporter is covered by the explicit reporter catalog in "
-        "`tests/snapshot/support/reporter_catalog.py`.",
+        GITLEAKS_PAGE,
+        "ASH runs `gitleaks --exit-code=2`, because gitleaks otherwise exits 1 both "
+        "when it finds leaks and when it fails. 0 (nothing found) and 2 (leaks "
+        "found) are success",
     )
-    for path in (
-        "scripts/preview_interfaces.py",
-        "docs/ui-tests/README.md",
-        "tests/snapshot/support/reporter_catalog.py",
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+        LEAKS_EXIT_CODE,
+        GitleaksScanner,
+    )
+
+    source = (SCANNERS / "gitleaks_scanner.py").read_text(encoding="utf-8")
+    for flag in (
+        '"--redact=100"',
+        'f"--exit-code={LEAKS_EXIT_CODE}"',
+        "--ignore-gitleaks-allow",
     ):
-        assert (REPO_ROOT / path).is_file(), path
+        assert flag in source, flag
+    assert 'self.subcommands = ["dir"]' in source
+    assert LEAKS_EXIT_CODE == 2
+    assert GitleaksScanner.success_exit_codes == {0, 2}
 
 
-def test_the_interface_review_reporter_table_lists_every_shipped_reporter():
-    rows = _table_rows(INTERFACE_REVIEW, "| Reporter |")
-    listed = [_code(row[0]) for row in rows]
-    shipped = [*BUILTIN_REPORTER_NAMES, *AWS_REPORTER_NAMES]
-    assert sorted(listed) == sorted(shipped)
-    assert len(listed) == 19
+# --------------------------------------------------------------------------- #
+# docs/plugins/builtin/zizmor.md
+# --------------------------------------------------------------------------- #
 
 
-def test_the_interface_review_surface_inventory_names_commands_that_exist():
+def test_zizmor_is_on_by_default_and_its_options_default_as_the_page_shows():
     assert_on_page(
-        INTERFACE_REVIEW,
-        "| `plugin list` | Scanner/converter/reporter/event inventory,",
+        ZIZMOR_PAGE,
+        "zizmor is a builtin scanner, enabled by default: a default scan runs it.",
     )
-    root = _click_commands()
-    for name in ("scan", "build-image", "report", "merge", "get-genai-guide"):
-        assert name in root.commands, name
-    for group, subcommands in {
-        "config": (
-            "init",
-            "get",
-            "update",
-            "wizard",
-            "validate",
-            "lint",
-            "validate-plugin-dependencies",
-        ),
-        "dependencies": ("install",),
-        "plugin": ("list",),
-        "inspect": ("findings", "sarif-fields"),
-    }.items():
-        for subcommand in subcommands:
-            assert subcommand in root.commands[group].commands, (group, subcommand)
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        ZizmorScannerConfig,
+        ZizmorScannerConfigOptions,
+    )
+
+    assert ZizmorScannerConfig.model_fields["enabled"].default is True
+    options = ZizmorScannerConfigOptions()
+    assert options.persona == "regular"
+    assert options.config_file is None
+    assert options.online_audits is False
+    assert options.honor_inline_ignores is False
+    assert options.tool_version == ">=1.29.0,<2.0.0"
+    assert options.install_timeout == 300
+    assert options.scan_timeout == 1800
+    assert options.severity_threshold is None
 
 
-def test_the_design_review_counts_the_reporters_there_are():
+def test_zizmor_runs_offline_without_tokens_and_without_the_repository_config():
     assert_on_page(
-        HIGH_END_REVIEW,
-        "The final row includes **all nineteen shipped reporters**: HTML, Markdown, "
-        "text, Bedrock summaries, CSV, flat JSON, SARIF, GitHub GHAS, GitLab SAST, "
-        "CycloneDX, GitLab CycloneDX, SPDX, JUnit XML, OCSF, YAML, unused "
-        "suppressions, Security Hub, CloudWatch Logs, and S3.",
+        ZIZMOR_PAGE,
+        "ASH always runs `zizmor --offline` unless `online_audits: true`.",
     )
-    assert len(BUILTIN_REPORTER_NAMES) + len(AWS_REPORTER_NAMES) == 19
+    assert_on_page(
+        ZIZMOR_PAGE,
+        "While offline, ASH removes those three variables from zizmor's environment.",
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        zizmor_scanner,
+    )
+
+    assert zizmor_scanner.GITHUB_TOKEN_ENV_VARS == (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "ZIZMOR_GITHUB_TOKEN",
+    )
+    assert set(zizmor_scanner.ZIZMOR_BEHAVIOR_ENV_VARS) >= {
+        "ZIZMOR_CONFIG",
+        "ZIZMOR_OFFLINE",
+        "ZIZMOR_NO_ONLINE_AUDITS",
+    }
+    source = (SCANNERS / "zizmor_scanner.py").read_text(encoding="utf-8")
+    for flag in ("--offline", "--no-config", "--no-ignores"):
+        assert flag in source, flag
+
+
+def test_the_zizmor_severity_table_is_the_mapping_the_scanner_applies():
+    assert_on_page(
+        ZIZMOR_PAGE,
+        "zizmor's scale stops at High, so no zizmor finding is CRITICAL.",
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        map_zizmor_severity,
+    )
+
+    rows = _table_rows(ZIZMOR_PAGE, "| zizmor severity")
+    assert len(rows) == 4, rows
+    for severity, confident, low_confidence in rows:
+        assert map_zizmor_severity(severity, "High", None) == confident, severity
+        assert map_zizmor_severity(severity, "Medium", None) == confident, severity
+        assert map_zizmor_severity(severity, "Low", None) == low_confidence, severity
+        assert "CRITICAL" not in (confident, low_confidence)
