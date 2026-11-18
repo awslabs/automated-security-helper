@@ -156,6 +156,14 @@ A committer can still widen one run with `--add-scanners`, or override the file 
 with `--only-scanners`. `--scanners` keeps working with a deprecation warning; it is the
 same additive selection `--add-scanners` now names explicitly.
 
+!!! warning "Upgrading to v3.8.0 with checkov extra formats configured"
+    An ASH config that sets `checkov.additional_formats: [cyclonedx_json]` can crash
+    checkov on some repositories. From v3.8.0, a scanner that crashes correctly fails
+    the run with exit code 1 instead of passing silently, so a hook that passed on
+    v3.7.x can start failing after the upgrade. Remove that format from the config, or
+    exclude checkov from the hook with `--exclude-scanners checkov`. Once checkov runs
+    without crashing, it can also report a real finding the crashed runs never surfaced.
+
 ### Add Python packages to the hook {#additional-dependencies}
 
 `additional_dependencies` in your configuration replaces the hook's own list rather than
@@ -184,22 +192,31 @@ With `stages: [pre-push]`, install that hook type with
 
 ## What it costs {#cost}
 
-Measured on a repository of three files, so these times are mostly the fixed cost of a
-run; the scan itself grows with what the commit stages:
+The first run builds the hook environment and installs the scanner tools, which takes 65
+to 150 seconds. The environment takes about 650 MB under `~/.cache/pre-commit`, and
+bandit and checkov about 240 MB under `~/.local/share/uv`.
 
-| Run | Time |
-|---|---|
-| First run, with the hook environment and scanner installs | 65 to 150 seconds |
-| Later runs | 11 to 15 seconds |
+Every later run's cost scales with the size of the repository unless `--staged` narrows
+the scan: without the flag, each commit scans the whole tree, however small the change.
+With `--staged`, which the hook passes, the scan covers the staged files and the time
+grows with the commit instead. checkov is the slowest scanner. Warm-run times, measured
+on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches:
 
-checkov is the slowest scanner. With `--staged`, which the hook passes by default, scan
-time grows with the size of the commit; without it (a hook you pointed at the whole tree),
-it grows with the size of the repository, because every run scans all of it. The hook
-environment takes about 650 MB under
-`~/.cache/pre-commit`, and bandit and checkov about 240 MB under `~/.local/share/uv`.
+| Warm run | 10-file repository | ~900-file Python repository |
+|---|---|---|
+| `--mode precommit` on the whole repository (no `--staged`) | ~6.7 s | ~18 s |
+| `--mode precommit --staged`, one `.py` file staged | ~4.4 s | ~5.7 s |
+| The same, with `--only-scanners bandit,detect-secrets` | ~2.8 s | ~3.4 s |
+| `--staged` with the express daemon warm (`--express`) | ~3.0 s | not measured |
 
-About two seconds of every later run is ASH's own startup (the interpreter and the eager
-imports), paid again on each commit. [Express mode](express-mode.md) removes it: add
+For scale, `ash --version` alone takes about 0.2 seconds on the same machine. What is
+left of the fastest runs above is the floor every scan pays: starting the interpreter,
+importing ASH, loading the configuration, and setting up the scanners. A `--staged` run
+whose staged files match no scanner still pays that floor; the scanners are skipped, and
+the wall time is unchanged.
+
+Part of that floor is ASH's own startup (the interpreter and the eager imports), paid
+again on each commit. [Express mode](express-mode.md) removes it: add
 `--express` to the hook's `args`, and the first commit starts a resident warm daemon
 paired with the hook's own environment, which every later hook run forks instead of
 starting cold (Linux and macOS only). The pairing matters: the daemon serves exactly the
@@ -220,7 +237,7 @@ both.
 | Scanners | The five in [What the hook runs](#behavior), plus any you add with `--scanners` | Every scanner your configuration enables, including the ones precommit mode leaves out, such as semgrep, opengrep, grype, trivy, and gitleaks |
 | Runs | On the developer's machine, per commit or push | On a clean runner, per pull request or push |
 | Output | Simplified, no progress display | The full summary and report files, for upload as artifacts or SARIF |
-| Cost | 11 to 15 seconds after the first run ([What it costs](#cost)) | Installs the scanner tools each build, or uses an image you prepared |
+| Cost | A few seconds per commit after the first run, growing with the staged set ([What it costs](#cost)) | Installs the scanner tools each build, or uses an image you prepared |
 
 [Scanner coverage](../reference/coverage.md#by-scanner) lists which scanners each mode
 runs. A scanner that precommit mode skips is not run by the `ash` hook at all, so a clean
