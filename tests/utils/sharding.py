@@ -22,6 +22,16 @@ shard agree without sharing a list, and each module lands in exactly one shard o
 count. Only paths that match the ``python_files`` patterns pytest was configured with are
 filtered; everything else is left to pytest.
 
+That is the owner of a module the run has no timing for. For a tier run (``-m unit`` or
+``-m integration``) with a shard, ``configure`` also builds a duration-aware plan from
+``tests/utils/shard_timings.json`` (:mod:`tests.utils.shard_plan`): the modules the file
+lists are packed onto the shards by measured seconds, and a module too large for one
+shard is collected on all of them, each keeping only the tests the plan gives it
+(:class:`_SplitModuleItems`). A module or test the file does not list, a missing file, a
+platform or tier it has no data for, or a run with no tier expression keeps the crc32
+owner above, so a new test is always run by exactly one shard and a stale file costs
+balance and never coverage. A file that is present and malformed is a usage error.
+
 A shard that collects nothing makes pytest exit 5 (no tests collected). A malformed
 ``ASH_TEST_SHARD`` is a usage error.
 
@@ -174,6 +184,8 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import pytest
 
+from tests.utils import shard_plan
+
 #: The variable the run-unit-tests action sets for a shard; unset means the whole suite.
 ENV_VAR = "ASH_TEST_SHARD"
 
@@ -219,9 +231,19 @@ def matches_python_files(path: Path, patterns: Sequence[str]) -> bool:
 
 
 def ignored_by_shard(
-    path: Path, rootpath: Path, patterns: Sequence[str], shard: Tuple[int, int]
+    path: Path,
+    rootpath: Path,
+    patterns: Sequence[str],
+    shard: Tuple[int, int],
+    plan: Optional[shard_plan.Plan] = None,
 ) -> bool:
-    """Whether ``path`` is a test module that a different shard owns."""
+    """Whether ``path`` is a test module that a different shard owns.
+
+    With a ``plan`` (the same count as ``shard``) a module the plan splits is never
+    ignored, because every shard owns some of its tests, and any other module the plan
+    lists goes to the shard it names. Without one, or for a module it does not list, the
+    owner is the crc32 shard.
+    """
     if not matches_python_files(path, patterns):
         return False
     try:
@@ -229,13 +251,20 @@ def ignored_by_shard(
     except ValueError:
         return False
     index, count = shard
-    return owner(relative.as_posix(), count) != index
+    module = relative.as_posix()
+    if plan is not None and plan.count == count:
+        if plan.is_split(module):
+            return False
+        return plan.module_owner(module) != index
+    return owner(module, count) != index
 
 
 #: The parsed shard of this run, ``(index, count)``, or None for the whole suite.
 _SHARD_KEY = pytest.StashKey[Optional[Tuple[int, int]]]()
 #: The setting's text, kept so the controller can hand it to its xdist workers.
 _TEXT_KEY = pytest.StashKey[str]()
+#: The duration-aware plan of this run, or None when the crc32 owner stands.
+_PLAN_KEY = pytest.StashKey[Optional[shard_plan.Plan]]()
 #: The ``workerinput`` key the controller hands the text to a worker under.
 WORKERINPUT_KEY = "ash_test_shard"
 #: The opt-in the run-unit-tests action sets for a CI tier run; ``1`` turns the
@@ -309,8 +338,10 @@ def configure(config: pytest.Config) -> None:
         shard = parse_shard(text) if text else None
     except ValueError as error:
         raise pytest.UsageError(f"{ENV_VAR}: {error}") from None
+    plan = _plan_for(config, shard)
     config.stash[_SHARD_KEY] = shard
     config.stash[_TEXT_KEY] = text
+    config.stash[_PLAN_KEY] = plan
     config.stash[_FLOOR_KEY] = floor
     config.stash[_FLOOR_WARN_KEY] = warn
     # A stand-in config without a plugin manager (the unit tests of this module use one)
@@ -320,6 +351,35 @@ def configure(config: pytest.Config) -> None:
     plugins = getattr(config, "pluginmanager", None)
     if (shard is not None or floor) and plugins is not None:
         plugins.register(_TierRunOutcome(), _TIER_RUN_PLUGIN)
+    if plan is not None and plan.split and shard is not None and plugins is not None:
+        plugins.register(_SplitModuleItems(plan, shard[0]), _SPLIT_ITEMS_PLUGIN)
+
+
+def _plan_for(
+    config: Any, shard: Optional[Tuple[int, int]]
+) -> Optional[shard_plan.Plan]:
+    """The duration-aware plan of a sharded tier run, None where the crc32 owner stands.
+
+    A plan needs a shard, a ``-m`` expression that is exactly one of the planned tiers
+    (a developer's run with another expression or none keeps the crc32 split), and timing
+    data for this platform and tier. A timing file that is present and malformed is a
+    usage error, so a bad commit fails every shard alike instead of dropping the plan on
+    some of them.
+    """
+    if shard is None:
+        return None
+    getoption = getattr(config, "getoption", None)
+    expression = getoption("markexpr", default="") if getoption is not None else ""
+    tier = (expression or "").strip()
+    if tier not in shard_plan.TIERS:
+        return None
+    try:
+        timings = shard_plan.load_timings()
+    except ValueError as error:
+        raise pytest.UsageError(f"tests/utils/shard_timings.json: {error}") from None
+    if timings is None:
+        return None
+    return shard_plan.build_plan(timings, shard_plan.platform_key(), tier, shard[1])
 
 
 def admit_empty_shard(session: Any, exitstatus: Any, deselected: int) -> bool:
@@ -659,6 +719,40 @@ class _TierRunOutcome:
 
 #: The name the plugin object is registered under, once per config.
 _TIER_RUN_PLUGIN = "ash-tier-run-outcome"
+#: The name the split-module item filter is registered under, once per config.
+_SPLIT_ITEMS_PLUGIN = "ash-shard-split-items"
+
+
+class _SplitModuleItems:
+    """Keep, in a module the plan splits, only the tests this shard owns.
+
+    A plugin object and not a module-level ``pytest_collection_modifyitems`` for the same
+    reason as :class:`_TierRunOutcome`: tests/conftest.py defines its own. Items of other
+    modules are never touched, and a test of a split module that the plan does not list is
+    kept by the shard its id hashes to, so every test is kept by exactly one shard. Dropped
+    items go through ``pytest_deselected``, so the empty-shard admission counts them.
+    """
+
+    def __init__(self, plan: shard_plan.Plan, index: int) -> None:
+        self._plan = plan
+        self._index = index
+
+    def pytest_collection_modifyitems(self, config: Any, items: list) -> None:
+        kept, dropped = [], []
+        for item in items:
+            module, _, _ = item.nodeid.partition("::")
+            key = shard_plan.item_key(item.nodeid)
+            if (
+                key is not None
+                and self._plan.is_split(module)
+                and self._plan.item_owner(module, key) != self._index
+            ):
+                dropped.append(item)
+            else:
+                kept.append(item)
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+            items[:] = kept
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -689,6 +783,7 @@ def pytest_ignore_collect(
     if shard is None:
         return None
     patterns = config.getini("python_files")
-    if ignored_by_shard(collection_path, config.rootpath, patterns, shard):
+    plan = config.stash.get(_PLAN_KEY, None)
+    if ignored_by_shard(collection_path, config.rootpath, patterns, shard, plan):
         return True
     return None
