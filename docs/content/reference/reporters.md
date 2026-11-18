@@ -89,9 +89,9 @@ Options, under `reporters.flat-json.options`. An option not listed here refuses 
 <!-- doctest: options of=reporters.flat-json -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.flat-json.options.include_scanner_metrics"></a>`include_scanner_metrics` | boolean | `true` | No description in the code. |
-| <a id="reporters.flat-json.options.include_summary_metrics"></a>`include_summary_metrics` | boolean | `true` | No description in the code. |
-| <a id="reporters.flat-json.options.include_metadata"></a>`include_metadata` | boolean | `true` | No description in the code. |
+| <a id="reporters.flat-json.options.include_scanner_metrics"></a>`include_scanner_metrics` | boolean | `true` | When true, the report carries a `scanner_metrics` key with one row per scanner: its finding counts by severity, its result status, and the severity threshold it was judged against. When false, the key is left out. |
+| <a id="reporters.flat-json.options.include_summary_metrics"></a>`include_summary_metrics` | boolean | `true` | Accepted for compatibility but not read: the report is written the same whether this is true or false. Use `include_scanner_metrics` and `include_metadata` to choose what the report carries. |
+| <a id="reporters.flat-json.options.include_metadata"></a>`include_metadata` | boolean | `true` | When true, the report carries a `metadata` key with the project name, the scan time, the report time, and the ASH version. When false, the key is left out. |
 
 ## `github-ghas`
 
@@ -175,7 +175,7 @@ Options, under `reporters.junitxml.options`. An option not listed here refuses t
 <!-- doctest: options of=reporters.junitxml -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.junitxml.options.respect_severity_threshold"></a>`respect_severity_threshold` | boolean | `true` | No description in the code. |
+| <a id="reporters.junitxml.options.respect_severity_threshold"></a>`respect_severity_threshold` | boolean | `true` | When true, a finding below the severity threshold its scanner is judged against is written as a skipped test case (type `threshold`), and only findings at or above the threshold are errors, which matches the exit code. When false, no threshold is applied and findings are written as errors whatever their severity. Suppressed findings are skipped either way. |
 
 ## `markdown`
 
@@ -192,13 +192,13 @@ Options, under `reporters.markdown.options`. An option not listed here refuses t
 <!-- doctest: options of=reporters.markdown -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.markdown.options.include_summary"></a>`include_summary` | boolean | `true` | No description in the code. |
-| <a id="reporters.markdown.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. |
-| <a id="reporters.markdown.options.include_detailed_findings"></a>`include_detailed_findings` | boolean | `true` | No description in the code. |
-| <a id="reporters.markdown.options.max_detailed_findings"></a>`max_detailed_findings` | integer | `20` | No description in the code. |
-| <a id="reporters.markdown.options.top_hotspots_limit"></a>`top_hotspots_limit` | integer | `10` | No description in the code. |
-| <a id="reporters.markdown.options.use_collapsible_details"></a>`use_collapsible_details` | boolean | `true` | No description in the code. |
-| <a id="reporters.markdown.options.compact"></a>`compact` | boolean | `false` | No description in the code. |
+| <a id="reporters.markdown.options.include_summary"></a>`include_summary` | boolean | `true` | When true, the report has a Summary section: the scanner results table and the top hotspots table. When false, both are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay. |
+| <a id="reporters.markdown.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | When true, the report has a Findings overview table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long. |
+| <a id="reporters.markdown.options.include_detailed_findings"></a>`include_detailed_findings` | boolean | `true` | When true, the report has a Detailed findings section that lists up to `max_detailed_findings` actionable findings, highest severity first. The Not gating (workspace policy) section of a workspace scan is part of it and is left out with it. |
+| <a id="reporters.markdown.options.max_detailed_findings"></a>`max_detailed_findings` | integer | `20` | The most findings listed in the Detailed findings section, and in the Not gating (workspace policy) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. 0 lists none. A negative value is refused. |
+| <a id="reporters.markdown.options.top_hotspots_limit"></a>`top_hotspots_limit` | integer | `10` | The most files listed in the top hotspots table, which ranks files by their number of actionable findings. Used only when `include_summary` is true. 0 leaves the table out. A negative value is refused. |
+| <a id="reporters.markdown.options.use_collapsible_details"></a>`use_collapsible_details` | boolean | `true` | When true, each detailed finding is wrapped in an HTML `details` element whose summary line shows its severity, rule ID, and location, so a long list stays short until a finding is opened. When false, every finding is written out in full. |
+| <a id="reporters.markdown.options.compact"></a>`compact` | boolean | `false` | When true, the scanner results table leaves out scanners that were skipped and scanners that passed with no findings, and the how-to-read help, the Scan metadata section, and the generated-at line are dropped. The outcome line, the project and scan time line, the workspace section, and the coverage notices stay. |
 
 ## `ocsf`
 
@@ -251,11 +251,11 @@ Options, under `reporters.text.options`. An option not listed here refuses the c
 <!-- doctest: options of=reporters.text -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.text.options.include_summary"></a>`include_summary` | boolean | `true` | No description in the code. |
-| <a id="reporters.text.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | No description in the code. The comment on its line in the code: This can be lengthy, default to False. |
-| <a id="reporters.text.options.include_detailed_findings"></a>`include_detailed_findings` | boolean | `false` | No description in the code. |
-| <a id="reporters.text.options.max_detailed_findings"></a>`max_detailed_findings` | integer | `20` | No description in the code. |
-| <a id="reporters.text.options.top_hotspots_limit"></a>`top_hotspots_limit` | integer | `20` | No description in the code. |
+| <a id="reporters.text.options.include_summary"></a>`include_summary` | boolean | `true` | When true, the report has a SUMMARY section: the scanner results table, a key to its columns, and the top hotspots list. When false, those are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay. |
+| <a id="reporters.text.options.include_findings_table"></a>`include_findings_table` | boolean | `false` | When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long. |
+| <a id="reporters.text.options.include_detailed_findings"></a>`include_detailed_findings` | boolean | `false` | When true, the report has a DETAILED FINDINGS section that lists up to `max_detailed_findings` actionable findings, highest severity first, each with its scanner, rule ID, location, and description. The NOT GATING (WORKSPACE POLICY) section of a workspace scan is part of it and is left out with it. |
+| <a id="reporters.text.options.max_detailed_findings"></a>`max_detailed_findings` | integer | `20` | The most findings listed in the DETAILED FINDINGS section, and in the NOT GATING (WORKSPACE POLICY) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. Used only when `include_detailed_findings` is true. 0 lists none. A negative value is refused. |
+| <a id="reporters.text.options.top_hotspots_limit"></a>`top_hotspots_limit` | integer | `20` | The most files listed in the top hotspots list, which ranks files by their number of actionable findings. Used only when `include_summary` is true. 0 leaves the list out. A negative value is refused. |
 
 ## `unused-suppressions`
 
@@ -273,7 +273,7 @@ Options, under `reporters.unused-suppressions.options`. An option not listed her
 <!-- doctest: options of=reporters.unused-suppressions -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.unused-suppressions.options.output_format"></a>`output_format` | string | `both` | No description in the code. The comment on its line in the code: "json", "markdown", or "both". |
+| <a id="reporters.unused-suppressions.options.output_format"></a>`output_format` | string | `both` | The format of the report: "json", "markdown", or "both". "json" writes the JSON report only. "markdown" writes the report as markdown, under the file extension `unused-suppressions.md` unless the reporter's `extension` was changed. "both" writes the JSON report and a markdown copy beside it, `ash.unused-suppressions.md`. The name is read without regard to case, and any other value is refused. |
 
 ## `yaml`
 

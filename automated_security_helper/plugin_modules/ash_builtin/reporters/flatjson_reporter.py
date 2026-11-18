@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from typing import Literal, TYPE_CHECKING, Dict, Any
+from typing import Annotated, Literal, TYPE_CHECKING, Dict, Any
+
+from pydantic import Field
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -27,9 +29,24 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
 class FlatJSONReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Flat JSON reporter."""
 
-    include_scanner_metrics: bool = True
-    include_summary_metrics: bool = True
-    include_metadata: bool = True
+    include_scanner_metrics: Annotated[
+        bool,
+        Field(
+            description="When true, the report carries a `scanner_metrics` key with one row per scanner: its finding counts by severity, its result status, and the severity threshold it was judged against. When false, the key is left out."
+        ),
+    ] = True
+    include_summary_metrics: Annotated[
+        bool,
+        Field(
+            description="Accepted for compatibility but not read: the report is written the same whether this is true or false. Use `include_scanner_metrics` and `include_metadata` to choose what the report carries."
+        ),
+    ] = True
+    include_metadata: Annotated[
+        bool,
+        Field(
+            description="When true, the report carries a `metadata` key with the project name, the scan time, the report time, and the ASH version. When false, the key is left out."
+        ),
+    ] = True
 
 
 class FlatJSONReporterConfig(ReporterPluginConfigBase):
