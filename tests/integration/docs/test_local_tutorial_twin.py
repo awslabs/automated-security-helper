@@ -59,6 +59,9 @@ pytestmark = [
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 JOURNEY = Path("docs/journeys/getting-started-local.journey.yaml")
+#: The page this twin runs, named as the other journey twins name theirs, which is how
+#: tests/unit/docs/test_every_page_is_doctested.py finds the page a twin covers.
+PAGE = "docs/content/getting-started/local.md"
 FENCE = "```"
 #: The twin steps of the local tutorial, in page order. A journey that loses one has
 #: stopped holding a claim the page makes.
@@ -156,6 +159,7 @@ def test_the_local_tutorial_holds_with_bandit_offline(tmp_path, request):
             pytrace=False,
         )
     docs_root = _docs_root(request.config)
+    assert (docs_root / PAGE).is_file(), f"{PAGE} is the page this twin covers"
     journey = journeys.load_journey(docs_root / JOURNEY)
     text, expectations = _twin(journey)
     twin_path = tmp_path / "local-twin.md"
