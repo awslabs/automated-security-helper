@@ -1,0 +1,36 @@
+# Pages of docs/content that no doctest mechanism reaches yet.
+#
+# This file may only shrink. test_every_page_is_doctested.py fails on a docs page that
+# no mechanism covers (a claims test, a runnable block the docs runner executes, a
+# journey twin, or generation from code under a freshness check) unless the page is
+# listed here, and fails on a listed page that has gained one: delete its line then.
+#
+# Never add a page. A new page is doctested when it is written. A page that is renamed
+# or removed leaves nothing to allow, so its line is deleted with it.
+#
+# One path per line, relative to docs/content, in sorted order.
+concepts/how-ash-works.md
+contributing/index.md
+contributing/releases.md
+developer-guide/high-end-design-review.md
+developer-guide/interface-design.md
+developer-guide/interface-review.md
+docs/plugins/builtin/actionlint.md
+docs/plugins/builtin/cfn-lint-and-cfn-guard.md
+docs/plugins/builtin/gitleaks.md
+docs/plugins/builtin/trivy.md
+docs/plugins/builtin/zizmor.md
+docs/plugins/community/guarddog-plugin.md
+docs/plugins/community/hadolint-plugin.md
+docs/plugins/community/index.md
+how-to/agent-plugins.md
+how-to/aidlc-workflows.md
+how-to/deploy-on-aws.md
+how-to/express-mode.md
+how-to/pre-commit.md
+index.md
+integrations.md
+personas/index.md
+personas/sdlc-aidlc.md
+reference/index.md
+support.md
