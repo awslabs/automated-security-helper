@@ -436,7 +436,7 @@ echo "Total findings: $finding_count"
 <!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # performance_monitor.py
-# Needs psutil, which is not part of ASH: pip install psutil
+# Needs psutil, which ASH already depends on
 import importlib
 import json
 import time

@@ -1324,7 +1324,7 @@ def _keep_live_logging_off_the_ash_logger(request):
     the rest of that worker process -- ``cli/main.py``'s ``reset_logging_config``
     and ``utils/log.py``'s ``get_logger`` both did, before they removed only the
     handlers ASH added, and seven files under ``tests/unit/cli`` reach one of
-    them. Under ``-n auto`` the xdist worker
+    them. Under ``-n logical`` the xdist worker
     count decides which tests share a process, so one commit was green on the
     4-worker Linux and Windows runners and red on the 3-worker macOS runners.
     """
@@ -4774,7 +4774,7 @@ def no_cdk_kernel(monkeypatch):
 
     WHAT THAT COSTS. jsii holds the cache lock for the whole extraction and its
     waiter gives up after 12 randomised retries (~13 s expected, ~26 s worst case).
-    On Windows CI the suite runs under ``-n auto`` = 4 workers, so two tests that
+    On Windows CI the suite runs under ``-n logical`` = 4 workers, so two tests that
     each boot a kernel can land on different workers, race the same cache entry, and
     the loser dies with ``EEXIST ... aws-cdk-lib/<version>/<sha>.lock``. That was
     measured: zero occurrences across 1,772 Windows legs while exactly one test

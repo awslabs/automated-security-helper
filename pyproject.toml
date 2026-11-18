@@ -43,6 +43,9 @@ dependencies = [
  # runs pytest; declared because ASH imports it.
  "tomli>=2.0,<2.4; python_full_version < '3.11'",
  "python-multipart>=0.0.32,<0.1",  # 0.0.x -- the patch is the only version component, so >=0.0 is meaningless
+ # Logical CPU count for the defaulted scanner-pool size
+ # (core/phases/scanner_executor.ScannerExecutor._pool_size).
+ "psutil>=7.0,<8",
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5.
  # >=50.0 keeps that floor: the advisory affects >= 44.0.0, < 50.0.0, so 50.0.0 is the fix.
  "cryptography>=50.0.2,<51",
@@ -126,6 +129,7 @@ dev = [
  "pytest-mock>=3.16.0,<4.0.0",
  "mypy>=2.4.0,<3.0.0",
  "types-pyyaml>=6.0.12.20261103",
+ "types-psutil>=7.0,<8",  # stubs for the psutil runtime dependency (scanner pool sizing)
  "lazydocs>=0.4,<1.0.0",
  "mkdocs>=1.6,<2.0.0",
  "mkdocs-material>=9.7.7,<10.0.0",  # floor is advisory-driven: GHSA-xvg9-69gf-fjrf affects >= 7.2.0, < 9.7.7

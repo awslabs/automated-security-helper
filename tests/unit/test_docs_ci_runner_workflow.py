@@ -1753,7 +1753,7 @@ def _pytest_ini_addopts() -> list[str]:
 #: * ``--durations``: every phase of every block, not the ten slowest, and with
 #:   ``--durations-min=0`` none is hidden for taking under 5 ms, so a run shows the
 #:   times its step budgets are checked against.
-#: * ``-n auto``: ``-n 0``, the blocks one at a time, since they share the Docker
+#: * ``-n logical``: ``-n 0``, the blocks one at a time, since they share the Docker
 #:   daemon, the pull recording and the images the session builds.
 #: * ``--dist worksteal``: left out. With ``-n 0`` no worker starts, so there is no work
 #:   to distribute.
@@ -1766,7 +1766,7 @@ ADDOPTS_IN_CI = (
     (("--verbose",), ()),
     (("--junit-xml=test-results/pytest.junit.xml",), ("--junit-xml=",)),
     (("--durations=10",), ("--durations=0", "--durations-min=0")),
-    (("-n", "auto"), ("-n", "0")),
+    (("-n", "logical"), ("-n", "0")),
     (("--dist", "worksteal"), ()),
     (("--strict-markers",), ()),
 )
@@ -1813,8 +1813,8 @@ def test_every_addopts_option_of_pytest_ini_is_decided_for_the_ci_runs():
     for name in PYTEST_STEPS:
         tokens = _pytest_command_tokens(steps[name])
         assert _has_run(tokens, ("-o", "addopts=")), (
-            f"{name}: without -o addopts=, pytest.ini's addopts apply (-n auto starts "
-            "workers the blocks cannot share the Docker daemon across)"
+            f"{name}: without -o addopts=, pytest.ini's addopts apply (-n logical "
+            "starts workers the blocks cannot share the Docker daemon across)"
         )
         for ini, ci in ADDOPTS_IN_CI:
             if ci:

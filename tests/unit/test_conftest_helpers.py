@@ -243,7 +243,7 @@ def test_no_marker_promises_scheduling_that_nothing_implements(request):
     """No marker such as ``serial`` ("Tests that should not run in parallel") is registered.
 
     pytest-xdist schedules a marked test like any other, so a test marked serial would
-    run beside the others under ``-n auto``.
+    run beside the others under ``-n logical``.
     """
     names = {line.split(":", 1)[0].strip() for line in request.config.getini("markers")}
     assert "integration" in names, f"read the wrong marker list: {sorted(names)}"
