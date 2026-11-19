@@ -23,7 +23,6 @@ docs/plugins/community/hadolint-plugin.md
 docs/plugins/community/index.md
 how-to/agent-plugins.md
 how-to/pre-commit.md
-index.md
 personas/index.md
 personas/sdlc-aidlc.md
 reference/index.md

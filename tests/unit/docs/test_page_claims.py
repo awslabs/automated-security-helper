@@ -22657,3 +22657,89 @@ def test_betterleaks_is_pinned_where_the_page_says_with_both_digests_on_every_pl
     dockerfile = (_code_root() / "Dockerfile").read_text(encoding="utf-8")
     assert 'ARG BETTERLEAKS_VERSION="v1.10.1"' in dockerfile
     assert "install-pinned-tool betterleaks" in dockerfile
+
+
+# --------------------------------------------------------------------------- #
+# Community scanners on the homepage and the plugins overview
+# --------------------------------------------------------------------------- #
+
+_HOMEPAGE = "index.md"
+_HOMEPAGE_COMMUNITY_SENTENCE = (
+    "Six more scanners ship with ASH as community plugins: "
+    "[Betterleaks](docs/plugins/community/betterleaks-plugin.md) and "
+    "[Ferret Scan](docs/plugins/community/ferret-scan-plugin.md) for secrets, "
+    "[GuardDog](docs/plugins/community/guarddog-plugin.md) for malicious packages, "
+    "[hadolint](docs/plugins/community/hadolint-plugin.md) for Dockerfiles, "
+    "[Snyk Code](docs/plugins/community/snyk-plugin.md) for SAST, and "
+    "[Trivy](docs/plugins/community/trivy-plugin.md) for repository scanning. "
+    "A scan runs one only when its module is named in `ash_plugin_modules` or "
+    "`--ash-plugin-modules`. See the "
+    "[community plugins](docs/plugins/community/index.md) and the "
+    "[scanners reference](reference/scanners.md) for all 22 scanners."
+)
+
+
+def _shipped_scanner_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Tuple[Set[str], Set[str]]:
+    """(built-in scanner names, community scanner names) the code ships."""
+    builtin: Set[str] = set()
+    community: Set[str] = set()
+    for module, plugin in _instantiated_plugins(tmp_path, monkeypatch, "ASH_SCANNERS"):
+        (builtin if module == "ash_builtin" else community).add(plugin.config.name)
+    return builtin, community
+
+
+@pytest.mark.unit
+def test_the_homepage_says_asha_ships_six_community_scanners_and_links_each(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """index.md (Scanners).
+
+    The sentence is on the page. Its count of six is the number of scanners the
+    vendored community plugin packages declare, which is every in-tree community
+    module; its 22 is built in plus community; and each link it carries resolves to
+    a page under docs/content, the community index and the scanners reference
+    included.
+    """
+    from automated_security_helper.core.scanner_inventory import (
+        _VENDORED_SCANNER_PLUGIN_PACKAGES,
+    )
+
+    assert_on_page(_HOMEPAGE, _HOMEPAGE_COMMUNITY_SENTENCE)
+    builtin, community = _shipped_scanner_split(tmp_path, monkeypatch)
+    assert len(_VENDORED_SCANNER_PLUGIN_PACKAGES) == len(community) == 6, (
+        len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
+        sorted(community),
+    )
+    assert len(builtin) + len(community) == 22, (len(builtin), len(community))
+    links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_COMMUNITY_SENTENCE)
+    assert len(links) == 8, links
+    for link in links:
+        assert (CONTENT / link).is_file(), link
+    # Each community scanner's own page is one of the links, by its name.
+    linked = " ".join(links)
+    for name in community:
+        stem = name.split("-")[0]
+        assert stem in linked, (name, links)
+
+
+@pytest.mark.unit
+def test_the_plugins_overview_names_every_community_scanner_and_no_other(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """plugins/index.md (Where plugins come from).
+
+    The community plugins row lists exactly the scanners the community plugin
+    modules ship, so a seventh module fails this test until the row names it.
+    """
+    _builtin, community = _shipped_scanner_split(tmp_path, monkeypatch)
+    assert community
+    text = _normalize(_page_text(_PLUGINS_INDEX))
+    row = re.search(
+        r"\[community plugins\]\(\.\./docs/plugins/community/index\.md\) \(([^)]*)\)",
+        text,
+    )
+    assert row, "the community plugins row no longer has the listed form"
+    named = set(re.findall(r"`([^`]+)`", row.group(1)))
+    assert named == community, (sorted(named - community), sorted(community - named))
