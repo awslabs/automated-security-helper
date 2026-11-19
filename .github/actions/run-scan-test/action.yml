@@ -417,7 +417,7 @@ runs:
     # reasons v4 made `ashx` the canonical command, and every invocation below uses
     # `ashx`, which neither tree ships. The deprecated `ash` alias pip also installs
     # would still lose to MSYS2 here: when it did, `ash --version` became "Illegal
-    # option --", `ash dependencies install` became "cannot open dependencies", and
+    # option --", `ashx dependencies install` became "cannot open dependencies", and
     # the step ended in about half a second having run no scanner, with the only
     # visible symptom a missing artifact four steps later.
     #
@@ -675,10 +675,10 @@ runs:
           Write-Host "::error::ash resolved to '$AshPath', not the ASH entry point"
           exit 1
         }
-        & ash dependencies install --tool hadolint --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
+        & ashx dependencies install --tool hadolint --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $Out = Join-Path $env:RUNNER_TEMP "hadolint-out"
-        & ash scan --mode local --no-progress --simple `
+        & ashx scan --mode local --no-progress --simple `
           --source-dir tests/test_data/scanners/hadolint/positive `
           --output-dir $Out `
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins `
@@ -727,7 +727,7 @@ runs:
           .ash/ash_output/ash_aggregated_results.json
 
     # hadolint is a community scanner, so the default scans above, which list no
-    # community module, never run it, and the plain `ash dependencies install` above
+    # community module, never run it, and the plain `ashx dependencies install` above
     # does not install it either: its name is a tool only once its module is loaded.
     # So this installs it with the module loaded and runs that copy on the committed
     # fixture with only hadolint selected, on every OS. The fixture has known findings at every
@@ -741,11 +741,11 @@ runs:
       env:
         ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
       run: |
-        ash dependencies install --tool hadolint \
+        ashx dependencies install --tool hadolint \
           --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_hadolint_plugins]"
         out="${RUNNER_TEMP}/hadolint-out"
         set +e
-        ash scan --mode local --no-progress --simple \
+        ashx scan --mode local --no-progress --simple \
           --source-dir tests/test_data/scanners/hadolint/positive \
           --output-dir "$out" \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \

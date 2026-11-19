@@ -626,7 +626,7 @@ runs:
     - name: "Scan with the built image"
       shell: bash
       env:
-        # `ash scan --mode container` rebuilds the image (from cache), so it gets the
+        # `ashx scan --mode container` rebuilds the image (from cache), so it gets the
         # same base-image hand-off as the build; only one runtime's pre-pull ran.
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
@@ -1052,7 +1052,7 @@ runs:
     # ran and reported it -- not merely that it was not MISSING.
     #
     # The scan asks for the `ci` stage, like every other build and container scan in
-    # this action. `ash scan --mode container` rebuilds the image first, and without
+    # this action. `ashx scan --mode container` rebuilds the image first, and without
     # `--build-target` it builds `non-root`, whose user has the runner's UID. Under
     # rootless podman that UID is not the owner of the host output directory inside
     # the container, so the scan cannot create ash.log there and exits 1 before any
@@ -1061,7 +1061,7 @@ runs:
     - name: "Scan with the image's hadolint (community plugin)"
       shell: bash
       env:
-        # `ash scan --mode container` rebuilds the image, so it gets the build's
+        # `ashx scan --mode container` rebuilds the image, so it gets the build's
         # base-image hand-off, as "Scan with the built image" does.
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout || steps.prepull-finch.outputs.oci-layout || steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override || steps.prepull-finch.outputs.base-image-override || steps.prepull-nerdctl.outputs.base-image-override }}
@@ -1070,7 +1070,7 @@ runs:
         mkdir -p /tmp/ash-selftest-hadolint
         printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-selftest-hadolint/Dockerfile
         set +e
-        ash scan \
+        ashx scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
           --build-target ci \

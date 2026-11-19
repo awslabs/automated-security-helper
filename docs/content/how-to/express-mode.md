@@ -1,6 +1,6 @@
 # Express mode
 
-A cold `ash scan` pays for the Python interpreter and the import of ASH's CLI, models and
+A cold `ashx scan` pays for the Python interpreter and the import of ASH's CLI, models and
 built-in plugins before any scanning starts -- around two seconds on a typical machine.
 Run once a day that is noise; run on every commit by a pre-commit hook, or dozens of times
 an hour by an agent, it is most of the wait. Express mode removes it: one resident daemon
@@ -15,12 +15,12 @@ reports and exit code are the cold run's. Express is an accelerator, never a dif
 
 Unix only (Linux and macOS). On Windows, and anywhere else without unix-domain sockets,
 there is no express mode: `ash express start` refuses with a clear message,
-`ash scan --express` prints one line on stderr saying the platform has no express mode
+`ashx scan --express` prints one line on stderr saying the platform has no express mode
 and runs cold, and every scan without the flag runs cold silently, exactly as before.
 
 ## Use it {#use}
 
-Nothing is required. When the daemon is running, every `ash scan` (and bare `ash`) uses it
+Nothing is required. When the daemon is running, every `ashx scan` (and bare `ash`) uses it
 automatically; when it is not, or anything about it is off, the scan silently runs cold.
 Up to the moment the daemon accepts a scan, express can only make it faster or leave it as
 it was: every pre-acceptance failure is the cold run. Once a scan is running on the daemon
@@ -32,7 +32,7 @@ Start the daemon on demand from a scan:
 
 <!-- doctest: illustrative reason="starts a resident daemon that would outlive the docs run, and only on unix" -->
 ```bash
-ash scan --source-dir . --express
+ashx scan --source-dir . --express
 ```
 
 `--express` starts the daemon if it is absent (and replaces it if it is stale), then runs
@@ -52,7 +52,7 @@ Force a cold run without stopping the daemon:
 
 <!-- doctest: illustrative reason="the cold run is the ordinary scan; running it here would only rescan the fixture" -->
 ```bash
-ash scan --source-dir . --no-express
+ashx scan --source-dir . --no-express
 ```
 
 The daemon retires itself after 30 minutes without a request (configure with the
@@ -146,8 +146,8 @@ double a scan's side effects. A Ctrl-C or termination signal that lands during t
 handshake itself ends the command with the usual interrupt code instead of starting a
 cold scan you just asked to stop.
 
-Some invocations never use the daemon: anything that is not a scan (`ash report`,
-`ash inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
+Some invocations never use the daemon: anything that is not a scan (`ashx report`,
+`ashx inspect`, shell tab-completion, ...), any scan with `--no-express`, and scans the
 MCP server hosts in-process. The console script `ash` gets the full saving; running the
 module form (`python -m automated_security_helper.cli.main`) delegates too, but it has
 already paid the import cost by the time it does.
