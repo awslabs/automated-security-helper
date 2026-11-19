@@ -34,6 +34,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+GUARDDOG_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_guarddog_plugins"
 
 # Every third-party entry installed from PyPI, which is to say by `uv tool install`.
 PYTHON_TOOLS = sorted(
@@ -139,6 +140,13 @@ def recorded_install(tmp_path, monkeypatch):
                 "--bin-path",
                 str(tmp_path / "bin"),
                 *tool_args,
+                # guarddog is a community scanner: `ash dependencies install` knows
+                # it only once its module is loaded. Without this the run depended
+                # on an earlier test in the same worker having imported that module
+                # (plugin registration happens at import, once per process), and
+                # failed with "Unknown tool(s): guarddog" wherever none had.
+                "--config-overrides",
+                f"ash_plugin_modules+=[{GUARDDOG_PLUGIN_MODULE}]",
                 *extra_args,
             ],
         )
