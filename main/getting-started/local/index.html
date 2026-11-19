@@ -3784,6 +3784,9 @@ machine that has those two tools, without the network:</p>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>ERROR (2) Exiting due to 2 actionable findings found in ASH scan
 </span></code></pre></div>
 <p>The rows of the other scanners show SKIPPED, because <code>--scanners</code> leaves them out.</p>
+<p>A default scan runs the built-in scanners. Six more ship as community plugin modules
+that a scan runs once <code>ash_plugin_modules</code> names them; the
+<a href="../../docs/plugins/community/">community plugins</a> page lists them.</p>
 <p>The full scan takes a minute or two the first time, most of it grype downloading its
 vulnerability database. Later scans of this project take about 20 seconds. The scan
 prints a summary table, then where it wrote the results:</p>
