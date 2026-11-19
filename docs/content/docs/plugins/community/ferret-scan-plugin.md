@@ -69,7 +69,7 @@ This plugin is tested and compatible with specific ferret-scan versions. Using v
 
 | Plugin Version | ferret-scan Version | Notes |
 |---------------|---------------------|-------|
-| Current | 2.4.5 - 2.7.0 (exclusive) | 2.4.5 and 2.5.2 verified end to end; 2.5.3 is the recommended version. 2.6.0 is verified on the plugin's invocation surface; its new detectors (NHS/CHI numbers, GB/Ontario/Quebec licences, ITINs, card track data) can surface new findings in previously clean scans |
+| Current | 2.4.5 - 2.7.0 (exclusive) | 2.4.5 and 2.5.2 verified end to end; 2.5.3 is the recommended version. 2.6.0 is verified on the plugin's invocation surface; its new detectors (NHS/CHI numbers, GB/Ontario/Quebec licenses, ITINs, card track data) can surface new findings in previously clean scans |
 
 ### Install Ferret Scan
 

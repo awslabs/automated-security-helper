@@ -352,7 +352,7 @@ scanners:
 The authoritative list for your installed version is `ferret-scan --help checks` — do not
 hardcode it, as ferret-scan adds detectors between releases. v2.6.0 adds no new check
 name, but widens several existing checks (UK NHS/CHI numbers under `MEDICAL_ID`,
-GB/Ontario/Quebec licences under `DRIVERS_LICENSE`, ITINs under `SSN`, card track
+GB/Ontario/Quebec licenses under `DRIVERS_LICENSE`, ITINs under `SSN`, card track
 data under `CREDIT_CARD`), so a previously clean scan can report new findings after
 upgrading. As of v2.4.5 through v2.5.2 the checks are:
 
