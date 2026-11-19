@@ -38,8 +38,8 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 
 pytestmark = pytest.mark.integration
 
-#: Not a session id another test delivers to: the record of a delivered source is
-#: kept per process, and these tests read it.
+#: Not a session id another test delivers to. The record of a delivered source is
+#: kept per process; the ``delivery`` fixture gives each test an empty one.
 SESSION = "session-cloneoserr2"
 
 #: What starting a program can raise, as factories so no test raises an instance
@@ -98,6 +98,12 @@ def delivery(tmp_path, monkeypatch) -> Dict[str, Any]:
     _git(["add", "a.py"], repo, env)
     _git(["commit", "-q", "-m", "one"], repo, env)
     monkeypatch.setattr(sd, "_GIT_ARGV", ("git", "-c", "protocol.file.allow=always"))
+    # The record of a delivered source is a module global. Two tests below deliver
+    # to SESSION and leave it set; under xdist a worker can run them before the
+    # parametrized failure tests, which then read the record of another test's
+    # tmp_path instead of None. Each test gets its own empty record, restored at
+    # teardown, as the other tests of the delivery do.
+    monkeypatch.setattr(sd, "_SESSION_SOURCE_DIRS", {})
     workspace = tmp_path / "workspaces"
     workspace.mkdir()
     return {
