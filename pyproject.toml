@@ -129,7 +129,7 @@ dev = [
  "pytest-mock>=3.16.0,<4.0.0",
  "mypy>=2.4.0,<3.0.0",
  "types-pyyaml>=6.0.12.20261111",
- "types-psutil>=7.0,<8",  # stubs for the psutil runtime dependency (scanner pool sizing)
+ "types-psutil>=7.2.2.20261111,<8",  # stubs for the psutil runtime dependency (scanner pool sizing)
  "lazydocs>=0.4,<1.0.0",
  "mkdocs>=1.6,<2.0.0",
  "mkdocs-material>=9.7.7,<10.0.0",  # floor is advisory-driven: GHSA-xvg9-69gf-fjrf affects >= 7.2.0, < 9.7.7
