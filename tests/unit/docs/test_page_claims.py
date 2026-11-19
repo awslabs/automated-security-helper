@@ -22300,3 +22300,360 @@ def test_the_sandbox_page_states_the_plugin_module_rule_as_the_code_keeps_it() -
         "Only ASH's own plugin modules and modules installed outside every git "
         "checkout and the scanned directory.",
     )
+
+
+BETTERLEAKS_PLUGIN = "docs/plugins/community/betterleaks-plugin.md"
+_BETTERLEAKS_MODULE = "automated_security_helper.plugin_modules.ash_betterleaks_plugins"
+_BETTERLEAKS_ENV = (
+    "BETTERLEAKS_CONFIG",
+    "BETTERLEAKS_CONFIG_TOML",
+    "GITLEAKS_CONFIG",
+    "GITLEAKS_CONFIG_TOML",
+)
+
+
+def _betterleaks_scanner(
+    tmp_path: Path, source: Path, output: Path, **options: Any
+) -> Any:
+    """A Betterleaks scanner over ``source``, built as a scan builds it."""
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+        BetterleaksScanner,
+        BetterleaksScannerConfig,
+        BetterleaksScannerConfigOptions,
+    )
+
+    source.mkdir(parents=True, exist_ok=True)
+    return BetterleaksScanner(
+        context=PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / "converted",
+            config=AshConfig(project_name="page-claims"),
+        ),
+        config=BetterleaksScannerConfig(
+            options=BetterleaksScannerConfigOptions(**options)
+        ),
+    )
+
+
+def _betterleaks_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str
+) -> List[str]:
+    """The argv a default Betterleaks run is given, with only ``env`` set of the
+    config variables it reads."""
+    for name in _BETTERLEAKS_ENV:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    source = tmp_path / "src"
+    scanner = _betterleaks_scanner(tmp_path, source, tmp_path / "output")
+    return scanner._build_arguments(source, tmp_path / "output" / "betterleaks.sarif")
+
+
+def _betterleaks_page_yaml(start: str) -> Any:
+    """The YAML of the fenced block of the Betterleaks page that opens with ``start``."""
+    blocks = re.findall(
+        r"```yaml\n(.*?)```", _page_text(BETTERLEAKS_PLUGIN), flags=re.DOTALL
+    )
+    (block,) = [text for text in blocks if text.lstrip().startswith(start)]
+    return yaml.safe_load(block)
+
+
+@pytest.mark.unit
+def test_the_betterleaks_page_names_the_module_the_code_ships_and_the_defaults_it_keeps() -> (
+    None
+):
+    """betterleaks-plugin.md (Enabling it, Configuration).
+
+    The module the page tells an operator to list is imported, and it offers the
+    ``betterleaks`` scanner; the configuration block the page shows is the scanner's
+    own defaults, key for key, so an option renamed or a default flipped fails here.
+    The scanner is on by default once its module is listed.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "With the module listed, `betterleaks` runs by default, like every other "
+        "scanner.",
+    )
+    enabling = _betterleaks_page_yaml("# .ash/.ash.yaml")
+    assert enabling == {"ash_plugin_modules": [_BETTERLEAKS_MODULE]}
+    module = importlib.import_module(_BETTERLEAKS_MODULE)
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+        BetterleaksScanner,
+        BetterleaksScannerConfig,
+    )
+
+    assert module.ASH_SCANNERS == [BetterleaksScanner]
+
+    defaults = BetterleaksScannerConfig()
+    shown = _betterleaks_page_yaml("scanners:")["scanners"]["betterleaks"]
+    assert defaults.name == "betterleaks"
+    assert defaults.enabled is True and shown["enabled"] is True
+    assert shown["options"] == {
+        "config_file": defaults.options.config_file,
+        "honor_inline_ignores": defaults.options.honor_inline_ignores,
+        "honor_tree_ignore_files": defaults.options.honor_tree_ignore_files,
+        "scan_timeout": defaults.options.scan_timeout,
+        "severity_threshold": defaults.options.severity_threshold,
+    }
+    assert shown["options"] == {
+        "config_file": None,
+        "honor_inline_ignores": False,
+        "honor_tree_ignore_files": False,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+    }
+
+
+@pytest.mark.unit
+def test_betterleaks_is_run_as_the_page_says_and_never_with_the_flags_it_says_are_unused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """betterleaks-plugin.md (the opening paragraph, What is scanned, Ignore files,
+    Configuration).
+
+    The argv a default run is given: ``betterleaks dir``, report redaction, inline
+    allow comments not honored, no auto-loaded config from the scanned tree, no
+    secret validation, no config the operator did not give. The scan path is ``.``
+    for the source, which is what makes a reported path source-relative.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH runs it as `betterleaks dir` over the scan target: the files as they are "
+        "on disk, not git history",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH passes `betterleaks --redact=100` and rewrites any snippet that is not "
+        "`REDACTED`.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH passes `betterleaks --ignore-gitleaks-allow` so they hide nothing, unless "
+        "`honor_inline_ignores` is set by the operator.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "only with `betterleaks --unsafe-auto-load-config`, which ASH never passes",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "A secret-validation block in a rule only runs with `betterleaks "
+        "--validation`, which ASH does not pass.",
+    )
+
+    argv = _betterleaks_argv(tmp_path, monkeypatch)
+
+    assert argv[:2] == ["betterleaks", "dir"], argv
+    assert "--redact=100" in argv
+    assert "--ignore-gitleaks-allow" in argv
+    assert "--unsafe-auto-load-config" not in argv
+    assert "--validation" not in argv
+    assert not [token for token in argv if token.startswith("--config")], argv
+    assert argv[-2:] == ["--", "."], argv
+
+
+@pytest.mark.unit
+def test_betterleaks_config_variables_are_anchored_where_the_page_says(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """betterleaks-plugin.md (Configuration).
+
+    A relative ``BETTERLEAKS_CONFIG`` or ``GITLEAKS_CONFIG`` would be read from the
+    scanned tree by Betterleaks, so it is passed as ``--config`` anchored to the
+    directory ASH runs in. An absolute path, and the TOML-content variable, are left
+    to Betterleaks, so no ``--config`` is passed for them.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "A relative `BETTERLEAKS_CONFIG` (or `GITLEAKS_CONFIG`) in your environment is "
+        "anchored to the directory ASH runs in and passed with `--config`",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.chdir(run_dir)
+    anchored = os.path.abspath(os.path.join("cfg", "rules.toml"))
+
+    for variable in ("BETTERLEAKS_CONFIG", "GITLEAKS_CONFIG"):
+        argv = _betterleaks_argv(
+            tmp_path, monkeypatch, **{variable: os.path.join("cfg", "rules.toml")}
+        )
+        assert f"--config={Path(anchored).as_posix()}" in argv, (variable, argv)
+
+    absolute = _betterleaks_argv(
+        tmp_path, monkeypatch, BETTERLEAKS_CONFIG=str(tmp_path / "rules.toml")
+    )
+    assert not [token for token in absolute if token.startswith("--config")], absolute
+    content = _betterleaks_argv(
+        tmp_path, monkeypatch, BETTERLEAKS_CONFIG_TOML='title = "rules"'
+    )
+    assert not [token for token in content if token.startswith("--config")], content
+
+
+@pytest.mark.parametrize(
+    "present",
+    [
+        pytest.param([".betterleaksignore"], id="a-betterleaksignore"),
+        pytest.param([".gitleaksignore"], id="a-gitleaksignore"),
+        pytest.param([".betterleaksignore", ".gitleaksignore"], id="both"),
+        pytest.param([], id="control-neither-file"),
+    ],
+)
+@pytest.mark.unit
+def test_a_tree_holding_a_betterleaks_ignore_file_fails_the_scan_naming_it(
+    tmp_path: Path, present: List[str]
+) -> None:
+    """betterleaks-plugin.md (Ignore files).
+
+    The scan path holds one of the two ignore files, and the scanner is asked to
+    accept the tree before Betterleaks runs: it must raise, naming each file and the
+    option that accepts it. With neither file, nothing is raised.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "So a scan whose tree holds either file fails before Betterleaks runs, with a "
+        "message naming the file.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "or set `scanners.betterleaks.options.honor_tree_ignore_files: true` in a "
+        "config outside the scanned tree to accept the file.",
+    )
+    from automated_security_helper.core.exceptions import ScannerError
+
+    source = tmp_path / "src"
+    scanner = _betterleaks_scanner(tmp_path, source, tmp_path / "output")
+    for name in present:
+        (source / name).write_text("src/app.py:github-pat:4\n", encoding="utf-8")
+
+    if not present:
+        scanner._refuse_tree_ignore_files(source)
+        return
+    with pytest.raises(ScannerError) as refused:
+        scanner._refuse_tree_ignore_files(source)
+    message = str(refused.value)
+    for name in present:
+        assert name in message, message
+    assert "honor_tree_ignore_files" in message, message
+
+
+@pytest.mark.unit
+def test_betterleaks_results_are_rated_critical_and_redacted_and_ashs_output_dropped(
+    tmp_path: Path,
+) -> None:
+    """betterleaks-plugin.md (What is scanned, Severity).
+
+    Betterleaks writes results with no level and a snippet that may hold the secret.
+    After the scanner's post-processing every result is ``error`` with
+    ``issue_severity`` CRITICAL, every snippet reads ``REDACTED``, and the tool's own
+    ``semanticVersion`` is dropped. A result under ASH's output directory inside the
+    scanned tree is dropped, and one beside it is kept.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "Every result is `error` in SARIF and CRITICAL in ASH",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH drops every result under it, except for a file the repository committed "
+        "there.",
+    )
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+    source = tmp_path / "tree"
+    output = source / ".ash" / "ash_output"
+    scanner = _betterleaks_scanner(tmp_path, source, output)
+
+    def result(uri: str, snippet: str) -> dict:
+        return {
+            "ruleId": "github-pat",
+            "message": {"text": "github-pat has detected secret"},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": uri},
+                        "region": {"startLine": 4, "snippet": {"text": snippet}},
+                    }
+                }
+            ],
+        }
+
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {"name": "betterleaks", "semanticVersion": "v8.0.0"}
+                    },
+                    "results": [
+                        result("src/settings.py", "not-redacted"),
+                        result(".ash/ash_output/converted/settings.py", "REDACTED"),
+                    ],
+                }
+            ],
+        }
+    )
+
+    processed = scanner._post_process_sarif(report, [], source)
+
+    kept = processed.runs[0].results
+    assert len(kept) == 1, kept
+    (only,) = kept
+    assert getattr(only.level, "value", only.level) == "error"
+    assert getattr(only.properties, "issue_severity") == "CRITICAL"  # noqa: B009
+    assert only.locations[0].physicalLocation.root.region.snippet.text == "REDACTED"
+    assert processed.runs[0].tool.driver.semanticVersion is None
+
+
+@pytest.mark.unit
+def test_betterleaks_is_pinned_where_the_page_says_with_both_digests_on_every_platform() -> (
+    None
+):
+    """betterleaks-plugin.md (the opening paragraph, Installing Betterleaks).
+
+    The pinned release is v1.10.1, the 1.x line. For Linux, macOS and Windows on
+    x86_64 and arm64 an asset resolves with a digest for the archive and a second
+    digest for the executable inside it, which is what the page says is checked. The
+    container image builds with the same version and installs it from the same pin.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH pins the 1.x line (v1.10.1); the 2.0 release candidates are not used.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "downloads the pinned v1.10.1 release archive from GitHub and verifies it "
+        "against the SHA256 digest pinned in ASH, and the executable inside it "
+        "against a second pinned digest, before installing it. Linux, macOS and "
+        "Windows on x86_64 and arm64 are supported.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "the ASH image includes Betterleaks v1.10.1.",
+    )
+    from automated_security_helper.utils.tool_downloads import (
+        TOOL_VERSIONS,
+        get_tool_asset,
+        supported_platforms,
+    )
+
+    assert TOOL_VERSIONS["betterleaks"] == "v1.10.1"
+    platforms = {
+        (platform_name, arch)
+        for platform_name in ("linux", "darwin", "windows")
+        for arch in ("amd64", "arm64")
+    }
+    assert set(supported_platforms("betterleaks")) == platforms
+    for platform_name, arch in sorted(platforms):
+        asset = get_tool_asset("betterleaks", platform_name, arch)
+        assert "1.10.1" in asset.version, (platform_name, arch, asset.version)
+        assert asset.sha256, (platform_name, arch)
+        assert asset.executable_digest, (platform_name, arch)
+        assert asset.executable_digest != asset.sha256, (platform_name, arch)
+
+    dockerfile = (_code_root() / "Dockerfile").read_text(encoding="utf-8")
+    assert 'ARG BETTERLEAKS_VERSION="v1.10.1"' in dockerfile
+    assert "install-pinned-tool betterleaks" in dockerfile
