@@ -655,6 +655,8 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
         # uv-managed like semgrep: not installed, present uv, online run.
         "cfn_lint": (None, False, True),
         "gitleaks": (None, False, False),
+        # A binary found on PATH, as for gitleaks: none here, nothing to install.
+        "betterleaks": (None, False, False),
         # uv-managed like semgrep: the stand-in uv lists no guarddog, uv is
         # present and the run is online, so a scan would install it.
         "guarddog": (None, False, True),

@@ -385,6 +385,9 @@ class TestDefaults:
         from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
             GuardDogScannerConfig,
         )
+        from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+            BetterleaksScannerConfig,
+        )
         from automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner import (
             HadolintScannerConfig,
         )
@@ -422,6 +425,7 @@ class TestDefaults:
                 # Plugin scanners' sections, from their own models, so an entry
                 # under them has to name an option the plugin really has.
                 "scanners": {
+                    "betterleaks": BetterleaksScannerConfig().model_dump(by_alias=True),
                     "ferret-scan": FerretScannerConfig().model_dump(by_alias=True),
                     "guarddog": GuardDogScannerConfig().model_dump(by_alias=True),
                     "hadolint": HadolintScannerConfig().model_dump(by_alias=True),

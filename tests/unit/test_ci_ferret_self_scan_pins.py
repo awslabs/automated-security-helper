@@ -73,6 +73,9 @@ DOCX_SCRIPT = "scripts/generate_test_docx.py"
 HADOLINT_BEHAVIOR_TEST = (
     "tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py"
 )
+BETTERLEAKS_SCANNER_TEST = (
+    "tests/unit/plugin_modules/ash_betterleaks_plugins/test_betterleaks_scanner.py"
+)
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,11 @@ _RANGED_PIN_MARKERS: dict[tuple[str, str], list[_Marker]] = {
                 r'^    NOTICES_SHA256 = "',
             )
         ),
+    ],
+    # The one constant the betterleaks pinned-release test compares the Dockerfile's
+    # pin against: the commit the v1.10.1 tag points at.
+    ("API_KEY_OR_SECRET", BETTERLEAKS_SCANNER_TEST): [
+        _Marker((r'^    COMMIT = "',)),
     ],
 }
 

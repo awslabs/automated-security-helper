@@ -2029,8 +2029,8 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument(
         "tool",
         help=(
-            "actionlint, cfn-guard, gitleaks, grype, hadolint, opengrep, syft, "
-            "trivy or uv"
+            "actionlint, betterleaks, cfn-guard, gitleaks, grype, hadolint, "
+            "opengrep, syft, trivy or uv"
         ),
     )
     parser.add_argument(

@@ -771,6 +771,18 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
         "/scanners/hadolint/options/config_file",
         "/etc/other.yaml",
     ),
+    "/scanners/betterleaks/options/config_file": (
+        "/scanners/betterleaks/options/config_file",
+        "/etc/other.toml",
+    ),
+    "/scanners/betterleaks/options/honor_tree_ignore_files": (
+        "/scanners/betterleaks/options/honor_tree_ignore_files",
+        True,
+    ),
+    "/scanners/betterleaks/options/honor_inline_ignores": (
+        "/scanners/betterleaks/options/honor_inline_ignores",
+        True,
+    ),
     "/scanners/*/options/tool_version": (
         "/scanners/checkov/options/tool_version",
         "==1.0.0",
@@ -1289,6 +1301,7 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     # whole section and the first denied entry under it is the one named.
     section = "/".join(entry.split("/")[:3]) + "/"
     plugin_section = section in (
+        "/scanners/betterleaks/",
         "/scanners/ferret-scan/",
         "/scanners/guarddog/",
         "/scanners/hadolint/",

@@ -136,6 +136,11 @@ LOCAL: Dict[Plugin, str] = {
     ("scanners", "cfn-lint"): "reads the templates",
     ("scanners", "cfn-guard"): "reads the templates and its installed rules bundle",
     ("scanners", "gitleaks"): "reads the files",
+    ("scanners", "betterleaks"): (
+        "reads the files; declares no network and runs without --validation, "
+        "which is the only way it sends a found value anywhere "
+        "(betterleaks_scanner.py _build_arguments)"
+    ),
     ("scanners", "guarddog"): (
         "reads copies of the package files ASH stages for it "
         "(guarddog_scanner.py:1001-1060, :1105-1118); its `verify` option, off by "

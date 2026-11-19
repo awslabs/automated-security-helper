@@ -147,6 +147,9 @@ class ToolAsset:
 # reaches because the scanner always passes its configured version.
 TOOL_VERSIONS: dict[str, str] = {
     "actionlint": "v1.7.12",
+    # The v1 maintenance line. v2.0.0 is a release candidate (2.0.0-rc.9 on
+    # 2026-11-17), and ASH pins no prerelease.
+    "betterleaks": "v1.10.1",
     "cfn-guard": "3.2.1",
     "gitleaks": "v8.30.1",
     "grype": "v0.121.3",
@@ -180,6 +183,15 @@ _ACTIONLINT_ASSETS: dict[PlatformArch, str] = {
     ("darwin", "arm64"): "actionlint_1.7.12_darwin_arm64.tar.gz",
     ("windows", "amd64"): "actionlint_1.7.12_windows_amd64.zip",
     ("windows", "arm64"): "actionlint_1.7.12_windows_arm64.zip",
+}
+
+_BETTERLEAKS_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "betterleaks_1.10.1_linux_x64.tar.gz",
+    ("linux", "arm64"): "betterleaks_1.10.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "betterleaks_1.10.1_darwin_x64.tar.gz",
+    ("darwin", "arm64"): "betterleaks_1.10.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "betterleaks_1.10.1_windows_x64.zip",
+    ("windows", "arm64"): "betterleaks_1.10.1_windows_arm64.zip",
 }
 
 # cfn-guard's release assets carry no version in their names: every release
@@ -272,6 +284,7 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # Transcribed verbatim from the checksums file published with each release, so a
 # reviewer can diff this block against the upstream file line for line:
 #   https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
+#   https://github.com/betterleaks/betterleaks/releases/download/v1.10.1/checksums.txt
 #   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
 #   https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_checksums.txt
 #   https://github.com/hadolint/hadolint/releases/download/v2.15.1/checksums.sha256
@@ -360,6 +373,13 @@ _DIGESTS: dict[str, str] = {
     "actionlint_1.7.12_darwin_arm64.tar.gz": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_amd64.zip": "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_arm64.zip": "cadcf7ea4efe3a68728893813643cebe1185e5b1d4be5b96245f65c9a4d5ea41",  # pragma: allowlist secret
+    # betterleaks v1.10.1
+    "betterleaks_1.10.1_linux_x64.tar.gz": "c174b42d7aa60caf58c0c3e555c0e4bed01fe6b0d99a412bce777b5af4ce913e",  # pragma: allowlist secret
+    "betterleaks_1.10.1_linux_arm64.tar.gz": "62a63199f9f61a6b5e5a6f58f048493db20fbc8c770014f4d903a4d97886e1bf",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_x64.tar.gz": "1ae2e3885d161918d8ad2e911e205e73f0d9ffba52c85b38126586c52d355ef4",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_arm64.tar.gz": "ca91eb3b006f15478411f235b5e2712fb15cea74f6701ebadc2364efe0af1403",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_x64.zip": "53d4b37635a999992fb8e1d79f8215279315cbb3b4139314289b69407e79143d",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_arm64.zip": "f93d26dfc7b939f967c74e3f908b44faec1b1cb6ffb29c75c0a1d7e713ab8f70",  # pragma: allowlist secret
     # cfn-guard 3.2.1
     "cfn-guard-v3-x86_64-linux-latest.tar.gz": "8c66efb19c63e6c2bf26b9a41bbcf2f85baa8a937b01d350940194faaf64cf1d",  # pragma: allowlist secret
     "cfn-guard-v3-aarch64-linux-latest.tar.gz": "cd378026dad0f865926ab1d1c082e2faf825f7fd888a9fe6b5c142cdf175c129",  # pragma: allowlist secret
@@ -421,6 +441,13 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "actionlint_1.7.12_darwin_arm64.tar.gz": "8db11704dc296f096216db4db65d86cd7f0ebfdf4c38453a1da276b137b88388",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_amd64.zip": "54ca21be3de4c7cfa26914aa8b61bd76bf573ef3caac5f80d110558cdf241718",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_arm64.zip": "dc172c9dd32275b4a563143a318a48c91dff44fabafb23b7d1a05ed9c106a488",  # pragma: allowlist secret
+    # betterleaks v1.10.1
+    "betterleaks_1.10.1_linux_x64.tar.gz": "506082605cad984abd6ecf979a5f00fd6d701bc3ab2104a6029b1d068b3e320c",  # pragma: allowlist secret
+    "betterleaks_1.10.1_linux_arm64.tar.gz": "a83657a5747c35ed35e0ef9a8a3d60ded4b29713e27856c2fbe7c63a1b972cb0",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_x64.tar.gz": "d09400141ae0a155666f22ab974cff27c409c2c968445f7f0fc5958c4c5de62b",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_arm64.tar.gz": "13ac5109fa85a590c7ba6e7f130311e0c60a2bf582c3aac073176c93b46621a8",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_x64.zip": "d9946b77870a30838f9a6a3591ea45c9c6530abfb0cf3890d2046b3d42816049",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_arm64.zip": "ed9ee26a6f1a8d7f042712e524802911e23fd1b1cb0561ecb606b4faab5882d4",  # pragma: allowlist secret
     # cfn-guard 3.2.1
     "cfn-guard-v3-x86_64-linux-latest.tar.gz": "75109d136e80060bee5572a23d0c1110949c02a8cebb2a56284866ab906b3978",  # pragma: allowlist secret
     "cfn-guard-v3-aarch64-linux-latest.tar.gz": "9f8d9a7bc483b39468595b91e99369e8bdbfb12160182a2e2c64ba758892bb79",  # pragma: allowlist secret
@@ -488,6 +515,7 @@ _BARE_EXECUTABLE_TOOLS = frozenset({"hadolint", "opengrep"})
 
 _RELEASE_BASE_URLS: dict[str, str] = {
     "actionlint": "https://github.com/rhysd/actionlint/releases/download",
+    "betterleaks": "https://github.com/betterleaks/betterleaks/releases/download",
     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
@@ -500,6 +528,7 @@ _RELEASE_BASE_URLS: dict[str, str] = {
 
 _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "actionlint": _ACTIONLINT_ASSETS,
+    "betterleaks": _BETTERLEAKS_ASSETS,
     "cfn-guard": _CFN_GUARD_ASSETS,
     "gitleaks": _GITLEAKS_ASSETS,
     "grype": _GRYPE_ASSETS,
@@ -940,6 +969,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "aws-guard-rules-registry/LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",  # pragma: allowlist secret
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
+    "betterleaks commit": "39d5bdcf34db54e944facac5cf6e8b03db5e2b99",  # pragma: allowlist secret
     "cfn-lint commit": "1d19193ad79ed20c83bf3fbafb6cd506e6d15b62",  # pragma: allowlist secret
     "checkov commit": "5038a50e21a2253cb5aed2e739d2c22ee28d2e17",  # pragma: allowlist secret
     "cfn-guard commit": "e531ef56092abb662e08fc6062c92db6d53f99c9",  # pragma: allowlist secret
@@ -1084,6 +1114,16 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["bandit commit"],
         files=(LicenseFile("LICENSE"),),
         distribution="bandit",
+    ),
+    # The release archive holds the executable, a README and the MIT LICENSE, which
+    # is byte-identical to the repository's at the release commit.
+    "betterleaks": ThirdPartyLicense(
+        tool="betterleaks",
+        version="v1.10.1",
+        license="MIT",
+        repository="https://github.com/betterleaks/betterleaks",
+        commit=_THIRD_PARTY_HASHES["betterleaks commit"],
+        files=(LicenseFile("LICENSE"),),
     ),
     # The release archive holds the executable and a README, no license file, so
     # both files come from the repository.
