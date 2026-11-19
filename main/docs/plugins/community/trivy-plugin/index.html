@@ -6510,85 +6510,11 @@ therefore runs trivy twice, and each finding is reported once per scanner; set
 </span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">      </span><span class="nt">disable_telemetry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span></code></pre></div>
 <h3 id="configuration-options">Configuration Options<a class="headerlink" href="#configuration-options" title="Permanent link">&para;</a></h3>
-<!-- doctest: options of=scanners.trivy-repo -->
-<table>
-<thead>
-<tr>
-<th>Option</th>
-<th>Type</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>scanners</code></td>
-<td>List[str]</td>
-<td><code>["vuln", "secret", "misconfig", "license"]</code></td>
-<td>Types of scans to perform</td>
-</tr>
-<tr>
-<td><code>severity_threshold</code></td>
-<td>str</td>
-<td><code>null</code></td>
-<td>Minimum severity that fails the scan (<code>ALL</code>, <code>LOW</code>, <code>MEDIUM</code>, <code>HIGH</code>, <code>CRITICAL</code>); <code>null</code> uses the global threshold. Findings below it are still reported; ASH does not pass it as <code>trivy --severity</code></td>
-</tr>
-<tr>
-<td><code>ignore_unfixed</code></td>
-<td>bool</td>
-<td><code>true</code></td>
-<td>Ignore vulnerabilities without available fixes</td>
-</tr>
-<tr>
-<td><code>license_full</code></td>
-<td>bool</td>
-<td><code>true</code></td>
-<td>Enable full license scanning (more comprehensive but slower)</td>
-</tr>
-<tr>
-<td><code>disable_telemetry</code></td>
-<td>bool</td>
-<td><code>true</code></td>
-<td>Disable Trivy telemetry data collection. Only <code>--config-overrides</code> or a config file outside every git checkout and the scanned directory can set it to <code>false</code>; any config can set it to <code>true</code></td>
-</tr>
-<tr>
-<td><code>config_file</code></td>
-<td>str</td>
-<td><code>null</code></td>
-<td>A trivy config file, passed as <code>trivy --config</code>; see below</td>
-</tr>
-<tr>
-<td><code>module_dir</code></td>
-<td>str</td>
-<td><code>null</code></td>
-<td>A directory of trivy modules, passed as <code>trivy --module-dir</code>; see below</td>
-</tr>
-<tr>
-<td><code>ignore_file</code></td>
-<td>str</td>
-<td><code>null</code></td>
-<td>A trivy ignore file, passed as <code>trivy --ignorefile</code>; see below</td>
-</tr>
-<tr>
-<td><code>secret_config_file</code></td>
-<td>str</td>
-<td><code>null</code></td>
-<td>A trivy secret-scanning config, passed as <code>trivy --secret-config</code>; see below</td>
-</tr>
-<tr>
-<td><code>offline</code></td>
-<td>bool</td>
-<td><code>false</code></td>
-<td>Run offline even when ASH does not; ASH's offline mode applies regardless</td>
-</tr>
-<tr>
-<td><code>scan_timeout</code></td>
-<td>int</td>
-<td><code>1800</code></td>
-<td>Seconds ASH lets trivy run; ASH does not pass <code>trivy --timeout</code>, so trivy's own 5-minute default still applies</td>
-</tr>
-</tbody>
-</table>
+<p>The options, with their types, defaults, and descriptions, are listed under <a href="../../../../reference/scanners/#trivy-repo"><code>trivy-repo</code> in the scanners reference</a>. Two behaviors that the reference does not state:</p>
+<ul>
+<li><code>severity_threshold</code>: findings below it are still reported, and ASH does not pass it as <code>trivy --severity</code>.</li>
+<li><code>scan_timeout</code>: ASH does not pass <code>trivy --timeout</code>, so trivy's own 5-minute default still applies.</li>
+</ul>
 <p>trivy-repo always passes <code>trivy --config</code> and <code>trivy --module-dir</code>, so trivy does not load a <code>trivy.yaml</code> from the directory it runs in. <code>config_file</code> and <code>module_dir</code> are honored only when set through <code>--config-overrides</code> or a config file outside every git checkout and the scanned directory (one that is not <a href="../../../../concepts/trust-model/#how-the-tier-is-decided">repository-written</a>), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for <code>--config-overrides</code>, not from the source directory (see <a href="../../../../how-to/configure/#relative-paths">Relative paths in the operator's settings</a>). A configured path that does not exist fails the scan. Unset or ignored, <code>--config</code> names <code>TRIVY_CONFIG</code> when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; <code>trivy --module-dir</code> names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.</p>
 <p><code>ignore_file</code> and <code>secret_config_file</code> follow the same rule, a relative path included. Unset or refused, trivy-repo uses <code>TRIVY_IGNOREFILE</code> or <code>TRIVY_SECRET_CONFIG</code> from the environment for a file outside the scanned tree (a relative path in either is taken from the working directory ASH runs in), and otherwise an empty file ASH writes outside the scanned tree, so a <code>.trivyignore</code> or <code>trivy-secret.yaml</code> in the scanned repository does not remove findings or disable secret rules.</p>
 <h3 id="scanner-types">Scanner Types<a class="headerlink" href="#scanner-types" title="Permanent link">&para;</a></h3>

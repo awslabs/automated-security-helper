@@ -4042,19 +4042,19 @@ SOFTWARE.
 <td><a id="reporters.flat-json.options.include_scanner_metrics"></a><code>include_scanner_metrics</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>When true, the report carries a <code>scanner_metrics</code> key with one row per scanner: its finding counts by severity, its result status, and the severity threshold it was judged against. When false, the key is left out.</td>
 </tr>
 <tr>
 <td><a id="reporters.flat-json.options.include_summary_metrics"></a><code>include_summary_metrics</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>Accepted for compatibility but not read: the report is written the same whether this is true or false. Use <code>include_scanner_metrics</code> and <code>include_metadata</code> to choose what the report carries.</td>
 </tr>
 <tr>
 <td><a id="reporters.flat-json.options.include_metadata"></a><code>include_metadata</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>When true, the report carries a <code>metadata</code> key with the project name, the scan time, the report time, and the ASH version. When false, the key is left out.</td>
 </tr>
 </tbody>
 </table>
@@ -4204,7 +4204,7 @@ SOFTWARE.
 <td><a id="reporters.junitxml.options.respect_severity_threshold"></a><code>respect_severity_threshold</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>When true, a finding below the severity threshold its scanner is judged against is written as a skipped test case (type <code>threshold</code>), and only findings at or above the threshold are errors, which matches the exit code. When false, no threshold is applied and findings are written as errors whatever their severity. Suppressed findings are skipped either way.</td>
 </tr>
 </tbody>
 </table>
@@ -4233,43 +4233,43 @@ SOFTWARE.
 <td><a id="reporters.markdown.options.include_summary"></a><code>include_summary</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>When true, the report has a Summary section: the scanner results table and the top hotspots table. When false, both are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay.</td>
 </tr>
 <tr>
 <td><a id="reporters.markdown.options.include_findings_table"></a><code>include_findings_table</code></td>
 <td>boolean</td>
 <td><code>false</code></td>
-<td>No description in the code.</td>
+<td>When true, the report has a Findings overview table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long.</td>
 </tr>
 <tr>
 <td><a id="reporters.markdown.options.include_detailed_findings"></a><code>include_detailed_findings</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>When true, the report has a Detailed findings section that lists up to <code>max_detailed_findings</code> actionable findings, highest severity first. The Not gating (workspace policy) section of a workspace scan is part of it and is left out with it.</td>
 </tr>
 <tr>
 <td><a id="reporters.markdown.options.max_detailed_findings"></a><code>max_detailed_findings</code></td>
 <td>integer</td>
 <td><code>20</code></td>
-<td>No description in the code.</td>
+<td>The most findings listed in the Detailed findings section, and in the Not gating (workspace policy) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. 0 lists none. A negative value is refused.</td>
 </tr>
 <tr>
 <td><a id="reporters.markdown.options.top_hotspots_limit"></a><code>top_hotspots_limit</code></td>
 <td>integer</td>
 <td><code>10</code></td>
-<td>No description in the code.</td>
+<td>The most files listed in the top hotspots table, which ranks files by their number of actionable findings. Used only when <code>include_summary</code> is true. 0 leaves the table out. A negative value is refused.</td>
 </tr>
 <tr>
 <td><a id="reporters.markdown.options.use_collapsible_details"></a><code>use_collapsible_details</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>When true, each detailed finding is wrapped in an HTML <code>details</code> element whose summary line shows its severity, rule ID, and location, so a long list stays short until a finding is opened. When false, every finding is written out in full.</td>
 </tr>
 <tr>
 <td><a id="reporters.markdown.options.compact"></a><code>compact</code></td>
 <td>boolean</td>
 <td><code>false</code></td>
-<td>No description in the code.</td>
+<td>When true, the scanner results table leaves out scanners that were skipped and scanners that passed with no findings, and the how-to-read help, the Scan metadata section, and the generated-at line are dropped. The outcome line, the project and scan time line, the workspace section, and the coverage notices stay.</td>
 </tr>
 </tbody>
 </table>
@@ -4328,31 +4328,31 @@ SOFTWARE.
 <td><a id="reporters.text.options.include_summary"></a><code>include_summary</code></td>
 <td>boolean</td>
 <td><code>true</code></td>
-<td>No description in the code.</td>
+<td>When true, the report has a SUMMARY section: the scanner results table, a key to its columns, and the top hotspots list. When false, those are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay.</td>
 </tr>
 <tr>
 <td><a id="reporters.text.options.include_findings_table"></a><code>include_findings_table</code></td>
 <td>boolean</td>
 <td><code>false</code></td>
-<td>No description in the code. The comment on its line in the code: This can be lengthy, default to False.</td>
+<td>When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long.</td>
 </tr>
 <tr>
 <td><a id="reporters.text.options.include_detailed_findings"></a><code>include_detailed_findings</code></td>
 <td>boolean</td>
 <td><code>false</code></td>
-<td>No description in the code.</td>
+<td>When true, the report has a DETAILED FINDINGS section that lists up to <code>max_detailed_findings</code> actionable findings, highest severity first, each with its scanner, rule ID, location, and description. The NOT GATING (WORKSPACE POLICY) section of a workspace scan is part of it and is left out with it.</td>
 </tr>
 <tr>
 <td><a id="reporters.text.options.max_detailed_findings"></a><code>max_detailed_findings</code></td>
 <td>integer</td>
 <td><code>20</code></td>
-<td>No description in the code.</td>
+<td>The most findings listed in the DETAILED FINDINGS section, and in the NOT GATING (WORKSPACE POLICY) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. Used only when <code>include_detailed_findings</code> is true. 0 lists none. A negative value is refused.</td>
 </tr>
 <tr>
 <td><a id="reporters.text.options.top_hotspots_limit"></a><code>top_hotspots_limit</code></td>
 <td>integer</td>
 <td><code>20</code></td>
-<td>No description in the code.</td>
+<td>The most files listed in the top hotspots list, which ranks files by their number of actionable findings. Used only when <code>include_summary</code> is true. 0 leaves the list out. A negative value is refused.</td>
 </tr>
 </tbody>
 </table>
@@ -4382,7 +4382,7 @@ SOFTWARE.
 <td><a id="reporters.unused-suppressions.options.output_format"></a><code>output_format</code></td>
 <td>string</td>
 <td><code>both</code></td>
-<td>No description in the code. The comment on its line in the code: "json", "markdown", or "both".</td>
+<td>The format of the report: "json", "markdown", or "both". "json" writes the JSON report only. "markdown" writes the report as markdown, under the file extension <code>unused-suppressions.md</code> unless the reporter's <code>extension</code> was changed. "both" writes the JSON report and a markdown copy beside it, <code>ash.unused-suppressions.md</code>. The name is read without regard to case, and any other value is refused.</td>
 </tr>
 </tbody>
 </table>
