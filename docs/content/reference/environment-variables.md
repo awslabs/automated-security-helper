@@ -9,7 +9,7 @@
 
 This page is generated from the code that reads each variable by `scripts/generate_env_var_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH reads 160 environment variables: 61 of its own (`ASH_` prefix) and 99 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.
+ASH reads 161 environment variables: 61 of its own (`ASH_` prefix) and 100 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.
 
 Columns:
 
@@ -181,6 +181,7 @@ Columns:
 | `ZSH_VERSION` | `""` |  | `utils/ash_helpers.sh` (top level) | Purpose not documented in code. |
 | `_AGENTIC_SECURITY_HARNESS_COMPLETE` |  |  | `automated_security_helper/express/client.py` (`completion_in_progress`) | click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE` with the program name uppercased and `-` as `_`). (`automated_security_helper/express/client.py`) |
 | `_ASHV3_COMPLETE` |  |  | `automated_security_helper/express/client.py` (`completion_in_progress`) | click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE` with the program name uppercased and `-` as `_`). (`automated_security_helper/express/client.py`) |
+| `_ASHX_COMPLETE` |  |  | `automated_security_helper/express/client.py` (`completion_in_progress`) | click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE` with the program name uppercased and `-` as `_`). (`automated_security_helper/express/client.py`) |
 | `_ASH_COMPLETE` |  |  | `automated_security_helper/express/client.py` (`completion_in_progress`) | click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE` with the program name uppercased and `-` as `_`). (`automated_security_helper/express/client.py`) |
 | `_AUTOMATED_SECURITY_HELPER_COMPLETE` |  |  | `automated_security_helper/express/client.py` (`completion_in_progress`) | click's completion variables for ASH's own console scripts (`_<PROG>_COMPLETE` with the program name uppercased and `-` as `_`). (`automated_security_helper/express/client.py`) |
 | `_TYPER_FORCE_DISABLE_TERMINAL` |  |  | `automated_security_helper/utils/console.py` (`typer_console`) | For what ASH prints in typer's place, a usage error and an escaping exception's traceback, so they look as typer prints them: typer's theme and option highlighter, its color system, a terminal forced under GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS (whose logs show color) and turned off by \_TYPER_FORCE_DISABLE_TERMINAL, ... (`automated_security_helper/utils/console.py`, `typer_console`) |
