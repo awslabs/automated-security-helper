@@ -290,8 +290,8 @@ runs:
         # against.
         #
         # snyk and ferret-scan stay here: neither has an ASH install path, snyk
-        # arrives through npm, and ferret-scan through pip against the constraint its
-        # own plugin declares.
+        # arrives through npm, and ferret-scan through pip at the version its own
+        # plugin recommends.
 
         # `pip install ferret-scan` resolves to whatever is newest, which is not
         # a version anyone chose. ferret-scan 2.3.3 was published at
@@ -302,17 +302,22 @@ runs:
         # unrelated merge-queue branches broke in the same window with no source
         # change.
         #
-        # The plugin already declares the range it is tested against, so read it
-        # from there rather than repeating it here -- one source of truth, and if
-        # the constant moves this fails loudly instead of silently reverting to
-        # installing latest.
-        FERRET_CONSTRAINT="$(python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import DEFAULT_VERSION_CONSTRAINT as c; print(c)')"
-        if [ -z "$FERRET_CONSTRAINT" ]; then
-          echo "::error::Could not read ferret-scan's declared version constraint from its ASH plugin. Refusing to install an unconstrained version."
+        # The plugin's supported range is wider than the version the repository's own
+        # pins were measured against: 2.6.0 is admitted, but it stopped reporting the
+        # operator auth module's pinned line and re-scored the test's, so the range's
+        # newest release is not a version anyone chose either. The plugin names the
+        # version its fixtures were run against (RECOMMENDED_VERSION); install exactly
+        # that, read from the plugin so there is one source of truth and a missing
+        # constant fails loudly instead of reverting to installing latest. Moving it
+        # is the plugin's fixture-matrix pass, which also re-pins the line-anchored
+        # suppressions in the community config.
+        FERRET_VERSION="$(python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import RECOMMENDED_VERSION as v; print(v)')"
+        if [ -z "$FERRET_VERSION" ]; then
+          echo "::error::Could not read ferret-scan's recommended version from its ASH plugin. Refusing to install an unconstrained version."
           exit 1
         fi
-        echo "Installing ferret-scan against its plugin-declared constraint: ${FERRET_CONSTRAINT}"
-        retry pip install "ferret-scan${FERRET_CONSTRAINT}"
+        echo "Installing ferret-scan at the plugin's recommended version: ${FERRET_VERSION}"
+        retry pip install "ferret-scan==${FERRET_VERSION}"
         ferret-scan --version
 
     # trivy, hadolint and GuardDog are the community-plugin tools ASH can provision

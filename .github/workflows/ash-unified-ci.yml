@@ -2449,16 +2449,18 @@ jobs:
           uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
       # ferret-scan is not a Python dependency of ASH. The operator-auth pin scan in
       # tests/integration/test_operator_auth_ferret_pins_scan.py runs it, so install it
-      # against the constraint its plugin declares, read from the plugin as
-      # run-scan-test does rather than repeated here.
+      # at the version its plugin recommends, read from the plugin as run-scan-test
+      # does rather than repeated here. The supported range's newest release is not
+      # the version the pinned lines were measured on: ferret-scan 2.6.0 does not
+      # report the operator auth module's line at all.
       - name: Install ferret-scan
         run: |
-          FERRET_CONSTRAINT="$(uv run python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import DEFAULT_VERSION_CONSTRAINT as c; print(c)')"
-          if [ -z "$FERRET_CONSTRAINT" ]; then
-            echo "::error::Could not read ferret-scan's declared version constraint from its ASH plugin."
+          FERRET_VERSION="$(uv run python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import RECOMMENDED_VERSION as v; print(v)')"
+          if [ -z "$FERRET_VERSION" ]; then
+            echo "::error::Could not read ferret-scan's recommended version from its ASH plugin."
             exit 1
           fi
-          uv pip install "ferret-scan${FERRET_CONSTRAINT}"
+          uv pip install "ferret-scan==${FERRET_VERSION}"
           uv run ferret-scan --version
       # The integration suite runs bandit, actionlint, cfn-lint, cfn-guard and gitleaks
       # for real, and nothing else in this job installs them: the first test that
