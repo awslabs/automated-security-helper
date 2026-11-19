@@ -1,17 +1,17 @@
 {
-  "additionalPropertiesDroppedAlongsideProperties": 92,
-  "collapsedOptionals": 57,
+  "additionalPropertiesDroppedAlongsideProperties": 93,
+  "collapsedOptionals": 58,
   "constRewrittenToEnum": 32,
   "droppedKeywords": {
-    "default": 199,
+    "default": 203,
     "propertyNames": 1,
-    "title": 231
+    "title": 235
   },
   "exclusiveBoundsRewritten": 0,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "29caa37967a991e5",
+  "sourceSchemaSha256": "c587641b6c6ffc0e",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",

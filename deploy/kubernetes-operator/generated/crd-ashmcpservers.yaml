@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 29caa37967a991e5
+    ash.awslabs.github.io/ash-config-schema-sha256: c587641b6c6ffc0e
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -295,8 +295,9 @@ spec:
                                     a finding from a scanner not listed here does not match this entry,
                                     and a listed scanner''s finding matches only when that scanner''s
                                     plugin accepts its block. A listed scanner whose plugin is not installed
-                                    or enabled suppresses nothing (fail closed). The block''s keys belong
-                                    to the named plugin.'
+                                    (its module is never imported) suppresses nothing (fail closed); a
+                                    plugin that is imported but disabled for the run is still registered.
+                                    The block''s keys belong to the named plugin.'
                                   nullable: true
                               type: object
                               nullable: true
@@ -669,6 +670,18 @@ spec:
                                   description: 'In a workspace scan, the workspace''s output directory,
                                     which holds this project''s output directory and every other project''s:
                                     ASH''s own output, left out of the scan like the output directory'
+                                  nullable: true
+                                staged_files:
+                                  items:
+                                    type: string
+                                  type: array
+                                  description: 'Under --mode precommit --staged, the staged files as POSIX
+                                    paths relative to source_dir: the scanner target set. Read from git
+                                    diff --cached, so a deletion is not listed (a deleted file cannot
+                                    be scanned) and a rename appears at its new path. None (the default)
+                                    means no staged scope; the whole tree is scanned. An empty list means
+                                    something was staged and none of it is inside source_dir, so every
+                                    scanner has nothing to scan.'
                                   nullable: true
                               required:
                               - source_dir
@@ -1912,6 +1925,9 @@ spec:
                                   - HIGH
                                   - CRITICAL
                                 - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
+                                description: Minimum severity level to consider findings as failures.
+                                  This is a scanner-level override of the default severity-level within
+                                  ASH of MEDIUM.
                                 nullable: true
                               scan_timeout:
                                 x-kubernetes-preserve-unknown-fields: true
@@ -2532,10 +2548,20 @@ spec:
                             properties:
                               include_scanner_metrics:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: 'When true, the report carries a `scanner_metrics` key with
+                                  one row per scanner: its finding counts by severity, its result status,
+                                  and the severity threshold it was judged against. When false, the key
+                                  is left out.'
                               include_summary_metrics:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: 'Accepted for compatibility but not read: the report is written
+                                  the same whether this is true or false. Use `include_scanner_metrics`
+                                  and `include_metadata` to choose what the report carries.'
                               include_metadata:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, the report carries a `metadata` key with the project
+                                  name, the scan time, the report time, and the ASH version. When false,
+                                  the key is left out.
                             type: object
                           extension:
                             type: string
@@ -2608,6 +2634,12 @@ spec:
                             properties:
                               respect_severity_threshold:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, a finding below the severity threshold its scanner
+                                  is judged against is written as a skipped test case (type `threshold`),
+                                  and only findings at or above the threshold are errors, which matches
+                                  the exit code. When false, no threshold is applied and findings are
+                                  written as errors whatever their severity. Suppressed findings are skipped
+                                  either way.
                             type: object
                           extension:
                             type: string
@@ -2628,18 +2660,45 @@ spec:
                             properties:
                               include_summary:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: 'When true, the report has a Summary section: the scanner
+                                  results table and the top hotspots table. When false, both are left
+                                  out; the notices about inputs that were not scanned, stale content databases,
+                                  and refused converter inputs stay.'
                               include_findings_table:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, the report has a Findings overview table with
+                                  one row per finding, including suppressed findings and findings below
+                                  the severity threshold. Off by default because the table can be long.
                               include_detailed_findings:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, the report has a Detailed findings section that
+                                  lists up to `max_detailed_findings` actionable findings, highest severity
+                                  first. The Not gating (workspace policy) section of a workspace scan
+                                  is part of it and is left out with it.
                               max_detailed_findings:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: The most findings listed in the Detailed findings section,
+                                  and in the Not gating (workspace policy) table of a workspace scan.
+                                  When more actionable findings exist, a note under the list gives the
+                                  count shown and the total. 0 lists none. A negative value is refused.
                               top_hotspots_limit:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: The most files listed in the top hotspots table, which ranks
+                                  files by their number of actionable findings. Used only when `include_summary`
+                                  is true. 0 leaves the table out. A negative value is refused.
                               use_collapsible_details:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, each detailed finding is wrapped in an HTML `details`
+                                  element whose summary line shows its severity, rule ID, and location,
+                                  so a long list stays short until a finding is opened. When false, every
+                                  finding is written out in full.
                               compact:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, the scanner results table leaves out scanners
+                                  that were skipped and scanners that passed with no findings, and the
+                                  how-to-read help, the Scan metadata section, and the generated-at line
+                                  are dropped. The outcome line, the project and scan time line, the workspace
+                                  section, and the coverage notices stay.
                             type: object
                           extension:
                             type: string
@@ -2712,14 +2771,34 @@ spec:
                             properties:
                               include_summary:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: 'When true, the report has a SUMMARY section: the scanner
+                                  results table, a key to its columns, and the top hotspots list. When
+                                  false, those are left out; the notices about inputs that were not scanned,
+                                  stale content databases, and refused converter inputs stay.'
                               include_findings_table:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, the report has a FINDINGS OVERVIEW table with
+                                  one row per finding, including suppressed findings and findings below
+                                  the severity threshold. Off by default because the table can be long.
                               include_detailed_findings:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: When true, the report has a DETAILED FINDINGS section that
+                                  lists up to `max_detailed_findings` actionable findings, highest severity
+                                  first, each with its scanner, rule ID, location, and description. The
+                                  NOT GATING (WORKSPACE POLICY) section of a workspace scan is part of
+                                  it and is left out with it.
                               max_detailed_findings:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: The most findings listed in the DETAILED FINDINGS section,
+                                  and in the NOT GATING (WORKSPACE POLICY) table of a workspace scan.
+                                  When more actionable findings exist, a note under the list gives the
+                                  count shown and the total. Used only when `include_detailed_findings`
+                                  is true. 0 lists none. A negative value is refused.
                               top_hotspots_limit:
                                 x-kubernetes-preserve-unknown-fields: true
+                                description: The most files listed in the top hotspots list, which ranks
+                                  files by their number of actionable findings. Used only when `include_summary`
+                                  is true. 0 leaves the list out. A negative value is refused.
                             type: object
                           extension:
                             type: string
@@ -2739,6 +2818,12 @@ spec:
                             description: Configuration options for the Unused Suppressions reporter.
                             properties:
                               output_format:
+                                description: 'The format of the report: "json", "markdown", or "both".
+                                  "json" writes the JSON report only. "markdown" writes the report as
+                                  markdown, under the file extension `unused-suppressions.md` unless the
+                                  reporter''s `extension` was changed. "both" writes the JSON report and
+                                  a markdown copy beside it, `ash.unused-suppressions.md`. The name is
+                                  read without regard to case, and any other value is refused.'
                                 type: string
                             type: object
                           extension:
@@ -2863,6 +2948,28 @@ spec:
                         x-kubernetes-preserve-unknown-fields: true
                         description: Seconds to allow a single project. Unset means no limit. On timeout
                           that project is recorded as failed and the remaining projects still complete.
+                    type: object
+                  precommit:
+                    description: 'Scanner selection for --mode precommit: only_scanners replaces the mode''s
+                      default set, add_scanners adds to it; setting both keys at once is refused. The
+                      command line''s --only-scanners replaces both; --add-scanners and the deprecated
+                      --scanners add; --exclude-scanners applies last. Other modes ignore this section.'
+                    properties:
+                      only_scanners:
+                        description: 'The whole scanner selection for precommit mode: run exactly these
+                          scanners instead of the mode''s default set. The command line''s --only-scanners
+                          replaces this list; --add-scanners and the deprecated --scanners add to it;
+                          --exclude-scanners removes names from it. Cannot be set together with add_scanners.'
+                        items:
+                          type: string
+                        type: array
+                      add_scanners:
+                        description: Scanner names precommit mode runs in addition to its default set.
+                          The command line's --only-scanners replaces this list too; --exclude-scanners
+                          removes names from the result. Cannot be set together with only_scanners.
+                        items:
+                          type: string
+                        type: array
                     type: object
                   extends:
                     x-kubernetes-preserve-unknown-fields: true
