@@ -89,9 +89,7 @@ class TestValidation:
         assert problems and "selects nothing" in problems[0]
 
     def test_an_unknown_key_is_refused(self):
-        problems = FerretScanScanner.validate_suppression_scope(
-            {"confidence": "low"}
-        )
+        problems = FerretScanScanner.validate_suppression_scope({"confidence": "low"})
         assert problems
 
     def test_an_unknown_band_is_refused_naming_the_valid_set(self):
@@ -101,12 +99,20 @@ class TestValidation:
         assert problems and "'high', 'low', 'medium'" in problems[0]
 
     @pytest.mark.parametrize(
-        "value", ["", "   ", [], [""], ["  "]], ids=["blank", "spaces", "empty-list", "blank-item", "space-item"]
+        "value",
+        ["", "   ", [], [""], ["  "], ["", "low"], ["high", " "]],
+        ids=[
+            "blank",
+            "spaces",
+            "empty-list",
+            "blank-item",
+            "space-item",
+            "blank-beside-band",
+            "space-beside-band",
+        ],
     )
     def test_an_empty_confidence_value_is_refused(self, value):
-        assert FerretScanScanner.validate_suppression_scope(
-            {"confidence_level": value}
-        )
+        assert FerretScanScanner.validate_suppression_scope({"confidence_level": value})
 
     def test_an_empty_validator_is_refused(self):
         assert FerretScanScanner.validate_suppression_scope({"validator": "  "})
@@ -230,6 +236,63 @@ class TestThroughAshSuppression:
         entry = _entry({"confidence_level": ["low", "medium", "high"]})
         finding = _finding(scanner="bandit", confidence_level="low")
         assert not entry.matches(finding)
+
+    def test_an_entry_scoped_to_another_engine_never_covers_a_ferret_finding(self):
+        entry = AshSuppression.model_validate(
+            {
+                "rule_id": "API_KEY_OR_SECRET",
+                "path": "src/*.py",
+                "reason": "test",
+                "scope": {"engines": {"cdk-nag": {"applies_to": "Resource::x"}}},
+            }
+        )
+        assert not entry.matches(_finding(confidence_level="low"))
+
+    def test_an_unscoped_entry_still_suppresses_a_ferret_finding(self):
+        entry = AshSuppression.model_validate(
+            {"rule_id": "API_KEY_OR_SECRET", "path": "src/*.py", "reason": "test"}
+        )
+        assert entry.matches(_finding(confidence_level="high"))
+
+
+class TestThroughTheSarifSeam:
+    """A real ferret SARIF result, flattened, is what a scoped entry sees."""
+
+    def _flatten(self, properties):
+        from automated_security_helper.schemas.sarif_schema_model import Result
+
+        result = Result.model_validate(
+            {
+                "ruleId": "API_KEY_OR_SECRET",
+                "level": "error",
+                "message": {"text": "API key detected"},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": "src/config.py"},
+                            "region": {"startLine": 12},
+                        }
+                    }
+                ],
+                "properties": properties,
+            }
+        )
+        return FlatVulnerability.from_sarif_result(
+            result, tool_name="ferret-scan", tool_type="SECRETS"
+        )
+
+    def test_a_scoped_entry_matches_the_flattened_result(self):
+        finding = self._flatten(
+            {"confidence": 15, "confidenceLevel": "LOW", "validator": "creditcard"}
+        )
+        assert finding.scanner == "ferret-scan"
+        assert _entry({"confidence_level": ["low"], "validator": "creditcard"}).matches(
+            finding
+        )
+
+    def test_a_scoped_entry_leaves_another_flattened_band_reported(self):
+        finding = self._flatten({"confidenceLevel": "HIGH", "validator": "creditcard"})
+        assert not _entry({"confidence_level": ["low", "medium"]}).matches(finding)
 
 
 class TestBlockModel:

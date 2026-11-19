@@ -1001,14 +1001,16 @@ class FerretScopeBlock(RedactedSection):
         Match-all is the ABSENCE of the key (EMPTY_SCOPE_RULE), so an empty
         value would make the entry silently inert — the defect class the
         suppression-scope feature exists to surface. ``[]`` and a list of
-        blank strings are as inert as ``""``.
+        blank strings are as inert as ``""``. A list holding ANY blank element
+        is refused too: the matcher strips and lowercases both sides, so a blank
+        element would otherwise match a finding whose reported value is blank.
         """
         if v is None:
             return v
         empty = (
             (not v.strip())
             if isinstance(v, str)
-            else all(isinstance(e, str) and not e.strip() for e in v)
+            else (not v) or any(isinstance(e, str) and not e.strip() for e in v)
         )
         if empty:
             raise ValueError(
@@ -1114,8 +1116,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             ]
         if model.confidence_level is None and model.validator is None:
             return [
-                "a ferret-scan scope block needs confidence_level or "
-                "validator; an empty block selects nothing."
+                (
+                    "a ferret-scan scope block needs confidence_level or "
+                    "validator; an empty block selects nothing."
+                )
             ]
         return []
 
