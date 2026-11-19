@@ -172,6 +172,7 @@ _KNOWN_DYNAMIC_READS = sorted(
         "interactions/run_ash_container.py [subscript] :: name",
         "interactions/run_ash_scan.py [get] :: name",
         "plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py [get] :: name",
+        "plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py [get] :: name",
         "plugin_modules/ash_builtin/scanners/_grep_scanner_base.py [get] :: cache_env",
         "plugin_modules/ash_builtin/scanners/_grep_scanner_base.py [get] :: self.cache_dir_env_var()",
         "plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py [get] :: env",

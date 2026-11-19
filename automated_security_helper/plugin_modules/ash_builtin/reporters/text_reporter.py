@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
-from typing import Literal, TYPE_CHECKING
+from typing import Annotated, Literal, TYPE_CHECKING
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -70,15 +70,36 @@ def _findings_table(findings) -> list[str]:
 class TextReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Text reporter."""
 
-    include_summary: bool = True
-    include_findings_table: bool = False  # This can be lengthy, default to False
-    include_detailed_findings: bool = False
-    max_detailed_findings: int = (
-        20  # Limit detailed findings to avoid overly large reports
-    )
-    top_hotspots_limit: int = (
-        20  # Number of top hotspots (files with most findings) to include
-    )
+    include_summary: Annotated[
+        bool,
+        Field(
+            description="When true, the report has a SUMMARY section: the scanner results table, a key to its columns, and the top hotspots list. When false, those are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay."
+        ),
+    ] = True
+    include_findings_table: Annotated[
+        bool,
+        Field(
+            description="When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long."
+        ),
+    ] = False
+    include_detailed_findings: Annotated[
+        bool,
+        Field(
+            description="When true, the report has a DETAILED FINDINGS section that lists up to `max_detailed_findings` actionable findings, highest severity first, each with its scanner, rule ID, location, and description. The NOT GATING (WORKSPACE POLICY) section of a workspace scan is part of it and is left out with it."
+        ),
+    ] = False
+    max_detailed_findings: Annotated[
+        int,
+        Field(
+            description="The most findings listed in the DETAILED FINDINGS section, and in the NOT GATING (WORKSPACE POLICY) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. Used only when `include_detailed_findings` is true. 0 lists none. A negative value is refused."
+        ),
+    ] = 20
+    top_hotspots_limit: Annotated[
+        int,
+        Field(
+            description="The most files listed in the top hotspots list, which ranks files by their number of actionable findings. Used only when `include_summary` is true. 0 leaves the list out. A negative value is refused."
+        ),
+    ] = 20
 
     @field_validator("max_detailed_findings", "top_hotspots_limit")
     @classmethod

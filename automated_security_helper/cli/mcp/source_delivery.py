@@ -2600,20 +2600,6 @@ class _ZipRefused(Exception):
 
 
 @contextlib.contextmanager
-def _refusing_after_close(
-    handle: Any, remove_zip: Callable[[], None]
-) -> Iterator[None]:
-    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, ``remove_zip()``, refuse."""
-
-    try:
-        with handle:
-            yield
-    except _ZipRefused as refused:
-        remove_zip()
-        raise ValueError(str(refused)) from None
-
-
-@contextlib.contextmanager
 def _removing_a_refused_zip(remove_zip: Callable[[], None]) -> Iterator[None]:
     """Call ``remove_zip`` when the validation or extraction inside refuses the zip.
 

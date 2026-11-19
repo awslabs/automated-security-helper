@@ -16,7 +16,8 @@ the kinds below, so a new one cannot be added without deciding which:
 - trivy (the trivy and trivy-repo scanners) skips every link (measured with trivy
   0.75.0). Each link is passed in ``--skip-files`` with the glob characters escaped;
   a path with a comma is not, because trivy splits the value on commas.
-- gitleaks runs ``gitleaks dir`` without ``--follow-symlinks``, so it reads no link.
+- gitleaks runs ``gitleaks dir`` without ``--follow-symlinks``, so it reads no link,
+  and betterleaks ``betterleaks dir`` without it, which is off by default there too.
 - semgrep and opengrep skip every link (measured with semgrep 1.180.0 and opengrep
   1.30.2), and their ``--exclude`` cannot name one path: semgrep matches a pattern
   against paths below the git work tree's root when the target is inside one, and
@@ -100,6 +101,8 @@ LINK_HANDLING = {
     "opengrep": FOLLOWS_NO_LINK,
     # `gitleaks dir` runs without --follow-symlinks.
     "gitleaks": FOLLOWS_NO_LINK,
+    # Likewise `betterleaks dir`, whose --follow-symlinks defaults to false.
+    "betterleaks": FOLLOWS_NO_LINK,
     "snyk-code": REFUSES_THE_TARGET,
 }
 
@@ -182,6 +185,11 @@ SCANNER_CLASSES = {
         "ash_hadolint_plugins.hadolint_scanner",
         "HadolintScanner",
         "Hadolint",
+    ),
+    "betterleaks": (
+        "ash_betterleaks_plugins.betterleaks_scanner",
+        "BetterleaksScanner",
+        "Betterleaks",
     ),
 }
 #: Where the scanners that take their inputs from utils/cfn_template_discovery.py

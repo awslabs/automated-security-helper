@@ -56,8 +56,8 @@ snake_cased set would recognize none of the three hyphenated names.
 The set covers every scanner ASH ships, which is the sixteen in
 ``plugin_modules/ash_builtin/scanners`` plus the scanners of the in-tree packages
 that ``load_internal_plugins()`` does not load: the vendored three
-(``ferret-scan``, ``snyk-code``, ``trivy-repo``) and the GuardDog and hadolint
-community modules. They are included because their results hit the same fallback
+(``ferret-scan``, ``snyk-code``, ``trivy-repo``) and the Betterleaks, GuardDog and
+hadolint community modules. They are included because their results hit the same fallback
 as a builtin scanner's, and because a gate that passed only by hand-excluding
 shipped scanners would be a weaker gate.
 
@@ -132,6 +132,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "cfn-nag": "IAC",
     "checkov": "IAC",
     "detect-secrets": "SECRETS",  # pragma: allowlist secret
+    "betterleaks": "SECRETS",
     "ferret-scan": "SECRETS",
     "gitleaks": "SECRETS",
     "grype": "SCA",

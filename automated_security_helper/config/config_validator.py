@@ -5278,33 +5278,6 @@ class ConfigValidator:
     PLUGIN_MODULES_ERROR_PREFIX = "Invalid ash_plugin_modules: "
 
     @classmethod
-    def _plugin_modules_refusal(cls, config_data: dict) -> Optional[str]:
-        """The scan's refusal of the config's ``ash_plugin_modules``, or None.
-
-        Entries are split on commas and stripped the way a scan reads them, then
-        given to ``plugins.loader.refuse_plugin_modules_outside_namespace``, which
-        imports nothing. Whether an accepted name imports is not checked here.
-        """
-        from automated_security_helper.config.plugin_module_trust import (
-            split_plugin_modules,
-        )
-        from automated_security_helper.plugins.loader import (
-            PluginModuleError,
-            refuse_plugin_modules_outside_namespace,
-        )
-
-        entries = config_data.get("ash_plugin_modules")
-        if isinstance(entries, str):
-            entries = [entries]
-        if not isinstance(entries, (list, tuple)):
-            return None
-        try:
-            refuse_plugin_modules_outside_namespace(split_plugin_modules(entries))
-        except PluginModuleError as e:
-            return f"{cls.PLUGIN_MODULES_ERROR_PREFIX}{e}"
-        return None
-
-    @classmethod
     def _plugin_module_refusal(
         cls,
         config_path: Path,

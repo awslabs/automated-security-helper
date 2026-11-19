@@ -1,0 +1,449 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A journey page is the render of its journey file, and the render can be wrong.
+
+WHY THIS EXISTS
+---------------
+``docs/content/getting-started/local.md.template`` is written by
+``scripts/generate_journey_pages.py`` from
+``docs/journeys/getting-started-local.journey.yaml``, the way the reference pages are
+written by their generators. A generator whose ``--check`` nobody runs is a
+suggestion (see ``test_generated_docs_freshness.py``), and a ``--check`` that cannot
+fail is worse. This file pins both halves for the journey generator:
+
+* the committed template equals what the generator renders now, twice, with the
+  environment planted the way ``test_generated_docs_freshness.py`` plants it and a
+  different hash seed and home each time; the generator reads two files and nothing
+  else, so the planted values must not reach the render, and the home must stay
+  empty;
+* on planted trees, the generator can fail: one edited byte in a template, a template
+  that was never written, and every kind of journey the renderer refuses (a sample
+  that contradicts a structured field, a fix for a function the project does not
+  define, an unknown key, an anchor, a marker key the docs runner does not read, a
+  render that does not parse back to the journey's blocks) is reported with an exit
+  status of 1 and the command that fixes it, and a refused journey writes nothing.
+
+``test_the_gate_check_can_fail`` is the non-vacuity proof for the docs freshness gate's
+``Journey pages match their journey files`` check, which calls the same function.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT = REPO_ROOT / "scripts" / "generate_journey_pages.py"
+GATE_SCRIPT = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
+JOURNEY = REPO_ROOT / "docs" / "journeys" / "getting-started-local.journey.yaml"
+TEMPLATE = REPO_ROOT / "docs" / "content" / "getting-started" / "local.md.template"
+REGENERATE = "uv run python scripts/generate_journey_pages.py"
+RUN_TIMEOUT_S = 120
+
+#: The environment variables that shape other generators' pages. The journey
+#: generator reads none of them, so planting them proves it.
+PLANTED_ENVIRONMENT = {
+    "AWS_REGION": "eu-west-3",
+    "AWS_PROFILE": "planted-profile",
+    "ASH_PROJECT_NAME": "planted-project",
+    "ASH_DEFAULT_SEVERITY_LEVEL": "LOW",
+    "XDG_CACHE_HOME": "/planted/xdg-cache",
+    "CI": "true",
+    "COLUMNS": "41",
+    "TZ": "Pacific/Chatham",
+    "LANG": "C",
+    "LC_ALL": "C",
+}
+#: Hash seed and home of each run: an empty directory (None), then "/d".
+PLANTED_RUNS = (("1", None), ("2", "/d"))
+
+GOOD_JOURNEY = """\
+schema: 1
+template: docs/content/getting-started/x.md.template
+page: docs/content/getting-started/x.md
+twin:
+  scan: ash --scanners bandit --offline
+  timeout: 60
+body:
+  - prose: |
+      # X
+
+      Make a project:
+  - block:
+      twin: {kind: project}
+      lang: bash
+      body: |
+        cat > app.py <<'EOF'
+        def archive(d):
+            return d
+        EOF
+  - block:
+      twin: {kind: scan, exit: "2", actionable: 1}
+      lang: bash
+      marker: {mode: illustrative, reason: "the scan needs the network for its scanners"}
+      body: |
+        ash
+        echo "exit code: $?"
+  - block:
+      lang: text
+      body: |
+        ERROR (2) Exiting due to 1 actionable findings found in ASH scan
+        exit code: 2
+  - block:
+      lang: bash
+      marker: {mode: run, expect-exit: "2", env: "ASH_OFFLINE=YES"}
+      body: |
+        ash --scanners bandit
+  - sample: |
+      awslabs/automated-security-helper v{{RELEASE}}
+  - prose: |
+      Save a file named `.ashrc.yaml` with this content:
+  - block:
+      twin: {kind: save, path: .ashrc.yaml}
+      lang: yaml
+      body: |
+        global_settings: {}
+  - prose: |
+      Install `v{{VERSION}}` and you are done.
+"""
+
+#: name -> (text to replace in GOOD_JOURNEY, its replacement, what the refusal says)
+REFUSED_JOURNEYS = {
+    "a sample shows another exit code than twin.exit": (
+        "        exit code: 2\n",
+        "        exit code: 0\n",
+        "twin.exit is 2 but a sample after it says `exit code: 0`",
+    ),
+    "a sample shows another count than twin.actionable": (
+        "Exiting due to 1 actionable",
+        "Exiting due to 3 actionable",
+        "twin.actionable is 1 but a sample after it says `Exiting due to 3",
+    ),
+    "the block echoes its exit code and no sample shows it": (
+        "      lang: text\n",
+        "      lang: json\n",
+        "the block echoes its exit code but no sample after it",
+    ),
+    "a count is claimed and no sample shows it": (
+        "        ERROR (2) Exiting due to 1 actionable findings found in ASH scan\n",
+        "        ERROR (2) the scan failed\n",
+        "twin.actionable is 1 but no sample after it shows",
+    ),
+    "a fix replaces a function the project does not define": (
+        "  - prose: |\n      Install `v{{VERSION}}`",
+        (
+            "  - block:\n"
+            "      twin: {kind: fix, file-from: project, replaces-function: missing}\n"
+            "      lang: python\n"
+            "      body: |\n"
+            "        def missing(d):\n"
+            "            return d\n"
+            "  - prose: |\n      Install `v{{VERSION}}`"
+        ),
+        "the project file defines no function missing()",
+    ),
+    "a save path the step's prose never names": (
+        "      Save a file named `.ashrc.yaml` with this content:\n",
+        "      Save a file with this content:\n",
+        "twin.path '.ashrc.yaml' does not appear in the prose that introduces this step",
+    ),
+    "a save path with a parent component": (
+        "path: .ashrc.yaml}",
+        "path: a/../b.yaml}",
+        "twin.path must be a relative file path",
+    ),
+    "a save path with a shell character": (
+        "path: .ashrc.yaml}",
+        "path: .ashrc.yaml;x}",
+        "twin.path must be a relative file path",
+    ),
+    "a save text with a line that is exactly EOF": (
+        "        global_settings: {}\n",
+        "        global_settings: {}\n        EOF\n",
+        "the save text has a line that is exactly EOF",
+    ),
+    "a project file with a line that is exactly EOF": (
+        "            return d\n        EOF\n",
+        "            return d\n        EOF\n        more\n        EOF\n",
+        "the project's file text has a line that is exactly EOF",
+    ),
+    "a fix text with a line that is exactly EOF": (
+        "  - prose: |\n      Install `v{{VERSION}}`",
+        (
+            "  - block:\n"
+            "      twin: {kind: fix, file-from: project, replaces-function: archive}\n"
+            "      lang: python\n"
+            "      body: |\n"
+            "        def archive(d):\n"
+            "            return d\n"
+            "        EOF\n"
+            "  - prose: |\n      Install `v{{VERSION}}`"
+        ),
+        "the fix text has a line that is exactly EOF",
+    ),
+    "a key schema v1 does not have": (
+        "schema: 1\n",
+        "schema: 1\nextra: 1\n",
+        "unknown key(s) ['extra']",
+    ),
+    "a YAML anchor": (
+        "schema: 1\n",
+        "schema: 1\nx: &anchor 1\n",
+        "YAML anchors and aliases are not part of schema v1",
+    ),
+    "a marker key the docs runner does not read": (
+        'reason: "the scan needs the network for its scanners"',
+        'reasoning: "the scan needs the network for its scanners"',
+        "is not one the docs runner reads",
+    ),
+    "a prose segment that holds a fence the journey does not state": (
+        "      # X\n",
+        "      # X\n\n      ```bash\n      stray\n      ```\n",
+        "the render does not parse back to the journey",
+    ),
+    "a prose segment that loses its newline": (
+        "  - prose: |\n      # X\n",
+        "  - prose: |-\n      # X\n",
+        "must end with exactly one newline",
+    ),
+}
+
+
+def _env(seed: str = "1", home: str | None = None, tmp: Path | None = None) -> dict:
+    env = {**os.environ, **PLANTED_ENVIRONMENT, "PYTHONHASHSEED": seed}
+    if home is not None:
+        env["HOME"] = home
+    if tmp is not None:
+        env["TMPDIR"] = str(tmp)
+    return env
+
+
+def _run(*args: str, env: dict | None = None, cwd: Path | None = None):
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=cwd or REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env or _env(),
+        timeout=RUN_TIMEOUT_S,
+    )
+
+
+def _plant(root: Path, journey: str = GOOD_JOURNEY) -> Path:
+    """A docs tree with one journey and its committed page; the template is not written."""
+    journeys = root / "docs" / "journeys"
+    journeys.mkdir(parents=True)
+    path = journeys / "x.journey.yaml"
+    path.write_text(journey, encoding="utf-8")
+    page = root / "docs" / "content" / "getting-started" / "x.md"
+    page.parent.mkdir(parents=True)
+    page.write_text("# X\n", encoding="utf-8")
+    return path
+
+
+def _template(root: Path) -> Path:
+    return root / "docs" / "content" / "getting-started" / "x.md.template"
+
+
+def _module(name: str, path: Path):
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.unit
+def test_committed_journey_pages_are_current(tmp_path: Path) -> None:
+    """The committed template equals what the generator renders now, twice.
+
+    Each run plants the environment above with its own hash seed and home, and runs
+    from a directory that is not the checkout. After the first, the empty home it
+    pointed at must still be empty.
+    """
+    assert TEMPLATE.is_file(), f"{TEMPLATE.relative_to(REPO_ROOT)} is missing"
+    for seed, home in PLANTED_RUNS:
+        root = tmp_path / f"run-{seed}"
+        home_dir = Path(home) if home else root / "home"
+        if home is None:
+            home_dir.mkdir(parents=True)
+        tmp = root / "tmp"
+        tmp.mkdir(parents=True, exist_ok=True)
+        result = _run("--check", env=_env(seed, str(home_dir), tmp), cwd=tmp)
+        assert result.returncode == 0, (
+            f"{TEMPLATE.relative_to(REPO_ROOT)} is stale (PYTHONHASHSEED={seed}, "
+            f"HOME={home_dir}).\nRegenerate with: {REGENERATE}\n\n"
+            + result.stdout
+            + result.stderr
+        )
+        assert "docs/journeys/getting-started-local.journey.yaml" in result.stderr
+        if home is None:
+            written = sorted(p.name for p in home_dir.iterdir())
+            assert written == [], f"the generator wrote under HOME: {written[:10]}"
+
+
+@pytest.mark.unit
+def test_the_committed_journey_renders_the_committed_template() -> None:
+    """In-process: the render is the template, byte for byte, and parses back."""
+    generator = _module("_ash_journey_pages", SCRIPT)
+    _journey, text = generator.render_checked(JOURNEY, REPO_ROOT)
+    assert text == TEMPLATE.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_the_committed_journey_saves_the_file_its_prose_names() -> None:
+    """The twin's save step writes the canonical config name the page tells the reader to create."""
+    generator = _module("_ash_journey_pages", SCRIPT)
+    journey = generator.load_journey(JOURNEY)
+    saves = [
+        (index, segment["block"]["twin"]["path"])
+        for index, segment in enumerate(journey["body"])
+        if segment.get("block", {}).get("twin", {}).get("kind") == "save"
+    ]
+    assert [path for _index, path in saves] == [".ashrc.yaml"]
+    index, path = saves[0]
+    assert path in generator._intro_prose(journey["body"], index)
+
+
+@pytest.mark.unit
+def test_writing_is_idempotent_and_the_render_is_verbatim(tmp_path: Path) -> None:
+    _plant(tmp_path)
+    first = _run("--docs-root", str(tmp_path))
+    assert first.returncode == 0, first.stderr
+    template = _template(tmp_path)
+    text = template.read_text(encoding="utf-8")
+    # Segments verbatim, one blank line between them, placeholders untouched.
+    assert text.startswith("# X\n\nMake a project:\n\n```bash\ncat > app.py <<'EOF'\n")
+    assert (
+        '<!-- doctest: illustrative reason="the scan needs the network for its '
+        'scanners" -->\n```bash\nash\necho "exit code: $?"\n```\n'
+    ) in text
+    assert '<!-- doctest: run expect-exit=2 env="ASH_OFFLINE=YES" -->\n' in text
+    assert (
+        "<!-- doctest: output -->\n```text\n"
+        "awslabs/automated-security-helper v{{RELEASE}}\n```\n"
+    ) in text
+    assert text.endswith("Install `v{{VERSION}}` and you are done.\n")
+
+    before = template.stat().st_mtime_ns
+    second = _run("--docs-root", str(tmp_path), env=_env("2"))
+    assert second.returncode == 0, second.stderr
+    assert "unchanged" in second.stderr
+    assert template.read_bytes() == text.encode("utf-8")
+    assert template.stat().st_mtime_ns == before
+
+    checked = _run("--docs-root", str(tmp_path), "--check")
+    assert checked.returncode == 0, checked.stderr
+    assert "is up to date" in checked.stderr
+
+
+@pytest.mark.unit
+def test_a_template_that_was_never_written_fails_check(tmp_path: Path) -> None:
+    _plant(tmp_path)
+    result = _run("--docs-root", str(tmp_path), "--check")
+    assert result.returncode == 1, result.stderr
+    assert "x.md.template" in result.stderr and "stale" in result.stderr
+    assert REGENERATE in result.stderr
+    assert not _template(tmp_path).exists(), "--check wrote the template"
+
+
+@pytest.mark.unit
+def test_one_edited_byte_in_the_template_fails_check(tmp_path: Path) -> None:
+    """The control for every freshness claim above: a hand edit is caught and named."""
+    _plant(tmp_path)
+    assert _run("--docs-root", str(tmp_path)).returncode == 0
+    template = _template(tmp_path)
+    original = template.read_text(encoding="utf-8")
+    template.write_text(original.replace("Make a project", "Make a projects"), "utf-8")
+    result = _run("--docs-root", str(tmp_path), "--check")
+    assert result.returncode == 1, result.stderr
+    assert "x.md.template" in result.stderr
+    assert f"Regenerate with: {REGENERATE}" in result.stderr
+    assert "-Make a projects" in result.stderr and "+Make a project:" in result.stderr
+    # Regenerating repairs it.
+    assert _run("--docs-root", str(tmp_path)).returncode == 0
+    assert template.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", sorted(REFUSED_JOURNEYS))
+def test_the_renderer_refuses_a_journey_that_contradicts_itself(
+    tmp_path: Path, name: str
+) -> None:
+    old, new, said = REFUSED_JOURNEYS[name]
+    assert old in GOOD_JOURNEY, f"the planted edit for {name!r} matches nothing"
+    _plant(tmp_path, GOOD_JOURNEY.replace(old, new, 1))
+    for args in (("--check",), ()):
+        result = _run("--docs-root", str(tmp_path), *args)
+        assert result.returncode == 1, (name, args, result.stderr)
+        assert "x.journey.yaml is refused" in result.stderr, result.stderr
+        assert said in result.stderr, (name, result.stderr)
+    assert not _template(tmp_path).exists(), f"{name}: a refused journey wrote a page"
+
+
+@pytest.mark.unit
+def test_the_good_journey_the_refusals_are_cut_from_is_accepted(tmp_path: Path) -> None:
+    """Control: each refusal above changes one thing about this journey and nothing else."""
+    _plant(tmp_path)
+    result = _run("--docs-root", str(tmp_path))
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_check_journeys_reports_a_missing_page(tmp_path: Path) -> None:
+    generator = _module("_ash_journey_pages", SCRIPT)
+    path = _plant(tmp_path)
+    assert _run("--docs-root", str(tmp_path)).returncode == 0
+    assert generator.check_journeys(tmp_path) == []
+    (tmp_path / "docs" / "content" / "getting-started" / "x.md").unlink()
+    failures = generator.check_journeys(tmp_path, [path])
+    assert len(failures) == 1 and "x.md, which is not committed" in failures[0]
+
+
+@pytest.mark.unit
+def test_the_gate_check_can_fail(tmp_path: Path, monkeypatch) -> None:
+    """The docs freshness gate's journey check reports drift, and passes when current.
+
+    Driven on a planted tree through the gate's own function: a stale template, a
+    journey the renderer refuses, and a journey whose template was never rendered each
+    come back as a finding that names the command that fixes it; the current tree
+    comes back empty, so the check is not vacuously failing.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    spec = importlib.util.spec_from_file_location(
+        "_ash_docs_gate_journeys", GATE_SCRIPT
+    )
+    assert spec and spec.loader
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+
+    path = _plant(tmp_path)
+    never_rendered = gate.check_doc_journeys()
+    assert len(never_rendered) == 1, never_rendered
+    assert "x.md.template is not committed" in never_rendered[0]
+    assert REGENERATE in never_rendered[0]
+
+    assert _run("--docs-root", str(tmp_path)).returncode == 0
+    assert gate.check_doc_journeys() == []
+
+    template = _template(tmp_path)
+    template.write_text(template.read_text("utf-8") + "extra\n", encoding="utf-8")
+    stale = gate.check_doc_journeys()
+    assert len(stale) == 1 and "differs from the render" in stale[0], stale
+    assert REGENERATE in stale[0]
+
+    old, new, said = REFUSED_JOURNEYS["a sample shows another exit code than twin.exit"]
+    path.write_text(GOOD_JOURNEY.replace(old, new, 1), encoding="utf-8")
+    refused = gate.check_doc_journeys()
+    assert len(refused) == 1 and "is refused" in refused[0] and said in refused[0]
