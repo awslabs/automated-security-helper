@@ -1,0 +1,396 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Kubernetes manifest linting over the scan target using KubeLinter (``kube-linter``).
+
+KubeLinter checks Kubernetes YAML, Helm charts and Kustomize directories against a set
+of built-in checks (``privileged-container``, ``run-as-non-root``, ``no-read-only-root-fs``
+and so on). This plugin is a community scanner: a scan that does not list
+``automated_security_helper.plugin_modules.ash_kube_linter_plugins`` in
+``ash_plugin_modules`` is unchanged.
+
+What was read, and from where (KubeLinter v0.8.3, the pinned release; source at the tag
+``v0.8.3`` of github.com/stackrox/kube-linter, Apache-2.0):
+
+Invocation
+    ``kube-linter lint --format=sarif --output=<report> --config=<stub> -- <path>``.
+    ``lint`` takes a file or a directory; Helm charts (a directory with ``Chart.yaml``)
+    and Kustomize directories are detected and rendered by KubeLinter itself.
+    ``--format`` is repeatable and paired by position with ``--output``; ASH passes one of
+    each, so the SARIF goes to a file and nothing is read from stdout.
+    (pkg/command/lint/command.go, format_output.go)
+
+Configuration
+    ASH always passes ``--config`` with a stub holding ``{}``, so the checks run are
+    KubeLinter's defaults and a ``.kube-linter.yaml`` that the scanned repository holds
+    cannot switch checks off. KubeLinter's own docs describe ``--config`` as the way to
+    name a config; whether it also reads one from the working directory on its own was
+    not verified, which is why the stub is passed rather than relied on.
+
+Exit status
+    ``lint`` returns an error, which the ``kube-linter`` program turns into exit 1, in
+    two different cases: it found problems (``found N lint errors``), or it failed (a
+    bad config, an unreadable path, a format that could not be written). Exit 0 means
+    nothing was found, or no valid object was found and ``--fail-if-no-objects-found``
+    was off (a warning goes to stderr and ``lint`` returns nil). ASH cannot tell the two
+    exit-1 cases apart from the code. It tells them apart from the report: the report is
+    deleted before each run, so exit 1 with a report on disk is "found problems" and
+    exit 1 without one is a failed scan. Any code other than 0 and 1 fails the scan.
+    Exit 0 with no report is read as "no Kubernetes object was found", and reported as
+    a clean run with no results; the log says so.
+
+Severity
+    KubeLinter's SARIF carries no ``level`` on a result and no severity of its own: the
+    check name is the ``ruleId``. ASH rates by the check. The checks in
+    ``HIGH_SEVERITY_CHECKS`` are the ones whose finding is a setting that widens what
+    a compromised container or role can reach (privileged containers, host namespaces,
+    the Docker socket, privilege escalation, wildcard or cluster-admin RBAC). Every
+    other check is MEDIUM: a workload hygiene gap (probes, limits, a read-only root
+    file system, a pinned image tag). Nothing is CRITICAL: these are configuration
+    findings, not a vulnerability in a running service. ``issue_severity`` and the SARIF
+    level agree: HIGH is ``error``, MEDIUM is ``warning``.
+
+Locations
+    KubeLinter writes every result at line 1 of the manifest (its source says this is
+    to satisfy GitHub's code-scanning rules; real positions are a TODO upstream). ASH
+    keeps the line as written and does not claim a better one.
+
+Offline
+    The checks are compiled into the binary and nothing is fetched at scan time for a
+    plain manifest. Helm chart dependencies are not fetched by ASH; whether KubeLinter
+    does so for a chart that lists any was not verified.
+
+Sandbox
+    The strict default (no network, baseline environment only). KubeLinter reads no
+    environment variable ASH passes.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
+
+from pydantic import Field, model_validator
+
+from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.schemas.sarif_schema_model import (
+    Kind,
+    Level,
+    PropertyBag,
+    SarifReport,
+)
+from automated_security_helper.utils.download_utils import (
+    pinned_tool_install_commands,
+)
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.subprocess_utils import find_executable
+
+#: Exit codes KubeLinter uses that mean it ran to completion or reported problems. Exit 1
+#: is both "found problems" and "failed"; see the module docstring.
+SUCCESS_EXIT_CODES: Set[int] = {0, 1}
+
+#: Checks whose finding widens what a compromised workload or identity can reach. These
+#: are HIGH; every other check is MEDIUM. See "Severity" in the module docstring.
+HIGH_SEVERITY_CHECKS = frozenset(
+    {
+        "access-to-create-pods",
+        "access-to-secrets",
+        "cluster-admin-role-binding",
+        "docker-sock",
+        "host-ipc",
+        "host-network",
+        "host-pid",
+        "privilege-escalation-container",
+        "privileged-container",
+        "privileged-ports",
+        "sensitive-host-mounts",
+        "wildcard-in-rules",
+    }
+)
+
+#: ``ruleId -> (ASH severity, SARIF level)``.
+SEVERITY_HIGH: Tuple[str, Level] = ("HIGH", Level.error)
+SEVERITY_MEDIUM: Tuple[str, Level] = ("MEDIUM", Level.warning)
+
+#: The report KubeLinter would write for a run that found no Kubernetes object, which it
+#: instead ends with a warning and no report.
+EMPTY_REPORT: Dict[str, Any] = {
+    "version": "2.1.0",
+    "runs": [{"tool": {"driver": {"name": "kube-linter"}}, "results": []}],
+}
+
+
+def severity_for_check(rule_id: Optional[str]) -> Tuple[str, Level]:
+    """The ASH severity and SARIF level for a KubeLinter check name."""
+    if rule_id in HIGH_SEVERITY_CHECKS:
+        return SEVERITY_HIGH
+    return SEVERITY_MEDIUM
+
+
+class KubeLinterScannerConfigOptions(ScannerOptionsBase):
+    """KubeLinter has no options of its own: ASH always runs its default checks."""
+
+
+class KubeLinterScannerConfig(ScannerPluginConfigBase):
+    name: Literal["kube_linter"] = "kube_linter"
+    enabled: bool = True
+    options: Annotated[
+        KubeLinterScannerConfigOptions,
+        Field(description="Configure the kube_linter scanner"),
+    ] = KubeLinterScannerConfigOptions()
+
+
+@ash_scanner_plugin
+class KubeLinterScanner(ScannerPluginBase[KubeLinterScannerConfig]):
+    """Kubernetes manifest, Helm chart and Kustomize linting using KubeLinter."""
+
+    #: Not Python-only: KubeLinter is a native binary installed from its pinned release.
+    python_only: ClassVar[bool | None] = False
+
+    # The checks are compiled into the binary; a plain manifest scan makes no network call.
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    success_exit_codes: ClassVar[Set[int]] = SUCCESS_EXIT_CODES
+    # The strict default; see "Sandbox" in the module docstring.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    def model_post_init(self, context: Any) -> None:
+        if self.config is None:
+            self.config = KubeLinterScannerConfig()
+        self.command = "kube-linter"
+        self.subcommands = ["lint"]
+        self.tool_type = ScannerToolType.IAC
+        # The argv is assembled in _execute_scan; ToolArgs stays empty so nothing from
+        # the base resolver can add a token KubeLinter would misread.
+        self.args = ToolArgs(extra_args=[])
+        super().model_post_init(context)
+
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "KubeLinterScanner":
+        """Install from the pinned release asset in ``utils/tool_downloads.py``."""
+        self.custom_install_commands.update(pinned_tool_install_commands("kube-linter"))
+        return self
+
+    def _source_dir(self) -> Path:
+        if self.context is None:
+            raise ScannerError("KubeLinterScanner has no plugin context")
+        return Path(self.context.source_dir)
+
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """None: ASH cannot tell before KubeLinter runs whether the tree holds manifests."""
+        return None
+
+    def _scan_path(self, target: Path) -> str:
+        """``.`` for the source (the subprocess's cwd), absolute otherwise."""
+        if Path(target).absolute() == self._source_dir().absolute():
+            return "."
+        return Path(target).absolute().as_posix()
+
+    def _stub_config(self) -> Path:
+        """An empty config ASH writes, so the scanned tree's config is never read."""
+        stub = (
+            Path(self.results_dir or self._source_dir())
+            .absolute()
+            .joinpath("kube-linter-no-config.yaml")
+        )
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        with open_for_write(stub) as handle:
+            handle.write("{}\n")
+        return stub
+
+    def _build_arguments(self, target: Path, results_file: Path) -> List[str]:
+        """The full argv: every option one ``--flag=value`` token, the path after ``--``."""
+        return [
+            self.command or "kube-linter",
+            *self.subcommands,
+            "--format=sarif",
+            f"--output={results_file.as_posix()}",
+            f"--config={self._stub_config().as_posix()}",
+            "--",
+            self._scan_path(target),
+        ]
+
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
+        """Resolve the argv and results path for one KubeLinter run.
+
+        ``global_ignore_paths`` is applied to every scanner's SARIF by
+        ``apply_suppressions_to_sarif``, not translated into KubeLinter config.
+        """
+        if self.results_dir is None:
+            raise ScannerError("KubeLinterScanner has no results directory")
+        # One instance scans source then converted, and the base keeps the worst exit
+        # code across runs; reset so a failed source run does not fail a clean one.
+        self.exit_code = 0
+        results_file = (
+            Path(self.results_dir).absolute().joinpath(target_type, "kube_linter.sarif")
+        )
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+        # A report left by an earlier run must not be read as this run's: with exit 1
+        # the report's presence is what separates "found problems" from "failed".
+        results_file.unlink(missing_ok=True)
+        final_args = self._build_arguments(target, results_file)
+        self._plugin_log(
+            f"Running: {' '.join(final_args)}",
+            target_type=target_type,
+            level=logging.DEBUG,
+        )
+        return final_args, results_file, None
+
+    def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
+        """The report of a run that completed, or an empty one when none was written.
+
+        Any code outside 0 and 1 fails. Exit 1 needs the report on disk (a missing one
+        raises in the base class): without it KubeLinter failed rather than found
+        problems. Exit 0 without a report is KubeLinter finding no Kubernetes object.
+        """
+        if self.exit_code not in self.success_exit_codes:
+            raise ScannerError(
+                f"kube-linter exited {self.exit_code}; it exits 0 when it finds nothing "
+                "and 1 when it finds problems or fails, so this run failed"
+            )
+        if self.exit_code == 0 and not os.path.lexists(results_file):
+            self._plugin_log(
+                "kube-linter exited 0 and wrote no report: it found no Kubernetes "
+                "object to lint, so nothing is reported.",
+                level=logging.INFO,
+            )
+            return {**EMPTY_REPORT}
+        return super()._read_results_file(results_file)
+
+    def _describe_scan_failure(
+        self,
+        exc: Exception,
+        results_file: Optional[Path],
+        tool_started: bool = True,
+    ) -> str:
+        """The failure and where KubeLinter's log is, without quoting the log.
+
+        KubeLinter's stderr can quote text of the scanned manifests, so it stays in the
+        log file and out of the scan's error lines.
+        """
+        detail = f"{self.__class__.__name__} scan failed: {exc}"
+        if not tool_started or results_file is None:
+            return f"{detail} (kube-linter was not started)"
+        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
+        return (
+            f"{detail} (exit code {self.exit_code}). kube-linter's log is not quoted "
+            f"here; see {log_path.as_posix()}"
+        )
+
+    def _process_command_response(self, response: Dict[str, Any]) -> None:
+        """Count the exit code and keep KubeLinter's stderr out of ``self.errors``."""
+        super()._process_command_response(
+            {key: value for key, value in response.items() if key != "stderr"}
+        )
+
+    def _drop_results_under_output_dir(
+        self, sarif_report: SarifReport, target: Path
+    ) -> None:
+        """Remove results located under ASH's own output directory inside ``target``.
+
+        KubeLinter has no exclude flag on the command line, so when the output
+        directory is inside the target (the default ``.ash/ash_output``) it lints ASH's
+        own YAML, including the copies of files ASH converted.
+        """
+        if self.context is None:
+            return
+        inside: List[Path] = []
+        own = self._output_dir_inside(target)
+        if own is not None:
+            inside.append(own)
+        for relative in self._ash_output_dirs_inside(target):
+            if relative not in inside:
+                inside.append(relative)
+        if not inside:
+            return
+        target_abs = Path(target).absolute()
+        roots = [Path(os.path.normpath(target_abs / o)) for o in inside]
+
+        def under_output(result: Any) -> bool:
+            for location in result.locations or []:
+                physical = location.physicalLocation
+                artifact = physical.root.artifactLocation if physical else None
+                uri = artifact.uri if artifact else None
+                if not uri:
+                    continue
+                path = Path(os.path.normpath(target_abs / uri))
+                if any(path.is_relative_to(root) for root in roots):
+                    return True
+            return False
+
+        for run in sarif_report.runs or []:
+            if run.results:
+                run.results = [r for r in run.results if not under_output(r)]
+
+    def _post_process_sarif(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: Path,
+    ) -> SarifReport:
+        """Drop ASH's own files, then rate every result by its check name."""
+        self._drop_results_under_output_dir(sarif_report, target)
+        for result in sarif_report.get_all_results():
+            severity, level = severity_for_check(result.ruleId)
+            result.level = level
+            result.kind = Kind.fail
+            tags = list(getattr(result.properties, "tags", None) or [])
+            for tag in ("kubernetes", "iac"):
+                if tag not in tags:
+                    tags.append(tag)
+            if result.properties is None:
+                result.properties = PropertyBag(tags=tags)
+            else:
+                result.properties.tags = tags
+            setattr(result.properties, "issue_severity", severity)  # noqa: B010
+        return sarif_report
+
+    def validate_plugin_dependencies(self) -> bool:
+        if self.dependency_unavailable_reason:
+            return False
+        found = find_executable(self.command or "kube-linter")
+        if not found:
+            ASH_LOGGER.warning(
+                "kube-linter executable not found in PATH. Install it with "
+                "`ash dependencies install --config-overrides "
+                "'ash_plugin_modules+=[\"automated_security_helper.plugin_modules."
+                "ash_kube_linter_plugins\"]' --tool kube_linter`."
+            )
+        return found is not None
+
+
+__all__ = [
+    "EMPTY_REPORT",
+    "HIGH_SEVERITY_CHECKS",
+    "KubeLinterScanner",
+    "KubeLinterScannerConfig",
+    "KubeLinterScannerConfigOptions",
+    "SUCCESS_EXIT_CODES",
+    "severity_for_check",
+]
