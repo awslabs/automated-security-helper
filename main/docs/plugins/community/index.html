@@ -16,7 +16,7 @@
         <link rel="prev" href="../builtin/zizmor/">
       
       
-        <link rel="next" href="ferret-scan-plugin/">
+        <link rel="next" href="betterleaks-plugin/">
       
       
         
@@ -2545,6 +2545,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -2592,6 +2594,34 @@ SOFTWARE.
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="betterleaks-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Betterleaks (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -3450,13 +3480,14 @@ SOFTWARE.
 <h2 id="available-community-plugins">Available Community Plugins<a class="headerlink" href="#available-community-plugins" title="Permanent link">&para;</a></h2>
 <h3 id="security-scanners">Security Scanners<a class="headerlink" href="#security-scanners" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><a href="betterleaks-plugin/">Betterleaks Plugin</a></strong> (<code>ash_betterleaks_plugins</code>) - Secret detection with Betterleaks, the successor to gitleaks written by its author</li>
 <li><strong><a href="ferret-scan-plugin/">Ferret Scan Plugin</a></strong> - Integrates Ferret Scan for comprehensive sensitive data detection (credit cards, passports, SSNs, API keys, secrets, and more)</li>
 <li><strong><a href="guarddog-plugin/">GuardDog Plugin</a></strong> (<code>ash_guarddog_plugins</code>) - Malicious-package heuristics for PyPI, npm, Go, GitHub Actions, RubyGems and crates packages (pending licensing review)</li>
 <li><strong><a href="hadolint-plugin/">hadolint Plugin</a></strong> (<code>ash_hadolint_plugins</code>) - Lints Dockerfiles and Containerfiles with hadolint and its ShellCheck integration (pending licensing review)</li>
 <li><strong><a href="snyk-plugin/">Snyk Code Plugin</a></strong> - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities</li>
 <li><strong><a href="trivy-plugin/">Trivy Plugin</a></strong> - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning</li>
 </ul>
-<p>These five ship inside ASH. Each takes part in a scan only when that scan names its
+<p>These six ship inside ASH. Each takes part in a scan only when that scan names its
 plugin module in <code>ash_plugin_modules</code> or <code>--ash-plugin-modules</code>, as its page shows.
 The MCP <code>list_scanners</code> tool reports them either way; listing one does not add it to
 any scan.</p>
@@ -3532,7 +3563,7 @@ any scan.</p>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ash<span class="w"> </span>scan<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>my_plugin
 </span></code></pre></div>
 <blockquote>
-<p>[!CAUTION] &gt; <strong>Community Plugin Security</strong>: The community plugins listed above ship with ASH, in <code>automated_security_helper/plugin_modules</code>, and need no separate package. <code>ash scan</code> loads one only when its module is listed in <code>ash_plugin_modules</code> or passed with <code>--ash-plugin-modules</code>. Each runs an external tool: the container image includes trivy, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with <code>pip install</code>), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.</p>
+<p>[!CAUTION] &gt; <strong>Community Plugin Security</strong>: The community plugins listed above ship with ASH, in <code>automated_security_helper/plugin_modules</code>, and need no separate package. <code>ash scan</code> loads one only when its module is listed in <code>ash_plugin_modules</code> or passed with <code>--ash-plugin-modules</code>. Each runs an external tool: the container image includes trivy, Betterleaks, GuardDog and hadolint, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with <code>pip install</code>), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.</p>
 </blockquote>
 
 
@@ -3576,8 +3607,8 @@ any scan.</p>
     </a>
     
     
-    <a class="ash-pagination__next" href="ferret-scan-plugin/" rel="next">
-      <span><span class="ash-pagination__direction">NEXT</span>ASH Ferret Scan Plugin</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
+    <a class="ash-pagination__next" href="betterleaks-plugin/" rel="next">
+      <span><span class="ash-pagination__direction">NEXT</span>Betterleaks (community plugin)</span><span class="ash-icon " aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></svg></span>
     </a>
     
   </div>

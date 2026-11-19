@@ -2634,6 +2634,8 @@ SOFTWARE.
       
         
       
+        
+      
     
     
     
@@ -2681,6 +2683,34 @@ SOFTWARE.
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../docs/plugins/community/betterleaks-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Betterleaks (community plugin)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -3458,7 +3488,7 @@ SOFTWARE.
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the code that reads each variable by <code>scripts/generate_env_var_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH reads 170 environment variables: 62 of its own (<code>ASH_</code> prefix) and 108 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
+<p>ASH reads 172 environment variables: 62 of its own (<code>ASH_</code> prefix) and 110 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
 <p>Columns:</p>
 <ul>
 <li>Default: the value the code uses when the variable is unset, as written in the code, at each read that supplies one. Where none does, or the only one is an empty string, it is the default of the CLI option the variable sets, or of the configuration key it is the default of. Blank means none of these supplies one (the code checks whether the variable is set, or treats unset as empty).</li>
@@ -3983,6 +4013,20 @@ SOFTWARE.
 <td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
 </tr>
 <tr>
+<td><code>BETTERLEAKS_CONFIG</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code> (<code>_config_env_names_set</code>)</td>
+<td>Environment variables Betterleaks reads a config from, in its order of precedence: <code>BETTERLEAKS_CONFIG</code> and <code>GITLEAKS_CONFIG</code> name a file, <code>BETTERLEAKS_CONFIG_TOML</code> and <code>GITLEAKS_CONFIG_TOML</code> hold the config's text, and each <code>GITLEAKS_</code> name is read only when its <code>BETTERLEAKS_</code> one is unset. (<code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code>)</td>
+</tr>
+<tr>
+<td><code>BETTERLEAKS_CONFIG_TOML</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code> (<code>_config_env_names_set</code>)</td>
+<td>Environment variables Betterleaks reads a config from, in its order of precedence: <code>BETTERLEAKS_CONFIG</code> and <code>GITLEAKS_CONFIG</code> name a file, <code>BETTERLEAKS_CONFIG_TOML</code> and <code>GITLEAKS_CONFIG_TOML</code> hold the config's text, and each <code>GITLEAKS_</code> name is read only when its <code>BETTERLEAKS_</code> one is unset. (<code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code>)</td>
+</tr>
+<tr>
 <td><code>BITBUCKET_BUILD_NUMBER</code></td>
 <td></td>
 <td></td>
@@ -4133,15 +4177,15 @@ SOFTWARE.
 <td><code>GITLEAKS_CONFIG</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._config_env_value</code>, <code>GitleaksScanner._resolve_config_file</code>)</td>
-<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH passes no <code>gitleaks --config</code> and gitleaks reads the variable; a non-absolute <code>GITLEAKS_CONFIG</code> is anchored to the directory ASH runs in and passed as <code>gitleaks --config</code>, so the scanned tree cannot supply it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
+<td><code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code> (<code>_config_env_names_set</code>)<br><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._config_env_value</code>, <code>GitleaksScanner._resolve_config_file</code>)</td>
+<td>Environment variables Betterleaks reads a config from, in its order of precedence: <code>BETTERLEAKS_CONFIG</code> and <code>GITLEAKS_CONFIG</code> name a file, <code>BETTERLEAKS_CONFIG_TOML</code> and <code>GITLEAKS_CONFIG_TOML</code> hold the config's text, and each <code>GITLEAKS_</code> name is read only when its <code>BETTERLEAKS_</code> one is unset. (<code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code>)</td>
 </tr>
 <tr>
 <td><code>GITLEAKS_CONFIG_TOML</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._resolve_config_file</code>)</td>
-<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH passes no <code>gitleaks --config</code> and gitleaks reads the variable; a non-absolute <code>GITLEAKS_CONFIG</code> is anchored to the directory ASH runs in and passed as <code>gitleaks --config</code>, so the scanned tree cannot supply it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
+<td><code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code> (<code>_config_env_names_set</code>)<br><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._resolve_config_file</code>)</td>
+<td>Environment variables Betterleaks reads a config from, in its order of precedence: <code>BETTERLEAKS_CONFIG</code> and <code>GITLEAKS_CONFIG</code> name a file, <code>BETTERLEAKS_CONFIG_TOML</code> and <code>GITLEAKS_CONFIG_TOML</code> hold the config's text, and each <code>GITLEAKS_</code> name is read only when its <code>BETTERLEAKS_</code> one is unset. (<code>automated_security_helper/plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py</code>)</td>
 </tr>
 <tr>
 <td><code>GIT_CEILING_DIRECTORIES</code></td>
