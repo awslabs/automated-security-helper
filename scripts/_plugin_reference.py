@@ -272,6 +272,7 @@ def discover(kind: str) -> list[Plugin]:
 
 def instantiate(plugins: list[Plugin]) -> None:
     """Build each plugin once in a throwaway context; record the instance or why not."""
+    from automated_security_helper.base.plugin_base import declaring_install_story
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -285,12 +286,16 @@ def instantiate(plugins: list[Plugin]) -> None:
         )
         # Built as on Linux, wherever this runs, so a page generated on Windows or
         # macOS matches the committed one. The pages say so where it matters.
+        # And with declaring_install_story() set, so a scanner whose install
+        # commands depend on a probe of this machine (cfn-nag: gem, a C compiler,
+        # a bin directory) declares them as on a machine that passes it.
         with mock.patch("platform.system", return_value="Linux"):
-            for plugin in plugins:
-                try:
-                    plugin.instance = plugin.cls(context=context)
-                except Exception as exc:  # recorded and rendered, not swallowed
-                    plugin.instance_error = f"{type(exc).__name__}: {exc}"
+            with declaring_install_story():
+                for plugin in plugins:
+                    try:
+                        plugin.instance = plugin.cls(context=context)
+                    except Exception as exc:  # recorded and rendered, not swallowed
+                        plugin.instance_error = f"{type(exc).__name__}: {exc}"
 
 
 def module_name(plugin: Plugin) -> str:
