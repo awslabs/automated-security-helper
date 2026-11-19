@@ -255,6 +255,27 @@ def pytest_runtest_teardown(item, nextitem):
     return result
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _each_module_starts_and_ends_with_empty_tool_lookup_caches():
+    """No module's tool lookups carry into the next module of the worker.
+
+    ``_unit_tool_guard`` clears the lookup caches after every test, but a module- or
+    class-scoped fixture (a scan run once for a module, such as
+    reporters/test_secret_masking_across_reports.py's) resolves tools into them
+    outside any test's function-scoped teardown, and its own finalizer runs after the
+    last test's clear. A guarded test's guard setup clears them again, so only an
+    unguarded (``runs_real_tools``) test saw the residue: it started with the
+    entries its worker's earlier modules left, and which modules share a worker
+    depends on the shard grouping. Cleared per module, not per test, so the
+    per-test teardown clear stays the only thing between two tests of one module
+    (tests/unit/utils/test_find_executable_cache_isolation.py pins that). Set up
+    ahead of the module's own fixtures: autouse fixtures of a scope come first.
+    """
+    reset_tool_lookup_caches()
+    yield
+    reset_tool_lookup_caches()
+
+
 class UnitTestGuard(NamedTuple):
     """What ``_unit_tool_guard`` set up for a test."""
 
