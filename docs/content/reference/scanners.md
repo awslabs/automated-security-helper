@@ -549,7 +549,7 @@ Options, under `scanners.ferret-scan.options`. An option not listed here refuses
 | <a id="scanners.ferret-scan.options.max_live_bytes"></a>`max_live_bytes` | string or null | `null` | Cap on total extracted content held in memory across concurrently scanned files, passed as '--max-live-bytes', e.g. '256MB' or '1GB' (units: B, KB, MB, GB; bare number = bytes). Bounds peak memory on constrained hosts. Default: no cap. |
 | <a id="scanners.ferret-scan.options.ferret_debug"></a>`ferret_debug` | boolean | `false` | Enable ferret-scan's debug logging (shows preprocessing and validation flow). This controls ferret-scan's own output, not ASH logging. |
 | <a id="scanners.ferret-scan.options.ferret_verbose"></a>`ferret_verbose` | boolean | `false` | Enable ferret-scan's verbose output (detailed finding info). This controls ferret-scan's own output, not ASH logging. |
-| <a id="scanners.ferret-scan.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for ferret-scan installation (e.g., '&gt;=1.0.0,&lt;2.0.0', '==1.2.0'). If not specified, uses the plugin's default compatible version range: &gt;=2.4.5,&lt;2.6.0. Supported versions: 2.4.5 to 2.6.0 (exclusive). |
+| <a id="scanners.ferret-scan.options.tool_version"></a>`tool_version` | string or null | `null` | Version constraint for ferret-scan installation (e.g., '&gt;=1.0.0,&lt;2.0.0', '==1.2.0'). If not specified, uses the plugin's default compatible version range: &gt;=2.4.5,&lt;2.7.0. Supported versions: 2.4.5 to 2.7.0 (exclusive). |
 | <a id="scanners.ferret-scan.options.skip_version_check"></a>`skip_version_check` | boolean | `false` | Skip version compatibility check. Use with caution - incompatible versions may cause unexpected behavior or errors. |
 
 ## `guarddog`
