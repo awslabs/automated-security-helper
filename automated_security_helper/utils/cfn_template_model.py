@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Generator, Iterable, Mapping
 import codecs
 import io
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 
-from typing import TYPE_CHECKING, Annotated, Any, Dict
+from typing import TYPE_CHECKING, Annotated, Any, Dict, cast
 
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scanned_tree import (
@@ -375,7 +375,11 @@ def _root_is_a_sequence(text: str) -> bool:
     cfn-nag decision made five of them. False when the stream cannot be read that
     far, so the parsers decide such a text.
     """
-    events = yaml.parse(text, Loader=yaml.BaseLoader)
+    # yaml.parse returns a generator at runtime, so .close() exists; newer
+    # types-pyyaml stubs annotate it as Iterator[Event], which has no close.
+    events = cast(
+        "Generator[yaml.Event, None, None]", yaml.parse(text, Loader=yaml.BaseLoader)
+    )
     try:
         for event in events:
             if isinstance(event, yaml.NodeEvent):
