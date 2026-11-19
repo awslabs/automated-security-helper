@@ -4,9 +4,9 @@
 """Every scanner that walks its target itself is kept off links that leave it.
 
 ASH's scan set leaves out a link to a file whose target leaves the scanned tree, but
-only detect-secrets, cfn-nag, cdk-nag, npm-audit, actionlint, zizmor, cfn-lint and
-cfn-guard read the scan set. Every other scanner is handed a directory and walks
-it. bandit, checkov and ferret-scan are covered in their own tests
+only detect-secrets, cfn-nag, cdk-nag, npm-audit, actionlint, zizmor, cfn-lint,
+cfn-guard, guarddog and hadolint read the scan set. Every other scanner is handed a
+directory and walks it. bandit, checkov and ferret-scan are covered in their own tests
 (test_scanners_skip_links_leaving_the_tree.py and the ferret one). This covers the rest, and pins that every registered scanner is one of
 the kinds below, so a new one cannot be added without deciding which:
 
@@ -16,7 +16,8 @@ the kinds below, so a new one cannot be added without deciding which:
 - trivy (the trivy and trivy-repo scanners) skips every link (measured with trivy
   0.75.0). Each link is passed in ``--skip-files`` with the glob characters escaped;
   a path with a comma is not, because trivy splits the value on commas.
-- gitleaks runs ``gitleaks dir`` without ``--follow-symlinks``, so it reads no link.
+- gitleaks runs ``gitleaks dir`` without ``--follow-symlinks``, so it reads no link,
+  and betterleaks ``betterleaks dir`` without it, which is off by default there too.
 - semgrep and opengrep skip every link (measured with semgrep 1.180.0 and opengrep
   1.30.2), and their ``--exclude`` cannot name one path: semgrep matches a pattern
   against paths below the git work tree's root when the target is inside one, and
@@ -84,6 +85,11 @@ LINK_HANDLING = {
     # Through utils/cfn_template_discovery.py.
     "cfn-lint": READS_THE_SCAN_SET,
     "cfn-guard": READS_THE_SCAN_SET,
+    # Through scan_set_of; guarddog also drops every link from the files it stages
+    # (guarddog_scanner.py _candidate_files), and hadolint skips a Dockerfile that
+    # resolves outside the target (hadolint_scanner.py _dockerfiles).
+    "guarddog": READS_THE_SCAN_SET,
+    "hadolint": READS_THE_SCAN_SET,
     "bandit": EXCLUDES_THE_LINK,
     "checkov": EXCLUDES_THE_LINK,
     "ferret-scan": EXCLUDES_THE_LINK,
@@ -94,6 +100,8 @@ LINK_HANDLING = {
     "opengrep": FOLLOWS_NO_LINK,
     # `gitleaks dir` runs without --follow-symlinks.
     "gitleaks": FOLLOWS_NO_LINK,
+    # Likewise `betterleaks dir`, whose --follow-symlinks defaults to false.
+    "betterleaks": FOLLOWS_NO_LINK,
     "snyk-code": REFUSES_THE_TARGET,
 }
 
@@ -161,6 +169,21 @@ SCANNER_CLASSES = {
         "ash_builtin.scanners.gitleaks_scanner",
         "GitleaksScanner",
         "Gitleaks",
+    ),
+    "guarddog": (
+        "ash_guarddog_plugins.guarddog_scanner",
+        "GuardDogScanner",
+        "GuardDog",
+    ),
+    "hadolint": (
+        "ash_hadolint_plugins.hadolint_scanner",
+        "HadolintScanner",
+        "Hadolint",
+    ),
+    "betterleaks": (
+        "ash_betterleaks_plugins.betterleaks_scanner",
+        "BetterleaksScanner",
+        "Betterleaks",
     ),
 }
 #: Where the scanners that take their inputs from utils/cfn_template_discovery.py

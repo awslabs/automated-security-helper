@@ -237,6 +237,18 @@ class ASHScanOrchestrator(BaseModel):
     work_dir: Annotated[
         Path | None, Field(description="Working directory for scan operations")
     ] = None
+    staged_files: Annotated[
+        List[str] | None,
+        Field(
+            description=(
+                "Under --mode precommit --staged, the staged files as POSIX "
+                "paths relative to source_dir. The run's scan set is limited to "
+                "them, so the scanners, the converters and their candidate "
+                "counts all see the staged files and nothing else. None means "
+                "no staged scope."
+            )
+        ),
+    ] = None
     config: Annotated[
         AshConfig | None, Field(description="The resolved ASH configuration")
     ] = None
@@ -907,6 +919,7 @@ class ASHScanOrchestrator(BaseModel):
                     ignore_suppressions=self.ignore_suppressions,
                     run_id=self._run_id,
                     workspace_output_dir=self.workspace_output_dir,
+                    staged_files=self.staged_files,
                 ),
                 strategy=self.strategy,
                 enabled_scanners=self.enabled_scanners,
@@ -1550,6 +1563,10 @@ class ASHScanOrchestrator(BaseModel):
                 if self.workspace_output_dir is None
                 else str(self.workspace_output_dir)
             ),
+            # Normally answered from the run's recorded (already restricted)
+            # list; stated again so a walk that had to rebuild it gives this
+            # run's scope, not the whole tree's.
+            restrict_to=self.staged_files,
         )
 
     def execute_scan(
@@ -1848,6 +1865,11 @@ class ASHScanOrchestrator(BaseModel):
                     honor_ignore_files=honors_ignore_files(self.config),
                     exclusions=exclusions,
                     links_not_scanned=links_not_scanned,
+                    # Under --staged the run's recorded scan set is the staged
+                    # files, so every scanner and converter that reads it back
+                    # (detect-secrets, cdk-nag, cfn-nag, npm-audit, the archive
+                    # and jupyter converters) works on them and nothing else.
+                    restrict_to=self.staged_files,
                 )
                 # Recorded on the results the phases build on, so the aggregated
                 # JSON and every summary say whether the repository's ignore files

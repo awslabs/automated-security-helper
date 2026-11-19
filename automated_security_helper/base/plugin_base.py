@@ -1,6 +1,7 @@
 """Module containing the PluginBase class."""
 
 from bisect import bisect_left
+import contextlib
 from contextvars import ContextVar
 from datetime import datetime
 import logging
@@ -898,6 +899,39 @@ _CONFIG_FROM_CONTEXT: ContextVar[bool] = ContextVar(
 )
 
 
+#: Whether a plugin is being built to DESCRIBE what it declares, not to run here.
+#: A plugin whose install commands depend on a probe of this machine (RubyGems, a
+#: C compiler, a writable bin directory) declares them as it would on a machine
+#: that passes the probe while this is set, so that a document generated from the
+#: declaration says the same thing wherever it is generated. Read through
+#: :func:`declaring_install_story`; never set it for a scan.
+_DECLARING_INSTALL_STORY: ContextVar[bool] = ContextVar(
+    "plugin_declaring_install_story", default=False
+)
+
+
+def install_story_is_declared() -> bool:
+    """True while :func:`declaring_install_story` is active in this context."""
+    return _DECLARING_INSTALL_STORY.get()
+
+
+@contextlib.contextmanager
+def declaring_install_story():
+    """Build plugins inside this block to read their declared install story.
+
+    The seam for the reference-docs generators: a plugin that gates its install
+    commands on what this machine has consults :func:`install_story_is_declared`
+    and, when it is true, declares the commands as if every prerequisite were
+    present. The declaration is then a function of the code, not of the machine
+    that generated the page.
+    """
+    token = _DECLARING_INSTALL_STORY.set(True)
+    try:
+        yield
+    finally:
+        _DECLARING_INSTALL_STORY.reset(token)
+
+
 def _declared_provenance(data: Dict[str, Any]) -> Optional[bool]:
     """Pop the ``config_from_context`` declaration from constructor *data*.
 
@@ -1003,6 +1037,15 @@ class PluginBase(UVToolMixin, BaseModel):
     # Why the last UVToolMixin._try_uv_tool_execution could not run the tool
     # through uv, or None. _run_subprocess reports it.
     _uv_run_failure: str | None = PrivateAttr(default=None)
+
+    # The executable _select_tool_execution verified on PATH for this plugin's
+    # requirement and chose to run directly (use_uv_tool False), or None. A later
+    # dependency validation of the same instance honors that decision instead of
+    # re-resolving: the consolidated resolver's answer flipped the scan back
+    # through uv after setup had verified the PATH copy, so the verified copy
+    # never ran and the resolver's cold version probe was paid per target. See
+    # UVToolMixin._honored_verified_pre_installed.
+    _verified_pre_installed_executable: str | None = PrivateAttr(default=None)
 
     #: The responses ``_process_command_response`` has folded and no recorder
     #: has yet retired. Held as the objects themselves, never their ``id()``:

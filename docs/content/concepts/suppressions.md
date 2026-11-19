@@ -6,12 +6,12 @@ ASH has three ways to keep a finding from failing a scan, and they differ in wha
 
 | | Suppression | Ignore path | Scanner exclusion |
 |---|---|---|---|
-| Set in | `global_settings.suppressions`, or an inline `ash-ignore` comment | `global_settings.ignore_paths` | the scanner's options, such as bandit `excluded_paths`, checkov `skip_path`, opengrep `exclude`, and syft `exclude` |
+| Set in | `global_settings.suppressions`, or an inline `ash-ignore` comment | `global_settings.ignore_paths` | the scanner's options, such as bandit `excluded_paths`, checkov `skip_path`, opengrep `exclude`, syft `exclude`, and guarddog `excluded_paths` |
 | Matches | a path, optionally narrowed by rule ID, line range, package, or symbol | a path | what the scanner's tool matches |
 | Is the file scanned? | Yes | Passed to every scanner; some skip the files, others scan them | No |
 | Is the finding in the results? | Yes, marked suppressed with the reason | No | No, it never existed |
 | Counts toward the gate? | No | No | No |
-| Expiration | Enforced | Enforced | Enforced for bandit `excluded_paths`, checkov `skip_path`, and syft `exclude`; none for the others |
+| Expiration | Enforced | Enforced | Enforced for bandit `excluded_paths`, checkov `skip_path`, syft `exclude`, and guarddog `excluded_paths`; none for the others |
 
 A scanner's own inline suppression comment works one of two ways, depending on the tool. bandit (`# nosec`) and detect-secrets (`# pragma: allowlist secret`) drop the finding, so ASH never sees it, as with a scanner exclusion. semgrep and opengrep (`# nosemgrep`) and checkov (`checkov:skip=<check>:<reason>`) report the finding with a SARIF suppression, and ASH keeps it in the results as a suppressed finding with the tool's justification, which can be empty. Either way the finding does not count toward the gate. For other scanners, see the tool's own documentation.
 
@@ -51,13 +51,24 @@ A scope may also carry per-engine blocks, keyed by scanner name and owned by tha
             resource_path: "Stack/CollectorTaskRole/DefaultPolicy/Resource"
 ```
 
-Listing engines enumerates the engines the entry covers: a finding from a scanner not listed does not match the entry, and a listed scanner's finding matches only when its plugin accepts the block. A listed scanner whose plugin is not installed or enabled this run suppresses nothing, with a warning naming it. cdk-nag's block takes `applies_to` (compared exactly, as cdk-nag's own `appliesTo`, against the granular qualifier cdk-nag appends to rule ids, so `rule_id: AwsSolutions-IAM5` plus a scope also covers `AwsSolutions-IAM5[Action::logs:*]` findings; the value is never read as a glob, so a literal ported from a cdk-nag config covers only its own qualifier) and `resource_path` (a glob over the construct path).
+Listing engines enumerates the engines the entry covers: a finding from a scanner not listed does not match the entry, and a listed scanner's finding matches only when its plugin accepts the block. A listed scanner whose plugin is not installed (its module is never imported this run) suppresses nothing, with a warning naming it. A plugin that is imported but disabled for the run is still registered, so a scoped entry can still suppress that scanner's findings in stored results. cdk-nag's block takes `applies_to` (compared exactly, as cdk-nag's own `appliesTo`, against the granular qualifier cdk-nag appends to rule ids, so `rule_id: AwsSolutions-IAM5` plus a scope also covers `AwsSolutions-IAM5[Action::logs:*]` findings; the value is never read as a glob, so a literal ported from a cdk-nag config covers only its own qualifier) and `resource_path` (a glob over the construct path).
+
+ferret-scan's block takes `confidence_level` (one of `low`, `medium`, `high`, or a list of them, matched case-insensitively against the band ferret-scan reported) and `validator` (the detector that produced the finding, as the result's `validator` property names it; exact, case-insensitive, never a glob). Both must match when both are present, and a finding that does not carry the named property never matches:
+
+<!-- doctest: config kind=other reason="the scope key of one suppression entry, indented as it sits in the entry, not a whole ASH config" -->
+```yaml
+      scope:
+        engines:
+          ferret-scan:
+            confidence_level: [low, medium]
+            validator: aws_credentials
+```
 
 Everything about a scope fails closed. An empty `scope`, an empty `engines` map and an empty engine block are refused: match-all is the absence of the field, never an empty dict.
 
 ## Unknown keys: warn now, error at v4
 
-A key a suppression or ignore-path entry does not declare is a defect to surface loudly: silently dropped (as ASH did through v3.7.x), a misspelled `rule_id` leaves a suppression covering every rule in its path. Today's default is to warn: the config loads, a warning names the key with a did-you-mean (and, for a key that belongs elsewhere, where it belongs), and the entry it sits in suppresses nothing until it is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error at config load instead. ASH v4 flips that default to true; the flag stays as an escape hatch.
+A key a suppression or ignore-path entry does not declare is a defect to surface loudly: silently dropped (as ASH did through v3.7.x), a misspelled `rule_id` leaves a suppression covering every rule in its path. Today's default is to warn: the config loads, a warning names the key with a did-you-mean (and, for a key that belongs elsewhere, where it belongs), and the entry it sits in suppresses nothing until it is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error at config load instead. ASH v4 flips that default to true; the flag stays as an escape hatch. The warning says so itself: it ends with `This will become an error in ASH v4.`, so a config that warns today is one to fix before v4.
 
 ## Order of application
 

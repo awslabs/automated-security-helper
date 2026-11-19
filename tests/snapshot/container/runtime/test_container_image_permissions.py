@@ -29,7 +29,9 @@ The rule:
 - The grype database cache (and trivy's, where the image has one): written by the
   database update at scan time, so owned by the user the image runs as -- root in
   the ``ci`` stage, the unprivileged user in ``non-root`` -- and not writable by
-  others. An offline image never updates it, so there it stays root's.
+  others. An offline image never updates it, so there it stays root's. The ``ci``
+  stage starts under a UID the platform chooses, so its two caches are root's but
+  writable by every user with the sticky bit, like /src and /out.
 - /src and /out may be writable by every user only with the sticky bit.
 """
 
@@ -90,6 +92,7 @@ _PROBE = r"""
 set -eu
 echo "uid $(id -u)"
 echo "offline ${OFFLINE:-NO}"
+echo "target ${ASH_TARGET:-}"
 for d in /deps /deps/.grype /deps/.semgrep /deps/.opengrep /ash /.ash /.ash/bin \
          ${TRIVY_CACHE_DIR:-}; do
   if [ -e "$d" ]; then stat -c 'dir %n %u %a' "$d"; fi
@@ -137,6 +140,7 @@ def probe() -> Dict[str, List[str]]:
     lines: Dict[str, List[str]] = {
         "uid": [],
         "offline": [],
+        "target": [],
         "dir": [],
         "owner": [],
     }
@@ -185,4 +189,11 @@ def test_the_database_caches_belong_to_the_user_the_image_runs_as(probe):
         assert uid == run_as, (
             f"{path} is owned by uid {uid}, the image runs as {run_as}"
         )
-        assert mode & 0o002 == 0, f"{path} is writable by others: {oct(mode)}"
+        if probe["target"] == ["ci"]:
+            # Any UID may write the cache; the sticky bit keeps one user from
+            # removing or replacing another's files in it.
+            assert mode & 0o1002 == 0o1002, (
+                f"{path} is not sticky and writable by every user: {oct(mode)}"
+            )
+        else:
+            assert mode & 0o002 == 0, f"{path} is writable by others: {oct(mode)}"

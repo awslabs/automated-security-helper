@@ -160,6 +160,8 @@ PLANTED_TOOLS = (
     "finch",
     "gitleaks",
     "grype",
+    "guarddog",
+    "hadolint",
     "nerdctl",
     "node",
     "npm",
@@ -277,6 +279,27 @@ def test_reference_page_is_current(script: str, tmp_path: Path) -> None:
             # there.
             written = sorted(p.name for p in home_dir.iterdir())
             assert written == [], f"{script} wrote under HOME: {written[:10]}"
+
+
+@pytest.mark.integration
+def test_scanner_page_does_not_depend_on_install_probes(tmp_path: Path) -> None:
+    """The scanner page is the same on a machine with no RubyGems, compiler or DevKit.
+
+    cfn-nag declares its ``gem install`` only where a probe of the machine passes
+    (``gem`` on PATH, a C compiler or RI_DEVKIT, Ruby headers). The generator builds
+    it with the install story declared, so the Install line is a function of the
+    code. The planted runs above have whatever the host has; this one has none of
+    it: PATH holds only the planted tools, and RI_DEVKIT is unset.
+    """
+    env, _home = _planted_environment(tmp_path / "bare", "0", None)
+    env["PATH"] = str(_planted_tools(tmp_path / "bare" / "planted-bin"))
+    env.pop("RI_DEVKIT", None)
+    result = _run_generator("generate_scanner_reference.py", "--check", env=env)
+    assert result.returncode == 0, (
+        "docs/content/reference/scanners.md differs when the generating machine has "
+        "no gem, compiler or DevKit; the generator must declare cfn-nag's install "
+        "story, not probe the machine.\n" + result.stdout + result.stderr
+    )
 
 
 @pytest.mark.unit

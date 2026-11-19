@@ -110,20 +110,10 @@ scanners:
 
 ### Configuration Options
 
-<!-- doctest: options of=scanners.trivy-repo -->
-| Option               | Type      | Default                                      | Description                                                             |
-| -------------------- | --------- | -------------------------------------------- | ----------------------------------------------------------------------- |
-| `scanners`           | List[str] | `["vuln", "secret", "misconfig", "license"]` | Types of scans to perform                                               |
-| `severity_threshold` | str       | `null`                                       | Minimum severity that fails the scan (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`); `null` uses the global threshold. Findings below it are still reported; ASH does not pass it as `trivy --severity` |
-| `ignore_unfixed`     | bool      | `true`                                       | Ignore vulnerabilities without available fixes                          |
-| `license_full`       | bool      | `true`                                       | Enable full license scanning (more comprehensive but slower)            |
-| `disable_telemetry`  | bool      | `true`                                       | Disable Trivy telemetry data collection. Only `--config-overrides` or a config file outside every git checkout and the scanned directory can set it to `false`; any config can set it to `true` |
-| `config_file`        | str       | `null`                                       | A trivy config file, passed as `trivy --config`; see below              |
-| `module_dir`         | str       | `null`                                       | A directory of trivy modules, passed as `trivy --module-dir`; see below |
-| `ignore_file`        | str       | `null`                                       | A trivy ignore file, passed as `trivy --ignorefile`; see below          |
-| `secret_config_file` | str       | `null`                                       | A trivy secret-scanning config, passed as `trivy --secret-config`; see below |
-| `offline`            | bool      | `false`                                      | Run offline even when ASH does not; ASH's offline mode applies regardless |
-| `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies |
+The options, with their types, defaults, and descriptions, are listed under [`trivy-repo` in the scanners reference](../../../reference/scanners.md#trivy-repo). Two behaviors that the reference does not state:
+
+- `severity_threshold`: findings below it are still reported, and ASH does not pass it as `trivy --severity`.
+- `scan_timeout`: ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies.
 
 trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside every git checkout and the scanned directory (one that is not [repository-written](../../../concepts/trust-model.md#how-the-tier-is-decided)), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../../how-to/configure.md#relative-paths)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; `trivy --module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
 
@@ -436,7 +426,7 @@ echo "Total findings: $finding_count"
 <!-- doctest: illustrative reason="a fragment of plugin code that names objects defined elsewhere" -->
 ```python
 # performance_monitor.py
-# Needs psutil, which is not part of ASH: pip install psutil
+# Needs psutil, which ASH already depends on
 import importlib
 import json
 import time

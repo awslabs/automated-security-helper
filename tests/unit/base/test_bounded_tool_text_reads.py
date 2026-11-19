@@ -311,6 +311,12 @@ _ALLOWED_SIZED_READS = {
     "shown of the probe's output goes through _verify's reviewed excerpt",
     (
         "utils/pre_installed_tool.py",
+        "_answer_from_the_store",
+    ): "bounded+1 read of ASH's own persisted verdict record on a regular-file "
+    "descriptor opened without following links, refused over the cap; parsed "
+    "as JSON, never shown as text (the hit log line carries no record field)",
+    (
+        "utils/pre_installed_tool.py",
         "find_tool_interpreter",
     ): "shebang line of the probed copy, parsed for an interpreter name; "
     "not tool output",
@@ -353,6 +359,17 @@ _ALLOWED_SIZED_READS = {
     ): "ASH's own aggregated-results file, read in bounded pieces to find and "
     "drop the old workspace block before the replacement is written; never a "
     "tool log",
+    (
+        "express/daemon.py",
+        "ExpressDaemon._drain",
+    ): "the daemon's own signal-wakeup self-pipe, drained in 4096-byte chunks "
+    "and discarded; kernel wakeup bytes, never tool text",
+    (
+        "express/client.py",
+        "_await_readiness",
+    ): "the one readiness byte a starting daemon writes on its pipe after "
+    "binding its socket (read by autostart and by spawn_daemon_process alike); "
+    "a protocol byte compared with a constant, never text",
 }
 
 

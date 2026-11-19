@@ -56,6 +56,13 @@ Failure modes and known limitations
   this account can write.
 * The check is POSIX only. On Windows, where these modes do not exist, the
   directory is made as before.
+* In a Linux user namespace (a rootless container, an agent sandbox), ``/`` and
+  usually ``/tmp`` are owned by accounts outside the namespace, which ``stat``
+  reports as the overflow uid (``nobody``, 65534 by default). The ownership walk
+  treats an overflow-uid owner like root there, or every candidate would be
+  rejected and no ``TMPDIR`` could help; a directory whose mode lets its group or
+  everyone write without the sticky bit is still rejected. Outside a user
+  namespace an overflow-uid owner is another account, as before.
 * A scanner run outside the scanner executor (a test, a scanner module run as a
   script) has no scope. Each file it writes gets a directory of its own, removed
   when the process exits.
@@ -156,6 +163,49 @@ def _inside_tree(path: Path, scan_root: Optional[Path]) -> bool:
     return scan_root is not None and in_scanned_tree(path, scan_root)
 
 
+#: What the kernel reports as the owner of a file whose owner has no mapping
+#: into this process's user namespace, when ``/proc/sys/kernel/overflowuid``
+#: cannot be read. ``man 7 user_namespaces``, "Unmapped user and group IDs".
+_OVERFLOW_UID_DEFAULT = 65534
+
+
+def _uid_map_is_identity(uid_map: str) -> bool:
+    """Whether ``uid_map`` (the text of ``/proc/self/uid_map``) is the initial
+    namespace's identity map, ``0 0 4294967295``.
+
+    Any other content, a single-uid self-map such as ``1000 1000 1`` included,
+    means the process is in a user namespace: some uids on the filesystem have
+    no mapping into it.
+    """
+    rows = [line.split() for line in uid_map.splitlines() if line.strip()]
+    return rows == [["0", "0", "4294967295"]]
+
+
+def _user_namespace_overflow_uid() -> Optional[int]:
+    """The overflow uid when this process is in a user namespace, else None.
+
+    In a user namespace (a rootless container, an agent sandbox), ``stat`` on a
+    file whose owner is not mapped into the namespace -- ``/`` and ``/tmp``,
+    owned by the real root, usually are not -- reports the kernel's overflow uid
+    (``nobody``, 65534 by default) as the owner. ``/proc/self/uid_map`` differs
+    from the initial namespace's identity map exactly when the process is in
+    such a namespace, so that is the test: cheap (one small ``procfs`` read),
+    and absent on anything but Linux, where this returns None.
+    """
+    try:
+        with open("/proc/self/uid_map", encoding="ascii") as handle:
+            uid_map = handle.read()
+    except (OSError, ValueError):
+        return None
+    if _uid_map_is_identity(uid_map):
+        return None
+    try:
+        with open("/proc/sys/kernel/overflowuid", encoding="ascii") as handle:
+            return int(handle.read().strip())
+    except (OSError, ValueError):
+        return _OVERFLOW_UID_DEFAULT
+
+
 def _changeable_by_others(resolved: Path) -> Optional[str]:
     """Why another local account could change what ``resolved`` names, or None.
 
@@ -171,22 +221,47 @@ def _changeable_by_others(resolved: Path) -> Optional[str]:
     files are written or the tool reads them. ``O_NOFOLLOW`` protects only the last
     component of a path. A sticky directory such as ``/tmp`` is fine: only an
     entry's owner may rename it there. POSIX only; Windows has no such modes.
+
+    In a user namespace (:func:`_user_namespace_overflow_uid`), an ancestor the
+    kernel reports as owned by the overflow uid is treated like a root-owned one:
+    its real owner is outside the namespace, which for ``/`` and ``/tmp`` in a
+    rootless container or an agent sandbox is the real root, and without this
+    every walk would reach an "owned by nobody" ``/`` and no candidate could ever
+    pass. Only the ownership inference is loosened: such a directory's mode bits
+    are still checked, so one that group or everyone can write without the
+    sticky bit is still rejected. Outside a user namespace an overflow-uid owner
+    is another account, as before.
     """
     if not hasattr(os, "geteuid"):
         return None
     me = os.geteuid()
+    overflow_uid: Optional[int] = None
+    overflow_read = False
     for directory in (resolved, *resolved.parents):
         try:
             st = os.stat(directory)
         except OSError as e:
             return f"{directory.as_posix()} cannot be checked ({e.strerror})"
+        mode = stat.S_IMODE(st.st_mode)
         if st.st_uid not in (0, me):
-            return f"{directory.as_posix()} belongs to another account"
+            if not overflow_read:
+                overflow_uid = _user_namespace_overflow_uid()
+                overflow_read = True
+            if overflow_uid is None or st.st_uid != overflow_uid:
+                return (
+                    f"{directory.as_posix()} belongs to another account: its "
+                    f"owner is uid {st.st_uid}, not this account (uid {me}) or "
+                    f"root (mode {oct(mode)})"
+                )
+            # Owned by the overflow uid inside a user namespace: an owner
+            # outside the namespace, treated like root. The mode check below
+            # still applies.
         shared = st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
         if shared and not st.st_mode & stat.S_ISVTX:
             return (
                 f"{directory.as_posix()} can be written by other accounts and does "
-                "not have the sticky bit"
+                f"not have the sticky bit (owner uid {st.st_uid}, mode {oct(mode)}: "
+                "group or everyone has the write bit and the sticky bit is not set)"
             )
     return None
 

@@ -2393,14 +2393,6 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         # named on _markdown_as_written.
         return _markdown_as_written(shown)
 
-    def _call_with_fallback(
-        self, client: BedrockModelClient, prompt: str, system_prompt: str
-    ) -> str:
-        """The text of ``_outcome_with_fallback``: an answer, or the "*Error
-        ...*" text of a failure. A caller that has to tell the two apart (the
-        batch synthesis) reads the outcome's ``ok`` instead of its text."""
-        return self._outcome_with_fallback(client, prompt, system_prompt).text
-
     def _outcome_with_fallback(
         self, client: BedrockModelClient, prompt: str, system_prompt: str
     ) -> CallOutcome:
@@ -3143,7 +3135,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """Try fallback models when the primary model fails.
 
         The walk itself is ``_walk_fallbacks``, shared with the report path
-        (``_call_with_fallback``); here each candidate is called through
+        (``_outcome_with_fallback``); here each candidate is called through
         ``_try_model_call`` with the shim's raw converse arguments.
         ``_try_model_call`` answers text, as this shim always has, so a
         candidate's call failed when that text is an "*Error ...*" string.

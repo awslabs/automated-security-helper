@@ -80,7 +80,11 @@ guessing in either direction.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import stat as stat_module
+import sys
 import time
 import re
 import shutil
@@ -189,9 +193,496 @@ _verdict_cache_lock = threading.Lock()
 
 
 def reset_pre_installed_tool_cache() -> None:
-    """Forget memoized verdicts (tests, or after installing a tool mid-process)."""
+    """Forget memoized AND persisted verdicts (tests, or after installing a tool).
+
+    The persisted store (below) outlives the process by design, so a reset
+    that cleared only the memo left every persisted "satisfied" answering
+    behind the caller's back: a test that fakes a probe, resets, and probes
+    again would read the first fake's record instead of running the second,
+    and a tool installed mid-process would keep its pre-install verdict. The
+    wipe is best-effort, through the same descriptor checks as every other
+    store access.
+    """
     with _verdict_cache_lock:
         _verdict_cache.clear()
+    directory_fd = _open_verdict_store(create=False)
+    if directory_fd is None:
+        return
+    try:
+        try:
+            names = os.listdir(directory_fd)
+        except OSError:
+            return
+        for name in names:
+            if name.endswith(".json") or (
+                name.startswith(".") and name.endswith(".tmp")
+            ):
+                try:
+                    os.unlink(name, dir_fd=directory_fd)
+                except OSError:
+                    continue
+    finally:
+        os.close(directory_fd)
+
+
+#: How long a PERSISTED satisfied verdict answers across processes. The
+#: in-process memo above lives 600 s, so every warm run (a precommit hook per
+#: commit) re-paid the verification of an unchanged copy: the tool's own
+#: ``--version`` (seconds for checkov) plus a uv dry run. The persisted record
+#: is keyed on the copy's path, mtime and size and on the uv that judged, so a
+#: changed binary misses whatever the clock says; the TTL only bounds how long
+#: an unchanged copy goes unre-verified.
+_PERSISTED_VERDICT_TTL_SECONDS = 24 * 3600.0
+
+#: The TTL for a copy whose Python ENVIRONMENT the record could not pin. The
+#: judge verifies the interpreter's environment (installed version, extras,
+#: dependencies), not the launcher file, and a `pip uninstall` or downgrade in
+#: that environment rewrites no launcher. Where the environment is pinned in
+#: the record's key (an ISOLATED venv's interpreter plus its site-packages
+#: directories' mtimes, which move on any install, uninstall or downgrade
+#: there; or a content-addressed Nix store path), the full TTL applies; where
+#: it cannot be (a native binary, a system interpreter whose pip writes to
+#: directories the stamp does not read, a venv that re-opens the system's
+#: site-packages, a user-site script), the record answers only this long past
+#: the in-process memo.
+_UNPINNED_VERDICT_TTL_SECONDS = 3600.0
+
+
+#: Overrides where the records live; "0", "off" or "none" turns persistence
+#: off. Unset or blank, the default under the user's own state directory
+#: (the container_leftovers pattern) is used.
+_VERDICT_STORE_DIR_ENV = "ASH_TOOL_VERDICT_STORE_DIR"
+
+_VERDICT_STORE_FORMAT = 1
+#: A record is a few hundred bytes; anything past this is not ours.
+_VERDICT_STORE_READ_LIMIT = 1 << 16
+#: At most this many directory entries are looked at by the opportunistic
+#: sweep of expired records, so a write never scans an unbounded directory.
+_VERDICT_STORE_SWEEP_LIMIT = 512
+
+
+def _verdict_store_dir() -> Optional[Path]:
+    """Where persisted verdicts live, or None when persistence is off.
+
+    None on Windows (the records are read and written through directory
+    descriptors, as ``container_leftovers.state_dir`` explains), when the
+    override names an off value, and when there is no home.
+    """
+    if sys.platform == "win32":
+        return None
+    named = os.environ.get(_VERDICT_STORE_DIR_ENV, "").strip()
+    if named:
+        if named.lower() in {"0", "off", "none"}:
+            return None
+        return Path(os.path.expanduser(named))
+    try:
+        return Path.home() / ".ash" / "state" / "tool-verdicts"
+    except RuntimeError:
+        return None
+
+
+def _secure_store_open_supported() -> bool:
+    """Whether this platform has every primitive the store's checks rely on.
+
+    The store opens its directory with ``O_DIRECTORY | O_NOFOLLOW``, compares
+    the owner with ``geteuid``, tightens the mode with ``fchmod`` and reads and
+    writes records relative to the descriptor (``dir_fd``). Windows has none of
+    these: ``os.O_DIRECTORY`` does not exist there, so naming it raises
+    ``AttributeError``. Without them the open alone cannot prove that the path
+    is a real directory, not a symlink and ours, so the store is not used at
+    all (the callers probe as they would with no store) rather than opened
+    with weaker checks.
+    """
+    return (
+        hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "geteuid")
+        and hasattr(os, "fchmod")
+        and os.open in os.supports_dir_fd
+    )
+
+
+def _open_verdict_store(*, create: bool) -> Optional[int]:
+    """The store directory's descriptor, or None when it cannot be used.
+
+    The ``container_leftovers._open_state_dir`` checks, for the same reason:
+    a persisted record decides whether a copy on PATH is accepted, so whoever
+    could repoint the directory or plant records in it would choose what runs.
+    A symlink is never followed, a directory that is another user's is not
+    used, and one of ours laxer than 0700 is tightened. The caller closes the
+    descriptor.
+    """
+    if not _secure_store_open_supported():
+        return None
+    directory = _verdict_store_dir()
+    if directory is None:
+        return None
+    if create:
+        try:
+            os.makedirs(directory, mode=0o700, exist_ok=True)
+        except OSError:
+            return None
+    try:
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        status = os.fstat(fd)
+        if not stat_module.S_ISDIR(status.st_mode):
+            raise OSError("not a directory")
+        if status.st_uid != os.geteuid():
+            raise OSError("not ours")
+        if status.st_mode & 0o077:
+            os.fchmod(fd, 0o700)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def _is_isolated_venv(prefix: Path) -> bool:
+    """Whether ``prefix`` is a venv whose packages ALL live under it.
+
+    ``pyvenv.cfg`` is the venv marker (PEP 405); one that sets
+    ``include-system-site-packages = true`` re-opens the base environment,
+    whose directories the identity fragment does not stamp. A prefix with no
+    ``pyvenv.cfg`` is a system interpreter's, where pip writes to directories
+    the ``lib/python*/site-packages`` glob does not read either
+    (``/usr/local/lib/...`` on Debian-family, ``lib64`` on Fedora/RHEL), so
+    only an isolated venv's site-packages mtimes pin the whole environment.
+    """
+    try:
+        with open(
+            prefix / "pyvenv.cfg", "r", encoding="utf-8", errors="replace"
+        ) as handle:
+            for line in handle:
+                key, _, value = line.partition("=")
+                if key.strip().lower() == "include-system-site-packages":
+                    return value.strip().lower() != "true"
+        return True
+    except OSError:
+        return False
+
+
+def _environment_identity(resolved: str) -> Tuple[str, bool]:
+    """A material fragment naming the copy's Python environment, and whether it pins it.
+
+    The judge (``_judge``) verifies the INTERPRETER'S ENVIRONMENT -- installed
+    version, extras, dependencies -- while the launcher file's own mtime and
+    size move for none of `pip uninstall <a dependency>`, a downgrade, or an
+    in-place venv rebuild. So the fragment carries the interpreter that
+    provides the copy (``find_tool_interpreter``'s reviewed read: the shebang,
+    an ``env`` shebang resolved through PATH, the environment beside a wrapped
+    script, a Windows launcher), stat through any symlink -- mtime and size
+    move on an interpreter swap or rebuild -- and each site-packages
+    directory's mtime beside it: a directory whose mtime moves whenever a
+    distribution is added, removed or replaced there, dist-info directories
+    included. A Nix store copy is pinned by its content-addressed path, which
+    the key's resolved path already carries.
+
+    ``pinned`` True ONLY for an isolated venv (``_is_isolated_venv``): there
+    every install, uninstall and downgrade lands under the stamped
+    directories. Everything else is unpinned and takes the short TTL
+    (``_UNPINNED_VERDICT_TTL_SECONDS``): a system interpreter's pip writes to
+    directories the stamp does not read (``/usr/local/lib``, ``lib64``), a
+    ``--system-site-packages`` venv re-opens those, a user-site script's
+    shebang interpreter does not describe the environment that provides it
+    (``_in_user_site``), and a copy with no interpreter or no site-packages
+    offers nothing to stamp.
+
+    Limits, accepted: an edit INSIDE an installed package that adds or removes
+    no directory entry does not move site-packages' mtime (it also rewrites no
+    verdict today); an unrelated install in the same environment moves it and
+    costs one re-verification, never a wrong answer.
+    """
+    if resolved.startswith("/nix/store/"):
+        return ("nix", True)
+    interpreter = find_tool_interpreter(resolved)
+    if interpreter is None:
+        return ("", False)
+    try:
+        status = os.stat(interpreter)
+    except OSError:
+        return ("", False)
+    parts = [interpreter, str(status.st_mtime_ns), str(status.st_size)]
+    if _in_user_site(resolved):
+        return ("\x00".join(parts), False)
+    prefix = Path(interpreter).parent.parent
+    site_dirs = sorted(str(path) for path in prefix.glob("lib/python*/site-packages"))
+    site_dirs += sorted(str(path) for path in prefix.glob("Lib/site-packages"))
+    if not site_dirs:
+        return ("\x00".join(parts), False)
+    for directory in site_dirs:
+        try:
+            parts.append(f"{directory}\x00{os.stat(directory).st_mtime_ns}")
+        except OSError:
+            parts.append(f"{directory}\x00gone")
+    return ("\x00".join(parts), _is_isolated_venv(prefix))
+
+
+def _store_name(
+    key: Tuple[str, int, str, Tuple[str, ...], str],
+) -> Optional[Tuple[str, bool]]:
+    """The record file name for ``key`` and whether its environment is pinned.
+
+    None when the copy cannot be read. A digest over the copy's resolved path,
+    mtime and SIZE, the requirement, the redaction values (hashed: they are
+    env-read and never written to disk), the judging uv's path, mtime and
+    size, and the ENVIRONMENT identity behind the launcher
+    (``_environment_identity``). A changed tool binary, uv, interpreter or
+    site-packages content therefore misses: invalidation is a new name, and
+    the old record ages out through the sweep. The size is read here, beside
+    the key's mtime; a copy replaced between the two reads yields a name no
+    later run re-derives, which costs one re-verification and nothing else.
+    """
+    resolved, mtime_ns, requirement, values, uv_executable = key
+    try:
+        size = os.stat(resolved).st_size
+    except OSError:
+        return None
+    environment, pinned = _environment_identity(resolved)
+    values_digest = hashlib.sha256(
+        "\x00".join(values).encode("utf-8", "surrogatepass")
+    ).hexdigest()
+    if uv_executable:
+        try:
+            uv_status = os.stat(uv_executable)
+            uv_identity = (
+                f"{uv_executable}\x00{uv_status.st_mtime_ns}\x00{uv_status.st_size}"
+            )
+        except OSError:
+            uv_identity = uv_executable
+    else:
+        uv_identity = ""
+    material = "\x00".join(
+        [
+            str(_VERDICT_STORE_FORMAT),
+            resolved,
+            str(mtime_ns),
+            str(size),
+            requirement,
+            values_digest,
+            uv_identity,
+            environment,
+        ]
+    )
+    digest = hashlib.sha256(material.encode("utf-8", "surrogatepass")).hexdigest()
+    return (f"{digest}.json", pinned)
+
+
+def _answer_from_the_store(
+    key: Tuple[str, int, str, Tuple[str, ...], str],
+) -> Optional[PreInstalledToolVerdict]:
+    """The persisted verdict for ``key``, or None when the copy must be probed.
+
+    Only "satisfied" verdicts are ever persisted (see ``_persist_verdict``),
+    so a hit short-circuits the probe and the dry run; anything else in the
+    file -- another status, a malformed record, a record past its TTL or
+    stamped from the future -- is removed and answered None, so a bad record
+    costs one re-verification, never a wrong acceptance. A hit logs one line
+    naming the cached verdict.
+    """
+    named = _store_name(key)
+    if named is None:
+        return None
+    name, pinned = named
+    directory_fd = _open_verdict_store(create=False)
+    if directory_fd is None:
+        return None
+    try:
+        try:
+            file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        except OSError:
+            return None
+        try:
+            status = os.fstat(file_fd)
+            if (
+                not stat_module.S_ISREG(status.st_mode)
+                or status.st_size > _VERDICT_STORE_READ_LIMIT
+            ):
+                raise ValueError("not a record")
+            # Bounded+1: a record past the cap is not ours and is refused
+            # whole, never truncated into something that might still parse.
+            raw = b""
+            while len(raw) <= _VERDICT_STORE_READ_LIMIT:
+                chunk = os.read(file_fd, _VERDICT_STORE_READ_LIMIT + 1 - len(raw))
+                if not chunk:
+                    break
+                raw += chunk
+            if len(raw) > _VERDICT_STORE_READ_LIMIT:
+                raise ValueError("record too large")
+            record = json.loads(raw.decode("utf-8"))
+            if not isinstance(record, dict):
+                raise ValueError("not a record")
+            if record.get("format") != _VERDICT_STORE_FORMAT:
+                raise ValueError("another format")
+            if record.get("status") != "satisfied":
+                raise ValueError("only satisfied verdicts are stored")
+            stored_at = record.get("stored_at")
+            if not isinstance(stored_at, (int, float)) or isinstance(stored_at, bool):
+                raise ValueError("no timestamp")
+            # The record's own TTL, clamped to the full one, and clamped down
+            # again when the environment reads unpinned NOW (the write side
+            # chose the TTL, but the launcher can have changed shape since).
+            ttl = record.get("ttl_seconds")
+            if not isinstance(ttl, (int, float)) or isinstance(ttl, bool):
+                raise ValueError("no ttl")
+            ttl = min(float(ttl), _PERSISTED_VERDICT_TTL_SECONDS)
+            if not pinned:
+                ttl = min(ttl, _UNPINNED_VERDICT_TTL_SECONDS)
+            age = time.time() - stored_at
+            if not (0 <= age <= ttl):
+                raise ValueError("expired")
+            executable = record.get("executable")
+            requirement = record.get("requirement")
+            detail = record.get("detail")
+            version = record.get("version")
+            summary = record.get("summary")
+            missing_extras = record.get("missing_extras")
+            if (
+                not isinstance(executable, str)
+                or not isinstance(detail, str)
+                or not isinstance(summary, str)
+                or not (requirement is None or isinstance(requirement, str))
+                or not (version is None or isinstance(version, str))
+                or not (
+                    isinstance(missing_extras, list)
+                    and all(isinstance(extra, str) for extra in missing_extras)
+                )
+            ):
+                raise ValueError("not a record")
+            verdict = PreInstalledToolVerdict(
+                "satisfied",
+                executable,
+                requirement,
+                detail,
+                missing_extras=tuple(missing_extras),
+                from_nix=bool(record.get("from_nix")),
+                version=version,
+                summary=summary,
+            )
+        except (OSError, ValueError, UnicodeDecodeError):
+            try:
+                os.unlink(name, dir_fd=directory_fd)
+            except OSError:
+                pass
+            return None
+        finally:
+            os.close(file_fd)
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        # One line per hit, naming the cached verdict. The path is the copy's
+        # own, logged by the satisfied selection line too; the requirement and
+        # detail stay out of this line (a configured constraint can be
+        # env-read, and this function has no values to redact with).
+        ASH_LOGGER.info(
+            f"Pre-installed tool at {key[0]}: using the persisted verification "
+            f"verdict (satisfied, stored {int(age)}s ago; re-verified when the "
+            "file changes or the record expires)"
+        )
+        return verdict
+    finally:
+        os.close(directory_fd)
+
+
+def _persist_verdict(
+    key: Tuple[str, int, str, Tuple[str, ...], str],
+    verdict: PreInstalledToolVerdict,
+) -> None:
+    """Persist a satisfied ``verdict`` for ``key``, best-effort.
+
+    Only "satisfied" is stored: the probe of a good copy is the cost every
+    warm run re-paid, while an unsatisfied or unverifiable state can heal
+    without the binary changing (uv's cache warms, the network returns), so
+    those stay re-probed per process. The record's text fields are the
+    verdict's own, whose values were redacted before they were memoized.
+    Written beside its final name and renamed into place, so a reader never
+    sees half a record; the write also sweeps records past their TTL.
+    """
+    if verdict.status != "satisfied":
+        return
+    named = _store_name(key)
+    if named is None:
+        return
+    name, pinned = named
+    directory_fd = _open_verdict_store(create=True)
+    if directory_fd is None:
+        return
+    temp_name = f".{name}.{os.getpid()}.tmp"
+    try:
+        record = {
+            "format": _VERDICT_STORE_FORMAT,
+            "ttl_seconds": (
+                _PERSISTED_VERDICT_TTL_SECONDS
+                if pinned
+                else _UNPINNED_VERDICT_TTL_SECONDS
+            ),
+            "status": verdict.status,
+            "executable": verdict.executable,
+            "requirement": verdict.requirement,
+            "detail": verdict.detail,
+            "missing_extras": list(verdict.missing_extras),
+            "from_nix": verdict.from_nix,
+            "version": verdict.version,
+            "summary": verdict.summary,
+            "stored_at": time.time(),
+        }
+        payload = json.dumps(record).encode("utf-8")
+        try:
+            file_fd = os.open(
+                temp_name,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory_fd,
+            )
+        except OSError:
+            return
+        try:
+            os.write(file_fd, payload)
+        finally:
+            os.close(file_fd)
+        try:
+            os.replace(
+                temp_name,
+                name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+        except OSError:
+            try:
+                os.unlink(temp_name, dir_fd=directory_fd)
+            except OSError:
+                pass
+            return
+        _sweep_expired_records(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _sweep_expired_records(directory_fd: int) -> None:
+    """Remove records past their TTL and stale temp files, best-effort.
+
+    Bounded (``_VERDICT_STORE_SWEEP_LIMIT``) and judged by file mtime, which a
+    record gets at its write, so the sweep needs no parse; the reader judges
+    the authoritative ``stored_at`` itself. Run from the write path only: a
+    read pays nothing for hygiene.
+    """
+    now = time.time()
+    try:
+        names = os.listdir(directory_fd)
+    except OSError:
+        return
+    for name in names[:_VERDICT_STORE_SWEEP_LIMIT]:
+        is_temp = name.startswith(".") and name.endswith(".tmp")
+        if not is_temp and not name.endswith(".json"):
+            continue
+        horizon = 3600.0 if is_temp else _PERSISTED_VERDICT_TTL_SECONDS
+        try:
+            status = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if stat_module.S_ISREG(status.st_mode) and now - status.st_mtime > horizon:
+                os.unlink(name, dir_fd=directory_fd)
+        except OSError:
+            continue
 
 
 def validate_version_constraint(value: Optional[str]) -> Optional[str]:
@@ -813,6 +1304,16 @@ def verify_pre_installed_tool(
     answered = _answer_without_a_probe(key)
     if answered is not None:
         return answered
+    # Across processes next: the in-process memo lives 600 s, so every warm
+    # run (a precommit hook per commit) re-paid the copy's own --version probe
+    # and the dry run. A persisted satisfied verdict for this exact copy (the
+    # key's mtime plus the record name's size) answers instead; a hit is
+    # memoized so the rest of this run reads it from memory.
+    persisted = _answer_from_the_store(key)
+    if persisted is not None:
+        with _verdict_cache_lock:
+            _verdict_cache[key] = (persisted, time.monotonic())
+        return persisted
 
     # One probe per key at a time. Checks of one copy that arrive together (the
     # project instances of one scanner in a workspace scan) would each start their
@@ -861,6 +1362,10 @@ def verify_pre_installed_tool(
 
         with _verdict_cache_lock:
             _verdict_cache[key] = (verdict, time.monotonic())
+        # Satisfied verdicts outlive the process (best-effort): the next run's
+        # check of this unchanged copy answers from the store instead of
+        # re-running the --version probe and the dry run.
+        _persist_verdict(key, verdict)
         return verdict
 
 

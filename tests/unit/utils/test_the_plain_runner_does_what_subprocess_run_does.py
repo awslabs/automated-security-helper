@@ -344,6 +344,20 @@ def test_an_interrupt_waits_only_briefly_for_a_child_the_kill_did_not_stop():
 
 @contextlib.contextmanager
 def _resource_warnings() -> Iterator[List[warnings.WarningMessage]]:
+    """Catch the ResourceWarnings of what the code under this window created.
+
+    The collector is flushed BEFORE the window opens. ResourceWarnings are
+    emitted at garbage collection, and the gc.collect() at the window's end
+    would otherwise also collect whatever earlier tests of this worker left
+    behind: a Popen another test dropped un-reaped warns "subprocess N is
+    still running" from its __del__, and the window would attribute that to
+    the runner under test. That is not hypothetical: when the CI shard count
+    moved from four to six, the changed module composition of one arm leg put
+    exactly such a leftover in this window (run 43474790003), and the leg
+    failed over a pid no call in the test had spawned. After the flush,
+    everything the window catches was created inside it.
+    """
+    gc.collect()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ResourceWarning)
         yield caught

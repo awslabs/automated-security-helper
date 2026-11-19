@@ -322,6 +322,40 @@ class TestADeclaredTwinBesideABuiltOnlyOne:
         assert result.exit_code == EXIT_OK, (result.output, self.panels.getvalue())
         assert self.selected == [(["twinplug"], ["twinplug"])], self.selected
 
+    def _option_check_builds(self, monkeypatch, typed):
+        """What the unknown-option check is told it builds for ``--tool typed``."""
+        seen = {}
+
+        def record(_config, _manager, builds):
+            seen["declared"] = builds("scanner", _DeclaredTwin)
+            seen["built_only"] = builds("scanner", _BuiltOnlyTwin)
+
+        monkeypatch.setattr(
+            dependencies_module, "refuse_unknown_options_of_registered", record
+        )
+        result = self._invoke(typed)
+        assert result.exit_code == EXIT_OK, (result.output, self.panels.getvalue())
+        return seen
+
+    def test_the_option_check_skips_the_declared_twin_of_an_exact_built_only_name(
+        self, monkeypatch
+    ):
+        """``--tool twinplug`` selects the built-only plugin of that exact name in
+        the second pass and never builds ``Twinplug``, so a bad option in the
+        ``Twinplug`` section must not exit 3. The first pass maps the typed name to
+        ``Twinplug`` by key; that provisional reading decided the check."""
+        seen = self._option_check_builds(monkeypatch, "twinplug")
+
+        assert seen == {"declared": False, "built_only": True}, seen
+
+    def test_the_option_check_still_covers_the_declared_twin_it_is_asked_for(
+        self, monkeypatch
+    ):
+        """The control: the declared twin's own spelling checks its section."""
+        seen = self._option_check_builds(monkeypatch, "Twinplug")
+
+        assert seen == {"declared": True, "built_only": True}, seen
+
     def test_a_third_spelling_is_refused_as_ambiguous_not_resolved(self):
         result = self._invoke("TWINPLUG")
 

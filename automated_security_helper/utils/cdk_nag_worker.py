@@ -480,6 +480,37 @@ _MAX_RESPONSE_BYTES = 512 * 1024 * 1024
 #: kilobytes; the cap is enforced on the running total instead.
 _READ_CHUNK_BYTES = 1024 * 1024
 
+#: The deepest array/object nesting an answer line may have. An answer is a small
+#: flat record; ``json.loads`` has no depth bound of its own and fails on a deep line
+#: only where the interpreter's recursion accounting runs out, which depends on the
+#: Python version, the platform and what ran earlier in the process. A line past this
+#: depth is refused before it reaches the parser, so the outcome does not.
+_MAX_ANSWER_NESTING = 64
+
+_JSON_NESTING_TOKEN = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|[\[\]{}]')
+
+
+def _nests_deeper_than(line: str, limit: int) -> bool:
+    """True when ``line`` opens arrays or objects more than ``limit`` deep.
+
+    Brackets inside string values are not nesting. A line with no more than ``limit``
+    openers in all cannot be deeper, which is checked first at C speed so an ordinary
+    answer pays for no scan.
+    """
+    if line.count("[") + line.count("{") <= limit:
+        return False
+    depth = 0
+    for token in _JSON_NESTING_TOKEN.finditer(line):
+        char = token.group()
+        if char in "[{":
+            depth += 1
+            if depth > limit:
+                return True
+        elif char in "]}":
+            depth -= 1
+    return False
+
+
 #: The least of the batch's time limit a new child is started with. A child needs
 #: seconds to start the jsii kernel before it can answer anything; one started with
 #: less is certain to time out, and used to add a timed-out record and a "killed at
@@ -551,9 +582,11 @@ def _read_response(
     fit are kept and ``cut`` is True; the template whose line crosses the cap is the
     one the caller fails, naming the cap, and those after it go to a new child.
 
-    An answer line too deep for the JSON parser (a RecursionError, which is not a
-    ValueError) ends the answers as a malformed line does; the parser's own recursion
-    limit is the bound on what a child may hand the parent. What this function cannot
+    An answer line nested deeper than ``_MAX_ANSWER_NESTING`` ends the answers as a
+    malformed line does, and is never handed to the parser: whether ``json.loads``
+    survives a deep line depends on the Python version and platform, so the bound is
+    fixed here. A RecursionError from a line inside the bound (a nearly exhausted
+    stack) is still treated as malformed. What this function cannot
     read without raising (a symlink the sandboxed child swapped in between the checks
     and the open, which ``O_NOFOLLOW`` refuses with ELOOP) raises to the caller, which
     keeps the runner's outcome for the child whatever became of its response.
@@ -595,6 +628,8 @@ def _read_response(
     lines = data.decode("utf-8", errors="replace").split("\n")
     if not lines:
         return False, [], cut
+    if _nests_deeper_than(lines[0], _MAX_ANSWER_NESTING):
+        return False, [], cut
     try:
         header = json.loads(lines[0])
     except (ValueError, RecursionError):
@@ -605,6 +640,8 @@ def _read_response(
     # The last element is the text after the final newline: empty for a complete
     # file, a fragment for a child that died mid-write. Either way it is not an answer.
     for line in lines[1:-1]:
+        if _nests_deeper_than(line, _MAX_ANSWER_NESTING):
+            break
         try:
             answer = json.loads(line)
         except (ValueError, RecursionError):

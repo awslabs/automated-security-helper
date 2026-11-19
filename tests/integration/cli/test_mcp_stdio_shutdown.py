@@ -41,7 +41,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import anyio
 import pytest
@@ -137,15 +137,33 @@ def _alive(pid: int) -> bool:
     return process_running(pid)
 
 
+def _pids_written(tmp_path: Path) -> Optional[Dict[str, int]]:
+    """The tool's and its child's pids, or None while either is still unwritten.
+
+    Path.write_text creates the file before it writes into it, and TOOL's own
+    wait for grandchild.pid breaks on existence, so either pid file can exist,
+    empty, when tool.pid first appears. Content is the signal; the raced
+    orderings are pinned in test_mcp_http_shutdown.py, whose _wait_for_tree
+    this one mirrors.
+    """
+    pids: Dict[str, int] = {}
+    for name in ("tool", "grandchild"):
+        path = tmp_path / f"{name}.pid"
+        text = path.read_text() if path.exists() else ""
+        if not text:
+            return None
+        pids[name] = int(text)
+    return pids
+
+
 def _wait_for_tree(tmp_path: Path) -> Dict[str, int]:
     deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    while not (tmp_path / "tool.pid").exists():
-        assert time.monotonic() < deadline, "the scanner's tool never started"
+    while (pids := _pids_written(tmp_path)) is None:
+        assert time.monotonic() < deadline, (
+            "the scanner's tool and its child never wrote their pids"
+        )
         time.sleep(0.05)
-    return {
-        name: int((tmp_path / f"{name}.pid").read_text())
-        for name in ("tool", "grandchild")
-    }
+    return pids
 
 
 def _settled(project: Path) -> None:

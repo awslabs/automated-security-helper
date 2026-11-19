@@ -154,6 +154,10 @@ ARG ASH_CLONE_DATE_EPOCH="-1"
 # git's own message, so the build never goes on with the context alone, which from
 # the packaged Dockerfile, whose context holds no pyproject.toml, would fail later
 # at `uv build`.
+# DL4006 (set -o pipefail before a RUN with a pipe): the one pipe below is read for
+# grep's answer alone, and a clone that fails stops the step by itself; moving the
+# stage to a pipefail SHELL is a separate change.
+# hadolint ignore=DL4006
 RUN if [ "${INSTALL_ASH_REVISION}" = "LOCAL" ]; then \
         echo "Skipping clone of repo for LOCAL revision"; \
     elif python3 -c 'import re, sys; \
@@ -388,8 +392,8 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 # Owned by root and writable by root only: a scan reads the database and the rules
 # in these caches, so they have one owner. The offline build below
 # writes them as root. At scan time only grype's database update writes here,
-# which the ci stage runs as root and for which the non-root stage hands
-# GRYPE_DB_CACHE_DIR to its own user.
+# which the non-root stage hands GRYPE_DB_CACHE_DIR to its own user for and the ci
+# stage, which starts under any UID, opens to every user with the sticky bit.
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
 RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
@@ -548,7 +552,8 @@ RUN trivy --version
 # GRYPE_DB_CACHE_DIR is: root's and writable by root only here, handed to the
 # non-root stage's user there because trivy's database update writes it at scan time,
 # and left root's in an offline image, which never updates it. Not mode 777: only
-# /src and /out may be writable by every user (see the chmod of /ash below), and a
+# /src and /out, and in the ci stage the two database caches, with the sticky bit,
+# may be writable by every user (see the chmod of /ash below), and a
 # scan reads the database in this cache. An offline image downloads the
 # vulnerability database into it here; trivy is a default scanner, and offline with no
 # database it is MISSING, which fails the scan. trivy's own bound for that database is
@@ -572,6 +577,25 @@ RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 755 "${TRIVY_CACHE_DIR}"; \
         echo "offline provisioning verified: trivy database present"; \
     fi
 
+# hadolint, the community Dockerfile linter, from its pinned release asset like the tools
+# above. Its asset is the executable itself rather than an archive; install-pinned-tool
+# handles that through ToolAsset.archive. ASH runs it as a separate process and never
+# links to it. It is GPL-3.0-only, so its entry in THIRD_PARTY_LICENSES gives it, under
+# ${ASH_THIRD_PARTY_DIR}/hadolint, its LICENSE and upstream ThirdPartyNotices.txt (both
+# fetched from the release commit and checked against their SHA256) and a SOURCE file
+# with the corresponding-source section every copyleft entry gets.
+ARG HADOLINT_VERSION="v2.15.1"
+RUN with-retry 'install-pinned-tool hadolint -b /usr/local/bin'
+RUN hadolint --version
+
+# betterleaks, the community secret scanner by gitleaks' author, from its pinned
+# release asset (an archive, like gitleaks). ASH runs it as a separate process. It is
+# MIT-licensed, so its entry in THIRD_PARTY_LICENSES installs its LICENSE under
+# ${ASH_THIRD_PARTY_DIR}/betterleaks.
+ARG BETTERLEAKS_VERSION="v1.10.1"
+RUN with-retry 'install-pinned-tool betterleaks -b /usr/local/bin'
+RUN betterleaks --version
+
 # cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
 # templates against. The binary comes from its pinned release asset like the tools
 # above. The rules archive is pinned the same way (RULES_BUNDLES in
@@ -590,13 +614,26 @@ RUN cfn-guard --version && \
     test -s "${ASH_CFN_GUARD_RULES_DIR}/aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard" && \
     install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
 
-# opengrep has no release archive for install-pinned-tool to read license files from:
-# it is a bare executable that `ashx dependencies install` puts in place below. So its
+# None of these has license files in a release archive install-pinned-tool reads:
+# opengrep is a bare executable that `ashx dependencies install` puts in place below,
+# and pygit2 and the libraries its wheel bundles (libgit2, libssh2, OpenSSL and PCRE,
+# in pygit2.libs), and the OpenSSL 1.1 the yara-python wheel bundles
+# (yara_python.libs), arrive in GuardDog's uv tool environment, also below. So their
 # license files are fetched on their own, each pinned by SHA256 and by the upstream
 # commit of the release the image carries. uv is not listed: `install-pinned-tool uv`
 # above already fetched its URL-pinned license files, because ASH_THIRD_PARTY_DIR was
 # set by then.
-RUN with-retry 'install-pinned-tool --licenses-only opengrep'
+RUN with-retry 'install-pinned-tool --licenses-only libgit2 libssh2 opengrep openssl openssl-1.1 pcre pygit2'
+
+# pygit2 (GPL-2.0-only with a linking exception) bundles libgit2 and is a GuardDog
+# dependency. Held to the release its license entry describes, so the files above are
+# the ones for the copy that ships; --verify-third-party below reads both versions
+# back from GuardDog's environment. A constraint, not a requirement: it changes
+# nothing for a uv install that does not pull pygit2 in. ENV, so the non-root
+# stage's own `ash dependencies install` resolves the same pygit2.
+ARG PYGIT2_VERSION="1.18.2"
+RUN mkdir -p /etc/ash && printf 'pygit2==%s\n' "${PYGIT2_VERSION}" > /etc/ash/uv-constraints.txt
+ENV UV_CONSTRAINT="/etc/ash/uv-constraints.txt"
 
 #
 # Setting default WORKDIR to /src
@@ -662,19 +699,36 @@ ENV _ASH_EXEC_MODE="local"
 # image, and in offline mode ASH downloads nothing, so opengrep, a bare executable
 # that only this install fetches, was never put in place. The build is online either
 # way (it fetched the rulesets and databases above); the finished image keeps the ENV.
+#
+# The community plugin modules that ship with ASH and bring tools of their own are
+# loaded for this install only (ASH_COMMUNITY_PLUGIN_MODULES), so those tools
+# (GuardDog's uv tool among them) are installed and pinned too, and the image carries
+# them; a scan in the image still loads a module only when it is listed. trivy-repo,
+# snyk and ferret are not in the list: their tools come another way.
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
-    ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
+    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 # The Python tools' license files, read from each installed wheel's dist-info.
-RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov zizmor'
+RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov guarddog zizmor'
 
 # zizmor (builtin scanner) is installed by the line above through `uv tool install`
 # within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
 RUN zizmor --version
+
+#
+# GuardDog (community scanner). Installed by `ash dependencies install` above through
+# uv, with the version and interpreter the scanner pins
+# (GUARDDOG_DEFAULT_VERSION_CONSTRAINT, GUARDDOG_PYTHON_REQUEST in
+# guarddog_scanner.py). Checked here so a failed install fails the build instead
+# of the first scan that enables the scanner.
+#
+RUN guarddog --version
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -717,6 +771,18 @@ ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 FROM core AS ci
 
 ENV ASH_TARGET=ci
+
+# This stage is for platforms that start the container under a UID they choose, so
+# the two database caches a scan updates (grype's and trivy's) must be writable by
+# that UID: left at 755 and root's, grype's and trivy's database downloads fail with
+# "permission denied" at scan time. Writable by every user with the sticky bit, as
+# /src and /out are (the chmod of /ash above): one user cannot remove or replace
+# another's files there, and what the build put in them stays root's and read-only
+# (chmod -R u=rwX,go=rX above), an offline image's databases included. Only the two
+# directories themselves are opened, and the rule caches stay closed: nothing
+# writes them at scan time. The non-root stage is built from core and hands the
+# same two directories to its own user instead.
+RUN chmod 1777 ${GRYPE_DB_CACHE_DIR} ${TRIVY_CACHE_DIR}
 
 
 # Final stage: Non-root user final version. This image contains all dependencies
@@ -781,12 +847,18 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Pinned as in the core stage: this user's uv tool directory starts empty, so the
-# Python tools are installed again here and would otherwise float.
+# Python tools are installed again here and would otherwise float. The same community
+# modules are loaded for it; an ARG does not reach a stage built FROM another, so it
+# is declared again (a unit test keeps the two equal).
+ARG ASH_COMMUNITY_PLUGIN_MODULES="automated_security_helper.plugin_modules.ash_betterleaks_plugins,automated_security_helper.plugin_modules.ash_guarddog_plugins,automated_security_helper.plugin_modules.ash_hadolint_plugins"
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     uv_tmp="$(mktemp -d)" && \
     { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ASH_OFFLINE=NO \
-    ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    ashx dependencies install --bin-path "${ASH_BIN_PATH}" ${pins} \
+    --config-overrides "ash_plugin_modules+=[${ASH_COMMUNITY_PLUGIN_MODULES}]"; \
     status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
+# GuardDog again, for the non-root user's own uv tool install.
+RUN guarddog --version
 
 # ASH_BIN_PATH back to root, readable and executable by this user but not writable:
 # nothing writes there at scan time. Then the core stage's sweep again, for the lock

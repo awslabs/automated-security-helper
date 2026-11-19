@@ -117,7 +117,16 @@ ash_config:
         - /scanners/gitleaks/options/config_file
         - /scanners/zizmor/options/config_file
         - /scanners/zizmor/options/online_audits
+        - /scanners/hadolint/options/config_file
+        - /scanners/betterleaks/options/config_file
+        - /scanners/betterleaks/options/honor_tree_ignore_files
+        - /scanners/guarddog/options/ecosystems
+        - /scanners/guarddog/options/rules
+        - /scanners/guarddog/options/exclude_rules
+        - /scanners/guarddog/options/verify
+        - /scanners/guarddog/options/sandbox
         - /scanners/snyk-code/options/honor_tree_exclusions
+        - /scanners/betterleaks/options/honor_inline_ignores
         - /scanners/cfn-lint/options/honor_inline_ignores
         - /scanners/gitleaks/options/honor_inline_ignores
         - /scanners/zizmor/options/honor_inline_ignores
@@ -174,6 +183,9 @@ ash_config:
     task_count_warning_threshold: 15
     thread_pool_max_workers: 4
   output_formats: []
+  precommit:
+    add_scanners: []
+    only_scanners: []
   project_name: trivy-snapshot
   reporters:
     csv:

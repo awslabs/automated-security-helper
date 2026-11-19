@@ -1,0 +1,14 @@
+
+ Usage: ash express start [OPTIONS]
+
+ Start the express daemon for this user and ASH version (idempotent).
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --idle-seconds        <int range> [x>=1]  Seconds of inactivity after which the daemon exits.   │
+│                                           Defaults to the ASH_EXPRESS_IDLE_SECONDS environment  │
+│                                           variable, else 1800.                                  │
+│ --foreground                              Run the daemon in this process, attached to this      │
+│                                           terminal, instead of detaching it. Useful for         │
+│                                           watching its log live.                                │
+│ --help                                    Show this message and exit.                           │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -15,7 +15,7 @@ import stat
 # its console checks each line it writes off a terminal, so none reads as a CI command.
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.console import print  # noqa: A004
-from typing import Annotated, List, NoReturn, Optional
+from typing import TYPE_CHECKING, Annotated, Any, List, NoReturn, Optional
 import typer
 from pathlib import Path
 
@@ -53,25 +53,23 @@ from automated_security_helper.cli.deprecations import (
     warn_deprecated_option_spellings,
 )
 from automated_security_helper.cli.params import from_environment as _from_environment
-from automated_security_helper.core.sharding import validate_shard_selection
-from automated_security_helper.interactions.run_ash_container import (
-    OciValueRefused,
-    oci_runner_for_this_run,
-    oci_wrapper_refusal,
-)
-from automated_security_helper.interactions.run_ash_scan import (
-    PRECOMMIT_MODE_SCANNERS,
-    refuse_output_dir_links,
-    resolve_workspace_execution_config,
-    resolved_console_log_level,
-    run_ash_scan,
-)
+
+# This module is imported on EVERY `ash` invocation (`ash --version` included):
+# cli/main.py registers run_ash_scan_cli_command as the root callback, so nothing
+# here may import the scan engine at module scope. The engine-sized trees --
+# interactions.run_ash_scan (the orchestrator), interactions.run_ash_container,
+# core.sharding, models.workspace, utils.get_scan_set, and the workspace.*
+# resolver (which pulls config.ash_config and every built-in plugin) -- are
+# imported on first use instead, through _DEFERRED_IMPORTS / __getattr__ /
+# _deferred below, which runs only once a scan (or a workspace dry run) is
+# actually asked for. tests/unit/cli/test_version_startup_budget.py pins the
+# budget.
+from automated_security_helper.core.constants import PRECOMMIT_MODE_SCANNERS
 from automated_security_helper.core.enums import (
     AWS_PLUGIN_MODULE_FORMATS,
     FORMATS_NO_REPORTER_WRITES,
     ExportFormat,
 )
-from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.content_databases import (
     content_db_staleness_flag_overrides,
     get as get_content_database,
@@ -82,10 +80,6 @@ from automated_security_helper.utils.directory_refusals import (
     source_dir_refusal,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.get_scan_set import (
-    InvalidBaseRefError,
-    validate_base_ref,
-)
 from automated_security_helper.utils.log import (
     configure_last_resort_level,
     escape_markup,
@@ -98,12 +92,108 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_WORKING_DIRS,
 )
 from automated_security_helper.utils.terminal_text import shown_on_one_line
-from automated_security_helper.workspace.plan import WorkspacePlan
-from automated_security_helper.workspace.resolver import resolve_workspace
-from automated_security_helper.workspace.workspace_file import (
-    WORKSPACE_AUTO,
-    discover_workspace_file,
-)
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.workspace import WorkspaceExitCode
+    from automated_security_helper.workspace.plan import WorkspacePlan
+
+#: The deferred names and where each lives: module attribute -> (module, name).
+#: Served by __getattr__ below, so `automated_security_helper.cli.scan.run_ash_scan`
+#: is still this module's attribute -- tests monkeypatch it there -- without the
+#: import happening before something asks for it.
+_DEFERRED_IMPORTS: dict[str, tuple[str, str]] = {
+    "OciValueRefused": (
+        "automated_security_helper.interactions.run_ash_container",
+        "OciValueRefused",
+    ),
+    "oci_runner_for_this_run": (
+        "automated_security_helper.interactions.run_ash_container",
+        "oci_runner_for_this_run",
+    ),
+    "oci_wrapper_refusal": (
+        "automated_security_helper.interactions.run_ash_container",
+        "oci_wrapper_refusal",
+    ),
+    "refuse_output_dir_links": (
+        "automated_security_helper.interactions.run_ash_scan",
+        "refuse_output_dir_links",
+    ),
+    "resolve_workspace_execution_config": (
+        "automated_security_helper.interactions.run_ash_scan",
+        "resolve_workspace_execution_config",
+    ),
+    "resolved_console_log_level": (
+        "automated_security_helper.interactions.run_ash_scan",
+        "resolved_console_log_level",
+    ),
+    "run_ash_scan": (
+        "automated_security_helper.interactions.run_ash_scan",
+        "run_ash_scan",
+    ),
+    "validate_shard_selection": (
+        "automated_security_helper.core.sharding",
+        "validate_shard_selection",
+    ),
+    "WorkspaceExitCode": (
+        "automated_security_helper.models.workspace",
+        "WorkspaceExitCode",
+    ),
+    "InvalidBaseRefError": (
+        "automated_security_helper.utils.get_scan_set",
+        "InvalidBaseRefError",
+    ),
+    "validate_base_ref": (
+        "automated_security_helper.utils.get_scan_set",
+        "validate_base_ref",
+    ),
+    "WorkspacePlan": ("automated_security_helper.workspace.plan", "WorkspacePlan"),
+    "resolve_workspace": (
+        "automated_security_helper.workspace.resolver",
+        "resolve_workspace",
+    ),
+    "WORKSPACE_AUTO": (
+        "automated_security_helper.workspace.workspace_file",
+        "WORKSPACE_AUTO",
+    ),
+    "discover_workspace_file": (
+        "automated_security_helper.workspace.workspace_file",
+        "discover_workspace_file",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Serve the deferred names as module attributes, importing on first access.
+
+    PEP 562. The imported value is cached in the module's globals, so later
+    attribute reads are plain dict lookups, and a monkeypatch of this module's
+    attribute -- which reads the old value first, then writes the stub into the
+    module dict -- behaves exactly as it did when the import was eager.
+    """
+    try:
+        module_path, attribute = _DEFERRED_IMPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    import importlib
+
+    value = getattr(importlib.import_module(module_path), attribute)
+    globals()[name] = value
+    return value
+
+
+def _deferred(name: str) -> Any:
+    """The deferred name as currently bound on this module.
+
+    Function bodies read the names through this instead of a plain global
+    reference (which would skip __getattr__ and NameError before first import)
+    or a function-local `from ... import` (which would skip the module dict and
+    so ignore a test's monkeypatch of `cli.scan.<name>`).
+    """
+    try:
+        return globals()[name]
+    except KeyError:
+        return __getattr__(name)
+
 
 #: The only word on how an interrupted scan ended, as exit-codes.md quotes it
 #: (the 130 row). Printed by the scan command's KeyboardInterrupt arm for the
@@ -132,6 +222,10 @@ def _oci_runner_for_this_run(
     """
     if (mode or RunMode.local) not in (RunMode.container, RunMode.nix):
         return oci_runner
+    OciValueRefused = _deferred("OciValueRefused")
+    oci_runner_for_this_run = _deferred("oci_runner_for_this_run")
+    oci_wrapper_refusal = _deferred("oci_wrapper_refusal")
+
     try:
         runner = oci_runner_for_this_run(
             oci_runner, from_environment=_from_environment(ctx, "oci_runner")
@@ -208,9 +302,15 @@ def _marks_outside_the_chain(
 
 def _fail_workspace(
     message: str,
-    code: WorkspaceExitCode = WorkspaceExitCode.WORKSPACE_ERROR,
+    code: "WorkspaceExitCode | None" = None,
 ) -> NoReturn:
     """Report a workspace-mode refusal and exit with its contract code.
+
+    ``code`` defaults to ``WorkspaceExitCode.WORKSPACE_ERROR``, resolved inside
+    the body rather than in the signature: a default there is evaluated when
+    this module is imported, which is every ``ash`` invocation, and
+    ``models.workspace`` is one of the trees the module-scope comment above the
+    imports keeps out of startup.
 
     Written with utils/console.py's ``echo`` rather than the Rich ``print``
     imported above, because these messages quote operator-supplied paths and Rich
@@ -221,6 +321,8 @@ def _fail_workspace(
     handlers, and the exit would otherwise chain the error being handled,
     whose unredacted text anything formatting the exit prints.
     """
+    if code is None:
+        code = _deferred("WorkspaceExitCode").WORKSPACE_ERROR
     echo(message, err=True)
     raise typer.Exit(code) from None
 
@@ -266,7 +368,7 @@ def _fail_workspace_config(exc: ASHConfigValidationError) -> NoReturn:
     from automated_security_helper.utils.error_text import error_text
     from automated_security_helper.utils.parser_text import refusal_own_lines
 
-    code = WorkspaceExitCode.INVALID_PROJECT_CONFIG
+    code = _deferred("WorkspaceExitCode").INVALID_PROJECT_CONFIG
     lines = refusal_own_lines(exc, error_text(exc))
     for line in lines[:-1]:
         echo(shown_on_one_line(line), err=True)
@@ -492,7 +594,7 @@ def _settle_output_dir(
     # refusal with exit 3. exit-codes.md gives it exit 5, "Output directory is not
     # a valid path:", from the usage refusal below, which no probe precedes.
     if "\x00" not in os.fspath(output_dir):
-        refuse_output_dir_links(
+        _deferred("refuse_output_dir_links")(
             source_dir,
             output_dir,
             container=mode is not None and RunMode(mode) == RunMode.container,
@@ -665,6 +767,41 @@ def _refuse_changed_files_only_in_container_mode(
     raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
 
+def _refuse_staged_outside_precommit_mode(
+    staged: bool,
+    mode: RunMode | str | None,
+    workspace: object,
+    from_environment: bool,
+) -> None:
+    """Refuse ``--staged`` outside ``--mode precommit``, before anything runs.
+
+    The staged scope exists for the pre-commit hook; no other mode applies it,
+    and silently scanning the whole tree would be the opposite of what the
+    caller asked for. Workspace mode is refused with it: the staged scope is
+    read for one source directory.
+    """
+    if not staged:
+        return
+    source = "ASH_STAGED is set, and --staged" if from_environment else "--staged"
+    if workspace is not None:
+        echo(
+            f"{source} is not supported with --workspace: the staged scope is "
+            "read for one source directory. Scan the project directly with "
+            "--mode precommit --staged.",
+            err=True,
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+    if mode is not None and RunMode(mode) == RunMode.precommit:
+        return
+    echo(
+        f"{source} is supported only with --mode precommit: it scopes the scan "
+        "to the files git has staged for commit. Run with --mode precommit, or "
+        "drop --staged.",
+        err=True,
+    )
+    raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+
+
 def _validate_shard_options(
     shard_index: int | None,
     shard_count: int | None,
@@ -697,7 +834,7 @@ def _validate_shard_options(
         )
 
     try:
-        validate_shard_selection(shard_index, shard_count)
+        _deferred("validate_shard_selection")(shard_index, shard_count)
     except ShardSelectionError as exc:
         _fail_shard_selection(str(exc))
 
@@ -747,11 +884,11 @@ def _handle_workspace_mode(
 
     try:
         workspace_file = (
-            discover_workspace_file(Path.cwd())
-            if workspace == WORKSPACE_AUTO
+            _deferred("discover_workspace_file")(Path.cwd())
+            if workspace == _deferred("WORKSPACE_AUTO")
             else Path(workspace)
         )
-        plan = resolve_workspace(
+        plan = _deferred("resolve_workspace")(
             workspace_file,
             allow_missing_projects=allow_missing_projects,
             workspace_config=(
@@ -782,7 +919,9 @@ def _handle_workspace_mode(
     # timeouts), and the run refuses one that cannot be loaded with exit 3. Read
     # here too, so --dry-run does not report a plan the run would refuse.
     try:
-        resolve_workspace_execution_config(Path(plan.workspace_root), config)
+        _deferred("resolve_workspace_execution_config")(
+            Path(plan.workspace_root), config
+        )
     except ASHConfigValidationError as exc:
         # Through _fail_workspace_config, as the plan's own config refusal is:
         # the refusal quotes the config's path, the caller's text, so each line
@@ -821,6 +960,8 @@ def _exit_with_workspace_dry_run(
         prewarm_plugin_registry,
         refuse_unresolvable_scanner_selection,
     )
+
+    WorkspaceExitCode = _deferred("WorkspaceExitCode")
 
     selection = ProjectScanSettings(
         # The pre-check and the prewarm read only the selection and the
@@ -903,7 +1044,13 @@ def run_ash_scan_cli_command(
         Optional[List[str]],
         typer.Option(
             rich_help_panel="Scan",
-            help="Specific scanner names to run. Defaults to all scanners.",
+            help=(
+                "Deprecated: use --only-scanners to state the whole selection, or "
+                "--add-scanners to add to the mode's default set. Behavior is "
+                "unchanged: specific scanner names to run (additive to the "
+                "precommit set in --mode precommit; the whole selection "
+                "elsewhere). Cannot be combined with --only-scanners."
+            ),
             envvar="ASH_SCANNERS",
         ),
     ] = None,
@@ -913,6 +1060,37 @@ def run_ash_scan_cli_command(
             rich_help_panel="Scan",
             help="Specific scanner names to exclude from running. Takes precedence over scanners parameter.",
             envvar="ASH_EXCLUDED_SCANNERS",
+        ),
+    ] = None,
+    only_scanners: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--only-scanners",
+            rich_help_panel="Scan",
+            help=(
+                "Run exactly these scanners: the whole selection, replacing the "
+                "mode's default set (--mode precommit's five) and the config "
+                "file's precommit.only_scanners/add_scanners keys. Repeatable, "
+                "and each value may name several scanners separated by commas, "
+                "as --scanners accepts. Cannot be combined with --add-scanners "
+                "or the deprecated --scanners. --exclude-scanners still removes "
+                "names from it."
+            ),
+        ),
+    ] = None,
+    add_scanners: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--add-scanners",
+            rich_help_panel="Scan",
+            help=(
+                "Scanner names to run in addition to the selection the mode and "
+                "config give: in --mode precommit, the five default scanners "
+                "plus the config's precommit keys; elsewhere the same additive "
+                "meaning as --scanners. Repeatable, comma lists accepted. "
+                "Cannot be combined with --only-scanners. --exclude-scanners "
+                "still applies last."
+            ),
         ),
     ] = None,
     ash_plugin_modules: Annotated[
@@ -946,6 +1124,28 @@ def run_ash_scan_cli_command(
             rich_help_panel="Execution",
             help="Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner whose sandbox cannot be set up is graded by the refusal: under 'auto' no working backend is a missing dependency and the scanner is reported MISSING; a named backend that is unavailable, or any other refusal (such as a results path that is a symlink), is reported ERROR. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md",
             case_sensitive=False,
+        ),
+    ] = None,
+    express: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--express/--no-express",
+            rich_help_panel="Execution",
+            help=(
+                "Run this scan on the resident express daemon, starting it if it "
+                "is not running (--express), or force an ordinary cold in-process "
+                "run (--no-express). Without either, a scan uses the daemon "
+                "automatically whenever its socket exists and its ASH version "
+                "matches, and silently runs cold otherwise. Unix only (Linux and "
+                "macOS). The flag is read by the console entry point before this "
+                "command parses, so it applies to CLI invocations: the 'ash' "
+                "console script gets the full saving; 'python -m "
+                "automated_security_helper.cli.main' delegates too but has paid "
+                "the import cost already; scans the MCP server hosts in-process "
+                "never delegate. By the time a scan runs here the decision has "
+                "been made, so this parameter only documents and accepts the "
+                "flag."
+            ),
         ),
     ] = None,
     offline_semgrep_rulesets: Annotated[
@@ -1040,7 +1240,10 @@ def run_ash_scan_cli_command(
                 "Execution mode preset. 'local' (default) runs the scan in this "
                 "process with the scanner tools installed on this machine. "
                 "'precommit' is a local scan that runs only "
-                f"{', '.join(PRECOMMIT_MODE_SCANNERS)}, plus any --scanners, with "
+                f"{', '.join(PRECOMMIT_MODE_SCANNERS)}, plus any --add-scanners "
+                "(or the deprecated --scanners); the config file's "
+                "precommit.only_scanners and the --only-scanners flag replace "
+                "that set instead. It prints "
                 "simplified output and no progress display; in workspace mode it "
                 "changes only the output. 'container' builds the ASH container "
                 "image and runs the scan inside it. 'nix' runs the scan inside "
@@ -1251,6 +1454,29 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASE_REF",
         ),
     ] = "origin/main",
+    staged: Annotated[
+        bool,
+        typer.Option(
+            "--staged",
+            rich_help_panel="Scan",
+            help=(
+                "With --mode precommit only: scan the staged files (git diff "
+                "--cached, without deletions; a rename's new path) instead of "
+                "the whole tree, so a commit pays for what it stages. What the "
+                "tools read is the working-tree copy of each staged file; under "
+                "the pre-commit framework the two are identical, because it "
+                "stashes unstaged changes around the hooks. Suppressions and "
+                "ignore paths apply exactly as in a whole-tree scan; findings "
+                "in files that are not staged are out of scope. With nothing "
+                "staged the scan exits 0 without starting any scanner. Unlike "
+                "--changed-files-only, which only filters the reports after "
+                "scanning everything, --staged saves the scan time. Any other "
+                "--mode refuses it (exit 5). Planned to become the precommit "
+                "default in ASH v4."
+            ),
+            envvar="ASH_STAGED",
+        ),
+    ] = False,
     allow_in_tree_tools: Annotated[
         bool,
         typer.Option(
@@ -1499,7 +1725,7 @@ def run_ash_scan_cli_command(
     # in-process for every hosted scan, and the server's own entry point
     # already set the gate.
     configure_last_resort_level(
-        resolved_console_log_level(
+        _deferred("resolved_console_log_level")(
             log_level=log_level,
             verbose=verbose,
             debug=debug,
@@ -1514,6 +1740,12 @@ def run_ash_scan_cli_command(
         changed_files_only,
         mode,
         from_environment=_from_environment(ctx, "changed_files_only"),
+    )
+    _refuse_staged_outside_precommit_mode(
+        staged,
+        mode,
+        workspace,
+        from_environment=_from_environment(ctx, "staged"),
     )
     # With the other early refusals, so the workspace dry run below refuses what the
     # run refuses and names the same first problem.
@@ -1630,8 +1862,8 @@ def run_ash_scan_cli_command(
     # a revision. Without the flag no diff runs and the value is not used.
     if changed_files_only:
         try:
-            validate_base_ref(base_ref)
-        except InvalidBaseRefError as exc:
+            _deferred("validate_base_ref")(base_ref)
+        except _deferred("InvalidBaseRefError") as exc:
             _fail_usage(f"{exc} The value comes from --base-ref or ASH_BASE_REF.")
 
     # Workspace mode is handled before any cwd-based default is applied, because
@@ -1748,6 +1980,50 @@ def run_ash_scan_cli_command(
         scanners = []
     if exclude_scanners is None:
         exclude_scanners = []
+    if add_scanners is None:
+        add_scanners = []
+    # --only-scanners states the whole selection, so either additive flag beside
+    # it is ambiguous: names in both repeat themselves, names in one contradict
+    # "exactly these". Refused rather than resolved to either reading, before
+    # the dry run answers and before any scan starts. None means the flag was
+    # not given; typer never produces an empty list for it.
+    if only_scanners is not None and add_scanners:
+        _fail_usage(
+            "--only-scanners cannot be combined with --add-scanners: "
+            "--only-scanners already states the whole scanner selection. Put "
+            "every name in --only-scanners, or drop it and keep --add-scanners."
+        )
+    if only_scanners is not None and scanners:
+        # ``scanners`` is also filled from ASH_SCANNERS: a pipeline that exports
+        # the variable and passes only --only-scanners must not be told about a
+        # --scanners flag its command line does not carry. click records where
+        # the value came from, and the refusal names that source.
+        legacy_source = (
+            "ASH_SCANNERS (set in the environment)"
+            if _from_environment(ctx, "scanners")
+            else "--scanners"
+        )
+        _fail_usage(
+            f"--only-scanners cannot be combined with {legacy_source}, which is "
+            "deprecated: --only-scanners already states the whole scanner "
+            "selection. Put every name in --only-scanners, or use "
+            "--add-scanners to add to the mode's default set."
+        )
+    if scanners and os.environ.get("ASH_IN_CONTAINER", "NO").upper() not in [
+        "YES",
+        "1",
+        "TRUE",
+    ]:
+        # A warning, not a refusal: behavior is unchanged. Skipped inside the
+        # container, where the forwarded command line is machine-built from the
+        # host's flags and the host already said this once.
+        echo(
+            "DeprecationWarning: --scanners (and ASH_SCANNERS) is deprecated. "
+            "Use --only-scanners to state the whole scanner selection, or "
+            "--add-scanners to add scanners to the mode's default set. "
+            "--scanners keeps its current behavior.",
+            err=True,
+        )
     if ash_plugin_modules is None:
         ash_plugin_modules = []
     # "a_ash_plugins, b_ash_plugins", from the flag or ASH_PLUGIN_MODULES, names two
@@ -1791,7 +2067,15 @@ def run_ash_scan_cli_command(
         # refuses what the run refuses and names the same first problem.
         _exit_with_workspace_dry_run(
             workspace_plan,
-            scanners=tuple(scanners),
+            # Folded as the real workspace run folds them (run_ash_scan's
+            # _folded_scanner_allowlist): workspace mode applies no precommit
+            # default, so --only-scanners is the list when given and the
+            # additive flags concatenate otherwise.
+            scanners=tuple(
+                only_scanners
+                if only_scanners is not None
+                else [*scanners, *add_scanners]
+            ),
             exclude_scanners=tuple(exclude_scanners),
             ash_plugin_modules=tuple(ash_plugin_modules),
         )
@@ -1823,6 +2107,34 @@ def run_ash_scan_cli_command(
     # The output formats were parsed above the workspace block
     # (parsed_output_formats).
 
+    # --staged with nothing staged: say so and exit clean before any engine,
+    # plugin or report machinery starts. This is the hook's hot path (a commit
+    # touching only files ASH does not scan still runs the hook), so it has to
+    # cost one git call, not a scan. run_ash_scan applies the same scope for
+    # callers that skip the CLI; an unreadable staged list is refused there too.
+    staged_for_scan = None
+    if staged:
+        from automated_security_helper.utils.staged_files import (
+            staged_files_for_source,
+        )
+
+        # source_dir is always set by here (the cwd default above).
+        staged_for_scan = staged_files_for_source(Path(source_dir))
+        if staged_for_scan is None:
+            echo(
+                "--staged could not read the staged file list: it needs git and "
+                "a git repository (the cause was logged). Run without --staged "
+                "to scan the whole tree.",
+                err=True,
+            )
+            raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+        if not staged_for_scan:
+            echo(
+                "--staged: nothing is staged inside the scanned directory, so "
+                "there is nothing to scan. Exiting clean."
+            )
+            raise typer.Exit(0)
+
     # Call run_ash_scan with all parameters, as a scan the entry point's SIGTERM
     # handler cancels (core/cancellation.py, "SIGTERM on the CLI"). The scope is
     # entered here and not inside run_ash_scan because the MCP runner calls
@@ -1836,7 +2148,7 @@ def run_ash_scan_cli_command(
     record_die_now_message(_SCAN_INTERRUPTED_MESSAGE)
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
-            run_ash_scan(
+            _deferred("run_ash_scan")(
                 source_dir=source_dir,
                 output_dir=output_dir,
                 config=config,
@@ -1845,6 +2157,8 @@ def run_ash_scan_cli_command(
                 strategy=strategy,
                 scanners=scanners,
                 exclude_scanners=exclude_scanners,
+                only_scanners=only_scanners,
+                add_scanners=add_scanners,
                 progress=cli_final_show_progress,
                 output_formats=parsed_output_formats,
                 cleanup=cleanup,
@@ -1863,6 +2177,8 @@ def run_ash_scan_cli_command(
                 min_severity=MinSeverity(min_severity).value,
                 changed_files_only=changed_files_only,
                 base_ref=base_ref,
+                staged=staged,
+                staged_files=staged_for_scan,
                 shard_index=shard_index,
                 shard_count=shard_count,
                 mode=mode or RunMode.local,

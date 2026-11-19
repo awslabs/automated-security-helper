@@ -845,6 +845,7 @@ def test_a_runs_window_opens_safely_beside_a_concurrent_warning(
 
     def warner():
         i = 0
+        batches = 0
         while not stop.is_set():
             run = _hosted()
             try:
@@ -861,6 +862,16 @@ def test_a_runs_window_opens_safely_beside_a_concurrent_warning(
                         failures.append(("warn", repr(error)))
             finally:
                 _closed(*run)
+            # The memo lock is not fair: a warner that takes it back to back
+            # can keep a waiting forgetter off it for as long as the warner
+            # runs (a macOS runner went 60 s with 1,032,600 warnings and no
+            # forget). Each batch of warnings therefore overlaps the forgetter
+            # as before, and the next one starts only after the forgetter has
+            # finished another window, so both sides make progress by
+            # construction rather than by the scheduler's grace.
+            batches += 1
+            while completed["forget"] < batches and not stop.is_set():
+                time.sleep(0.0005)
 
     old = sys.getswitchinterval()
     threads = [threading.Thread(target=forgetter), threading.Thread(target=warner)]

@@ -48,13 +48,70 @@ Do not ignore all of `.ash/`: an ASH config file can live there, as `.ash/.ash.y
 
 ## What the hook runs {#behavior}
 
-The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
+The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommit mode:
 
-- runs five scanners: bandit, detect-secrets, checkov, cdk-nag, and npm-audit. `--scanners`
-  can add others but cannot remove these; `--exclude-scanners` removes them.
-- scans the whole repository on every run, not only the staged files. A commit that touches
-  one file is still blocked by a finding in a file committed earlier.
-- prints simplified output and writes the usual reports to `.ash/ash_output/`.
+- runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
+  `--add-scanners` adds others to that set; `--only-scanners` replaces the set and runs
+  exactly what it names; `--exclude-scanners` removes names, whichever source added them.
+  The deprecated `--scanners` behaves like `--add-scanners` here. See
+  [Choosing the scanners](#scanner-selection).
+- with `--staged` (which the hook passes), scans the staged files instead of the whole
+  repository, so a one-file commit pays for one file. See
+  [Staged-file scope](#staged-scope).
+- prints simplified output and writes reports to `.ash/ash_output/`.
+
+Precommit mode writes only the reports the hook actually consumes: the text summary
+and the SARIF report the exit code is computed from, instead of the full report set
+every other mode writes. That is a default, not a cap -- passing `--output-formats`,
+or setting `output_formats` or configuring anything under `reporters` in the ASH
+config file, keeps the full behavior those choices describe, exactly as outside
+precommit mode.
+
+## Staged-file scope (`--staged`) {#staged-scope}
+
+`--staged` reads the staged file list from `git diff --cached` (added, copied, modified
+and renamed entries; a rename is scanned at its new path; a deleted file cannot be
+scanned and is not listed) and makes it the scan's target set:
+
+- bandit and checkov are handed the staged files instead of the tree; the scanners that
+  pick their own files (detect-secrets, cdk-nag, npm-audit) read the same staged list.
+  For Terraform, checkov also reads a staged file's same-directory `.tf`/`.tfvars`
+  siblings, so same-directory `variables.tf` defaults and `locals` still resolve;
+  nothing recurses into subdirectories, so a local module that lives in one is read
+  only when its own files are staged.
+- a scanner none of whose files are staged is skipped, with a log line saying so.
+  For bandit and checkov that decision is made before their tools are even looked
+  up (the converted tree has to be empty too), so a commit that stages nothing
+  they scan does not pay for their version probes -- and does not need their
+  tools installed.
+- converters (Jupyter notebooks, archives) convert staged inputs only, and are skipped
+  when nothing staged matches them.
+- suppressions and `ignore_paths` resolve against the same scan root as a whole-repository
+  run, so a suppression that matches a finding in a full scan matches it here too.
+- findings in files that are not staged are out of scope by definition: the hook judges
+  the commit, not the repository. The reports are filtered to the staged files, so even
+  what a tool read for context (the Terraform siblings above, or the large-commit
+  fallback below) never adds findings. Keep a whole-repository scan in CI for the rest.
+- a commit staging more files than one command line can carry (about 500) makes bandit
+  and checkov fall back to scanning the directory, with a log line: the reports still
+  hold staged-file findings only, and what degrades is the time win.
+- with nothing staged, the scan logs that and exits 0 without starting any scanner.
+
+What the tools read is the working-tree copy of each staged file. Under the
+pre-commit framework the two are identical, because it stashes unstaged changes
+around the hooks; a direct `ash --mode precommit --staged` run after `git add -p`,
+or after editing a file it had staged, scans content that differs from what the
+commit will contain.
+
+`--staged` works only with `--mode precommit`; any other mode refuses it (exit 5).
+Without the flag, a precommit scan still covers the whole repository: on every ASH v3
+release the flag is opt-in, the hooks in this repository pass it for you, and it is
+planned to become the precommit default in ASH v4.
+
+This is not what `--changed-files-only` does. `--changed-files-only` scans everything
+and only filters the reports against a `<base_ref>...HEAD` diff afterwards, so it saves
+no scan time and cannot see staged-but-uncommitted content; `--staged` is the scan-time
+scope built for the hook.
 
 The hook's environment includes the `cdk` extra that cdk-nag needs. cdk-nag and npm-audit
 also need Node.js and npm on `PATH`, but only when the repository has files they scan:
@@ -80,6 +137,43 @@ is the same hook under another name.
 
 Do not add `--no-fail-on-incomplete-scanners` to the hook: with it, a commit passes when a
 scanner did not run, and the output says only `Passed`.
+
+### Choosing the scanners {#scanner-selection}
+
+The selection precommit mode runs is resolved in this order, later entries winning:
+
+1. The mode default: the five scanners above.
+2. The ASH config file: `precommit.only_scanners` replaces the default set;
+   `precommit.add_scanners` adds to it. Setting both keys is refused.
+3. The command line: `--only-scanners` replaces everything above, mode default and config
+   keys alike; `--add-scanners`, or the deprecated `--scanners`, adds to whatever stands.
+   `--only-scanners` cannot be combined with either additive flag.
+4. `--exclude-scanners` applies last: an excluded name does not run, whichever source
+   included it.
+
+So a repository that wants its hook to run only bandit and detect-secrets states it once
+in its ASH config instead of in every clone's hook `args`:
+
+<!-- doctest: config kind=ash -->
+```yaml
+project_name: my-project
+precommit:
+  only_scanners:
+    - bandit
+    - detect-secrets
+```
+
+A committer can still widen one run with `--add-scanners`, or override the file entirely
+with `--only-scanners`. `--scanners` keeps working with a deprecation warning; it is the
+same additive selection `--add-scanners` now names explicitly.
+
+!!! warning "Upgrading to v3.8.0 with checkov extra formats configured"
+    An ASH config that sets `checkov.additional_formats: [cyclonedx_json]` can crash
+    checkov on some repositories. From v3.8.0, a scanner that crashes correctly fails
+    the run with exit code 1 instead of passing silently, so a hook that passed on
+    v3.7.x can start failing after the upgrade. Remove that format from the config, or
+    exclude checkov from the hook with `--exclude-scanners checkov`. Once checkov runs
+    without crashing, it can also report a real finding the crashed runs never surfaced.
 
 ### Add Python packages to the hook {#additional-dependencies}
 
@@ -109,16 +203,39 @@ With `stages: [pre-push]`, install that hook type with
 
 ## What it costs {#cost}
 
-Measured on a repository of three files:
+The first run builds the hook environment and installs the scanner tools, which takes 65
+to 150 seconds. The environment takes about 650 MB under `~/.cache/pre-commit`, and
+bandit and checkov about 240 MB under `~/.local/share/uv`.
 
-| Run | Time |
-|---|---|
-| First run, with the hook environment and scanner installs | 65 to 150 seconds |
-| Later runs | 11 to 15 seconds |
+Every later run's cost scales with the size of the repository unless `--staged` narrows
+the scan: without the flag, each commit scans the whole tree, however small the change.
+With `--staged`, which the hook passes, the scan covers the staged files and the time
+grows with the commit instead. checkov is the slowest scanner. Warm-run times, measured
+on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches:
 
-checkov is the slowest scanner. Scan time grows with the size of the repository, because
-every run scans all of it. The hook environment takes about 650 MB under
-`~/.cache/pre-commit`, and bandit and checkov about 240 MB under `~/.local/share/uv`.
+| Warm run | 10-file repository | ~900-file Python repository |
+|---|---|---|
+| `--mode precommit` on the whole repository (no `--staged`) | ~6.7 s | ~18 s |
+| `--mode precommit --staged`, one `.py` file staged | ~4.4 s | ~5.7 s |
+| The same, with `--only-scanners bandit,detect-secrets` | ~2.8 s | ~3.4 s |
+| `--staged` with the express daemon warm (`--express`) | ~3.0 s | not measured |
+
+For scale, `ash --version` alone takes about 0.2 seconds on the same machine. What is
+left of the fastest runs above is the floor every scan pays: starting the interpreter,
+importing ASH, loading the configuration, and setting up the scanners. A `--staged` run
+whose staged files match no scanner still pays that floor; the scanners are skipped, and
+the wall time is unchanged.
+
+Part of that floor is ASH's own startup (the interpreter and the eager imports), paid
+again on each commit. [Express mode](express-mode.md) removes it: add
+`--express` to the hook's `args`, and the first commit starts a resident warm daemon
+paired with the hook's own environment, which every later hook run forks instead of
+starting cold (Linux and macOS only). The pairing matters: the daemon serves exactly the
+ASH installation that started it, and pre-commit's hook environment is its own
+installation, so a daemon started from your shell's `ash` is silently ignored by the
+hook -- start it with the hook's flag, not from the shell. The hook's default `--staged`
+already scopes the scan to the files the commit touches, so the daemon and `--staged`
+together are the fastest hook shape.
 
 ## Pre-commit and CI together {#with-ci}
 
@@ -131,7 +248,7 @@ both.
 | Scanners | The five in [What the hook runs](#behavior), plus any you add with `--scanners` | Every scanner your configuration enables, including the ones precommit mode leaves out, such as opengrep, grype, trivy, and gitleaks |
 | Runs | On the developer's machine, per commit or push | On a clean runner, per pull request or push |
 | Output | Simplified, no progress display | The full summary and report files, for upload as artifacts or SARIF |
-| Cost | 11 to 15 seconds after the first run ([What it costs](#cost)) | Installs the scanner tools each build, or uses an image you prepared |
+| Cost | A few seconds per commit after the first run, growing with the staged set ([What it costs](#cost)) | Installs the scanner tools each build, or uses an image you prepared |
 
 [Scanner coverage](../reference/coverage.md#by-scanner) lists which scanners each mode
 runs. A scanner that precommit mode skips is not run by the `ash` hook at all, so a clean

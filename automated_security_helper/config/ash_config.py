@@ -71,7 +71,10 @@ from automated_security_helper.config.plugin_section_names import (
     # before `extends` merges.
     folded_section_name as _folded_section_name,
 )
-from automated_security_helper.utils.unknown_keys import TOLERATE_STORED_CONFIG
+from automated_security_helper.utils.unknown_keys import (
+    TOLERATE_STORED_CONFIG,
+    UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
+)
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -1547,12 +1550,33 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/gitleaks/options/config_file",
         "/scanners/zizmor/options/config_file",
         "/scanners/zizmor/options/online_audits",
+        # The same for the plugin scanners hadolint and guarddog. hadolint's config
+        # file is the operator's alone (utils/config_trust.py). Of GuardDog's
+        # options, ecosystems narrows which package roots are scanned, rules and
+        # exclude_rules choose the rules it runs, verify downloads every dependency
+        # of every manifest from its registry, and sandbox set to disabled turns off
+        # GuardDog's own kernel sandbox. Its excluded_paths is marked and
+        # re-applied to the results instead (config/client_scanner_exclusions.py).
+        "/scanners/hadolint/options/config_file",
+        # And betterleaks, a secret scanner like gitleaks: its config file is the
+        # operator's alone, and whether it applies the .betterleaksignore and
+        # .gitleaksignore in the scanned tree (honor_tree_ignore_files) and the
+        # inline allow comments in its files (honor_inline_ignores, below) drops
+        # findings before ASH's suppressions see them.
+        "/scanners/betterleaks/options/config_file",
+        "/scanners/betterleaks/options/honor_tree_ignore_files",
+        "/scanners/guarddog/options/ecosystems",
+        "/scanners/guarddog/options/rules",
+        "/scanners/guarddog/options/exclude_rules",
+        "/scanners/guarddog/options/verify",
+        "/scanners/guarddog/options/sandbox",
         # Whether snyk code test may apply the .snyk and .dcignore files in the
         # tree it tests, which leave files out of its analysis.
         "/scanners/snyk-code/options/honor_tree_exclusions",
         # Whether cfn-lint, gitleaks and zizmor honor the ignore comments and
         # template metadata in the files they scan, which drop findings before
         # ASH's suppressions see them.
+        "/scanners/betterleaks/options/honor_inline_ignores",
         "/scanners/cfn-lint/options/honor_inline_ignores",
         "/scanners/gitleaks/options/honor_inline_ignores",
         "/scanners/zizmor/options/honor_inline_ignores",
@@ -2133,6 +2157,72 @@ class WorkspaceExecutionConfig(RedactedSection):
         return max(1, min(4, cpu_count or 1))
 
 
+class PrecommitModeConfig(RedactedSection):
+    """Scanner selection for ``ash scan --mode precommit``.
+
+    Precommit mode starts from a fixed default set
+    (``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,
+    cdk-nag, npm-audit). These two keys change that selection from the config
+    file, so a repository can state once what its hook runs instead of every
+    committer spelling flags in ``.pre-commit-config.yaml``.
+
+    Precedence, lowest to highest (``run_ash_scan._selected_scanners`` applies
+    it): the mode default; then ``only_scanners`` (replaces the default) and
+    ``add_scanners`` (adds to it); then the command line, where
+    ``--only-scanners`` replaces everything this section and the mode give, and
+    ``--add-scanners`` (or the deprecated ``--scanners``) adds to it.
+    ``--exclude-scanners`` applies after all of them: an excluded name wins over
+    any inclusion. Read only by ``--mode precommit``; other modes ignore this
+    section.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    only_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "The whole scanner selection for precommit mode: run exactly "
+                "these scanners instead of the mode's default set. The command "
+                "line's --only-scanners replaces this list; --add-scanners and "
+                "the deprecated --scanners add to it; --exclude-scanners "
+                "removes names from it. Cannot be set together with "
+                "add_scanners."
+            )
+        ),
+    ] = []
+
+    add_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanner names precommit mode runs in addition to its default "
+                "set. The command line's --only-scanners replaces this list "
+                "too; --exclude-scanners removes names from the result. Cannot "
+                "be set together with only_scanners."
+            )
+        ),
+    ] = []
+
+    @model_validator(mode="after")
+    def _refuse_only_with_add(self) -> "PrecommitModeConfig":
+        """Both keys at once are refused rather than resolved to either reading.
+
+        ``only_scanners`` already states the whole selection, so an
+        ``add_scanners`` beside it either repeats names or smuggles additions
+        into a list that says "exactly these". The same pair of flags is
+        refused on the command line for the same reason.
+        """
+        if self.only_scanners and self.add_scanners:
+            raise ValueError(
+                "precommit.only_scanners and precommit.add_scanners cannot be "
+                "set together: only_scanners already states the whole "
+                "selection. Put every name in only_scanners, or drop it and "
+                "keep add_scanners."
+            )
+        return self
+
+
 class ContentDbStalenessOverride(RedactedSection):
     """One content database held to a different staleness policy, until a fixed date.
 
@@ -2644,7 +2734,9 @@ class AshConfig(RedactedSection):
                 "set it True now to adopt the error early."
             )
         ),
-    ] = False
+        # The default is the one v4 gate (utils/unknown_keys.py), so the v4
+        # bump flips the field and the raw-document read together.
+    ] = UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT
 
     honor_ignore_files: Annotated[
         bool,
@@ -2790,6 +2882,20 @@ class AshConfig(RedactedSection):
             ),
         ),
     ] = WorkspaceExecutionConfig()
+
+    precommit: Annotated[
+        PrecommitModeConfig,
+        Field(
+            description=(
+                "Scanner selection for --mode precommit: only_scanners replaces "
+                "the mode's default set, add_scanners adds to it; setting both "
+                "keys at once is refused. The command "
+                "line's --only-scanners replaces both; --add-scanners and the "
+                "deprecated --scanners add; --exclude-scanners applies last. "
+                "Other modes ignore this section."
+            ),
+        ),
+    ] = PrecommitModeConfig()
 
     # `extends` and `patch` are read by the config loader (config/config_sources.py)
     # and removed before validation, so a loaded config always has both as None.

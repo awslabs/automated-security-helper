@@ -35,9 +35,11 @@ runs:
   using: "composite"
   steps:
     # uv's cache: restored by every caller, saved only by a caller that passes
-    # `save-cache: "true"`. That is the ensure-cache job in ash-unified-ci.yml, and every
-    # other job in that workflow that uses this action waits for it, so the entry for its
-    # key is already there and it only reads. Before, every caller saved from a push to
+    # `save-cache: "true"`. That is the ensure-cache job in ash-unified-ci.yml; no other
+    # job in that workflow waits for it (the needs edge was its one serial link and was
+    # dropped), so a caller whose key has no entry yet pays its own fetch and saves
+    # nothing, and an unchanged dependency set reads the entry a push to main saved.
+    # Before, every caller saved from a push to
     # main, which put the whole matrix on the same keys at once.
     #
     # The key is the runner image plus a hash of the dependency files. It does not carry

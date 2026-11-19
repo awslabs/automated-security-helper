@@ -1,0 +1,18 @@
+{
+  "aidlc": {
+    "contributes": {
+      "memory": "memory/",
+      "overlays": "contributions/"
+    },
+    "rulesLevel": "team"
+  },
+  "author": {
+    "name": "AWS ASH"
+  },
+  "dependencies": [
+    "core"
+  ],
+  "description": "Runs ASH (Automated Security Helper) at AI-DLC's construction checkpoints: a fast precommit-mode scan when each Unit's code is generated, and a full scan at Build and Test. Prose-only contributions; no new stages, agents, or scopes.",
+  "name": "ash-scan",
+  "version": "0.1.0"
+}

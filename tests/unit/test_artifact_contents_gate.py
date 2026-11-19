@@ -1208,7 +1208,7 @@ class TestAllowlistsAreWhatTheArtifactContains:
         assert member.startswith(gate.ASSETS_PREFIX), member
 
     def test_package_subdirectories_has_the_measured_count(self):
-        assert len(gate.PACKAGE_SUBDIRECTORIES) == 12
+        assert len(gate.PACKAGE_SUBDIRECTORIES) == 13
 
     def test_assets_is_itself_a_pinned_subdirectory(self):
         """Otherwise rule 5b would reject every asset before 5a could speak."""

@@ -739,7 +739,16 @@
               '/scanners/gitleaks/options/config_file',
               '/scanners/zizmor/options/config_file',
               '/scanners/zizmor/options/online_audits',
+              '/scanners/hadolint/options/config_file',
+              '/scanners/betterleaks/options/config_file',
+              '/scanners/betterleaks/options/honor_tree_ignore_files',
+              '/scanners/guarddog/options/ecosystems',
+              '/scanners/guarddog/options/rules',
+              '/scanners/guarddog/options/exclude_rules',
+              '/scanners/guarddog/options/verify',
+              '/scanners/guarddog/options/sandbox',
               '/scanners/snyk-code/options/honor_tree_exclusions',
+              '/scanners/betterleaks/options/honor_inline_ignores',
               '/scanners/cfn-lint/options/honor_inline_ignores',
               '/scanners/gitleaks/options/honor_inline_ignores',
               '/scanners/zizmor/options/honor_inline_ignores',
@@ -804,6 +813,12 @@
       }),
       'output_formats': list([
       ]),
+      'precommit': dict({
+        'add_scanners': list([
+        ]),
+        'only_scanners': list([
+        ]),
+      }),
       'project_name': 'snapshot-project',
       'reporters': dict({
         'csv': dict({
@@ -1324,7 +1339,16 @@
               '/scanners/gitleaks/options/config_file',
               '/scanners/zizmor/options/config_file',
               '/scanners/zizmor/options/online_audits',
+              '/scanners/hadolint/options/config_file',
+              '/scanners/betterleaks/options/config_file',
+              '/scanners/betterleaks/options/honor_tree_ignore_files',
+              '/scanners/guarddog/options/ecosystems',
+              '/scanners/guarddog/options/rules',
+              '/scanners/guarddog/options/exclude_rules',
+              '/scanners/guarddog/options/verify',
+              '/scanners/guarddog/options/sandbox',
               '/scanners/snyk-code/options/honor_tree_exclusions',
+              '/scanners/betterleaks/options/honor_inline_ignores',
               '/scanners/cfn-lint/options/honor_inline_ignores',
               '/scanners/gitleaks/options/honor_inline_ignores',
               '/scanners/zizmor/options/honor_inline_ignores',
@@ -1389,6 +1413,12 @@
       }),
       'output_formats': list([
       ]),
+      'precommit': dict({
+        'add_scanners': list([
+        ]),
+        'only_scanners': list([
+        ]),
+      }),
       'project_name': 'ash-scan',
       'reporters': dict({
         'csv': dict({
@@ -1813,6 +1843,14 @@
         'offline_strategy': 'bundled',
         'version': '<BANDIT_VERSION>',
       }),
+      'betterleaks': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'installs_on_first_scan': False,
+        'name': 'betterleaks',
+        'offline_strategy': 'bundled',
+        'version': None,
+      }),
       'cdk_nag': dict({
         'dependencies_satisfied': True,
         'enabled': True,
@@ -1883,6 +1921,22 @@
         'installs_on_first_scan': False,
         'name': 'grype',
         'offline_strategy': 'cache_flags',
+        'version': None,
+      }),
+      'guarddog': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'installs_on_first_scan': False,
+        'name': 'guarddog',
+        'offline_strategy': 'bundled',
+        'version': '<GUARDDOG_VERSION>',
+      }),
+      'hadolint': dict({
+        'dependencies_satisfied': True,
+        'enabled': True,
+        'installs_on_first_scan': False,
+        'name': 'hadolint',
+        'offline_strategy': 'bundled',
         'version': None,
       }),
       'npm_audit': dict({

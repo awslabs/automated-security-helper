@@ -40,8 +40,9 @@ Known limitations
 -----------------
 * Not every tool publishes an asset for every platform ASH runs on.
   ``get_tool_asset`` raises :class:`ToolNotProvisionableError` for those pairs
-  rather than guessing at a nearby architecture. The absences are real: grype and
-  trivy publish no windows/arm64 asset, and trivy publishes no 32-bit macOS one.
+  rather than guessing at a nearby architecture. The absences are real: grype,
+  hadolint and trivy publish no windows/arm64 asset, and trivy publishes no 32-bit
+  macOS one.
 * cfn-nag is not here. It is a Ruby gem with a dependency closure, not a single
   release binary, so it is provisioned through the committed
   ``assets/Gemfile.lock`` instead -- see ``cfn_nag_scanner``.
@@ -51,7 +52,7 @@ Known limitations
 * Bumping a version means replacing every digest for that tool, in both tables:
   the archive digests and the executable digests (see ``_EXECUTABLE_DIGESTS``).
   A version bumped without its digests will fail every install with an integrity
-  error, which is the intended direction to fail in. cfn-guard, opengrep and uv name their assets
+  error, which is the intended direction to fail in. cfn-guard, hadolint, opengrep and uv name their assets
   without a version, so for those a bump would not even change a filename; see
   ``_DIGESTS_TAKEN_AT`` for what catches it instead.
   Nothing bumps these pins on its own, and Dependabot cannot see a Python dict.
@@ -97,9 +98,11 @@ class ToolAsset:
     arbitrarily.
 
     ``archive`` is False when the release asset *is* the executable, which is how
-    opengrep publishes. There is nothing to extract, ``member_name`` is unused, and
-    the pinned digest then covers the very bytes that will be executed -- which is
-    what lets a cached copy be checked against the pin directly.
+    opengrep and hadolint publish. There is nothing to extract, ``member_name`` is
+    unused, and the pinned digest then covers the very bytes that will be executed
+    -- which is what lets a cached copy be checked against the pin directly. It is
+    a field rather than something inferred from the filename's extension because
+    hadolint's Linux and macOS assets have no extension at all.
     """
 
     tool: str
@@ -121,7 +124,7 @@ class ToolAsset:
         not the file that runs, so it cannot tell whether a binary already on disk
         is the pinned one; ``executable_sha256`` can. An asset that is the
         executable itself, with no archive around it, needs no second digest: the
-        asset digest already covers the bytes that run (opengrep, ``archive`` False).
+        asset digest already covers the bytes that run (opengrep and hadolint, ``archive`` False).
 
         None means there is nothing to compare a binary on disk against. Callers
         then install as they always have; they never treat None as a match.
@@ -144,9 +147,13 @@ class ToolAsset:
 # reaches because the scanner always passes its configured version.
 TOOL_VERSIONS: dict[str, str] = {
     "actionlint": "v1.7.12",
+    # The v1 maintenance line. v2.0.0 is a release candidate (2.0.0-rc.9 on
+    # 2026-11-17), and ASH pins no prerelease.
+    "betterleaks": "v1.10.1",
     "cfn-guard": "3.2.1",
     "gitleaks": "v8.30.1",
     "grype": "v0.121.3",
+    "hadolint": "v2.15.1",
     "opengrep": "v1.33.1",
     "syft": "v1.57.1",
     "trivy": "v0.76.2",
@@ -176,6 +183,15 @@ _ACTIONLINT_ASSETS: dict[PlatformArch, str] = {
     ("darwin", "arm64"): "actionlint_1.7.12_darwin_arm64.tar.gz",
     ("windows", "amd64"): "actionlint_1.7.12_windows_amd64.zip",
     ("windows", "arm64"): "actionlint_1.7.12_windows_arm64.zip",
+}
+
+_BETTERLEAKS_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "betterleaks_1.10.1_linux_x64.tar.gz",
+    ("linux", "arm64"): "betterleaks_1.10.1_linux_arm64.tar.gz",
+    ("darwin", "amd64"): "betterleaks_1.10.1_darwin_x64.tar.gz",
+    ("darwin", "arm64"): "betterleaks_1.10.1_darwin_arm64.tar.gz",
+    ("windows", "amd64"): "betterleaks_1.10.1_windows_x64.zip",
+    ("windows", "arm64"): "betterleaks_1.10.1_windows_arm64.zip",
 }
 
 # cfn-guard's release assets carry no version in their names: every release
@@ -212,6 +228,18 @@ _GRYPE_ASSETS: dict[PlatformArch, str] = {
     ("darwin", "amd64"): "grype_0.121.3_darwin_amd64.tar.gz",
     ("darwin", "arm64"): "grype_0.121.3_darwin_arm64.tar.gz",
     ("windows", "amd64"): "grype_0.121.3_windows_amd64.zip",
+    # windows/arm64: upstream publishes no such asset for this release.
+}
+
+# hadolint publishes bare executables, not archives, and its filenames carry no
+# version -- the version is only in the release tag in the URL. See
+# ToolAsset.archive, _BARE_EXECUTABLE_TOOLS and _DIGESTS_TAKEN_AT.
+_HADOLINT_ASSETS: dict[PlatformArch, str] = {
+    ("linux", "amd64"): "hadolint-linux-x86_64",
+    ("linux", "arm64"): "hadolint-linux-arm64",
+    ("darwin", "amd64"): "hadolint-macos-x86_64",
+    ("darwin", "arm64"): "hadolint-macos-arm64",
+    ("windows", "amd64"): "hadolint-windows-x86_64.exe",
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
@@ -256,8 +284,10 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # Transcribed verbatim from the checksums file published with each release, so a
 # reviewer can diff this block against the upstream file line for line:
 #   https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
+#   https://github.com/betterleaks/betterleaks/releases/download/v1.10.1/checksums.txt
 #   https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
 #   https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_checksums.txt
+#   https://github.com/hadolint/hadolint/releases/download/v2.15.1/checksums.sha256
 #   https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_checksums.txt
 #   https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_checksums.txt
 #
@@ -278,10 +308,12 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # opengrep publishes no checksums file. Its five digests were obtained two ways on
 # 2026-11-10 and both agreed byte for byte: the `digest` field GitHub reports for
 # each asset of the v1.33.1 release (`gh api repos/opengrep/opengrep/releases/tags/
-# v1.33.1`) and sha256sum over each asset downloaded once. For v1.30.2 each asset's
-# `.sig` was also checked against the public key in its `.cert`; that check was not
-# repeated for v1.33.1 and is not made at install time (see the module docstring).
-# tests/unit/utils/test_pinned_tool_downloads.py
+# v1.33.1`) and sha256sum over each asset downloaded once. On 2026-11-13 each
+# pinned asset's `.sig` was also checked with openssl against the public key in
+# its `.cert`, and every certificate's identity is opengrep's rolling-release.yml
+# workflow at refs/heads/release-v1.33.1 with the GitHub Actions OIDC issuer, the
+# same check the v1.30.2 pins had; it is not made at install time (see the module
+# docstring). tests/unit/utils/test_pinned_tool_downloads.py
 # keeps nix/opengrep.nix's SRI copy of the four non-Windows digests equal to this one.
 #
 # uv publishes a `<asset>.sha256` beside each asset. For 0.12.24 both were downloaded
@@ -326,6 +358,8 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # ``LC_ALL=C`` order, gave the same value. Both installers refuse an extraction that
 # does not hash to it, and an installed bundle is checked against it and nothing else.
 #
+# hadolint has no entry: its asset is the executable itself, so the asset digest
+# already covers the bytes that run (ToolAsset.executable_digest; the same holds for opengrep).
 #
 # The three tables are adjacent so that one line-pinned suppression covers them (see
 # .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
@@ -339,6 +373,13 @@ _DIGESTS: dict[str, str] = {
     "actionlint_1.7.12_darwin_arm64.tar.gz": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_amd64.zip": "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_arm64.zip": "cadcf7ea4efe3a68728893813643cebe1185e5b1d4be5b96245f65c9a4d5ea41",  # pragma: allowlist secret
+    # betterleaks v1.10.1
+    "betterleaks_1.10.1_linux_x64.tar.gz": "c174b42d7aa60caf58c0c3e555c0e4bed01fe6b0d99a412bce777b5af4ce913e",  # pragma: allowlist secret
+    "betterleaks_1.10.1_linux_arm64.tar.gz": "62a63199f9f61a6b5e5a6f58f048493db20fbc8c770014f4d903a4d97886e1bf",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_x64.tar.gz": "1ae2e3885d161918d8ad2e911e205e73f0d9ffba52c85b38126586c52d355ef4",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_arm64.tar.gz": "ca91eb3b006f15478411f235b5e2712fb15cea74f6701ebadc2364efe0af1403",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_x64.zip": "53d4b37635a999992fb8e1d79f8215279315cbb3b4139314289b69407e79143d",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_arm64.zip": "f93d26dfc7b939f967c74e3f908b44faec1b1cb6ffb29c75c0a1d7e713ab8f70",  # pragma: allowlist secret
     # cfn-guard 3.2.1
     "cfn-guard-v3-x86_64-linux-latest.tar.gz": "8c66efb19c63e6c2bf26b9a41bbcf2f85baa8a937b01d350940194faaf64cf1d",  # pragma: allowlist secret
     "cfn-guard-v3-aarch64-linux-latest.tar.gz": "cd378026dad0f865926ab1d1c082e2faf825f7fd888a9fe6b5c142cdf175c129",  # pragma: allowlist secret
@@ -361,6 +402,12 @@ _DIGESTS: dict[str, str] = {
     "grype_0.121.3_darwin_amd64.tar.gz": "65bfb1b3b30d32e9dab156a60003c7146e619f649992be227bf09c9ccbf44f7e",  # pragma: allowlist secret
     "grype_0.121.3_darwin_arm64.tar.gz": "54336f2cd8cdee8b3d8ea83462561ff7fa9293498054c7c53a193db44bfea4c8",  # pragma: allowlist secret
     "grype_0.121.3_windows_amd64.zip": "3007a5afea25c60030a49d6c24d4e5abb6c94c0dbeed7ea303eb26df8e900c18",  # pragma: allowlist secret
+    # hadolint v2.15.1
+    "hadolint-linux-x86_64": "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507",  # pragma: allowlist secret
+    "hadolint-linux-arm64": "f6198ef8090f404dbb771abfee086eb8c48ac177f30da7fd3510aca35b344b5d",  # pragma: allowlist secret
+    "hadolint-macos-x86_64": "ffe9bb18b23d5ed1eae50237aecdbb523d016e96da0bd4e7aa432040acfc3fde",  # pragma: allowlist secret
+    "hadolint-macos-arm64": "5c09f3213f8e40406abe048233d985eebef336d4a6a20021be47fadb6cf480a2",  # pragma: allowlist secret
+    "hadolint-windows-x86_64.exe": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",  # pragma: allowlist secret
     # syft v1.57.1
     "syft_1.57.1_linux_amd64.tar.gz": "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c",  # pragma: allowlist secret
     "syft_1.57.1_linux_arm64.tar.gz": "aa3d3e07344f590bcce8d31043b752daa76c8a56c2aa34ceeee63c6168152582",  # pragma: allowlist secret
@@ -394,6 +441,13 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "actionlint_1.7.12_darwin_arm64.tar.gz": "8db11704dc296f096216db4db65d86cd7f0ebfdf4c38453a1da276b137b88388",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_amd64.zip": "54ca21be3de4c7cfa26914aa8b61bd76bf573ef3caac5f80d110558cdf241718",  # pragma: allowlist secret
     "actionlint_1.7.12_windows_arm64.zip": "dc172c9dd32275b4a563143a318a48c91dff44fabafb23b7d1a05ed9c106a488",  # pragma: allowlist secret
+    # betterleaks v1.10.1
+    "betterleaks_1.10.1_linux_x64.tar.gz": "506082605cad984abd6ecf979a5f00fd6d701bc3ab2104a6029b1d068b3e320c",  # pragma: allowlist secret
+    "betterleaks_1.10.1_linux_arm64.tar.gz": "a83657a5747c35ed35e0ef9a8a3d60ded4b29713e27856c2fbe7c63a1b972cb0",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_x64.tar.gz": "d09400141ae0a155666f22ab974cff27c409c2c968445f7f0fc5958c4c5de62b",  # pragma: allowlist secret
+    "betterleaks_1.10.1_darwin_arm64.tar.gz": "13ac5109fa85a590c7ba6e7f130311e0c60a2bf582c3aac073176c93b46621a8",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_x64.zip": "d9946b77870a30838f9a6a3591ea45c9c6530abfb0cf3890d2046b3d42816049",  # pragma: allowlist secret
+    "betterleaks_1.10.1_windows_arm64.zip": "ed9ee26a6f1a8d7f042712e524802911e23fd1b1cb0561ecb606b4faab5882d4",  # pragma: allowlist secret
     # cfn-guard 3.2.1
     "cfn-guard-v3-x86_64-linux-latest.tar.gz": "75109d136e80060bee5572a23d0c1110949c02a8cebb2a56284866ab906b3978",  # pragma: allowlist secret
     "cfn-guard-v3-aarch64-linux-latest.tar.gz": "9f8d9a7bc483b39468595b91e99369e8bdbfb12160182a2e2c64ba758892bb79",  # pragma: allowlist secret
@@ -450,19 +504,22 @@ _BUNDLE_CONTENTS_DIGESTS: dict[str, str] = {
 # edit. Recording the version here turns it into the same refusal by name instead.
 _DIGESTS_TAKEN_AT: dict[str, str] = {
     "cfn-guard": "3.2.1",
+    "hadolint": "v2.15.1",
     "opengrep": "v1.33.1",
     "uv": "0.13.7",
 }
 
 # Tools whose release asset is the executable itself rather than an archive.
-_BARE_EXECUTABLE_TOOLS = frozenset({"opengrep"})
+_BARE_EXECUTABLE_TOOLS = frozenset({"hadolint", "opengrep"})
 
 
 _RELEASE_BASE_URLS: dict[str, str] = {
     "actionlint": "https://github.com/rhysd/actionlint/releases/download",
+    "betterleaks": "https://github.com/betterleaks/betterleaks/releases/download",
     "cfn-guard": "https://github.com/aws-cloudformation/cloudformation-guard/releases/download",
     "gitleaks": "https://github.com/gitleaks/gitleaks/releases/download",
     "grype": "https://github.com/anchore/grype/releases/download",
+    "hadolint": "https://github.com/hadolint/hadolint/releases/download",
     "opengrep": "https://github.com/opengrep/opengrep/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
@@ -471,9 +528,11 @@ _RELEASE_BASE_URLS: dict[str, str] = {
 
 _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "actionlint": _ACTIONLINT_ASSETS,
+    "betterleaks": _BETTERLEAKS_ASSETS,
     "cfn-guard": _CFN_GUARD_ASSETS,
     "gitleaks": _GITLEAKS_ASSETS,
     "grype": _GRYPE_ASSETS,
+    "hadolint": _HADOLINT_ASSETS,
     "opengrep": _OPENGREP_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
@@ -909,6 +968,7 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "aws-guard-rules-registry/LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",  # pragma: allowlist secret
     "aws-guard-rules-registry/NOTICE": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287",  # pragma: allowlist secret
     "bandit commit": "92ae8b82fb422a639f0ed8d99e96cea769594e08",  # pragma: allowlist secret
+    "betterleaks commit": "39d5bdcf34db54e944facac5cf6e8b03db5e2b99",  # pragma: allowlist secret
     "cfn-lint commit": "1d19193ad79ed20c83bf3fbafb6cd506e6d15b62",  # pragma: allowlist secret
     "checkov commit": "5038a50e21a2253cb5aed2e739d2c22ee28d2e17",  # pragma: allowlist secret
     "cfn-guard commit": "e531ef56092abb662e08fc6062c92db6d53f99c9",  # pragma: allowlist secret
@@ -916,9 +976,27 @@ _THIRD_PARTY_HASHES: dict[str, str] = {
     "cfn-guard/NOTICE": "ba249a48f79f76c72cffea8689eb7a5ce450a4a67ad6b1e44e8ff15a95b2b751",  # pragma: allowlist secret
     "gitleaks commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",  # pragma: allowlist secret
     "grype commit": "cd1f23eb50dfb52647090158f453c7359172591f",  # pragma: allowlist secret
+    "guarddog commit": "3da172679cb58b1c9a780f9f5d640f855be016dc",  # pragma: allowlist secret
+    "hadolint commit": "2eece55955ced00200be9729e9728cb7dacca505",  # pragma: allowlist secret
+    "hadolint/LICENSE": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",  # pragma: allowlist secret
+    "hadolint/ThirdPartyNotices.txt": "424561d8aade37960e8db594ca5403f9a4a98f593ff1126a296298f11d3d1a27",  # pragma: allowlist secret
+    "libgit2 commit": "0060d9cf5666f015b1067129bd874c6cc4c9c7ac",  # pragma: allowlist secret
+    "libgit2/AUTHORS": "126ed06438e488d71f5232b39436b3a1dffccb9c2697e3a332fbe868975cd55f",  # pragma: allowlist secret
+    "libgit2/COPYING": "e3712465634e97cfd850822a4eb5ac7d2f8a10f753189366d5a2060046f28288",  # pragma: allowlist secret
+    "libssh2 commit": "a312b43325e3383c865a87bb1d26cb52e3292641",  # pragma: allowlist secret
+    "libssh2/COPYING": "f7f9633cf9ff2f1333f3d7ce46973a8716a4d2a2815ad56f30d437d5fea7bafe",  # pragma: allowlist secret
     "opengrep commit": "092c80faa0817840228349f93eff12a50fb9cf6b",  # pragma: allowlist secret
     "opengrep/COPYRIGHT": "0f90eaca8e598c6c67a6cda7beb4470518fb2dababc996b3898344d380769aca",  # pragma: allowlist secret
     "opengrep/LICENSE": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",  # pragma: allowlist secret
+    "openssl commit": "42768eafab40d3e2f0851caa84aa9801139c74ab",  # pragma: allowlist secret
+    "openssl-1.1 commit": "e04bd3433fd84e1861bf258ea37928d9845e6a86",  # pragma: allowlist secret
+    "openssl-1.1/LICENSE": "c32913b33252e71190af2066f08115c69bc9fddadf3bf29296e20c835389841c",  # pragma: allowlist secret
+    "openssl/LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",  # pragma: allowlist secret
+    "pcre commit": "c8dd39955982faaf63176bedc456746e5cf43e2f",  # pragma: allowlist secret
+    "pcre/LICENCE": "f998c0f52eb704eff28f503580cfca3f2547280aa212994f6cf2d8e317587c1c",  # pragma: allowlist secret
+    "pygit2 commit": "d88fa3dcbab21a7eb33ff354222c4ec8e5ff6ece",  # pragma: allowlist secret
+    "pygit2/AUTHORS.md": "4ecad3164600b3c7a216cdd636288d1434afd6307737cfeba8fc1372dc04ba20",  # pragma: allowlist secret
+    "pygit2/COPYING": "3f2a642de5f24ed216404873b875e9d1c5dd112a4e0ae27a42f7303583f69683",  # pragma: allowlist secret
     "syft commit": "a0c0d3890a9d79421c403e8fcadec50a2e55bf21",  # pragma: allowlist secret
     "trivy commit": "3f6334d223b52188324af3b9923b4249cd206652",  # pragma: allowlist secret
     "trivy/NOTICE": "aed9bc6dab87c6f6567d20bf0f5c0433a8ccd3ad7873322cf79b9244eb720a1f",  # pragma: allowlist secret
@@ -936,6 +1014,36 @@ def _from_source(tool: str, repository: str, name: str) -> LicenseFile:
         url=_source_file(repository, _THIRD_PARTY_HASHES[f"{tool} commit"], name),
         sha256=_THIRD_PARTY_HASHES[f"{tool}/{name}"],
     )
+
+
+def _bundled_library_probe(
+    module: str, libs_dir: str, parents: int, glob: str, pattern: bytes, prefix: str
+) -> "tuple[str, ...]":
+    """A version_probe for a shared library a wheel in GuardDog's environment bundles.
+
+    auditwheel copies the shared libraries a wheel links against into
+    ``site-packages/<project>.libs`` under hashed names, and none of them can be
+    asked for its version, so the probe reads the version string each one embeds.
+    ``module`` is imported with GuardDog's own interpreter to find
+    site-packages, ``parents`` levels up from its ``__file__``. No matching file,
+    or no match in it, raises, so the image build fails rather than vouching for a
+    library that is not there.
+    """
+    code = (
+        f"import pathlib, re, {module}; "
+        f"d = pathlib.Path({module}.__file__).resolve(){'.parent' * parents} / {libs_dir!r}; "
+        f"b = b''.join(p.read_bytes() for p in sorted(d.glob({glob!r}))); "
+        f"m = re.search({pattern!r}, b); "
+        f"print({prefix!r} + m.group(1).decode())"
+    )
+    return ("{uv_tool_dir}/guarddog/bin/python", "-c", code)
+
+
+def _pygit2_bundled_library_probe(
+    glob: str, pattern: bytes, prefix: str
+) -> "tuple[str, ...]":
+    """A probe for a library the pygit2 wheel bundles in ``pygit2.libs``."""
+    return _bundled_library_probe("pygit2", "pygit2.libs", 2, glob, pattern, prefix)
 
 
 # Alphabetical, one entry per tool.
@@ -974,7 +1082,11 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         # over every aws-guard-rules-registry-* directory printed each installed
         # version, so the check passed as long as any of them was the pinned one,
         # and an unset ASH_CFN_GUARD_RULES_DIR raised KeyError, which read as a
-        # version mismatch; now it prints nothing and says why on stderr.
+        # version mismatch. With the variable unset or empty the probe now exits
+        # after saying so on stderr: globbing with an empty base would search a
+        # RELATIVE path, which could find a manifest from a lucky working
+        # directory. The directory name carries the pinned release, so a bundle
+        # bump moves the probe with it.
         version_probe=(
             "python3",
             "-c",
@@ -982,8 +1094,10 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
                 "import glob, json, os, sys; "
                 "d = os.environ.get('ASH_CFN_GUARD_RULES_DIR'); "
                 "d or print('ASH_CFN_GUARD_RULES_DIR is not set', file=sys.stderr); "
+                "d or sys.exit(0); "
                 "[print(json.load(open(m))['version']) for m in glob.glob(os.path.join("
-                "d or '', 'aws-guard-rules-registry-1.0.2', '.ash-rules-manifest.json'))]"
+                f"d, 'aws-guard-rules-registry-{_CFN_GUARD_RULES_RELEASE}', "
+                "'.ash-rules-manifest.json'))]"
             ),
         ),
     ),
@@ -996,6 +1110,16 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["bandit commit"],
         files=(LicenseFile("LICENSE"),),
         distribution="bandit",
+    ),
+    # The release archive holds the executable, a README and the MIT LICENSE, which
+    # is byte-identical to the repository's at the release commit.
+    "betterleaks": ThirdPartyLicense(
+        tool="betterleaks",
+        version="v1.10.1",
+        license="MIT",
+        repository="https://github.com/betterleaks/betterleaks",
+        commit=_THIRD_PARTY_HASHES["betterleaks commit"],
+        files=(LicenseFile("LICENSE"),),
     ),
     # The release archive holds the executable and a README, no license file, so
     # both files come from the repository.
@@ -1058,6 +1182,85 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
         commit=_THIRD_PARTY_HASHES["grype commit"],
         files=(LicenseFile("LICENSE"),),
     ),
+    # The GuardDog community scanner's uv tool. The wheel's dist-info carries
+    # licenses/LICENSE, licenses/NOTICE and licenses/LICENSE-3rdparty.csv.
+    "guarddog": ThirdPartyLicense(
+        tool="guarddog",
+        version="v3.2.0",
+        license="Apache-2.0",
+        repository="https://github.com/DataDog/guarddog",
+        commit=_THIRD_PARTY_HASHES["guarddog commit"],
+        files=(
+            LicenseFile("LICENSE"),
+            LicenseFile("NOTICE"),
+            LicenseFile("LICENSE-3rdparty.csv"),
+        ),
+        distribution="guarddog",
+    ),
+    # The asset is the executable itself, so both files come from the repository.
+    # LICENSE: GPL version 3, with no "or later" grant in the repository.
+    # ThirdPartyNotices.txt is upstream's report of the libraries linked into the
+    # binary (ShellCheck, language-docker, HsYAML and others).
+    "hadolint": ThirdPartyLicense(
+        tool="hadolint",
+        version="v2.15.1",
+        license="GPL-3.0-only",
+        repository="https://github.com/hadolint/hadolint",
+        commit=_THIRD_PARTY_HASHES["hadolint commit"],
+        files=(
+            _from_source("hadolint", "https://github.com/hadolint/hadolint", "LICENSE"),
+            _from_source(
+                "hadolint",
+                "https://github.com/hadolint/hadolint",
+                "ThirdPartyNotices.txt",
+            ),
+        ),
+        source_note=(
+            "The release binary is statically linked with the Haskell libraries "
+            "ThirdPartyNotices.txt in this directory lists, at the versions it "
+            "lists. Their sources are on Hackage at "
+            "https://hackage.haskell.org/package/<name>-<version>, the links that "
+            "file gives."
+        ),
+    ),
+    # Compiled into the pygit2 wheel GuardDog depends on (pygit2.libs/libgit2-*.so),
+    # in GuardDog's uv tool environment. COPYING carries the linking exception and
+    # the notices of the code libgit2 itself bundles. The version is whatever the
+    # pinned pygit2 wheel bundles, read from pygit2 in that environment.
+    "libgit2": ThirdPartyLicense(
+        tool="libgit2",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="v1.9.1",
+        license="GPL-2.0-only WITH GCC-exception-2.0",
+        repository="https://github.com/libgit2/libgit2",
+        commit=_THIRD_PARTY_HASHES["libgit2 commit"],
+        files=(
+            _from_source("libgit2", "https://github.com/libgit2/libgit2", "COPYING"),
+            _from_source("libgit2", "https://github.com/libgit2/libgit2", "AUTHORS"),
+        ),
+        version_probe=(
+            "{uv_tool_dir}/guarddog/bin/python",
+            "-c",
+            "import pygit2; print(pygit2.LIBGIT2_VERSION)",
+        ),
+    ),
+    # Bundled in the pygit2 wheel (pygit2.libs/libssh2-*.so) for libgit2's SSH
+    # transport; libgit2's COPYING does not cover it. 1.11.1 in both the x86_64
+    # and the aarch64 manylinux wheels of pygit2 1.18.2.
+    "libssh2": ThirdPartyLicense(
+        tool="libssh2",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="libssh2-1.11.1",
+        license="BSD-3-Clause",
+        repository="https://github.com/libssh2/libssh2",
+        commit=_THIRD_PARTY_HASHES["libssh2 commit"],
+        files=(
+            _from_source("libssh2", "https://github.com/libssh2/libssh2", "COPYING"),
+        ),
+        version_probe=_pygit2_bundled_library_probe(
+            "libssh2-*", rb"SSH-2\.0-libssh2_([0-9.]+)", "libssh2-"
+        ),
+    ),
     # Installed by `ashx dependencies install`, which publishes a bare executable
     # with no archive around it, so both files come from the repository.
     "opengrep": ThirdPartyLicense(
@@ -1073,6 +1276,93 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
             _from_source(
                 "opengrep", "https://github.com/opengrep/opengrep", "COPYRIGHT"
             ),
+        ),
+    ),
+    # Bundled in the pygit2 wheel (pygit2.libs/libcrypto-*.so.3 and libssl-*.so.3)
+    # for libssh2 and libgit2's HTTPS transport. OpenSSL 3.3.3 in both manylinux
+    # wheels of pygit2 1.18.2. Apache-2.0; the release has no NOTICE file. Only
+    # libcrypto is probed: libssl embeds no "OpenSSL x.y.z" string, and the two are
+    # one OpenSSL build (same release, grafted together by auditwheel).
+    "openssl": ThirdPartyLicense(
+        tool="openssl",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        version="openssl-3.3.3",
+        license="Apache-2.0",
+        repository="https://github.com/openssl/openssl",
+        commit=_THIRD_PARTY_HASHES["openssl commit"],
+        files=(
+            _from_source(
+                "openssl", "https://github.com/openssl/openssl", "LICENSE.txt"
+            ),
+        ),
+        version_probe=_pygit2_bundled_library_probe(
+            "libcrypto-*", rb"OpenSSL ([0-9]+\.[0-9]+\.[0-9]+)", "openssl-"
+        ),
+    ),
+    # Bundled in the yara-python wheel GuardDog depends on
+    # (yara_python.libs/libcrypto-*.so.1.1), for libyara's hash and PE modules:
+    # OpenSSL 1.1.1w, which auditwheel grafted in. A second OpenSSL beside the
+    # pygit2 one above, and a different license: the 1.1 series is under the dual
+    # OpenSSL and SSLeay license (SPDX "OpenSSL"), not 3.x's Apache-2.0. Upstream
+    # ended support for 1.1.1 in September 2023.
+    "openssl-1.1": ThirdPartyLicense(
+        tool="openssl-1.1",
+        bundled_in="the yara-python manylinux wheel GuardDog depends on",
+        tag="OpenSSL_1_1_1w",
+        version="1.1.1w",
+        license="OpenSSL",
+        repository="https://github.com/openssl/openssl",
+        commit=_THIRD_PARTY_HASHES["openssl-1.1 commit"],
+        files=(
+            _from_source(
+                "openssl-1.1", "https://github.com/openssl/openssl", "LICENSE"
+            ),
+        ),
+        version_probe=_bundled_library_probe(
+            "yara",
+            "yara_python.libs",
+            1,
+            "libcrypto-*.so.1.1",
+            rb"OpenSSL (1\.1\.1[a-z]?) ",
+            "",
+        ),
+    ),
+    # Bundled in the pygit2 wheel (pygit2.libs/libpcre-*.so) for libgit2's regex
+    # support: the manylinux build image's system PCRE 8.42, which auditwheel
+    # grafted in. PCRE1 has no release tags; the commit is "Final file tidies for
+    # 8.42." in the project's archived PCRE1 repository.
+    "pcre": ThirdPartyLicense(
+        tool="pcre",
+        bundled_in="the pygit2 1.18.2 manylinux wheel",
+        tag="",
+        version="8.42",
+        license="BSD-3-Clause",
+        repository="https://github.com/PCRE2Project/pcre1",
+        commit=_THIRD_PARTY_HASHES["pcre commit"],
+        files=(
+            _from_source("pcre", "https://github.com/PCRE2Project/pcre1", "LICENCE"),
+        ),
+        version_probe=_pygit2_bundled_library_probe(
+            "libpcre-*", rb"([0-9]+\.[0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2}", ""
+        ),
+    ),
+    # A GuardDog dependency, in GuardDog's uv tool environment. Its version is held
+    # to this one in the image by the uv constraint the Dockerfile writes
+    # (PYGIT2_VERSION), so these files describe the copy that ships.
+    "pygit2": ThirdPartyLicense(
+        tool="pygit2",
+        version="v1.18.2",
+        license="GPL-2.0-only WITH GCC-exception-2.0",
+        repository="https://github.com/libgit2/pygit2",
+        commit=_THIRD_PARTY_HASHES["pygit2 commit"],
+        files=(
+            _from_source("pygit2", "https://github.com/libgit2/pygit2", "COPYING"),
+            _from_source("pygit2", "https://github.com/libgit2/pygit2", "AUTHORS.md"),
+        ),
+        version_probe=(
+            "{uv_tool_dir}/guarddog/bin/python",
+            "-c",
+            "import pygit2; print(pygit2.__version__)",
         ),
     ),
     "syft": ThirdPartyLicense(

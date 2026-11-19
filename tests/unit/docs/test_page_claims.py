@@ -2229,7 +2229,8 @@ def _resolved_from_tier(tmp_path: Path, tier: str, document: Dict[str, Any]) -> 
     from automated_security_helper.config.resolve_config import resolve_config
 
     project = tmp_path / "project"
-    (project / ".git").mkdir(parents=True)
+    project.mkdir(parents=True)
+    _mark_git_checkout(project)
     if tier == "repository":
         (project / ".ash").mkdir()
         (project / ".ash" / ".ash.yaml").write_text(
@@ -3528,6 +3529,20 @@ def test_the_reports_that_show_justifications_carry_the_client_mark(
 # The gate
 # --------------------------------------------------------------------------- #
 
+
+def _wrapper_command(*parts: str) -> str:
+    """One ``OCI_RUNNER_WRAPPER`` value from argv parts, quoted for the platform.
+
+    A plain ``" ".join`` broke every container-mode cell when ``sys.executable``
+    or the test's temporary directory carried a space: ASH reads the value back
+    by splitting it (shlex's rules on POSIX, the Windows command-line rules on
+    Windows), so each platform gets the quoting its splitter reads.
+    """
+    if os.name == "nt":
+        return subprocess.list2cmdline(parts)
+    return shlex.join(parts)
+
+
 #: A fake container runtime. It records the command it was given, then writes the
 #: results an inner scan would have written into the directory mounted at /out. When
 #: the host hands the inner run an ID (``-e ASH_OUTER_RUN_ID``, with the value on the
@@ -3618,7 +3633,7 @@ def _container_scan(
             *args,
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
     if not record.is_file():
         return result, None
@@ -3929,7 +3944,7 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
                 "--no-progress",
             ],
             cwd=tmp_path,
-            OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+            OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
         )
 
     # A refusal must come before the image build, so only an allowed config skips it.
@@ -4191,7 +4206,7 @@ def test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_hos
         runtime.write_text(
             _RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
-        env["OCI_RUNNER_WRAPPER"] = " ".join([sys.executable, str(runtime)])
+        env["OCI_RUNNER_WRAPPER"] = _wrapper_command(sys.executable, str(runtime))
         mode_args = ["--mode", "container", "--oci-runner", sys.executable]
     else:
         mode_args = ["--mode", "nix"]
@@ -4417,7 +4432,7 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
         ],
         cwd=tmp_path,
         ASH_CONFIG=str(env_config),
-        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
     scans = [call for call in _runtime_calls(record) if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -4614,7 +4629,7 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
             "--no-progress",
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=_wrapper_command(sys.executable, str(runtime)),
     )
     scans = [call for call in _runtime_calls(record) if CANONICAL_CLI_NAME in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -7943,7 +7958,7 @@ def _interrupt_scan(
     if mode == "container":
         script, log = _interrupt_stand_in(tmp_path, "run", behavior, console)
         args += ["--mode", "container", "--no-build", "--oci-runner", sys.executable]
-        wrapper = " ".join([sys.executable, str(script)])
+        wrapper = _wrapper_command(sys.executable, str(script))
         return args, (log, "started"), {"OCI_RUNNER_WRAPPER": wrapper}, log
     script, log = _interrupt_stand_in(tmp_path, "develop", behavior)
     bin_dir = tmp_path / "bin"
@@ -8197,8 +8212,9 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
         assert happened == ["started", "INT"], happened
     last_sign_of_life = max(at for _, at in events)
     if interrupts_sent == 1:
-        # One press only: the documented single-press contract, that ASH stops the
-        # child after the wait (no ``deadline`` or ``orphaned``, checked above).
+        # One press only (the second withheld included): the documented
+        # single-press contract, that ASH stops the child after the wait (no
+        # ``deadline`` or ``orphaned``, checked above).
         got_it = next(at for event, at in events if event == "INT")
         assert last_sign_of_life - got_it < _INTERRUPT_GRACE_SECONDS + 30, (
             f"the stand-in ran {last_sign_of_life - got_it:.1f} s after the interrupt"
@@ -8210,6 +8226,17 @@ def test_ctrl_c_ends_a_scan_with_exit_code_130_in_every_mode(
         assert last_sign_of_life - sent[1] < _INTERRUPT_GRACE_SECONDS / 2, (
             f"the stand-in ran {last_sign_of_life - sent[1]:.1f} s after the second "
             f"SIGINT"
+        )
+    if window_not_entered:
+        # The single-press assertions above covered the press that was sent.
+        # Passing outright from here would GREEN the cell without its own
+        # contract: the second press was withheld exactly because the
+        # kill-at-once window was never entered on this runner. Say so.
+        pytest.skip(
+            "ASH never entered the kill-at-once window on this runner, so the "
+            "second console Ctrl-C was withheld and the two-press contract was "
+            "not exercised; the single-press contract above was asserted on "
+            "the press that was sent"
         )
 
 
@@ -8259,7 +8286,7 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
     args = ["build-image", "--oci-runner", sys.executable, "--offline"]
     if no_run:
         args.append("--no-run")
-    wrapper = " ".join([sys.executable, str(script)])
+    wrapper = _wrapper_command(sys.executable, str(script))
     result = _run_interrupted(
         tmp_path,
         args,
@@ -8544,7 +8571,8 @@ def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
     (session_dir / CONFIG_DIR_NAME).mkdir()
     scan_root = tmp_path / "scan-root"
     checkout = scan_root / "repo"
-    (checkout / ".git").mkdir(parents=True)
+    checkout.mkdir(parents=True)
+    _mark_git_checkout(checkout)
     files = {
         "missing": tmp_path / "absent.yaml",
         "unknown_key": tmp_path / "unknown-key.yaml",
@@ -8577,6 +8605,9 @@ def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
         pytest.param("workspace-delivery", 3, id="inside-the-mcp-workspace-root"),
         pytest.param("checkout", 3, id="in-a-git-checkout-under-an-allowed-root"),
         pytest.param("server-config", 0, id="control-a-config-the-server-wrote"),
+        pytest.param(
+            "plain-directory", 0, id="control-no-checkout-under-the-allowed-root"
+        ),
     ],
 )
 @pytest.mark.unit
@@ -8589,9 +8620,12 @@ def test_ash_mcp_refuses_a_profile_kept_where_a_scan_may_rewrite_it(
     does not load. The profile is the same valid file in each; only where it sits
     differs, so the exit code can come from the place and not from the file. It sits
     in a session workspace under ``ASH_MCP_WORKSPACE_ROOT``, where a client could
-    have delivered it, or in a directory holding a ``.git`` entry under
-    ``ASH_MCP_ALLOWED_ROOTS``. The control is the file the server itself writes
-    in a session's ``config/`` directory, which the page says is fine.
+    have delivered it, or in a git checkout (``_mark_git_checkout``) under
+    ``ASH_MCP_ALLOWED_ROOTS``. Two controls attribute the refusals: the file the
+    server itself writes in a session's ``config/`` directory, which the page says
+    is fine, and the same file in a plain directory under the allowed root, with
+    no checkout around it, so the checkout refusal is the checkout's and not the
+    root's.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         SESSION_CONFIG_FILENAME,
@@ -8607,9 +8641,11 @@ def test_ash_mcp_refuses_a_profile_kept_where_a_scan_may_rewrite_it(
         "workspace-delivery": session / "delivered",
         "checkout": checkout,
         "server-config": session / CONFIG_DIR_NAME,
+        "plain-directory": allowed / "plain",
     }
-    for directory in (workspace, allowed, session, checkout / ".git"):
+    for directory in (workspace, allowed, session, checkout):
         directory.mkdir(parents=True, exist_ok=True)
+    _mark_git_checkout(checkout)
     workspace.chmod(0o700)
     profile = places[kept_in] / (
         SESSION_CONFIG_FILENAME if kept_in == "server-config" else "profile.yaml"
@@ -9113,6 +9149,11 @@ def _mcp_serving_stdio(
 #: two minutes after the signal is the failure the stop tests look for.
 _MCP_CHILD_SECONDS = 300
 _MCP_STOP_SECONDS = 120
+#: How long an HTTP server may take to say it listens. On Windows a server that has
+#: not said so within a minute has not started, and waiting the full
+#: ``_MCP_CHILD_SECONDS`` only moves the same failure five minutes later in every test
+#: that starts one. Elsewhere it is ``_MCP_CHILD_SECONDS``, unchanged.
+_MCP_HTTP_LISTEN_SECONDS = 60 if os.name == "nt" else _MCP_CHILD_SECONDS
 
 
 #: SGR color codes, which uvicorn puts inside the phrases the readers wait for
@@ -9138,10 +9179,13 @@ class _Lines:
             self._new.put(line)
         self._new.put(None)
 
-    def wait_for(self, pattern: "re.Pattern[str]") -> Optional["re.Match[str]"]:
+    def wait_for(
+        self, pattern: "re.Pattern[str]", seconds: float = _MCP_CHILD_SECONDS
+    ) -> Optional["re.Match[str]"]:
         """The first match of ``pattern`` in a new line, its SGR color codes
-        removed, or None at the end of the pipe or after ``_MCP_CHILD_SECONDS``."""
-        deadline = time.monotonic() + _MCP_CHILD_SECONDS
+        removed, or None at the end of the pipe or after ``seconds``,
+        ``_MCP_CHILD_SECONDS`` by default."""
+        deadline = time.monotonic() + seconds
         while (remaining := deadline - time.monotonic()) > 0:
             try:
                 line = self._new.get(timeout=remaining)
@@ -9301,13 +9345,14 @@ def _mcp_http_server(
         stderr=subprocess.PIPE,
     )
     stderr = _Lines(process.stderr)
-    listening = stderr.wait_for(_UVICORN_LISTENING)
+    listening = stderr.wait_for(_UVICORN_LISTENING, _MCP_HTTP_LISTEN_SECONDS)
     if listening is None:
         if process.poll() is None:
             process.kill()
         process.wait(timeout=30)
         raise AssertionError(
-            f"the HTTP server did not say it listens within {_MCP_CHILD_SECONDS} s "
+            "the HTTP server did not say it listens within "
+            f"{_MCP_HTTP_LISTEN_SECONDS} s "
             f"(exit {process.returncode}):\n{stderr.text()[-1500:]}"
         )
     port = int(listening.group(1))
@@ -12976,7 +13021,7 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
             _CI_ENV_RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
         monkeypatch.setenv(
-            "OCI_RUNNER_WRAPPER", " ".join([sys.executable, str(runtime)])
+            "OCI_RUNNER_WRAPPER", _wrapper_command(sys.executable, str(runtime))
         )
         result = container.run_ash_container(
             source_dir=str(source),
@@ -18146,7 +18191,10 @@ def _workflow_value(value: Any, inputs: Dict[str, Any], given: Dict[str, Any]) -
 
     The scan workflow's ``inputs`` step (the workflow-command refusal) writes each
     string input back out unchanged as ``<name with - as _>``, so a step reading
-    ``steps.inputs.outputs.artifact_name`` reads ``inputs.artifact-name``.
+    ``steps.inputs.outputs.artifact_name`` reads ``inputs.artifact-name``. An
+    input whose own name carries the underscore is looked up as written first,
+    so the mapping never turns a real name into a miss, and a name that resolves
+    to no input at all fails here instead of flowing on as None.
     """
     match = re.fullmatch(r"\$\{\{\s*inputs\.([\w-]+)\s*\}\}", str(value))
     if match:
@@ -18157,7 +18205,13 @@ def _workflow_value(value: Any, inputs: Dict[str, Any], given: Dict[str, Any]) -
         )
         if not passed:
             return value
-        name = passed[1].replace("_", "-")
+        name = passed[1]
+        if name not in given and name not in inputs:
+            name = name.replace("_", "-")
+        assert name in given or name in inputs, (
+            f"steps.inputs.outputs.{passed[1]} resolves to no workflow input: "
+            f"{name!r} is neither passed by the caller nor declared"
+        )
     return given.get(name, (inputs.get(name) or {}).get("default"))
 
 
@@ -22279,3 +22333,448 @@ def test_the_sandbox_page_states_the_plugin_module_rule_as_the_code_keeps_it() -
         "Only ASH's own plugin modules and modules installed outside every git "
         "checkout and the scanned directory.",
     )
+
+
+BETTERLEAKS_PLUGIN = "docs/plugins/community/betterleaks-plugin.md"
+_BETTERLEAKS_MODULE = "automated_security_helper.plugin_modules.ash_betterleaks_plugins"
+_BETTERLEAKS_ENV = (
+    "BETTERLEAKS_CONFIG",
+    "BETTERLEAKS_CONFIG_TOML",
+    "GITLEAKS_CONFIG",
+    "GITLEAKS_CONFIG_TOML",
+)
+
+
+def _betterleaks_scanner(
+    tmp_path: Path, source: Path, output: Path, **options: Any
+) -> Any:
+    """A Betterleaks scanner over ``source``, built as a scan builds it."""
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+        BetterleaksScanner,
+        BetterleaksScannerConfig,
+        BetterleaksScannerConfigOptions,
+    )
+
+    source.mkdir(parents=True, exist_ok=True)
+    return BetterleaksScanner(
+        context=PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / "converted",
+            config=AshConfig(project_name="page-claims"),
+        ),
+        config=BetterleaksScannerConfig(
+            options=BetterleaksScannerConfigOptions(**options)
+        ),
+    )
+
+
+def _betterleaks_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str
+) -> List[str]:
+    """The argv a default Betterleaks run is given, with only ``env`` set of the
+    config variables it reads."""
+    for name in _BETTERLEAKS_ENV:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    source = tmp_path / "src"
+    scanner = _betterleaks_scanner(tmp_path, source, tmp_path / "output")
+    return scanner._build_arguments(source, tmp_path / "output" / "betterleaks.sarif")
+
+
+def _betterleaks_page_yaml(start: str) -> Any:
+    """The YAML of the fenced block of the Betterleaks page that opens with ``start``."""
+    blocks = re.findall(
+        r"```yaml\n(.*?)```", _page_text(BETTERLEAKS_PLUGIN), flags=re.DOTALL
+    )
+    (block,) = [text for text in blocks if text.lstrip().startswith(start)]
+    return yaml.safe_load(block)
+
+
+@pytest.mark.unit
+def test_the_betterleaks_page_names_the_module_the_code_ships_and_the_defaults_it_keeps() -> (
+    None
+):
+    """betterleaks-plugin.md (Enabling it, Configuration).
+
+    The module the page tells an operator to list is imported, and it offers the
+    ``betterleaks`` scanner; the configuration block the page shows is the scanner's
+    own defaults, key for key, so an option renamed or a default flipped fails here.
+    The scanner is on by default once its module is listed.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "With the module listed, `betterleaks` runs by default, like every other "
+        "scanner.",
+    )
+    enabling = _betterleaks_page_yaml("# .ash/.ash.yaml")
+    assert enabling == {"ash_plugin_modules": [_BETTERLEAKS_MODULE]}
+    module = importlib.import_module(_BETTERLEAKS_MODULE)
+    from automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner import (
+        BetterleaksScanner,
+        BetterleaksScannerConfig,
+    )
+
+    assert module.ASH_SCANNERS == [BetterleaksScanner]
+
+    defaults = BetterleaksScannerConfig()
+    shown = _betterleaks_page_yaml("scanners:")["scanners"]["betterleaks"]
+    assert defaults.name == "betterleaks"
+    assert defaults.enabled is True and shown["enabled"] is True
+    assert shown["options"] == {
+        "config_file": defaults.options.config_file,
+        "honor_inline_ignores": defaults.options.honor_inline_ignores,
+        "honor_tree_ignore_files": defaults.options.honor_tree_ignore_files,
+        "scan_timeout": defaults.options.scan_timeout,
+        "severity_threshold": defaults.options.severity_threshold,
+    }
+    assert shown["options"] == {
+        "config_file": None,
+        "honor_inline_ignores": False,
+        "honor_tree_ignore_files": False,
+        "scan_timeout": 1800,
+        "severity_threshold": None,
+    }
+
+
+@pytest.mark.unit
+def test_betterleaks_is_run_as_the_page_says_and_never_with_the_flags_it_says_are_unused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """betterleaks-plugin.md (the opening paragraph, What is scanned, Ignore files,
+    Configuration).
+
+    The argv a default run is given: ``betterleaks dir``, report redaction, inline
+    allow comments not honored, no auto-loaded config from the scanned tree, no
+    secret validation, no config the operator did not give. The scan path is ``.``
+    for the source, which is what makes a reported path source-relative.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH runs it as `betterleaks dir` over the scan target: the files as they are "
+        "on disk, not git history",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH passes `betterleaks --redact=100` and rewrites any snippet that is not "
+        "`REDACTED`.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH passes `betterleaks --ignore-gitleaks-allow` so they hide nothing, unless "
+        "`honor_inline_ignores` is set by the operator.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "only with `betterleaks --unsafe-auto-load-config`, which ASH never passes",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "A secret-validation block in a rule only runs with `betterleaks "
+        "--validation`, which ASH does not pass.",
+    )
+
+    argv = _betterleaks_argv(tmp_path, monkeypatch)
+
+    assert argv[:2] == ["betterleaks", "dir"], argv
+    assert "--redact=100" in argv
+    assert "--ignore-gitleaks-allow" in argv
+    assert "--unsafe-auto-load-config" not in argv
+    assert "--validation" not in argv
+    assert not [token for token in argv if token.startswith("--config")], argv
+    assert argv[-2:] == ["--", "."], argv
+
+
+@pytest.mark.unit
+def test_betterleaks_config_variables_are_anchored_where_the_page_says(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """betterleaks-plugin.md (Configuration).
+
+    A relative ``BETTERLEAKS_CONFIG`` or ``GITLEAKS_CONFIG`` would be read from the
+    scanned tree by Betterleaks, so it is passed as ``--config`` anchored to the
+    directory ASH runs in. An absolute path, and the TOML-content variable, are left
+    to Betterleaks, so no ``--config`` is passed for them.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "A relative `BETTERLEAKS_CONFIG` (or `GITLEAKS_CONFIG`) in your environment is "
+        "anchored to the directory ASH runs in and passed with `--config`",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.chdir(run_dir)
+    anchored = os.path.abspath(os.path.join("cfg", "rules.toml"))
+
+    for variable in ("BETTERLEAKS_CONFIG", "GITLEAKS_CONFIG"):
+        argv = _betterleaks_argv(
+            tmp_path, monkeypatch, **{variable: os.path.join("cfg", "rules.toml")}
+        )
+        assert f"--config={Path(anchored).as_posix()}" in argv, (variable, argv)
+
+    absolute = _betterleaks_argv(
+        tmp_path, monkeypatch, BETTERLEAKS_CONFIG=str(tmp_path / "rules.toml")
+    )
+    assert not [token for token in absolute if token.startswith("--config")], absolute
+    content = _betterleaks_argv(
+        tmp_path, monkeypatch, BETTERLEAKS_CONFIG_TOML='title = "rules"'
+    )
+    assert not [token for token in content if token.startswith("--config")], content
+
+
+@pytest.mark.parametrize(
+    "present",
+    [
+        pytest.param([".betterleaksignore"], id="a-betterleaksignore"),
+        pytest.param([".gitleaksignore"], id="a-gitleaksignore"),
+        pytest.param([".betterleaksignore", ".gitleaksignore"], id="both"),
+        pytest.param([], id="control-neither-file"),
+    ],
+)
+@pytest.mark.unit
+def test_a_tree_holding_a_betterleaks_ignore_file_fails_the_scan_naming_it(
+    tmp_path: Path, present: List[str]
+) -> None:
+    """betterleaks-plugin.md (Ignore files).
+
+    The scan path holds one of the two ignore files, and the scanner is asked to
+    accept the tree before Betterleaks runs: it must raise, naming each file and the
+    option that accepts it. With neither file, nothing is raised.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "So a scan whose tree holds either file fails before Betterleaks runs, with a "
+        "message naming the file.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "or set `scanners.betterleaks.options.honor_tree_ignore_files: true` in a "
+        "config outside the scanned tree to accept the file.",
+    )
+    from automated_security_helper.core.exceptions import ScannerError
+
+    source = tmp_path / "src"
+    scanner = _betterleaks_scanner(tmp_path, source, tmp_path / "output")
+    for name in present:
+        (source / name).write_text("src/app.py:github-pat:4\n", encoding="utf-8")
+
+    if not present:
+        scanner._refuse_tree_ignore_files(source)
+        return
+    with pytest.raises(ScannerError) as refused:
+        scanner._refuse_tree_ignore_files(source)
+    message = str(refused.value)
+    for name in present:
+        assert name in message, message
+    assert "honor_tree_ignore_files" in message, message
+
+
+@pytest.mark.unit
+def test_betterleaks_results_are_rated_critical_and_redacted_and_ashs_output_dropped(
+    tmp_path: Path,
+) -> None:
+    """betterleaks-plugin.md (What is scanned, Severity).
+
+    Betterleaks writes results with no level and a snippet that may hold the secret.
+    After the scanner's post-processing every result is ``error`` with
+    ``issue_severity`` CRITICAL, every snippet reads ``REDACTED``, and the tool's own
+    ``semanticVersion`` is dropped. A result under ASH's output directory inside the
+    scanned tree is dropped, and one beside it is kept.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "Every result is `error` in SARIF and CRITICAL in ASH",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH drops every result under it, except for a file the repository committed "
+        "there.",
+    )
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+    source = tmp_path / "tree"
+    output = source / ".ash" / "ash_output"
+    scanner = _betterleaks_scanner(tmp_path, source, output)
+
+    def result(uri: str, snippet: str) -> dict:
+        return {
+            "ruleId": "github-pat",
+            "message": {"text": "github-pat has detected secret"},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": uri},
+                        "region": {"startLine": 4, "snippet": {"text": snippet}},
+                    }
+                }
+            ],
+        }
+
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {"name": "betterleaks", "semanticVersion": "v8.0.0"}
+                    },
+                    "results": [
+                        result("src/settings.py", "not-redacted"),
+                        result(".ash/ash_output/converted/settings.py", "REDACTED"),
+                    ],
+                }
+            ],
+        }
+    )
+
+    processed = scanner._post_process_sarif(report, [], source)
+
+    kept = processed.runs[0].results
+    assert len(kept) == 1, kept
+    (only,) = kept
+    assert getattr(only.level, "value", only.level) == "error"
+    assert getattr(only.properties, "issue_severity") == "CRITICAL"  # noqa: B009
+    assert only.locations[0].physicalLocation.root.region.snippet.text == "REDACTED"
+    assert processed.runs[0].tool.driver.semanticVersion is None
+
+
+@pytest.mark.unit
+def test_betterleaks_is_pinned_where_the_page_says_with_both_digests_on_every_platform() -> (
+    None
+):
+    """betterleaks-plugin.md (the opening paragraph, Installing Betterleaks).
+
+    The pinned release is v1.10.1, the 1.x line. For Linux, macOS and Windows on
+    x86_64 and arm64 an asset resolves with a digest for the archive and a second
+    digest for the executable inside it, which is what the page says is checked. The
+    container image builds with the same version and installs it from the same pin.
+    """
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "ASH pins the 1.x line (v1.10.1); the 2.0 release candidates are not used.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "downloads the pinned v1.10.1 release archive from GitHub and verifies it "
+        "against the SHA256 digest pinned in ASH, and the executable inside it "
+        "against a second pinned digest, before installing it. Linux, macOS and "
+        "Windows on x86_64 and arm64 are supported.",
+    )
+    assert_on_page(
+        BETTERLEAKS_PLUGIN,
+        "the ASH image includes Betterleaks v1.10.1.",
+    )
+    from automated_security_helper.utils.tool_downloads import (
+        TOOL_VERSIONS,
+        get_tool_asset,
+        supported_platforms,
+    )
+
+    assert TOOL_VERSIONS["betterleaks"] == "v1.10.1"
+    platforms = {
+        (platform_name, arch)
+        for platform_name in ("linux", "darwin", "windows")
+        for arch in ("amd64", "arm64")
+    }
+    assert set(supported_platforms("betterleaks")) == platforms
+    for platform_name, arch in sorted(platforms):
+        asset = get_tool_asset("betterleaks", platform_name, arch)
+        assert "1.10.1" in asset.version, (platform_name, arch, asset.version)
+        assert asset.sha256, (platform_name, arch)
+        assert asset.executable_digest, (platform_name, arch)
+        assert asset.executable_digest != asset.sha256, (platform_name, arch)
+
+    dockerfile = (_code_root() / "Dockerfile").read_text(encoding="utf-8")
+    assert 'ARG BETTERLEAKS_VERSION="v1.10.1"' in dockerfile
+    assert "install-pinned-tool betterleaks" in dockerfile
+
+
+# --------------------------------------------------------------------------- #
+# Community scanners on the homepage and the plugins overview
+# --------------------------------------------------------------------------- #
+
+_HOMEPAGE = "index.md"
+_HOMEPAGE_COMMUNITY_SENTENCE = (
+    "Six more scanners ship with ASH as community plugins: "
+    "[Betterleaks](docs/plugins/community/betterleaks-plugin.md) and "
+    "[Ferret Scan](docs/plugins/community/ferret-scan-plugin.md) for secrets, "
+    "[GuardDog](docs/plugins/community/guarddog-plugin.md) for malicious packages, "
+    "[hadolint](docs/plugins/community/hadolint-plugin.md) for Dockerfiles, "
+    "[Snyk Code](docs/plugins/community/snyk-plugin.md) for SAST, and "
+    "[Trivy](docs/plugins/community/trivy-plugin.md) for repository scanning. "
+    "A scan runs one only when its module is named in `ash_plugin_modules` or "
+    "`--ash-plugin-modules`. See the "
+    "[community plugins](docs/plugins/community/index.md) and the "
+    "[scanners reference](reference/scanners.md) for all 22 scanners."
+)
+
+
+def _shipped_scanner_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Tuple[Set[str], Set[str]]:
+    """(built-in scanner names, community scanner names) the code ships."""
+    builtin: Set[str] = set()
+    community: Set[str] = set()
+    for module, plugin in _instantiated_plugins(tmp_path, monkeypatch, "ASH_SCANNERS"):
+        (builtin if module == "ash_builtin" else community).add(plugin.config.name)
+    return builtin, community
+
+
+@pytest.mark.unit
+def test_the_homepage_says_asha_ships_six_community_scanners_and_links_each(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """index.md (Scanners).
+
+    The sentence is on the page. Its count of six is the number of scanners the
+    vendored community plugin packages declare, which is every in-tree community
+    module; its 22 is built in plus community; and each link it carries resolves to
+    a page under docs/content, the community index and the scanners reference
+    included.
+    """
+    from automated_security_helper.core.scanner_inventory import (
+        _VENDORED_SCANNER_PLUGIN_PACKAGES,
+    )
+
+    assert_on_page(_HOMEPAGE, _HOMEPAGE_COMMUNITY_SENTENCE)
+    builtin, community = _shipped_scanner_split(tmp_path, monkeypatch)
+    assert len(_VENDORED_SCANNER_PLUGIN_PACKAGES) == len(community) == 6, (
+        len(_VENDORED_SCANNER_PLUGIN_PACKAGES),
+        sorted(community),
+    )
+    assert len(builtin) + len(community) == 22, (len(builtin), len(community))
+    links = re.findall(r"\]\(([^)#]+\.md)", _HOMEPAGE_COMMUNITY_SENTENCE)
+    assert len(links) == 8, links
+    for link in links:
+        assert (CONTENT / link).is_file(), link
+    # Each community scanner's own page is one of the links, by its name.
+    linked = " ".join(links)
+    for name in community:
+        stem = name.split("-")[0]
+        assert stem in linked, (name, links)
+
+
+@pytest.mark.unit
+def test_the_plugins_overview_names_every_community_scanner_and_no_other(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """plugins/index.md (Where plugins come from).
+
+    The community plugins row lists exactly the scanners the community plugin
+    modules ship, so a seventh module fails this test until the row names it.
+    """
+    _builtin, community = _shipped_scanner_split(tmp_path, monkeypatch)
+    assert community
+    # Raw text, whitespace-collapsed: _normalize would drop the link this row is
+    # matched by.
+    text = " ".join(_page_text(_PLUGINS_INDEX).split())
+    row = re.search(
+        r"\[community plugins\]\(\.\./docs/plugins/community/index\.md\) \(([^)]*)\)",
+        text,
+    )
+    assert row, "the community plugins row no longer has the listed form"
+    named = set(re.findall(r"`([^`]+)`", row.group(1)))
+    assert named == community, (sorted(named - community), sorted(community - named))

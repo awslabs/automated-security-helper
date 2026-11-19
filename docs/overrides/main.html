@@ -14,19 +14,18 @@
   3.8.0/ and as a copy at latest/ (mike alias_type: copy), and the copy holds the
   same markup, so a page read under latest/ removes the notice itself: whatever
   Material decides, or has cached in sessionStorage, the page that is the latest
-  release never says it is not. An unreleased page always carries the unreleased
-  notice instead, and no outdated one: main is ahead of the latest release, not
-  behind it, and its notice says so.
+  release never says it is not. An unreleased page carries no notice at all: no
+  announce banner and no outdated one, since main is ahead of the latest release,
+  not behind it.
 
-  Both notices link to the site root, which redirects to the latest release. The
-  install commands of every build pin the latest release, main's included: the
-  committed pages carry those pins, and docs/hooks/install_refs.py leaves them alone
-  on the main version's build (a reader of the main docs should install a release,
-  not an unreleased branch). The unreleased notice says so, and names the pinned ref
-  when the hook recorded it in config.extra.install_ref, which it does on the builds
-  whose pins it vouches for. `scripts/docs_versions.py check` builds a release and
-  main and fails when either page shows the wrong notice; the data-ash-notice
-  attributes are what it looks for.
+  The outdated notice links to the site root, which redirects to the latest
+  release. The install commands of every build pin the latest release, main's
+  included: the committed pages carry those pins, and docs/hooks/install_refs.py
+  leaves them alone on the main version's build (a reader of the main docs should
+  install a release, not an unreleased branch). `scripts/docs_versions.py check`
+  builds a release and main and fails when a release page lacks the outdated notice
+  or when a main page carries any notice or announce banner; the data-ash-notice
+  attributes and the announce banner's markup are what it looks for.
 -#}
 
 {% block extrahead %}
@@ -49,20 +48,6 @@
       }
     </style>
   </noscript>
-{% endblock %}
-
-{% block announce %}
-  {%- if not (config.extra.docs_version or "")[:1].isdigit() -%}
-    <span data-ash-notice="unreleased">
-      These docs describe the main branch, which is ahead of the latest release, so a
-      feature described here may not be in a release yet.
-      The install commands on these pages install the latest release{%- if config.extra.install_ref %},
-      <code>{{ config.extra.install_ref }}</code>{%- endif %}, not main:
-      <a href="{{ '../' ~ base_url }}">read the latest release's docs</a> for what they
-      install. To run what these pages describe,
-      <a href="{{ 'how-to/install/' | url }}#install-from-main">install from main</a>.
-    </span>
-  {%- endif -%}
 {% endblock %}
 
 {% block outdated %}

@@ -287,6 +287,9 @@ class UVToolMixin:
     # resolve_deferred_tool_version clears once the probe has answered.
     _uv_run_failure: Optional[str]
     _deferred_tool_version_probe: Optional[tuple[str, Optional[str]]]
+    # The PATH executable _select_tool_execution verified and chose to run
+    # directly, or None (a PrivateAttr defaulting to None on PluginBase).
+    _verified_pre_installed_executable: Optional[str]
 
     if TYPE_CHECKING:
         # ScannerPluginBase and ConverterPluginBase declare it, defaulting to
@@ -544,6 +547,7 @@ class UVToolMixin:
                 offline=self._is_offline_mode(),
                 package=self._uv_package(),
                 **self._uv_python_kwargs(),
+                **self._uv_metadata_kwargs(),
             )
             if version:
                 self._plugin_log(
@@ -1735,6 +1739,13 @@ class UVToolMixin:
             )
             self.use_uv_tool = False
             self.dependencies_satisfied = True
+            # Remembered so a later validation of this instance (the per-target
+            # one in _pre_scan, or any direct re-check) honors this decision
+            # instead of re-resolving through uv: the consolidated resolver's
+            # fallback flipped use_uv_tool back to True, discarding the copy
+            # verified here, and paid a cold `uv tool run ... --version` probe
+            # per target doing it. See _honored_verified_pre_installed.
+            self._verified_pre_installed_executable = executable
             # The copy that runs is this one, so the version the reports name
             # (SARIF scanner_version) is its own, not the one the uv probe read
             # from uv's environment. Read with a default: a verifier stand-in
@@ -1817,6 +1828,63 @@ class UVToolMixin:
                 if verdict.status == "unsatisfied"
                 else logging.INFO,
             )
+        self.dependencies_satisfied = True
+        return True
+
+    def _honored_verified_pre_installed(self) -> bool:
+        """Whether an earlier validation's verified-PATH decision still stands.
+
+        True when ``_select_tool_execution`` verified a copy on PATH for this
+        instance, chose to run it directly (``use_uv_tool`` False), and that
+        copy is still an executable file; ``dependencies_satisfied`` is set to
+        match. The scanners' ``validate_plugin_dependencies`` consult this
+        before re-running selection: without it, a re-validation (the
+        per-target one in ``_pre_scan``) skipped its ``if self.use_uv_tool``
+        branch -- the earlier decision had set the flag False -- and fell to
+        the consolidated resolver, which spawned a cold
+        ``uv tool run ... --version`` probe and flipped ``use_uv_tool`` back
+        to True, so the scan ran through uv and the verified copy never ran
+        (ash.log showed "Using pre-installed <tool> at ... directly" followed
+        by "Executing <tool> via UV tool run").
+
+        False, with nothing changed, when no such decision was made; False
+        with the record cleared -- and ``use_uv_tool`` put back on the uv
+        route, so the next selection runs afresh instead of skipping into the
+        fallback -- when the verified copy is gone or no longer executable, so
+        a genuinely unusable tool still fails loudly. A decision something
+        re-pointed at uv (``use_uv_tool`` True again) is not honored either:
+        whatever flipped it knew more recent facts than the record here.
+
+        WHO CONSULTS THIS (the roster test in
+        tests/unit/plugin_modules/ash_builtin/scanners/ pins the set): the
+        scanners whose validation, entered with ``use_uv_tool`` False, falls
+        into a ``get_uv_tool_command`` fallback -- checkov and cfn-lint, whose
+        fallback also re-points the route from the resolver's answer, and
+        bandit, whose ``_take_resolved_command`` keeps the route but still
+        pays the resolver's cold probe. Semgrep needs no consult: entered with
+        ``use_uv_tool`` False and uv available, its ``_validate_tool_dependencies``
+        returns satisfied with no probe (semgrep_scanner.py, the final
+        ``dependencies_satisfied = True`` arm). Zizmor re-decides from scratch
+        by design (zizmor_scanner.py sets ``use_uv_tool = True`` at the top of
+        its tool check, around its rejected-executable logic), and the jupyter
+        converter records its route in its own ``_nbconvert_route`` instead of
+        this flag; both re-verifications answer from the memoized or persisted
+        verdict.
+        """
+        executable = getattr(self, "_verified_pre_installed_executable", None)
+        if executable is None:
+            return False
+        if getattr(self, "use_uv_tool", True):
+            return False
+        if not (os.path.isfile(executable) and os.access(executable, os.X_OK)):
+            self._verified_pre_installed_executable = None
+            # The dropped decision is what turned the uv route off; put the
+            # flag back so the next selection starts where construction left
+            # it, instead of skipping its own `if use_uv_tool` branch into the
+            # consolidated resolver's cold probe and flip.
+            if getattr(self, "use_uv_tool", None) is False:
+                self.use_uv_tool = True
+            return False
         self.dependencies_satisfied = True
         return True
 
@@ -2807,6 +2875,28 @@ class UVToolMixin:
         """
         python_request = self._get_tool_python_request()
         return {"python_request": python_request} if python_request else {}
+
+    def _tool_version_from_metadata(self) -> bool:
+        """Whether the version may be read from the tool's package metadata.
+
+        False, the default, keeps the ``<tool> --version`` probe, which also
+        warms a stevedore entry-point cache once for tools that load plugins
+        through it (see ``_uv_tool_version_cache``). Override it to return True
+        for a tool that does not use stevedore and whose ``--version`` is slow
+        (checkov imports its framework before printing it): the recorded
+        version is then read from the installed environment's ``.dist-info``
+        when that is the environment the probe would resolve, and probed as
+        before when it is not. The install health check is not affected.
+        """
+        return False
+
+    def _uv_metadata_kwargs(self) -> Dict[str, Any]:
+        """``{"from_metadata": True}`` for the runner calls, or ``{}`` when unset.
+
+        Empty when unset, so every plugin that does not opt in calls the
+        runner with exactly the arguments it did before.
+        """
+        return {"from_metadata": True} if self._tool_version_from_metadata() else {}
 
     def _get_tool_with_dependencies(self) -> Optional[List[str]]:
         """Get additional dependencies to install with the tool using --with flag.

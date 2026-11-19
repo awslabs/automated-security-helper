@@ -40,6 +40,7 @@ from automated_security_helper.config.ash_config import (
     reduced_plugin_name,
     sandbox_mode_in_document,
 )
+from automated_security_helper.utils import unknown_keys as _unknown_keys
 from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
@@ -1025,12 +1026,17 @@ def _unknown_entry_keys_are_fatal(
     Read from the raw document before the model is built, because the entry
     validators run inside that build: the flag's own field is still validated
     strictly, so a value that is not a bool refuses the config either way (a
-    non-bool read here only chooses warn mode, the direction that marks the
-    entry inert). An override that sets the flag counts too, last one wins, so
-    ``--config-overrides fail_on_unknown_keys=true`` adopts the refusal for one
-    run.
+    non-bool read here only chooses the line's default, which on 3.x is warn
+    mode, the direction that marks the entry inert). An absent flag takes the
+    line's default, ``UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT`` (the one
+    constant the v4 bump flips; AshConfig's field default reads it too, so the
+    raw read and the validated model cannot disagree). An override that sets
+    the flag counts too, last one wins, so ``--config-overrides
+    fail_on_unknown_keys=true`` adopts the refusal for one run.
     """
-    fatal = isinstance(data, dict) and _flag_is_true(data.get("fail_on_unknown_keys"))
+    fatal = _unknown_keys.UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT
+    if isinstance(data, dict) and isinstance(data.get("fail_on_unknown_keys"), bool):
+        fatal = data["fail_on_unknown_keys"]
     for override in config_overrides or []:
         key_path, separator, value = override.partition("=")
         if (

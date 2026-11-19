@@ -21,27 +21,31 @@ The Environment variable column names the variable click reads for the option; a
 | Command | Description |
 |---------|-------------|
 | [`ash`](#ash) | Automated Security Helper, the agentic security harness · one workflow for your scanners. |
-| [`ashx build-image`](#build-image) | Builds the ASH container image, then scans the current directory with it unless --no-run is given. |
-| [`ashx config`](#config) | ASH configuration management |
-| [`ashx config get`](#config-get) | Print the resolved configuration: the file's settings over the defaults. |
-| [`ashx config init`](#config-init) | Create a configuration file with every setting at its default. |
-| [`ashx config lint`](#config-lint) | Lint an ASH configuration file for issues and optionally auto-fix them. |
-| [`ashx config update`](#config-update) | Update an existing configuration file with the specified modifications. |
-| [`ashx config validate`](#config-validate) | Validate an ASH configuration file the way a scan loads it. |
-| [`ashx config validate-plugin-dependencies`](#config-validate-plugin-dependencies) | Check that the configuration resolves and names a project. |
-| [`ashx config wizard`](#config-wizard) | Interactive configuration wizard. |
-| [`ashx dependencies`](#dependencies) | Install dependencies for ASH plugins |
-| [`ashx dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
-| [`ashx get-genai-guide`](#get-genai-guide) | Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file. |
-| [`ashx inspect`](#inspect) | Inspect and analyze ASH outputs and reports |
-| [`ashx inspect findings`](#inspect-findings) | The `inspect findings` command provides an interactive TUI to explore the findings and identify actions to quickly take. |
-| [`ashx inspect sarif-fields`](#inspect-sarif-fields) | The `inspect sarif-fields` command analyzes SARIF reports to understand field usage across different scanners and ensure fields are preserved during aggregation. |
-| [`ashx mcp`](#mcp) | Start the ASH MCP server (Model Context Protocol) |
-| [`ashx merge`](#merge) | Merges the results of a sharded scan into one unified report. |
-| [`ashx plugin`](#plugin) | Manage ASH plugins |
-| [`ashx plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
-| [`ashx report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
-| [`ashx scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
+| [`ash build-image`](#build-image) | Builds the ASH container image, then scans the current directory with it unless --no-run is given. |
+| [`ash config`](#config) | ASH configuration management |
+| [`ash config get`](#config-get) | Print the resolved configuration: the file's settings over the defaults. |
+| [`ash config init`](#config-init) | Create a configuration file with every setting at its default. |
+| [`ash config lint`](#config-lint) | Lint an ASH configuration file for issues and optionally auto-fix them. |
+| [`ash config update`](#config-update) | Update an existing configuration file with the specified modifications. |
+| [`ash config validate`](#config-validate) | Validate an ASH configuration file the way a scan loads it. |
+| [`ash config validate-plugin-dependencies`](#config-validate-plugin-dependencies) | Check that the configuration resolves and names a project. |
+| [`ash config wizard`](#config-wizard) | Interactive configuration wizard. |
+| [`ash dependencies`](#dependencies) | Install dependencies for ASH plugins |
+| [`ash dependencies install`](#dependencies-install) | Install dependencies for ASH plugins. |
+| [`ash express`](#express) | Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable. |
+| [`ash express start`](#express-start) | Start the express daemon for this user and ASH version (idempotent). |
+| [`ash express status`](#express-status) | Report whether the express daemon is running, and what it has served. |
+| [`ash express stop`](#express-stop) | Stop the express daemon. A scan it is running is sent SIGTERM. |
+| [`ash get-genai-guide`](#get-genai-guide) | Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file. |
+| [`ash inspect`](#inspect) | Inspect and analyze ASH outputs and reports |
+| [`ash inspect findings`](#inspect-findings) | The `inspect findings` command provides an interactive TUI to explore the findings and identify actions to quickly take. |
+| [`ash inspect sarif-fields`](#inspect-sarif-fields) | The `inspect sarif-fields` command analyzes SARIF reports to understand field usage across different scanners and ensure fields are preserved during aggregation. |
+| [`ash mcp`](#mcp) | Start the ASH MCP server (Model Context Protocol) |
+| [`ash merge`](#merge) | Merges the results of a sharded scan into one unified report. |
+| [`ash plugin`](#plugin) | Manage ASH plugins |
+| [`ash plugin list`](#plugin-list) | The `plugin list` command lists what a scan with this configuration loads, on or off. |
+| [`ash report`](#report) | Generate a report from ASH scan results using the specified reporter plugin. |
+| [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
 
 ## `ash`
 
@@ -51,7 +55,7 @@ Automated Security Helper, the agentic security harness · one workflow for your
 ash [OPTIONS] COMMAND [ARGS]...
 ```
 
-Run with no command, `ash` runs a scan. It accepts these options of [`ashx scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg).
+Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--only-scanners`](#scan--only-scanners), [`--add-scanners`](#scan--add-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--express`](#scan--express), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--staged`](#scan--staged), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg).
 
 Options that only `ash` itself accepts:
 
@@ -61,7 +65,7 @@ Options that only `ash` itself accepts:
 | <a id="ash--install-completion"></a>`--install-completion` | flag | off |  | Install completion for the current shell. |
 | <a id="ash--show-completion"></a>`--show-completion` | flag | off |  | Show completion for the current shell, to copy it or customize the installation. |
 
-Subcommands: [`ashx build-image`](#build-image), [`ashx config`](#config), [`ashx dependencies`](#dependencies), [`ashx get-genai-guide`](#get-genai-guide), [`ashx inspect`](#inspect), [`ashx mcp`](#mcp), [`ashx merge`](#merge), [`ashx plugin`](#plugin), [`ashx report`](#report), [`ashx scan`](#scan).
+Subcommands: [`ash build-image`](#build-image), [`ash config`](#config), [`ash dependencies`](#dependencies), [`ash express`](#express), [`ash get-genai-guide`](#get-genai-guide), [`ash inspect`](#inspect), [`ash mcp`](#mcp), [`ash merge`](#merge), [`ash plugin`](#plugin), [`ash report`](#report), [`ash scan`](#scan).
 
 ## <a id="build-image"></a>`ashx build-image`
 
@@ -400,7 +404,56 @@ ashx dependencies install [OPTIONS]
 | <a id="dependencies-install--debug"></a>`--debug`, `-d` | flag | off |  | Enable debug logging |
 | <a id="dependencies-install--color"></a>`--color` / `--no-color`, `-C` | flag | on |  | Enable/disable colorized output |
 
-## <a id="get-genai-guide"></a>`ashx get-genai-guide`
+## <a id="express"></a>`ash express`
+
+Manage the express daemon: a resident warm ASH process that removes startup cost from every scan. Unix only; scans fall back to ordinary cold runs wherever the daemon is unavailable.
+
+```text
+ash express [OPTIONS] COMMAND [ARGS]...
+```
+
+This command takes no options.
+
+Subcommands: [`ash express start`](#express-start), [`ash express status`](#express-status), [`ash express stop`](#express-stop).
+
+### <a id="express-start"></a>`ash express start`
+
+Start the express daemon for this user and ASH version (idempotent).
+
+```text
+ash express start [OPTIONS]
+```
+
+<!-- doctest: options of=cli.express.start -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="express-start--idle-seconds"></a>`--idle-seconds` | int range | not set |  | Seconds of inactivity after which the daemon exits. Defaults to the ASH_EXPRESS_IDLE_SECONDS environment variable, else 1800. |
+| <a id="express-start--foreground"></a>`--foreground` | flag | off |  | Run the daemon in this process, attached to this terminal, instead of detaching it. Useful for watching its log live. |
+
+### <a id="express-status"></a>`ash express status`
+
+Report whether the express daemon is running, and what it has served.
+
+```text
+ash express status [OPTIONS]
+```
+
+<!-- doctest: options of=cli.express.status -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="express-status--json"></a>`--json` | flag | off |  | Print the daemon's status object as JSON. |
+
+### <a id="express-stop"></a>`ash express stop`
+
+Stop the express daemon. A scan it is running is sent SIGTERM.
+
+```text
+ash express stop [OPTIONS]
+```
+
+This command takes no options.
+
+## <a id="get-genai-guide"></a>`ash get-genai-guide`
 
 Write the ASH GenAI Integration Guide for AI assistants and LLMs to a file.
 
@@ -614,13 +667,16 @@ ashx scan [OPTIONS]
 |--------|------|---------|----------------------|-------------|
 | <a id="scan--source-dir"></a>`--source-dir` | text | not set | `ASH_SOURCE_DIR` | The source directory to scan |
 | <a id="scan--output-dir"></a>`--output-dir` | text | not set | `ASH_OUTPUT_DIR` | The directory to output results to |
-| <a id="scan--scanners"></a>`--scanners` | text, repeatable | not set | `ASH_SCANNERS` | Specific scanner names to run. Defaults to all scanners. |
+| <a id="scan--scanners"></a>`--scanners` | text, repeatable | not set | `ASH_SCANNERS` | Deprecated: use --only-scanners to state the whole selection, or --add-scanners to add to the mode's default set. Behavior is unchanged: specific scanner names to run (additive to the precommit set in --mode precommit; the whole selection elsewhere). Cannot be combined with --only-scanners. |
 | <a id="scan--exclude-scanners"></a>`--exclude-scanners` | text, repeatable | not set | `ASH_EXCLUDED_SCANNERS` | Specific scanner names to exclude from running. Takes precedence over scanners parameter. |
+| <a id="scan--only-scanners"></a>`--only-scanners` | text, repeatable | not set |  | Run exactly these scanners: the whole selection, replacing the mode's default set (--mode precommit's five) and the config file's precommit.only_scanners/add_scanners keys. Repeatable, and each value may name several scanners separated by commas, as --scanners accepts. Cannot be combined with --add-scanners or the deprecated --scanners. --exclude-scanners still removes names from it. |
+| <a id="scan--add-scanners"></a>`--add-scanners` | text, repeatable | not set |  | Scanner names to run in addition to the selection the mode and config give: in --mode precommit, the five default scanners plus the config's precommit keys; elsewhere the same additive meaning as --scanners. Repeatable, comma lists accepted. Cannot be combined with --only-scanners. --exclude-scanners still applies last. |
 | <a id="scan--ash-plugin-modules"></a>`--ash-plugin-modules` | text, repeatable | not set | `ASH_PLUGIN_MODULES` | List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules. |
 | <a id="scan--config-overrides"></a>`--config-overrides` | text, repeatable | not set |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. See https://awslabs.github.io/automated-security-helper/latest/how-to/configure/ |
 | <a id="scan--offline"></a>`--offline` / `--no-offline` | flag | off |  | Run scan in offline/airgapped mode. npm-audit does not run offline, because npm, yarn and pnpm audit by asking the registry: a project with a lockfile reports it MISSING, and one without reports it SKIPPED. IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage. |
 | <a id="scan--sandbox"></a>`--sandbox` | one of `off`, `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` | not set |  | Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner whose sandbox cannot be set up is graded by the refusal: under 'auto' no working backend is a missing dependency and the scanner is reported MISSING; a named backend that is unavailable, or any other refusal (such as a results path that is a symlink), is reported ERROR. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md |
-| <a id="scan--offline-semgrep-rulesets"></a>`--offline-semgrep-rulesets` | text | `p/ci` |  | Specify rulesets to bake into the opengrep offline cache for ASH offline mode (the flag keeps its historical name; the semgrep scanner is served by the opengrep plugin) |
+| <a id="scan--express"></a>`--express` / `--no-express` | flag | not set |  | Run this scan on the resident express daemon, starting it if it is not running (--express), or force an ordinary cold in-process run (--no-express). Without either, a scan uses the daemon automatically whenever its socket exists and its ASH version matches, and silently runs cold otherwise. Unix only (Linux and macOS). The flag is read by the console entry point before this command parses, so it applies to CLI invocations: the 'ash' console script gets the full saving; 'python -m automated_security_helper.cli.main' delegates too but has paid the import cost already; scans the MCP server hosts in-process never delegate. By the time a scan runs here the decision has been made, so this parameter only documents and accepts the flag. |
+| <a id="scan--offline-semgrep-rulesets"></a>`--offline-semgrep-rulesets` | text | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | <a id="scan--strategy"></a>`--strategy` | one of `sequential`, `parallel` | `parallel` |  | Whether to run scanners in parallel or sequential |
 | <a id="scan--progress"></a>`--progress`, `-p` / `--no-progress`, `-P` | flag | on |  | Show progress of each job live in the console. Defaults to True. |
 | <a id="scan--output-formats"></a>`--output-formats`, `--output-format`, `--formats`, `--format`, `-f` | text, repeatable | not set |  | The output formats to use (comma-separated). Available formats: text, flat-json, yaml, csv, html, junitxml, markdown, sarif, ocsf, cyclonedx, spdx, github-ghas, gitlab-sast, gitlab-cyclonedx, unused-suppressions. With the AWS plugin module (ash_aws_plugins) in ash_plugin_modules, also, once enabled: aws-security-hub, bedrock-summary-reporter, cloudwatch-logs, s3. Also accepted, though no reporter writes them: aggregated, dict, asff, custom. Values that write a report: `text`, `flat-json`, `yaml`, `csv`, `html`, `junitxml`, `markdown`, `sarif`, `ocsf`, `cyclonedx`, `spdx`, `github-ghas`, `gitlab-sast`, `gitlab-cyclonedx`, `unused-suppressions`. Values that name no reporter and write no report: `aggregated`, `dict`, `asff`, `custom`, `aws-security-hub`, `bedrock-summary-reporter`, `cloudwatch-logs`, `s3`. |
@@ -628,8 +684,8 @@ ashx scan [OPTIONS]
 | <a id="scan--phases"></a>`--phases` | one of `convert`, `scan`, `report`, `inspect`, repeatable | not set |  | The phases to run. Defaults to all phases except inspect. |
 | <a id="scan--inspect"></a>`--inspect` / `--no-inspect` | flag | off |  | Enable inspection of SARIF fields after running. This adds the inspect phase to the execution. |
 | <a id="scan--use-existing"></a>`--use-existing` / `--no-use-existing` | flag | off |  | Use an existing ash_aggregated_results.json file in the output-dir. If True, the scan phase will be skipped and reports will be generated from this file. |
-| <a id="scan--version"></a>`--version`, `-V` | flag | off |  | Prints version number |
-| <a id="scan--mode"></a>`--mode` | one of `precommit`, `container`, `local`, `nix` | `local` | `ASH_MODE` | Execution mode preset. 'local' (default) runs the scan in this process with the scanner tools installed on this machine. 'precommit' is a local scan that runs only bandit, detect-secrets, checkov, cdk-nag, npm-audit, plus any --scanners, with simplified output and no progress display; in workspace mode it changes only the output. 'container' builds the ASH container image and runs the scan inside it. 'nix' runs the scan inside `nix develop`, whose shell supplies pinned scanner versions, and always offline. |
+| <a id="scan--version"></a>`--version` | flag | off |  | Prints version number |
+| <a id="scan--mode"></a>`--mode` | one of `precommit`, `container`, `local`, `nix` | `local` | `ASH_MODE` | Execution mode preset. 'local' (default) runs the scan in this process with the scanner tools installed on this machine. 'precommit' is a local scan that runs only bandit, detect-secrets, checkov, cdk-nag, npm-audit, plus any --add-scanners (or the deprecated --scanners); the config file's precommit.only_scanners and the --only-scanners flag replace that set instead. It prints simplified output and no progress display; in workspace mode it changes only the output. 'container' builds the ASH container image and runs the scan inside it. 'nix' runs the scan inside `nix develop`, whose shell supplies pinned scanner versions, and always offline. |
 | <a id="scan--python-only"></a>`--python-only`, `--python-based-scanners-only`, `--python-based-plugins-only` / `--full`, `--all-enabled-scanners`, `--all-enabled-plugins` | flag | off |  | Exclude execution of any plugins or tools that have depencies external to Python. |
 | <a id="scan--show-summary"></a>`--show-summary` / `--no-show-summary` | flag | on |  | Show metrics table and results summary |
 | <a id="scan--quiet"></a>`--quiet`, `-q` / `--no-quiet` | flag | off |  | Hide all log output |
@@ -648,8 +704,9 @@ ashx scan [OPTIONS]
 | <a id="scan--compact-report"></a>`--compact-report` | flag | off |  | Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings. |
 | <a id="scan--changed-files-only"></a>`--changed-files-only` | flag | off | `ASH_CHANGED_FILES_ONLY` | Report only findings in files changed between --base-ref and HEAD, for example on a pull request. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. Findings with no file location are kept. When git cannot list the changes, everything is reported; when nothing changed inside --source-dir, nothing is. Not supported with --mode container, which refuses it (exit 5). |
 | <a id="scan--base-ref"></a>`--base-ref` | text | `origin/main` | `ASH_BASE_REF` | Git ref to diff against when --changed-files-only is set. |
-| <a id="scan--allow-in-tree-tools"></a>`--allow-in-tree-tools` | flag | off |  | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ashx mcp` never does. |
-| <a id="scan--shard-index"></a>`--shard-index` | integer | not set | `ASH_SHARD_INDEX` | Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ashx merge'. |
+| <a id="scan--staged"></a>`--staged` | flag | off | `ASH_STAGED` | With --mode precommit only: scan the staged files (git diff --cached, without deletions; a rename's new path) instead of the whole tree, so a commit pays for what it stages. What the tools read is the working-tree copy of each staged file; under the pre-commit framework the two are identical, because it stashes unstaged changes around the hooks. Suppressions and ignore paths apply exactly as in a whole-tree scan; findings in files that are not staged are out of scope. With nothing staged the scan exits 0 without starting any scanner. Unlike --changed-files-only, which only filters the reports after scanning everything, --staged saves the scan time. Any other --mode refuses it (exit 5). Planned to become the precommit default in ASH v4. |
+| <a id="scan--allow-in-tree-tools"></a>`--allow-in-tree-tools` | flag | off |  | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ash mcp` never does. |
+| <a id="scan--shard-index"></a>`--shard-index` | integer | not set | `ASH_SHARD_INDEX` | Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'. |
 | <a id="scan--shard-count"></a>`--shard-count` | integer | not set | `ASH_SHARD_COUNT` | Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner. |
 | <a id="scan--config-from-scanned-repository"></a>`--config-from-scanned-repository` | flag | off |  | Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config is a file the scanned repository wrote (judged by its resolved path and by the name that reached it) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on. This option is hidden from `--help` output. |
 | <a id="scan--config-file-from-scanned-repository"></a>`--config-file-from-scanned-repository` | text, repeatable | not set |  | Apply the limits ASH puts on a repository-written config file to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. Container mode passes it, once per file, for each file of those chains the scanned repository wrote; the bases of a --config whose whole chain carries --config-from-scanned-repository are passed individually as well, so a mounted base judged on its own is still a marked file. Refused for a file that is in neither chain. This option is hidden from `--help` output. |

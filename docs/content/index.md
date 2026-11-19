@@ -86,6 +86,8 @@ ashx --mode precommit
 - Secrets: detect-secrets
 - Dependencies and software inventory: Grype, npm audit, Syft
 
+Six more scanners ship with ASH as community plugins: [Betterleaks](docs/plugins/community/betterleaks-plugin.md) and [Ferret Scan](docs/plugins/community/ferret-scan-plugin.md) for secrets, [GuardDog](docs/plugins/community/guarddog-plugin.md) for malicious packages, [hadolint](docs/plugins/community/hadolint-plugin.md) for Dockerfiles, [Snyk Code](docs/plugins/community/snyk-plugin.md) for SAST, and [Trivy](docs/plugins/community/trivy-plugin.md) for repository scanning. A scan runs one only when its module is named in `ash_plugin_modules` or `--ash-plugin-modules`. See the [community plugins](docs/plugins/community/index.md) and the [scanners reference](reference/scanners.md) for all 22 scanners.
+
 A scan ends by printing the exit codes and the one it exits with:
 
 ```text
@@ -106,6 +108,8 @@ Configure scanners, severity thresholds, ignore paths, and suppressions in your 
 ## Integrations
 
 Run [locally](getting-started/local.md), integrate with [CI/CD](getting-started/ci.md), or connect your AI tools through the [Model Context Protocol](how-to/mcp-server.md).
+
+[Who uses ASH](personas/index.md) starts from the role instead: setups for [developers](personas/developer.md), [security reviewers](personas/security-reviewer.md), and [security analysts](personas/security-analyst.md), and where ASH sits [across the SDLC and AI-DLC](personas/sdlc-aidlc.md).
 
 ## Reports and next steps
 

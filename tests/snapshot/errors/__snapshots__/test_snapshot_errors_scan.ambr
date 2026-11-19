@@ -324,7 +324,10 @@
 # name: TestScanFailures.test_selection_cancels_itself
   dict({
     'exit_code': 5,
-    'stderr': '',
+    'stderr': '''
+      DeprecationWarning: --scanners (and ASH_SCANNERS) is deprecated. Use --only-scanners to state the whole scanner selection, or --add-scanners to add scanners to the mode's default set. --scanners keeps its current behavior.
+  
+    ''',
     'stdout': '''
       INFO     Initializing ASH v<ASH_VERSION>
       INFO     Initializing execution engine
@@ -350,7 +353,10 @@
 # name: TestScanFailures.test_unknown_scanner
   dict({
     'exit_code': 5,
-    'stderr': '',
+    'stderr': '''
+      DeprecationWarning: --scanners (and ASH_SCANNERS) is deprecated. Use --only-scanners to state the whole scanner selection, or --add-scanners to add scanners to the mode's default set. --scanners keeps its current behavior.
+  
+    ''',
     'stdout': '''
       INFO     Initializing ASH v<ASH_VERSION>
       INFO     Initializing execution engine

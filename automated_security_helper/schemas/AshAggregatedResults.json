@@ -1683,7 +1683,16 @@
                   "/scanners/gitleaks/options/config_file",
                   "/scanners/zizmor/options/config_file",
                   "/scanners/zizmor/options/online_audits",
+                  "/scanners/hadolint/options/config_file",
+                  "/scanners/betterleaks/options/config_file",
+                  "/scanners/betterleaks/options/honor_tree_ignore_files",
+                  "/scanners/guarddog/options/ecosystems",
+                  "/scanners/guarddog/options/rules",
+                  "/scanners/guarddog/options/exclude_rules",
+                  "/scanners/guarddog/options/verify",
+                  "/scanners/guarddog/options/sandbox",
                   "/scanners/snyk-code/options/honor_tree_exclusions",
+                  "/scanners/betterleaks/options/honor_inline_ignores",
                   "/scanners/cfn-lint/options/honor_inline_ignores",
                   "/scanners/gitleaks/options/honor_inline_ignores",
                   "/scanners/zizmor/options/honor_inline_ignores",
@@ -1814,6 +1823,14 @@
           "default": [],
           "description": "Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list.",
           "title": "Output Formats"
+        },
+        "precommit": {
+          "$ref": "#/$defs/PrecommitModeConfig",
+          "default": {
+            "add_scanners": [],
+            "only_scanners": []
+          },
+          "description": "Scanner selection for --mode precommit: only_scanners replaces the mode's default set, add_scanners adds to it; setting both keys at once is refused. The command line's --only-scanners replaces both; --add-scanners and the deprecated --scanners add; --exclude-scanners applies last. Other modes ignore this section."
         },
         "project_name": {
           "default": "ash-scan",
@@ -2303,7 +2320,16 @@
                 "/scanners/gitleaks/options/config_file",
                 "/scanners/zizmor/options/config_file",
                 "/scanners/zizmor/options/online_audits",
+                "/scanners/hadolint/options/config_file",
+                "/scanners/betterleaks/options/config_file",
+                "/scanners/betterleaks/options/honor_tree_ignore_files",
+                "/scanners/guarddog/options/ecosystems",
+                "/scanners/guarddog/options/rules",
+                "/scanners/guarddog/options/exclude_rules",
+                "/scanners/guarddog/options/verify",
+                "/scanners/guarddog/options/sandbox",
                 "/scanners/snyk-code/options/honor_tree_exclusions",
+                "/scanners/betterleaks/options/honor_inline_ignores",
                 "/scanners/cfn-lint/options/honor_inline_ignores",
                 "/scanners/gitleaks/options/honor_inline_ignores",
                 "/scanners/zizmor/options/honor_inline_ignores",
@@ -2457,7 +2483,16 @@
               "/scanners/gitleaks/options/config_file",
               "/scanners/zizmor/options/config_file",
               "/scanners/zizmor/options/online_audits",
+              "/scanners/hadolint/options/config_file",
+              "/scanners/betterleaks/options/config_file",
+              "/scanners/betterleaks/options/honor_tree_ignore_files",
+              "/scanners/guarddog/options/ecosystems",
+              "/scanners/guarddog/options/rules",
+              "/scanners/guarddog/options/exclude_rules",
+              "/scanners/guarddog/options/verify",
+              "/scanners/guarddog/options/sandbox",
               "/scanners/snyk-code/options/honor_tree_exclusions",
+              "/scanners/betterleaks/options/honor_inline_ignores",
               "/scanners/cfn-lint/options/honor_inline_ignores",
               "/scanners/gitleaks/options/honor_inline_ignores",
               "/scanners/zizmor/options/honor_inline_ignores",
@@ -9091,16 +9126,19 @@
       "properties": {
         "include_metadata": {
           "default": true,
+          "description": "When true, the report carries a `metadata` key with the project name, the scan time, the report time, and the ASH version. When false, the key is left out.",
           "title": "Include Metadata",
           "type": "boolean"
         },
         "include_scanner_metrics": {
           "default": true,
+          "description": "When true, the report carries a `scanner_metrics` key with one row per scanner: its finding counts by severity, its result status, and the severity threshold it was judged against. When false, the key is left out.",
           "title": "Include Scanner Metrics",
           "type": "boolean"
         },
         "include_summary_metrics": {
           "default": true,
+          "description": "Accepted for compatibility but not read: the report is written the same whether this is true or false. Use `include_scanner_metrics` and `include_metadata` to choose what the report carries.",
           "title": "Include Summary Metrics",
           "type": "boolean"
         }
@@ -10116,6 +10154,7 @@
             }
           ],
           "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
         }
       },
@@ -11554,6 +11593,7 @@
       "properties": {
         "respect_severity_threshold": {
           "default": true,
+          "description": "When true, a finding below the severity threshold its scanner is judged against is written as a skipped test case (type `threshold`), and only findings at or above the threshold are errors, which matches the exit code. When false, no threshold is applied and findings are written as errors whatever their severity. Suppressed findings are skipped either way.",
           "title": "Respect Severity Threshold",
           "type": "boolean"
         }
@@ -13248,21 +13288,25 @@
       "properties": {
         "compact": {
           "default": false,
+          "description": "When true, the scanner results table leaves out scanners that were skipped and scanners that passed with no findings, and the how-to-read help, the Scan metadata section, and the generated-at line are dropped. The outcome line, the project and scan time line, the workspace section, and the coverage notices stay.",
           "title": "Compact",
           "type": "boolean"
         },
         "include_detailed_findings": {
           "default": true,
+          "description": "When true, the report has a Detailed findings section that lists up to `max_detailed_findings` actionable findings, highest severity first. The Not gating (workspace policy) section of a workspace scan is part of it and is left out with it.",
           "title": "Include Detailed Findings",
           "type": "boolean"
         },
         "include_findings_table": {
           "default": false,
+          "description": "When true, the report has a Findings overview table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long.",
           "title": "Include Findings Table",
           "type": "boolean"
         },
         "include_summary": {
           "default": true,
+          "description": "When true, the report has a Summary section: the scanner results table and the top hotspots table. When false, both are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay.",
           "title": "Include Summary",
           "type": "boolean"
         },
@@ -13278,6 +13322,7 @@
             }
           ],
           "default": 20,
+          "description": "The most findings listed in the Detailed findings section, and in the Not gating (workspace policy) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. 0 lists none. A negative value is refused.",
           "title": "Max Detailed Findings"
         },
         "top_hotspots_limit": {
@@ -13292,10 +13337,12 @@
             }
           ],
           "default": 10,
+          "description": "The most files listed in the top hotspots table, which ranks files by their number of actionable findings. Used only when `include_summary` is true. 0 leaves the table out. A negative value is refused.",
           "title": "Top Hotspots Limit"
         },
         "use_collapsible_details": {
           "default": true,
+          "description": "When true, each detailed finding is wrapped in an HTML `details` element whose summary line shows its severity, rule ID, and location, so a long list stays short until a finding is opened. When false, every finding is written out in full.",
           "title": "Use Collapsible Details",
           "type": "boolean"
         }
@@ -15586,6 +15633,22 @@
           "title": "Source Dir",
           "type": "string"
         },
+        "staged_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Under --mode precommit --staged, the staged files as POSIX paths relative to source_dir: the scanner target set. Read from git diff --cached, so a deletion is not listed (a deleted file cannot be scanned) and a rename appears at its new path. None (the default) means no staged scope; the whole tree is scanned. An empty list means something was staged and none of it is inside source_dir, so every scanner has nothing to scan.",
+          "title": "Staged Files"
+        },
         "work_dir": {
           "default": null,
           "description": "Working directory for temporary files",
@@ -15761,6 +15824,32 @@
         }
       },
       "title": "PostalAddress",
+      "type": "object"
+    },
+    "PrecommitModeConfig": {
+      "additionalProperties": false,
+      "description": "Scanner selection for ``ash scan --mode precommit``.\n\nPrecommit mode starts from a fixed default set\n(``run_ash_scan.PRECOMMIT_MODE_SCANNERS``: bandit, detect-secrets, checkov,\ncdk-nag, npm-audit). These two keys change that selection from the config\nfile, so a repository can state once what its hook runs instead of every\ncommitter spelling flags in ``.pre-commit-config.yaml``.\n\nPrecedence, lowest to highest (``run_ash_scan._selected_scanners`` applies\nit): the mode default; then ``only_scanners`` (replaces the default) and\n``add_scanners`` (adds to it); then the command line, where\n``--only-scanners`` replaces everything this section and the mode give, and\n``--add-scanners`` (or the deprecated ``--scanners``) adds to it.\n``--exclude-scanners`` applies after all of them: an excluded name wins over\nany inclusion. Read only by ``--mode precommit``; other modes ignore this\nsection.",
+      "properties": {
+        "add_scanners": {
+          "default": [],
+          "description": "Scanner names precommit mode runs in addition to its default set. The command line's --only-scanners replaces this list too; --exclude-scanners removes names from the result. Cannot be set together with only_scanners.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Add Scanners",
+          "type": "array"
+        },
+        "only_scanners": {
+          "default": [],
+          "description": "The whole scanner selection for precommit mode: run exactly these scanners instead of the mode's default set. The command line's --only-scanners replaces this list; --add-scanners and the deprecated --scanners add to it; --exclude-scanners removes names from it. Cannot be set together with add_scanners.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Only Scanners",
+          "type": "array"
+        }
+      },
+      "title": "PrecommitModeConfig",
       "type": "object"
     },
     "Primitive": {
@@ -22698,7 +22787,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed or enabled suppresses nothing (fail closed). The block's keys belong to the named plugin.",
+          "description": "(Optional) Per-engine blocks, keyed by scanner name (e.g. 'cdk-nag'). Listing engines ENUMERATES the engines the entry covers: a finding from a scanner not listed here does not match this entry, and a listed scanner's finding matches only when that scanner's plugin accepts its block. A listed scanner whose plugin is not installed (its module is never imported) suppresses nothing (fail closed); a plugin that is imported but disabled for the run is still registered. The block's keys belong to the named plugin.",
           "title": "Engines"
         },
         "resource_id": {
@@ -23359,16 +23448,19 @@
       "properties": {
         "include_detailed_findings": {
           "default": false,
+          "description": "When true, the report has a DETAILED FINDINGS section that lists up to `max_detailed_findings` actionable findings, highest severity first, each with its scanner, rule ID, location, and description. The NOT GATING (WORKSPACE POLICY) section of a workspace scan is part of it and is left out with it.",
           "title": "Include Detailed Findings",
           "type": "boolean"
         },
         "include_findings_table": {
           "default": false,
+          "description": "When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long.",
           "title": "Include Findings Table",
           "type": "boolean"
         },
         "include_summary": {
           "default": true,
+          "description": "When true, the report has a SUMMARY section: the scanner results table, a key to its columns, and the top hotspots list. When false, those are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay.",
           "title": "Include Summary",
           "type": "boolean"
         },
@@ -23384,6 +23476,7 @@
             }
           ],
           "default": 20,
+          "description": "The most findings listed in the DETAILED FINDINGS section, and in the NOT GATING (WORKSPACE POLICY) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. Used only when `include_detailed_findings` is true. 0 lists none. A negative value is refused.",
           "title": "Max Detailed Findings"
         },
         "top_hotspots_limit": {
@@ -23398,6 +23491,7 @@
             }
           ],
           "default": 20,
+          "description": "The most files listed in the top hotspots list, which ranks files by their number of actionable findings. Used only when `include_summary` is true. 0 leaves the list out. A negative value is refused.",
           "title": "Top Hotspots Limit"
         }
       },
@@ -24996,6 +25090,7 @@
       "properties": {
         "output_format": {
           "default": "both",
+          "description": "The format of the report: \"json\", \"markdown\", or \"both\". \"json\" writes the JSON report only. \"markdown\" writes the report as markdown, under the file extension `unused-suppressions.md` unless the reporter's `extension` was changed. \"both\" writes the JSON report and a markdown copy beside it, `ash.unused-suppressions.md`. The name is read without regard to case, and any other value is refused.",
           "title": "Output Format",
           "type": "string"
         }

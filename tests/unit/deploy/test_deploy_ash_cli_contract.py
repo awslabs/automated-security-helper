@@ -265,6 +265,7 @@ _COMMANDS = frozenset(
         "build-image",
         "config",
         "dependencies",
+        "express",
         "get-genai-guide",
         "inspect",
         "mcp",

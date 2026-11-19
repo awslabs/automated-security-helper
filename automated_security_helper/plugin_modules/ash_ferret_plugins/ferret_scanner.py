@@ -16,6 +16,7 @@ from typing import (
     Annotated,
     Any,
     ClassVar,
+    Dict,
     Iterable,
     List,
     Literal,
@@ -27,6 +28,7 @@ from urllib.parse import quote, urljoin
 
 import yaml
 from pydantic import (
+    ConfigDict,
     Field,
     PrivateAttr,
     ValidationError,
@@ -56,7 +58,15 @@ from automated_security_helper.base.plugin_base import (
 )
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.models.core import ToolArgs, ToolExtraArg
+from automated_security_helper.models.core import (
+    EMPTY_SCOPE_RULE,
+    ToolArgs,
+    ToolExtraArg,
+)
+from automated_security_helper.utils.redacted_model import RedactedSection
+from automated_security_helper.utils.suppression_scope_registry import (
+    register_suppression_scope_engine,
+)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     redacted_command_record,
@@ -152,8 +162,17 @@ def bundled_redaction_profiles() -> frozenset[str]:
 # Minimum supported ferret-scan version (inclusive)
 MIN_SUPPORTED_VERSION = "2.4.5"
 
-# Maximum supported ferret-scan version (exclusive - versions >= this may have breaking changes)
-MAX_SUPPORTED_VERSION = "2.6.0"
+# Maximum supported ferret-scan version (exclusive - versions >= this may have breaking changes).
+# 2.6.0 was verified against this plugin's invocation surface (2026-11-10): the
+# %SRCROOT% SARIF shape, glob-only --exclude semantics and the 0/3 exit-code
+# contract are unchanged from 2.5.x, the repeatable list flags still accept one
+# comma-joined occurrence, and 2.6.0's breaking changes (redaction audit log,
+# --stdin validation, native-suppression loader and hash v5) sit on paths this
+# plugin does not use. 2.6.0 also fixes --disable-ip-types to outrank a
+# profile's disabled_types on --file (ferret-scan #887), and its new detectors
+# (NHS/CHI MEDICAL_ID, GB/ON/QC DRIVERS_LICENSE, ITIN, card track data) can
+# surface new findings in previously clean scans.
+MAX_SUPPORTED_VERSION = "2.7.0"
 
 # Default version constraint for installation (if using uv tool)
 DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION}"
@@ -165,7 +184,10 @@ DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION
 # and DEVELOPMENT.md section 9 for the two shape changes 2.5.x brought). 2.5.3
 # also fixes two secrets-detector defects: the API_KEY_OR_SECRET type-annotation
 # false positive (ferret-scan #742 via PR #745) and the list/collection matcher
-# false negatives (#749).
+# false negatives (#749). 2.6.0 is admitted and smoke-verified (see
+# MAX_SUPPORTED_VERSION) but has not had the full fixture-matrix pass the 2.5.x
+# line had, and its new detectors change finding counts; the recommendation
+# moves once that pass is recorded in DEVELOPMENT.md.
 RECOMMENDED_VERSION = "2.5.3"
 
 # ferret-scan switches into pre-commit mode from the environment alone
@@ -915,6 +937,117 @@ class FerretScannerConfig(ScannerPluginConfigBase):
     ] = FerretScannerConfigOptions()
 
 
+#: The confidence bands ferret-scan reports (``properties.confidenceLevel``),
+#: lowercase. A scope block naming anything else is refused at config time.
+_SCOPE_CONFIDENCE_LEVELS = frozenset({"low", "medium", "high"})
+
+
+class FerretScopeBlock(RedactedSection):
+    """What a suppression's ``scope.engines.ferret-scan`` block may say.
+
+    Owned by this plugin (utils/suppression_scope_registry.py); ASH's core
+    never reads the keys. Both keys compare case-insensitively against the
+    result properties ferret-scan writes and this plugin keeps on the flat
+    finding (``confidenceLevel``, ``validator``); a finding that carries
+    neither property never matches, the fail-closed direction.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+        hide_input_in_errors=True,
+        json_schema_extra={"additionalProperties": False},
+    )
+
+    ENTRY_KIND: ClassVar[str] = "a ferret-scan suppression scope"
+
+    confidence_level: Annotated[
+        str | List[str] | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only cover findings ferret-scan reported at one of "
+                "these confidence bands: 'low', 'medium', 'high', or a list of "
+                "them. Case-insensitive. A finding with no confidenceLevel "
+                "property never matches."
+            ),
+        ),
+    ] = None
+    validator: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only cover findings this ferret-scan validator "
+                "produced, as the result's 'validator' property names it. "
+                "Exact match, case-insensitive; no glob reading. A finding "
+                "with no validator property never matches."
+            ),
+        ),
+    ] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unknown_keys(cls, data, info):
+        """A typo inside the block gets the same did-you-mean as everywhere."""
+        from automated_security_helper.utils.unknown_keys import refuse_unknown_keys
+
+        return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
+
+    @field_validator("confidence_level", "validator")
+    @classmethod
+    def _refuse_an_empty_value(cls, v, info):
+        """Refuse ``""`` and lists that say nothing: they can never match.
+
+        Match-all is the ABSENCE of the key (EMPTY_SCOPE_RULE), so an empty
+        value would make the entry silently inert — the defect class the
+        suppression-scope feature exists to surface. ``[]`` and a list of
+        blank strings are as inert as ``""``. A list holding ANY blank element
+        is refused too: the matcher strips and lowercases both sides, so a blank
+        element would otherwise match a finding whose reported value is blank.
+        """
+        if v is None:
+            return v
+        empty = (
+            (not v.strip())
+            if isinstance(v, str)
+            else (not v) or any(isinstance(e, str) and not e.strip() for e in v)
+        )
+        if empty:
+            raise ValueError(
+                EMPTY_SCOPE_RULE.format(
+                    what=f"{info.field_name} in a ferret-scan scope block",
+                    omit="the key",
+                )
+            )
+        return v
+
+    @field_validator("confidence_level")
+    @classmethod
+    def _confidence_level_is_a_known_band(cls, v):
+        """Name the valid set when refusing, so the config check can say it."""
+        if v is None:
+            return v
+        values = [v] if isinstance(v, str) else v
+        unknown = [
+            e
+            for e in values
+            if isinstance(e, str)
+            and e.strip()
+            and e.strip().lower() not in _SCOPE_CONFIDENCE_LEVELS
+        ]
+        if unknown:
+            raise ValueError(
+                f"confidence_level in a ferret-scan scope block must be one of "
+                f"{sorted(_SCOPE_CONFIDENCE_LEVELS)}; "
+                f"got {sorted(set(unknown))}"
+            )
+        return v
+
+    @property
+    def has_unknown_keys(self) -> bool:
+        return bool(self.model_extra)
+
+
 @ash_scanner_plugin
 class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     """Implementation of a sensitive data detection scanner using Ferret Scan.
@@ -968,6 +1101,73 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     # treating it as success would mask a real failure. We therefore override the base
     # default of {0, 1} to {0, 3} rather than adding to it.
     success_exit_codes: ClassVar[set[int]] = {0, 3}
+
+    # --- Suppression-scope hooks (ScannerPluginBase; registered below) ---
+
+    @classmethod
+    def validate_suppression_scope(cls, block: Dict[str, Any]) -> List[str]:
+        """Problems with a scope.engines.ferret-scan block, for the config checks."""
+        try:
+            model = FerretScopeBlock.model_validate(block)
+        except ValidationError as e:
+            return [
+                error.get("msg", "invalid ferret-scan scope block")
+                for error in e.errors()
+            ]
+        if model.confidence_level is None and model.validator is None:
+            return [
+                (
+                    "a ferret-scan scope block needs confidence_level or "
+                    "validator; an empty block selects nothing."
+                )
+            ]
+        return []
+
+    @classmethod
+    def suppression_scope_matches(cls, block: Dict[str, Any], finding) -> bool:
+        """Whether this ferret-scan block covers ``finding``. Fails closed throughout."""
+        try:
+            model = FerretScopeBlock.model_validate(block)
+        except ValidationError:
+            return False
+        if model.has_unknown_keys or (
+            model.confidence_level is None and model.validator is None
+        ):
+            return False
+        # The result properties ferret-scan wrote, kept on the flat finding as a
+        # JSON string. A finding with none, or with unreadable ones, never matches.
+        raw = getattr(finding, "properties", None)
+        if not isinstance(raw, str):
+            return False
+        try:
+            properties = json.loads(raw)
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(properties, dict):
+            return False
+        if model.confidence_level is not None:
+            reported = properties.get("confidenceLevel")
+            if not isinstance(reported, str):
+                return False
+            wanted = (
+                [model.confidence_level]
+                if isinstance(model.confidence_level, str)
+                else model.confidence_level
+            )
+            if reported.strip().lower() not in {
+                w.strip().lower() for w in wanted if isinstance(w, str)
+            }:
+                return False
+        if model.validator is not None:
+            reported = properties.get("validator")
+            if not isinstance(reported, str):
+                return False
+            if reported.strip().lower() != model.validator.strip().lower():
+                return False
+        return True
+
+    # split_rule_qualifier: the inherited no-split default is correct — ferret-scan
+    # rule ids are the plain check type with no granular qualifier.
 
     def model_post_init(self, context):
         if self.config is None:
@@ -2062,6 +2262,16 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # this one an end before its start.
             self.end_time = datetime.now(timezone.utc)
             raise ScannerError(f"Ferret scan failed: {e}")
+
+
+# ferret-scan owns its scope.engines blocks (validate_suppression_scope and
+# suppression_scope_matches above). Registered at import, like the plugin
+# manager's own registry: an uninstalled plugin (module never imported) stays
+# unregistered and its blocks fail closed. A plugin that is imported but
+# DISABLED for the run is still registered — the loader imports listed modules
+# before it consults the enabled flag — so a scoped entry can still suppress
+# that scanner's findings in stored results, as cdk-nag's can.
+register_suppression_scope_engine("ferret-scan", FerretScanScanner)
 
 
 def _patterns_for_uncovered_links(

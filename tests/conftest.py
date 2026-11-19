@@ -1322,7 +1322,7 @@ def _keep_live_logging_off_the_ash_logger(request):
     the rest of that worker process -- ``cli/main.py``'s ``reset_logging_config``
     and ``utils/log.py``'s ``get_logger`` both did, before they removed only the
     handlers ASH added, and seven files under ``tests/unit/cli`` reach one of
-    them. Under ``-n auto`` the xdist worker
+    them. Under ``-n logical`` the xdist worker
     count decides which tests share a process, so one commit was green on the
     4-worker Linux and Windows runners and red on the 3-worker macOS runners.
     """
@@ -2676,6 +2676,36 @@ def _isolated_container_state_dir(request, tmp_path_factory, _isolated_home):
         target = Path(os.environ["HOME"]) / ".ash" / "state" / "containers"
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv(STATE_DIR_ENV, str(target))
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_tool_verdict_store(tmp_path_factory, _isolated_home):
+    """Persisted tool verdicts go to a directory of each test's own, never a HOME.
+
+    ``verify_pre_installed_tool`` persists a satisfied verdict under
+    ``$HOME/.ash/state/tool-verdicts`` by default and answers from it across
+    processes. ``_isolated_home`` keeps that default out of the developer's
+    home -- a suite faking ``_verify`` must never leave a made-up "satisfied"
+    record answering the developer's real runs, nor one test's record
+    answering another's -- but several suites also assert at teardown that
+    their test HOME holds no tool files, so the store is pointed outside every
+    home outright, per test, under the base temp directory (the counter for
+    the reason ``_isolated_home`` gives). A ``real_home`` test is covered by
+    the same arm. A test's own ``monkeypatch.setenv`` of the variable still
+    wins for that test.
+    """
+    from automated_security_helper.utils.pre_installed_tool import (
+        _VERDICT_STORE_DIR_ENV,
+    )
+
+    target = (
+        tmp_path_factory.getbasetemp()
+        / "tool-verdict-stores"
+        / str(next(_HOME_COUNTER))
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(_VERDICT_STORE_DIR_ENV, str(target))
         yield
 
 
@@ -4742,7 +4772,7 @@ def no_cdk_kernel(monkeypatch):
 
     WHAT THAT COSTS. jsii holds the cache lock for the whole extraction and its
     waiter gives up after 12 randomised retries (~13 s expected, ~26 s worst case).
-    On Windows CI the suite runs under ``-n auto`` = 4 workers, so two tests that
+    On Windows CI the suite runs under ``-n logical`` = 4 workers, so two tests that
     each boot a kernel can land on different workers, race the same cache entry, and
     the loser dies with ``EEXIST ... aws-cdk-lib/<version>/<sha>.lock``. That was
     measured: zero occurrences across 1,772 Windows legs while exactly one test

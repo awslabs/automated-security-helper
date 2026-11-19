@@ -33,7 +33,7 @@ ashx dependencies install --config .ash/.ash_community_plugins.yaml
 # Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
 # the latter resolves to whatever is newest, which is how a release published
 # mid-CI-run once turned every open pull request red.
-pip install 'ferret-scan>=2.4.5,<2.6.0'
+pip install 'ferret-scan>=2.4.5,<2.7.0'
 
 # Or build from source
 git clone https://github.com/awslabs/ferret-scan.git
@@ -159,8 +159,31 @@ manage false positives with ASH's own controls:
         rule_id: API_KEY_OR_SECRET
         reason: "False positive — variable/field name matches the secret-keyword heuristic, not a credential"
   ```
+- Or **narrow a suppression to a confidence band or detector** with an
+  engine-scoped block, so only the weak hits are suppressed and a HIGH-confidence
+  finding on the same path still reports:
+  ```yaml
+  global_settings:
+    suppressions:
+      - path: "tests/**"
+        rule_id: API_KEY_OR_SECRET
+        reason: "Fixture keys trip the keyword heuristic at low confidence"
+        scope:
+          engines:
+            ferret-scan:
+              confidence_level: [low, medium]
+  ```
+  The block also takes `validator` (exact detector name, case-insensitive).
+  Both keys fail closed: a finding without the property never matches.
 - Or **exclude** whole noise directories via the plugin's `exclude_patterns`.
 - Or scope the `checks` option to omit `SECRETS` if you do not need secret detection.
+
+**Findings in documents and binaries (PDF, DOCX, images):** the reported line
+number indexes ferret-scan's extracted text, not the file's bytes. Never pin a
+line in a suppression for such a finding — re-saving the document shifts it —
+and inline `ash-ignore` comments are impossible there. Suppress by the exact
+file path + `rule_id` (plus a `confidence_level`/`validator` scope to narrow
+further), and keep the path as narrow as the one file.
 
 See `DEVELOPMENT.md` → "Design decision: API_KEY_OR_SECRET stays ENABLED" for the full
 rationale.
@@ -311,7 +334,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: ">=2.4.5,<2.6.0"  # Compatible range
+      tool_version: ">=2.4.5,<2.7.0"  # Compatible range
 ```
 
 To bypass version checks (not recommended for production):
@@ -327,7 +350,11 @@ scanners:
 ### Available Checks
 
 The authoritative list for your installed version is `ferret-scan --help checks` — do not
-hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 through v2.5.2 the checks are:
+hardcode it, as ferret-scan adds detectors between releases. v2.6.0 adds no new check
+name, but widens several existing checks (UK NHS/CHI numbers under `MEDICAL_ID`,
+GB/Ontario/Quebec licenses under `DRIVERS_LICENSE`, ITINs under `SSN`, card track
+data under `CREDIT_CARD`), so a previously clean scan can report new findings after
+upgrading. As of v2.4.5 through v2.5.2 the checks are:
 
 - `BANK_ACCOUNT` - Bank account / IBAN / routing numbers
 - `CLOUD_RESOURCES` - Cloud resource identifiers (AWS ARNs, Azure/GCP/OCI/IBM/Alibaba IDs)

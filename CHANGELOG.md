@@ -44,6 +44,56 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## Unreleased
+
+### Features
+
+- **`ash --mode precommit --staged` scans the staged files instead of the whole repository.**
+  The list comes from `git diff --cached` (no deletions; a rename is scanned at its new
+  path): bandit and checkov are handed the staged files as targets, the scanners that pick
+  their own files (detect-secrets, cdk-nag, npm-audit) and the converters read the same
+  staged list, a scanner with nothing staged to scan is skipped with a log line, and a
+  commit with nothing staged exits 0 without starting a scanner. Suppressions and ignore
+  paths resolve exactly as in a whole-repository scan, and the staged file targets are
+  filtered through the run's scan set, so ignored or force-added files and staged
+  symlinks are not scanned. The reports are filtered to the staged files, so what a tool
+  reads for context (checkov's same-directory Terraform siblings; the directory fallback
+  past about 500 staged files, where one command line cannot carry the list) never adds
+  findings. The tools read the working-tree copy of each staged file;
+  under the pre-commit framework the two are identical, because it stashes unstaged
+  changes around the hooks. The `ash` and `ash-simple-scan`
+  pre-commit hooks now pass `--staged`; on the plain CLI the flag is opt-in and any mode
+  but `precommit` refuses it. It is planned to become the precommit default in ASH v4.
+  Unlike `--changed-files-only`, which scans everything and filters only the reports,
+  `--staged` saves the scan time.
+- **A Betterleaks community plugin, `ash_betterleaks_plugins`.** It runs
+  [Betterleaks](https://github.com/betterleaks/betterleaks) 1.10.1, the successor to
+  gitleaks written by its author, as `betterleaks dir` over the scan target when the
+  module is listed in `ash_plugin_modules` (or passed with `--ash-plugin-modules`), and
+  is on by default then. It runs beside the builtin gitleaks scanner, so a secret both
+  find is reported by each. Findings are CRITICAL with the secret redacted. Betterleaks
+  does not read a `.betterleaks.toml` or `.gitleaks.toml` from the scanned tree
+  (that needs `--unsafe-auto-load-config`, which ASH never passes), but it reads a
+  `.betterleaksignore` or `.gitleaksignore` at the scan root whatever ASH passes, and
+  drops what it lists before ASH sees it: a scan whose tree holds either file fails
+  before Betterleaks runs, unless the operator sets
+  `scanners.betterleaks.options.honor_tree_ignore_files`. The container image ships
+  Betterleaks, pinned and digest-verified; `ash dependencies install --tool betterleaks`,
+  with the module loaded, installs the same build locally. See
+  [Betterleaks Plugin](docs/content/docs/plugins/community/betterleaks-plugin.md).
+- **Engine-scoped suppressions for ferret-scan** (`scope.engines.ferret-scan`): a
+  suppression entry can now be narrowed to the confidence band ferret-scan reported
+  (`confidence_level: low|medium|high`, or a list) and/or the detector that produced
+  the finding (`validator`, exact and case-insensitive), so an operator can suppress
+  only the weak hits on a path while a HIGH-confidence finding there still reports.
+  Both keys fail closed: an empty block, an unknown key or band is refused at config
+  time, and a finding that does not carry the named property never matches. The
+  supported ferret-scan window also widens from `>=2.4.5,<2.6.0` to `>=2.4.5,<2.7.0`:
+  2.6.0 was verified against the plugin's invocation surface (SARIF shape, exclude
+  semantics, exit codes); note its new detectors (NHS/CHI numbers, GB/Ontario/Quebec
+  licenses, ITINs, card track data) can surface new findings in previously clean
+  scans. The recommended version stays 2.5.3 until the full fixture-matrix pass runs.
+
 ## v3.8.0 (2026-11-12)
 
 ### Breaking behavior changes in a minor release
@@ -385,17 +435,56 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
   ASH does not deduplicate across scanners, so overlapping pairs (gitleaks and
   detect-secrets, trivy and grype or trivy-repo, zizmor and actionlint) report a
   shared finding once per scanner; each scanner page says where.
+- **A hadolint community plugin, `ash_hadolint_plugins`, pending licensing review.** It
+  runs hadolint 2.15.1
+  with ShellCheck on `Dockerfile`, `Containerfile`, `*.Dockerfile` and
+  `Dockerfile.*` when the module is listed in `ash_plugin_modules` (or passed with
+  `--ash-plugin-modules`), and is on by default then. A Dockerfile hadolint cannot
+  parse is an unevaluated target, named, which makes the scan incomplete (exit 1),
+  and not a DL1000 finding. The container image ships hadolint, pinned and
+  digest-verified; `ash dependencies install --tool hadolint`, with the module
+  loaded, installs the same build locally; nix mode supplies it. hadolint always
+  gets an explicit `--config`, the operator's `config_file` (from
+  `--config-overrides` or a config outside the scanned tree, for a file outside
+  it) or an empty one, so a `.hadolint.yaml` in the scanned repository is not read.
+  See [hadolint Plugin](docs/content/docs/plugins/community/hadolint-plugin.md).
+- **A GuardDog community plugin, `ash_guarddog_plugins`, pending licensing review.** It
+  runs GuardDog 3.2.0
+  over every PyPI, npm, Go, GitHub Action, RubyGems and crates package root,
+  looking for malicious-package heuristics, when the module is listed in
+  `ash_plugin_modules` (or passed with `--ash-plugin-modules`), and is on by
+  default then. Local scans run offline; `options.verify` is refused in offline
+  mode. Not available on Windows, where it is SKIPPED with the reason. The
+  container image installs it as a uv tool at the pinned version,
+  `ash dependencies install --tool guarddog`, with the module loaded, installs the
+  same version locally, and an online scan that finds no GuardDog installs it the
+  same way before running it (`options.install_timeout` bounds the install).
+  GuardDog stops each rule after its `max_hits` (1, 3 or 5) per package root, a
+  limit in its bundled rule metadata, so by default it does not report every match.
+  `options.max_hits` changes that limit for every rule (0 removes it) by running
+  GuardDog's own CLI in its interpreter with the limit set; from a config in the
+  scanned tree it can only raise a rule's limit, since a lower one hides matches.
+  See
+  [GuardDog Plugin](docs/content/docs/plugins/community/guarddog-plugin.md).
 - **`--scanners` names the module to add for a community scanner that is not loaded.**
   `--scanners snyk-code` without `ash_snyk_plugins` listed is refused with a message
   naming the module, rather than reading as a typo; a selection in which other names
   resolved warns with the same advice and runs those, as any partly unresolved
   `--scanners` list does. `ash dependencies install --tool <name>` gives the same hint.
 - **The container image ships license files for the new scanners' tools.**
-  actionlint, gitleaks, and cfn-guard with the Guard Rules Registry bundle it reads
-  get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0) and zizmor,
-  read from each installed wheel's dist-info and checked against its RECORD. Every
-  uv install in the image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer
-  kept in any layer.
+  actionlint, gitleaks, cfn-guard with the Guard Rules Registry bundle it reads, and
+  hadolint (GPL-3.0, with its upstream ThirdPartyNotices and a corresponding-source
+  pointer) get `THIRD_PARTY_LICENSES` entries, as do the uv tools cfn-lint (MIT-0),
+  GuardDog and zizmor, read from each installed wheel's dist-info and checked
+  against its RECORD. pygit2 and the libgit2 it bundles (GPL-2.0 with a linking
+  exception), which GuardDog depends on, get the same directory, and so do the three
+  other libraries the pygit2 wheel bundles in `pygit2.libs`: libssh2 1.11.1
+  (BSD-3-Clause), OpenSSL 3.3.3 (Apache-2.0) and PCRE 8.42 (BSD-3-Clause), and the
+  OpenSSL 1.1.1w the yara-python wheel bundles in `yara_python.libs` (the dual
+  OpenSSL and SSLeay license). The image
+  holds pygit2 to the release those files describe with a uv constraint, and the
+  build reads each version back from GuardDog's environment. Every uv install in the
+  image now runs with `UV_NO_CACHE=1`, so uv's cache is no longer kept in any layer.
 
 - **The reusable scan workflow hands its artifact over by ID.**
   `run-ash-security-scan.yml` has a new `artifact-id` output: the ID
@@ -1517,6 +1606,11 @@ The commits below also carry breaking-change notes, listed under BREAKING CHANGE
 - A config that cannot be loaded because the file changed after it was checked is
   reported as such, with `error_category` `invalid_path`, whether the refusal is
   the error itself, its cause, or the mark of a reworded error.
+- **The container image sets `UV_CONSTRAINT` image-wide.** It names
+  `/etc/ash/uv-constraints.txt` (`pygit2==1.18.2`, the release whose license files
+  the image ships for GuardDog), so it also applies to any `uv` command run in the
+  container. An install that does not pull pygit2 in is unchanged; unset
+  `UV_CONSTRAINT` to drop it.
 - **An ignore path ending in `/` ignores the directory.** `global_settings.ignore_paths`
   entries are globs matched against a file's path below the source directory, and
   a file's path never ends in `/`, so `vendor/` matched nothing: every file there

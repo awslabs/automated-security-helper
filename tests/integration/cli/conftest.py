@@ -34,7 +34,7 @@ scan of a single-file tree measured 13 seconds on a 192-core host.
 
 ISOLATION UNDER PARALLEL EXECUTION
 ----------------------------------
-pytest.ini runs the suite with ``-n auto``, which on this host is 192 workers, so
+pytest.ini runs the suite with ``-n logical``, which on this host is 192 workers, so
 nothing here may contend on a fixed name. Three properties give that:
 
 * No port and no fixed socket. The in-memory transport is a pair of anyio object

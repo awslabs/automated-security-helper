@@ -1218,6 +1218,46 @@ scanners:
         assert any(i.category == LintCategory.LEGACY_NAME_VARIANT for i in fixed_issues)
 
 
+# One config per kind of issue that ``--fix`` fixes, and nothing else wrong with it, so
+# the file ``--fix`` leaves behind has no issue left to report.
+FIXABLE_ONLY_CONFIGS = {
+    LintCategory.SUPPRESSION_LINE_RANGE: (
+        "project_name: t\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/app.py\n"
+        "      rule_id: B201\n"
+        "      line_start: 42\n"
+        "      reason: False positive\n"
+    ),
+    LintCategory.SUPPRESSION_EXPIRED: (
+        "project_name: t\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/app.py\n"
+        "      rule_id: B201\n"
+        '      expires: "2020-01-01"\n'
+        "      reason: Temporary\n"
+        "    - path: src/other.py\n"
+        "      rule_id: B101\n"
+        "      reason: Still needed\n"
+    ),
+    LintCategory.SUPPRESSION_MULTILINE_REASON: (
+        "project_name: t\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: src/app.py\n"
+        "      rule_id: B201\n"
+        "      reason: |\n"
+        "        The command is a constant,\n"
+        "        so no user input reaches it.\n"
+    ),
+    LintCategory.LEGACY_NAME_VARIANT: (
+        "project_name: t\nscanners:\n  cdk_nag:\n    enabled: true\n"
+    ),
+}
+
+
 class TestConfigLintCLI:
     """Integration tests for the `ashx config lint` CLI command."""
 
@@ -1309,6 +1349,66 @@ class TestConfigLintCLI:
         assert "build" not in fixed_data
         assert "mcp-resource-management" not in fixed_data
         assert "name" not in fixed_data["scanners"]["bandit"]
+
+    def test_lint_after_fix_reports_nothing_for_internal_fields(
+        self, cli_runner, config_with_internal_fields
+    ):
+        """The roundtrip's close: lint the file --fix wrote and it has no issue left.
+
+        test_lint_fix_applies_changes reads the fix's exit code, which describes the
+        file left behind; this lints that file a second time and asks it for issues.
+        """
+        before = ConfigLinter.lint(config_with_internal_fields)
+        assert {i.category for i in before.fixable_issues} == {
+            LintCategory.INTERNAL_FIELD,
+            LintCategory.INVALID_SECTION,
+        }
+
+        fix = cli_runner.invoke(
+            config_app,
+            [
+                "lint",
+                "--config",
+                str(config_with_internal_fields),
+                "--fix",
+                "--non-interactive",
+            ],
+        )
+        assert fix.exit_code == 0, fix.output
+
+        after = ConfigLinter.lint(config_with_internal_fields)
+        assert after.issues == [], [(i.category.value, i.path) for i in after.issues]
+        validate = cli_runner.invoke(
+            config_app, ["validate", "--config", str(config_with_internal_fields)]
+        )
+        assert validate.exit_code == 0, validate.output
+
+    @pytest.mark.parametrize(
+        "category", list(FIXABLE_ONLY_CONFIGS), ids=lambda c: c.value
+    )
+    def test_lint_after_fix_reports_nothing(self, cli_runner, tmp_path, category):
+        """For each fixable category: lint names it, --fix removes it, a re-lint is empty."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(FIXABLE_ONLY_CONFIGS[category], encoding="utf-8")
+
+        before = ConfigLinter.lint(config_path)
+        assert category in {i.category for i in before.fixable_issues}, [
+            (i.category.value, i.path) for i in before.issues
+        ]
+
+        fix = cli_runner.invoke(
+            config_app,
+            ["lint", "--config", str(config_path), "--fix", "--non-interactive"],
+        )
+        assert fix.exit_code == 0, fix.output
+
+        after = ConfigLinter.lint(config_path)
+        assert after.issues == [], [(i.category.value, i.path) for i in after.issues]
+        validate = cli_runner.invoke(
+            config_app, ["validate", "--config", str(config_path)]
+        )
+        assert validate.exit_code == 0, validate.output
 
     def test_lint_fix_suppression_line_end(
         self, cli_runner, config_with_suppression_issues

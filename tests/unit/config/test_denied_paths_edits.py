@@ -86,8 +86,16 @@ def test_replace_uses_the_list_as_written_and_names_what_it_drops(ash_log) -> No
     (warning,) = [
         r.getMessage() for r in ash_log if "replace_default" in r.getMessage()
     ]
-    assert "/fail_on_findings" in warning
-    assert "/sandbox," not in warning, "an always-denied entry is not dropped"
+    # Compare the dropped entries whole: a default entry may end in a word that
+    # is also an always-denied section name (".../options/sandbox, ...").
+    dropped = warning.split(": ", 1)[1].split(", ")
+    assert "/fail_on_findings" in dropped
+    assert "/sandbox" not in dropped and "/sandbox/**" not in dropped, (
+        "an always-denied entry is not dropped"
+    )
+    assert not set(dropped) & set(ALWAYS_DENIED_PATHS), (
+        "an always-denied entry is not dropped"
+    )
     ccp.policy_of(
         AshConfig.model_validate(
             {

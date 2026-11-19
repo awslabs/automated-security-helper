@@ -30,6 +30,7 @@ EXEMPT = {
     "utils/sandbox/landlock_exec.py": "execs the scanner after restricting itself",
     "utils/get_scan_set.py": "ASH's own git calls, never inside a scanner",
     "interactions/run_ash_nix.py": "re-executes ASH itself inside nix develop",
+    "express/spawn.py": "starts the express daemon: ASH itself, detached, never a scanner",
     "cli/mcp/source_delivery.py": "git clone and checkout for MCP source delivery",
     "assets/install-pinned-tool.py": "standalone script run during the container image build",
 }

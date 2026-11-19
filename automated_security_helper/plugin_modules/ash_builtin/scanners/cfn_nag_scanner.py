@@ -12,7 +12,10 @@ from typing import Annotated, ClassVar, Dict, List, Literal
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
-from automated_security_helper.base.plugin_base import CustomCommand
+from automated_security_helper.base.plugin_base import (
+    CustomCommand,
+    install_story_is_declared,
+)
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -573,7 +576,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         on this platform" -- by name, next to npm-audit -- and a machine with Ruby
         installs it.
         """
-        missing = self._missing_gem_prerequisites()
+        # Built to be described (the reference generators), not run: declare the
+        # install as a machine that passes every probe below would, so the page
+        # does not depend on whether the generating machine has gem or a compiler.
+        declaring = install_story_is_declared()
+        missing = [] if declaring else self._missing_gem_prerequisites()
         if missing:
             # At WARNING only where it matters: with cfn_nag_scan already on PATH
             # (the official image installs the gem and then purges its compiler)
@@ -606,6 +613,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         # directory, since Gem.path includes it by default. With no bin directory
         # there is no --bindir to give, and the command only says so.
         bin_dir = current_bin_path()
+        if declaring and bin_dir is None:
+            # The bin directory is a per-machine fact too (no usable home).
+            bin_dir = Path("ASH_BIN_PATH")
         command = (
             refusing_install_command(NO_BIN_DIRECTORY)
             if bin_dir is None

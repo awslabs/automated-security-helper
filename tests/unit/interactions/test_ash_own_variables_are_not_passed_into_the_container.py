@@ -160,6 +160,9 @@ _KNOWN_DYNAMIC_READS = sorted(
         "config/environment_record.py [get] :: name",
         "core/constants.py [get] :: variable",
         "core/constants.py [get] :: variable",
+        # The express client's completion check reads each name of its one list
+        # (COMPLETION_ENV_NAMES, click's _<PROG>_COMPLETE spellings, none ASH_*).
+        "express/client.py [in-environ] :: name",
         "interactions/container_leftovers.py [get] :: variable",
         "interactions/run_ash_container.py [get] :: name",
         "interactions/run_ash_container.py [get] :: name",
@@ -169,6 +172,7 @@ _KNOWN_DYNAMIC_READS = sorted(
         "interactions/run_ash_container.py [subscript] :: name",
         "interactions/run_ash_scan.py [get] :: name",
         "plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py [get] :: name",
+        "plugin_modules/ash_betterleaks_plugins/betterleaks_scanner.py [get] :: name",
         "plugin_modules/ash_builtin/scanners/_grep_scanner_base.py [get] :: cache_env",
         "plugin_modules/ash_builtin/scanners/_grep_scanner_base.py [get] :: self.cache_dir_env_var()",
         "plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py [get] :: env",

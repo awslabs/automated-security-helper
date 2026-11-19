@@ -9,6 +9,8 @@ fail_on_findings: true
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins
+  - automated_security_helper.plugin_modules.ash_guarddog_plugins
+  - automated_security_helper.plugin_modules.ash_hadolint_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
@@ -110,6 +112,27 @@ global_settings:
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugin_modules/ash_aws_plugins/test_security_hub_batch_import.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_hadolint_plugins/test_hadolint_scanner_behavior.py
+      line_start: 885
+      line_end: 887
+      reason: >-
+        False positive. The three lines hold the commit hadolint's v2.15.1 tag points at
+        and the SHA256 of its LICENSE and ThirdPartyNotices.txt files at that commit, which
+        the third-party-license test compares the vendored copies against. They are public
+        digests, not credentials. Pinned to the three lines so a value added elsewhere in
+        the file still reports; the inline pragma on each line is detect-secrets', which
+        ferret-scan does not read.
+    - rule_id: API_KEY_OR_SECRET
+      path: tests/unit/plugin_modules/ash_betterleaks_plugins/test_betterleaks_scanner.py
+      line_start: 746
+      line_end: 746
+      reason: >-
+        False positive. The line holds the commit the betterleaks v1.10.1 tag points at,
+        which the pinned-release test compares against the Dockerfile's pin. It is a
+        public commit id, not a credential. Pinned to the one line so a value added
+        elsewhere in the file still reports; the inline pragma on the line is
+        detect-secrets', which ferret-scan does not read.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugin_modules/ash_snyk_plugins/test_snyk_code_scanner_behavior.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
@@ -266,6 +289,22 @@ global_settings:
     - path: pyproject.toml
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
+    # === GuardDog false positives, continued: the docs-CI and MCP waves ===
+    #
+    # The same dispositions as the line-pinned block below: heuristics matching
+    # docstrings that NAME sensitive paths, fixtures that PLANT the hazard a test
+    # asserts is refused, and a doc-claims harness talking to its own loopback
+    # server. One entry per finding, pinned to its line.
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/cli/mcp/source_delivery.py
+      line_start: 2501
+      line_end: 2501
+      reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/path_matching.py
+      line_start: 268
+      line_end: 268
+      reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
     # === ferret-scan API_KEY_OR_SECRET, unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
     # validator, so an ordinary identifier whose NAME is a secret keyword (session,
@@ -482,14 +521,82 @@ global_settings:
       reason: >-
         False positive. A module constant named for a fake MCP session, the same
         shape as the entries for the other MCP tests above.
+    # === ferret-scan API_KEY_OR_SECRET: new detections in ferret-scan 2.6.0 ===
+    # The supported window admits ferret-scan 2.6.0, whose detectors report these
+    # nine sites at 95-100% confidence. Each was read at the reported line and is
+    # pinned to it; none is a stored credential. The ferret-scan 2.5.x scans of
+    # the same files did not report them.
+    - path: tests/unit/utils/test_secret_masking_shapes_in_text.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 49
+      line_end: 49
+      reason: >-
+        False positive. A masking test's assertion over a made-up fixture value,
+        the same shape as the other secret-masking tests.
+    - path: tests/unit/utils/test_secret_masking_regression.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 51
+      line_end: 51
+      reason: >-
+        False positive. A masking test's input string holding a made-up password
+        literal, so the masker has something to mask.
+    - path: tests/unit/utils/test_secret_masking_regression.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 60
+      line_end: 60
+      reason: >-
+        False positive. A masking test's input string holding a made-up password
+        literal, so the masker has something to mask.
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret-config.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 325
+      line_end: 325
+      reason: >-
+        False positive. This is ferret-scan's own detector regular expression
+        for the trade_secret keywords, pattern text and not a value.
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret-config.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 670
+      line_end: 670
+      reason: >-
+        False positive. This is ferret-scan's own detector regular expression
+        for the trade_secret keywords, pattern text and not a value.
+    - path: .ash/.ash.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 1019
+      line_end: 1019
+      reason: >-
+        False positive. A suppression reason that quotes a placeholder fixture
+        literal; the text explains why another finding is a false positive.
+    - path: .ash/.ash.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 1266
+      line_end: 1266
+      reason: >-
+        False positive. A suppression reason that quotes a placeholder fixture
+        literal; the text explains why another finding is a false positive.
+    - path: .github/workflows/ash-repo-docs.yml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 158
+      line_end: 158
+      reason: >-
+        False positive. A shell variable named for a token, filled at run time
+        from /dev/urandom as a per-run nonce. No value is stored in the file.
+    - path: .github/workflows/ash-repo-scan.yml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 274
+      line_end: 274
+      reason: >-
+        False positive. A shell variable named for a token, filled at run time
+        from /dev/urandom as a per-run nonce. No value is stored in the file.
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 334
-      line_end: 439
+      line_start: 368
+      line_end: 493
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -525,8 +632,8 @@ global_settings:
         a version bump that moves them fails a test instead of drifting.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 906
-      line_end: 929
+      line_start: 966
+      line_end: 1011
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -537,8 +644,8 @@ global_settings:
         fails when the block moves and this range does not.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
-      line_start: 626
-      line_end: 626
+      line_start: 650
+      line_end: 650
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B404
@@ -547,13 +654,13 @@ global_settings:
       reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B603
-      line_start: 1070
-      line_end: 1076
+      line_start: 1263
+      line_end: 1273
       reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B607
-      line_start: 1070
-      line_end: 1076
+      line_start: 1263
+      line_end: 1273
       reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
     - path: scripts/generate_test_docx.py
       rule_id: B311
@@ -1446,6 +1553,28 @@ global_settings:
       line_start: 1612
       line_end: 1612
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/utils/python_installer.py
+      line_start: 116
+      line_end: 116
+      reason: "The pip install argv ASH builds for its own interpreter when it runs outside a uv tool environment; returned to the caller, which installs ASH's own pinned requirements. Nothing downloaded here is executed."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/interactions/run_ash_container.py
+      line_start: 4359
+      line_end: 4359
+      reason: "The container.env file ASH writes, under a temporary directory it has checked is outside the source and output trees, to hand its own variables to the container runner; a write of ASH's file, not a read of a dotenv."
+    # === GuardDog: hits the self-scan reports with max_hits: 0 ===
+    # Measured with GuardDog 3.2.0 over the tree the plugin stages, with no hit limit
+    # (scanners.guarddog.options.max_hits: 0 in .ash/.ash_community_plugins.yaml, the
+    # config the self-scan runs GuardDog under). Each is code whose text is what the
+    # rule describes: an input a check must reject, a file planted under a test's
+    # temporary directory, a command string a test inspects, or one variable read by
+    # name. One entry per line, as above.
+    - rule_id: threat-runtime-environment-read
+      path: deploy/cdk/lib/ash-container-scripts.ts
+      line_start: 559
+      line_end: 559
+      reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 443
@@ -1483,14 +1612,84 @@ global_settings:
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 1217
-      line_end: 1217
+      line_start: 1175
+      line_end: 1175
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
       line_start: 417
       line_end: 417
       reason: "Decodes a nix SRI hash to hex to compare with the pinned table; nothing is executed."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
+      line_start: 141
+      line_end: 141
+      reason: "'.git-credentials' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
+      line_start: 144
+      line_end: 144
+      reason: "'.env' is an entry of SCANNABLE_MEMBER_NAMES, the archive member names the converter extracts so the secret scanners can read them; a name in a table, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
+      line_start: 171
+      line_end: 171
+      reason: "'.env' is the dotfile stem whose stage-suffixed variants (.env.local) the converter admits for scanning; a name in a table, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
+      line_start: 582
+      line_end: 582
+      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
+      line_start: 584
+      line_end: 584
+      reason: "A docstring naming .npmrc to say why the version probe's directory holds its own package.json; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 62
+      line_end: 62
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 304
+      line_end: 304
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 319
+      line_end: 319
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 359
+      line_end: 359
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 420
+      line_end: 420
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 436
+      line_end: 436
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 574
+      line_end: 574
+      reason: "Module prose naming .npmrc to document which configuration the package managers would read and why the scan copy avoids it; nothing here reads the file."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/package_manager_child.py
+      line_start: 1186
+      line_end: 1186
+      reason: "A refusal message naming ~/.npmrc and ~/.yarnrc as what the audit copy keeps the package managers away from; nothing here reads the files."
+    - rule_id: threat-filesystem-read
+      path: scripts/generate_plugin_data_partial.py
+      line_start: 185
+      line_end: 185
+      reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
     # === trivy license scanner: two expressions the approved list does not match ===
     #
     # The approved-license entries above are keyed on rule ids of the form
@@ -1657,7 +1856,7 @@ global_settings:
       path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
       expires: "2027-05-06"
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file. Reviewed at the expiry date."
-    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-24) ===
+    # === Time-boxed: dnspython CVE-2026-114605 / GHSA-45c3-73f7-pv4m on Python 3.10 (expires 2026-11-27) ===
     # Same decision as the dnspython entries in .ash/.ash.yaml, restated here because
     # a suppression list is not inherited across config files. uv.lock holds two
     # dnspython entries. The one for Python 3.11 and later is at 2.9.0, the first
@@ -1673,18 +1872,36 @@ global_settings:
       path: "uv.lock"
       package_name: "dnspython"
       package_version: "2.8.0"
-      expiration: "2026-11-24"
+      expires: "2026-11-27"
       reason: >-
         CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
+    # === Time-boxed: dnspython CVE-2026-128089 / GHSA-vvf4-9x63-8xvv on Python 3.10 (expires 2026-11-27) ===
+    # Same decision as the dnspython CVE-2026-128089 entries in .ash/.ash.yaml, restated
+    # here because a suppression list is not inherited across config files. Same Python
+    # 3.10 entry as above: the fixed release 2.9.2 requires Python 3.11, so the 3.10
+    # entry stays at 2.8.0 and the Python 3.11 and later entry moves to 2.9.2. trivy
+    # and trivy-repo both report the CVE id as is; grype, which would add the package
+    # name to the GHSA id, is off in this mode, so one CVE-spelled entry covers both.
+    # Revisit when requires-python rises or a dnspython release supporting Python
+    # 3.10 ships.
+    - rule_id: "CVE-2026-128089"
+      path: "uv.lock"
+      package_name: "dnspython"
+      package_version: "2.8.0"
+      expires: "2026-11-27"
+      reason: >-
+        CVE-2026-128089 (GHSA-vvf4-9x63-8xvv): dnspython 2.8.0 in uv.lock, the Python 3.10
+        entry. The fixed release 2.9.2 requires Python 3.11; the Python 3.11 and later entry
+        is at 2.9.2. Revisit when requires-python rises or a supporting release ships.
     # === Time-boxed: minimatch CVE-2026-118764 / GHSA-g3hv-75wg-m249, bundled in aws-cdk-lib (expires 2027-02-06) ===
     # The flagged copy is node_modules/aws-cdk-lib/node_modules/minimatch 10.2.5
     # (inBundle: true) in deploy/cdk/package-lock.json. The repository's own override
     # already pins the top-level minimatch to 11.x, but a bundled copy ships inside the
     # aws-cdk-lib tarball and no override reaches it. The advisory lists 11.0.1 as the
-    # only patched release (affected >= 7.0.0, < 11.0.1). Measured 2026-11-06: the latest
-    # aws-cdk-lib, 2.275.0, declares minimatch ^10.2.6 and bundles it, and main declares
+    # only patched release (affected >= 7.0.0, < 11.0.1). Measured 2026-11-13: the latest
+    # aws-cdk-lib, 2.277.0, declares minimatch ^10.2.6 and bundles it, and main declares
     # the same range, so no released aws-cdk-lib carries a fixed bundle yet. The version
     # is pinned in the entry, so a different bundled version reports again. trivy and
     # trivy-repo both report the CVE id as is, so one entry covers both.
@@ -1697,9 +1914,108 @@ global_settings:
       reason: >-
         CVE-2026-118764 (GHSA-g3hv-75wg-m249): minimatch 10.2.5 bundled inside aws-cdk-lib
         (inBundle), so the repository's override, which pins the top-level minimatch to 11.x,
-        cannot reach it. Fix = aws-cdk-lib >= none released yet (2.275.0 declares minimatch
+        cannot reach it. Fix = aws-cdk-lib >= none released yet (2.277.0 declares minimatch
         ^10.2.6; the fix is minimatch 11.0.1). Revisit when a release bundles minimatch
         >=11.0.1.
+    # === Time-boxed: picomatch GHSA-fc5q-39xc-vjpf, no patched version (expires 2026-11-27) ===
+    # Kept in step with .ash/.ash.yaml: suppression lists are not inherited across
+    # config files, so the npm-audit entries live in both. picomatch up to and
+    # including 4.0.7 is affected (ReDoS through single-branch repeated extglobs) and
+    # 4.0.7 is the newest release on the registry (read 2026-11-17), so no upgrade or
+    # npm `overrides` pin can remove it. Every copy in both lockfiles is a dev
+    # dependency ("dev": true) of the deploy tooling; none of it ships in the wheel or
+    # the container image. One entry per install path, version pinned, so a new copy or
+    # a different version reports again. The `npm-audit-transitive-<package>` findings
+    # whose via chains reach these copies are covered by these root entries. Revisit
+    # when a picomatch release above 4.0.7 ships.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "2.3.2"
+      package_path: "deploy/cdk/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 in deploy/cdk/package-lock.json, hoisted for
+        anymatch. No patched version exists (newest release is 4.0.7, inside the affected
+        range). Dev dependency of the deploy tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/@parcel/watcher/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/@parcel/watcher/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under @parcel/watcher in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/jest-haste-map/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/jest-haste-map/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-haste-map in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/jest-message-util/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/jest-message-util/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-message-util in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/jest-util/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk/node_modules/jest-util/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 under jest-util in
+        deploy/cdk/package-lock.json. No patched version exists. Dev dependency of the
+        deploy tooling only, not shipped in the wheel or the container image. Revisit when
+        a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "4.0.7"
+      package_path: "deploy/cdk-constructs/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 4.0.7 in deploy/cdk-constructs/package-lock.json,
+        hoisted for fdir and the jest 30 tree. No patched version exists. Dev dependency of
+        the constructs package's build tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/anymatch/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "2.3.2"
+      package_path: "deploy/cdk-constructs/node_modules/anymatch/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under anymatch in
+        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
+        of the constructs package's build tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
+    - rule_id: "GHSA-fc5q-39xc-vjpf"
+      path: "node_modules/micromatch/picomatch/package.json"
+      package_name: "picomatch"
+      package_version: "2.3.2"
+      package_path: "deploy/cdk-constructs/node_modules/micromatch/node_modules/picomatch"
+      expires: "2026-11-27"
+      reason: >-
+        GHSA-fc5q-39xc-vjpf: picomatch 2.3.2 under micromatch in
+        deploy/cdk-constructs/package-lock.json. No patched version exists. Dev dependency
+        of the constructs package's build tooling only, not shipped in the wheel or the
+        container image. Revisit when a fix ships; see the block comment above.
     # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===
     #
     # The same unquoted-assignment and name-matching dispositions as the ferret-scan
@@ -1835,8 +2151,9 @@ global_settings:
     # The same entry as in .ash/.ash.yaml, where the default mode already made
     # this call. Without it here, the community scanners report the docs'
     # illustrative DATABASE_PASSWORD example (gitleaks and ferret-scan, on
-    # platform-teams.md, its .template and reference/coverage.md), which is not
-    # shipped code or a real credential.
+    # platform-teams.md, its .template and reference/coverage.md) and the docs
+    # UI suite's browser assertions (guarddog, on docs/ui-tests/specs), none of
+    # which are shipped code or real credentials.
     - path: "docs/**"
       reason: Documentation content with example code snippets — secrets/keywords in examples are illustrative, not real credentials.
 reporters:
@@ -1928,6 +2245,23 @@ scanners:
       severity_threshold: "MEDIUM"
   syft:
     enabled: false
+  # GuardDog stops a rule after 1, 3 or 5 hits per package root by default, so
+  # matches past that were never reported or reviewed. The self-scan removes the
+  # limit; every hit it then reports is either fixed or pinned to its line in the
+  # GuardDog suppressions above. Only this config raises it: ASH's default is
+  # unchanged.
+  guarddog:
+    options:
+      max_hits: 0
+      # The self-scan reads the product, not its tests. The unit and integration
+      # trees plant the hazards the tests assert ASH refuses (process spawns,
+      # downloads, dotfiles, traversal paths), and a line pin on a test file went
+      # stale at every move of the base. The product-file pins above stay.
+      excluded_paths:
+        - path: "tests/**"
+          reason: "Test code plants the hazards it asserts ASH refuses; the self-scan covers the product."
+        - path: "deploy/cdk-constructs/test/**"
+          reason: "Construct tests plant the inputs they assert synth rejects; the self-scan covers the product."
   ferret-scan:
     enabled: true
     options:

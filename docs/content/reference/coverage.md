@@ -16,17 +16,17 @@ Community plugins run only when you load their module with `ash_plugin_modules` 
 | Python code | bandit, opengrep | snyk-code |
 | JavaScript and TypeScript code | opengrep | snyk-code |
 | Java, Go, Ruby, C#, PHP, and other languages | opengrep (as far as its rules cover the language) | snyk-code |
-| Python dependencies (`requirements.txt`, lockfiles) | grype, trivy, syft | trivy-repo |
-| npm, Yarn, and pnpm dependencies | npm-audit, grype, trivy, syft | trivy-repo |
-| Other dependency manifests and lockfiles (`go.mod`, `pom.xml`, and the others grype and trivy recognize) | grype, trivy, syft | trivy-repo |
+| Python dependencies (`requirements.txt`, lockfiles) | grype, trivy, syft | guarddog, trivy-repo |
+| npm, Yarn, and pnpm dependencies | npm-audit, grype, trivy, syft | guarddog, trivy-repo |
+| Other dependency manifests and lockfiles (`go.mod`, `pom.xml`, and the others grype and trivy recognize) | grype, trivy, syft | guarddog, trivy-repo |
 | CloudFormation templates | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov | trivy-repo |
 | AWS CDK apps | cfn-nag, cfn-lint, cfn-guard, cdk-nag, checkov (on the templates `cdk synth` writes to `cdk.out`); bandit, opengrep (on the app code; bandit reads only Python) | trivy-repo |
 | Terraform | checkov | trivy-repo |
 | Kubernetes manifests and the other formats checkov supports | checkov | trivy-repo |
-| Dockerfiles | checkov | trivy-repo |
+| Dockerfiles | checkov | hadolint, trivy-repo |
 | GitHub Actions workflows | actionlint, zizmor, checkov | |
-| Composite actions (`action.yml`) | zizmor | |
-| Secrets, in any file | detect-secrets, gitleaks | ferret-scan (sensitive data), trivy-repo |
+| Composite actions (`action.yml`) | zizmor | guarddog |
+| Secrets, in any file | detect-secrets, gitleaks | betterleaks, ferret-scan (sensitive data), trivy-repo |
 | A software bill of materials | syft | |
 | Jupyter notebooks | bandit, detect-secrets, gitleaks (on the converted script, bandit only for a Python notebook; see [Converted files](#converted-files)) | |
 | `.zip`, `.tar`, and `.gz` archives | detect-secrets, gitleaks (on every extracted file; see [Converted files](#converted-files)) | |
@@ -63,7 +63,10 @@ them to the tool.
 | syft | SBOM | Whole directory: builds an SBOM and reports no findings | no | no |
 | trivy | SCA | Whole directory: `trivy fs` with the vulnerability scanner only, by default | no | no |
 | zizmor | SAST | Selected files: GitHub Actions workflows and composite actions | yes | no |
+| betterleaks | Secrets | Whole directory: the files on disk, not git history | no | no |
 | ferret-scan | Secrets | Whole directory, including files `.gitignore` excludes | no | no |
+| guarddog | SCA | Selected files: for each directory that holds a package manifest (`setup.py`, `package.json`, `go.mod`, `action.yml`, a `*.gemspec`, `Cargo.toml`, and the others the [GuardDog page](../docs/plugins/community/guarddog-plugin.md) lists), a temporary copy of the files in the scan set under it | yes | no |
+| hadolint | IaC | Selected files: Dockerfiles, named `Dockerfile`, `Containerfile`, `*.Dockerfile`, or `Dockerfile.*`, with that exact capitalization | no | no |
 | snyk-code | SAST | Whole directory, sent to Snyk's service | no | no |
 | trivy-repo | SAST | Whole directory: `trivy repository` with the vulnerability, secret, misconfiguration, and license scanners | no | no |
 

@@ -12,8 +12,13 @@
 # run (cdk-nag MISSING, because the hook environment had no `cdk` extra) and
 # `ash-full-scan` could not start ("Executable `.../ashv3` not found").
 #
-# `ash` runs for real and must exit 0 on a clean repository and 2 on one with a
-# finding. `ash-simple-scan` is not run: tests/unit/test_pre_commit_hooks_manifest.py
+# `ash` runs for real and must exit 0 when the STAGED change is clean and 2 when
+# it holds a finding. The hook passes --staged, so what it judges is the change
+# being committed: each fixture stages its app.py on top of a committed baseline,
+# the state a pre-commit hook is called about. A fixture that committed app.py
+# instead measured nothing once the hook grew --staged: with nothing staged the
+# hook correctly exits clean, and this check read that as a missed finding.
+# `ash-simple-scan` is not run: tests/unit/test_pre_commit_hooks_manifest.py
 # holds it identical to `ash`. `ash-full-scan` builds the ASH image, which takes
 # minutes and a container runtime this job does not have; here a stub `finch`
 # (first in ASH's runtime discovery order) records the commands ASH sends it, and
@@ -34,14 +39,20 @@ fail() {
 pre-commit --version
 pre-commit validate-manifest "$REPO/.pre-commit-hooks.yaml"
 
-# A git repository holding one committed file; try-repo needs a repository to run in.
+# A git repository with a committed baseline and the body STAGED in app.py;
+# try-repo needs a repository to run in, and the --staged hook scans the staged
+# change. The baseline commit gives the index diff a parent, as every repository
+# with history has; app.py is added and left uncommitted, as at commit time.
+# pre-commit stashes only unstaged edits around a run, so the staged file stays.
 make_fixture() {
   local dir="$1" body="$2"
   mkdir -p "$dir"
-  printf '%s\n' "$body" >"$dir/app.py"
+  printf '# fixture baseline\n' >"$dir/README.md"
   git -C "$dir" init -q
-  git -C "$dir" add app.py
+  git -C "$dir" add README.md
   git -C "$dir" -c user.name=ci -c user.email=ci@example.invalid commit -q -m fixture
+  printf '%s\n' "$body" >"$dir/app.py"
+  git -C "$dir" add app.py
 }
 
 # Prints the hook's output, and returns pre-commit's exit code.

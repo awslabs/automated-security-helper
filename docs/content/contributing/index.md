@@ -210,8 +210,9 @@ does not merge.
 | `lint` | the JSON schemas match a regeneration; the docs checks pass; every CI artifact upload and cache is allowlisted; every cached content database is time-bounded; and `ruff check`, `ruff format --check`, and mypy pass. ty runs for information only | through `required-checks` |
 | `actionlint` | actionlint and shellcheck over every workflow | through `required-checks` |
 | `snapshot-trailers` | every changed golden file has a `Snapshot-Update:` trailer, and every snapshot belongs to a test module | through `required-checks` |
-| `unit-test (<os>, py<version>, shard <i>of4)` | the unit and snapshot suite with both extras, on five runners and Python 3.10 to 3.14, plus the cdk-nag integration tests. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of `automated_security_helper/` is under 80% | through `required-checks` |
-| `integration-test (ubuntu-latest)` | the integration suite with `pytest --run-integration --run-slow`, and the examples in the docs | through `required-checks` |
+| `unit-test (<os>, py<version>, shard <i>of<n>)` | the unit and snapshot suite with both extras, on five runners and Python 3.10 to 3.14, plus the cdk-nag integration tests, in six shards per Linux combination and eight per macOS and Windows one. A test that cannot find an extra fails rather than skipping, and the leg fails when total coverage of `automated_security_helper/` is under 80% | through `required-checks` |
+| `integration-test (ubuntu-latest, shard <i>of4)` | the integration suite with `pytest --run-integration --run-slow`, in four shards | through `required-checks` |
+| `docs-examples` | every runnable shell and Python block in the docs, one test per page | through `required-checks` |
 | `build-docs` | `mkdocs build --strict`, and `scripts/docs_versions.py check` on the versioned site | through `required-checks` |
 | `converter-integration (<os>)` | the converter integration tests on macOS and Windows | through `required-checks` |
 | `scan (<method>, <os>)` | real scans by every way of running ASH: local, the Python container launcher, `./ash`, PowerShell, each container runtime, offline, and with the community plugins | through `required-checks` |

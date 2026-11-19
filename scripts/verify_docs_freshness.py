@@ -1744,6 +1744,42 @@ def check_doc_workflow_inputs() -> list[str]:
     return [str(f) for f in findings]
 
 
+JOURNEY_PAGES = REPO_ROOT / "scripts" / "generate_journey_pages.py"
+_journey_pages_module = None
+
+
+def _journey_pages():
+    """Load scripts/generate_journey_pages.py by path, once."""
+    global _journey_pages_module
+    if _journey_pages_module is None:
+        import importlib.util
+
+        name = "_ash_journey_pages"
+        if name in sys.modules:
+            _journey_pages_module = sys.modules[name]
+        else:
+            spec = importlib.util.spec_from_file_location(name, JOURNEY_PAGES)
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"cannot load {JOURNEY_PAGES}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            _journey_pages_module = module
+    return _journey_pages_module
+
+
+def check_doc_journeys() -> list[str]:
+    """Every journey file renders, and its template is exactly that render.
+
+    A journey page is written by scripts/generate_journey_pages.py from the journey
+    file, so a template edited by hand, a journey edited without regenerating, a
+    journey the renderer refuses (its samples contradict its structured fields) and a
+    journey whose page is not committed each fail here, naming the command that fixes
+    it.
+    """
+    return _journey_pages().check_journeys(REPO_ROOT)
+
+
 # ---------------------------------------------------------------------------
 # Docs from one tree, code from another
 # ---------------------------------------------------------------------------
@@ -2444,6 +2480,7 @@ def main(argv: list[str] | None = None) -> int:
             "Values docs examples pass the scan workflow pass its input check",
             check_doc_workflow_inputs,
         ),
+        ("Journey pages match their journey files", check_doc_journeys),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []
