@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 import tomllib
+from packaging.markers import Marker
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
@@ -45,9 +46,56 @@ PIN = re.compile(
 )
 
 
+# The interpreter every Dockerfile here builds on (python:3.12-slim). A package a lock pins
+# once per marker range is read at the pin whose marker holds for this environment.
+IMAGE_ENVIRONMENT = {
+    "python_version": "3.12",
+    "python_full_version": "3.12.15",
+    "sys_platform": "linux",
+    "platform_system": "Linux",
+    "os_name": "posix",
+    "platform_machine": "x86_64",
+    "implementation_name": "cpython",
+    "platform_python_implementation": "CPython",
+}
+# Environments the disjointness check tries. Two pins of one package are accepted only
+# when no environment in this grid satisfies both markers.
+_MARKER_GRID = [
+    {
+        "python_version": f"3.{minor}",
+        "python_full_version": f"3.{minor}.0",
+        "sys_platform": sys_platform,
+        "platform_system": system,
+        "os_name": "nt" if sys_platform == "win32" else "posix",
+        "platform_machine": machine,
+        "implementation_name": implementation,
+        "platform_python_implementation": "CPython" if implementation == "cpython" else "PyPy",
+    }
+    for minor in range(8, 16)
+    for sys_platform, system in (("linux", "Linux"), ("darwin", "Darwin"), ("win32", "Windows"))
+    for machine in ("x86_64", "aarch64", "arm64", "AMD64")
+    for implementation in ("cpython", "pypy")
+]
+
+
+def _markers_overlap(first: str | None, second: str | None) -> bool:
+    """True unless both markers exist and no environment in the grid satisfies both."""
+    if first is None or second is None:
+        return True
+    left, right = Marker(first), Marker(second)
+    return any(left.evaluate(env) and right.evaluate(env) for env in _MARKER_GRID)
+
+
 def parse_lock(text: str) -> dict[str, tuple[Version, list[str]]]:
-    """{canonical name: (version, hashes)} for a pip requirements file, refusing loose lines."""
+    """{canonical name: (version, hashes)} for a pip requirements file, refusing loose lines.
+
+    A universal lock pins one package once per marker range (dnspython 2.8.0 for
+    python < 3.11 and 2.9.2 for >= 3.11). Those repeats are accepted when their markers
+    cannot both hold, and the pin whose marker holds on IMAGE_ENVIRONMENT is the one
+    returned. Two pins that can apply to one environment still raise "pinned twice".
+    """
     entries: dict[str, tuple[Version, list[str]]] = {}
+    markers: dict[str, list[str | None]] = {}
     logical = re.sub(r"\\\n", " ", text)
     for raw in logical.splitlines():
         line = raw.split(" #", 1)[0].strip() if not raw.lstrip().startswith("#") else ""
@@ -62,9 +110,16 @@ def parse_lock(text: str) -> dict[str, tuple[Version, list[str]]]:
         if not hashes or not all(re.fullmatch(r"sha256:[0-9a-f]{64}", h) for h in hashes):
             raise ValueError(f"no sha256 hash: {line[:120]}")
         name = canonicalize_name(match.group("name"))
+        marker = match.group("marker")
+        pin = (Version(match.group("version")), hashes)
         if name in entries:
-            raise ValueError(f"{name} pinned twice")
-        entries[name] = (Version(match.group("version")), hashes)
+            if any(_markers_overlap(seen, marker) for seen in markers[name]):
+                raise ValueError(f"{name} pinned twice")
+            if marker is not None and Marker(marker).evaluate(IMAGE_ENVIRONMENT):
+                entries[name] = pin
+        else:
+            entries[name] = pin
+        markers.setdefault(name, []).append(marker)
     if not entries:
         raise ValueError("no requirements at all")
     return entries
@@ -109,6 +164,54 @@ class TestEveryLock:
     def test_a_loose_requirement_is_refused(self, text, message):
         with pytest.raises(ValueError, match=message):
             parse_lock(text)
+
+
+def _pin(name: str, version: str, marker: str | None, digit: str) -> str:
+    where = f" ; {marker}" if marker else ""
+    return f"{name}=={version}{where} \\\n    --hash=sha256:{digit * 64}\n"
+
+
+class TestAMarkerSplitPin:
+    """uv.lock pins dnspython 2.8.0 below python 3.11 and 2.9.2 from 3.11 on."""
+
+    SPLIT = _pin("dnspython", "2.8.0", "python_full_version < '3.11'", "a") + _pin(
+        "dnspython", "2.9.2", "python_full_version >= '3.11'", "b"
+    )
+
+    def test_disjoint_markers_are_accepted_and_the_image_interpreter_picks_one(self):
+        version, hashes = parse_lock(self.SPLIT)["dnspython"]
+        assert version == Version("2.9.2") and hashes == ["sha256:" + "b" * 64]
+
+    def test_the_order_of_the_pins_does_not_change_the_pick(self):
+        flipped = _pin("dnspython", "2.9.2", "python_full_version >= '3.11'", "b") + _pin(
+            "dnspython", "2.8.0", "python_full_version < '3.11'", "a"
+        )
+        assert parse_lock(flipped)["dnspython"][0] == Version("2.9.2")
+
+    @pytest.mark.parametrize(
+        "second",
+        [
+            "python_full_version >= '3.11'",  # the same marker space twice
+            "python_full_version >= '3.10'",  # overlaps on 3.10
+            None,  # a pin with no marker applies everywhere
+        ],
+    )
+    def test_markers_that_can_both_hold_are_still_refused(self, second):
+        text = _pin("dnspython", "2.8.0", "python_full_version >= '3.11'", "a") + _pin(
+            "dnspython", "2.9.2", second, "b"
+        )
+        with pytest.raises(ValueError, match="dnspython pinned twice"):
+            parse_lock(text)
+
+    def test_two_unmarked_pins_are_still_refused(self):
+        text = _pin("dnspython", "2.8.0", None, "a") + _pin("dnspython", "2.9.2", None, "b")
+        with pytest.raises(ValueError, match="dnspython pinned twice"):
+            parse_lock(text)
+
+    def test_the_committed_uv_lock_export_parses(self, tmp_path):
+        stage_ash_locks(tmp_path)
+        runtime = parse_lock((tmp_path / ASH_RUNTIME_LOCK).read_text())
+        assert runtime["dnspython"][0] >= Version("2.9"), runtime["dnspython"]
 
 
 # The command relock.sh runs for each file, as uv records it in the file's header.
