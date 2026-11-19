@@ -173,6 +173,10 @@ body:
   - prose: |
       The rows of the other scanners show SKIPPED, because `--scanners` leaves them out.
 
+      A default scan runs the built-in scanners. Six more ship as community plugin modules
+      that a scan runs once `ash_plugin_modules` names them; the
+      [community plugins](../docs/plugins/community/index.md) page lists them.
+
       The full scan takes a minute or two the first time, most of it grype downloading its
       vulnerability database. Later scans of this project take about 20 seconds. The scan
       prints a summary table, then where it wrote the results:
