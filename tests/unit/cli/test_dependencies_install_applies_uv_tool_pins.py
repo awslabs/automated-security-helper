@@ -244,15 +244,10 @@ class TestTheOverridesReachTheInstallCommand:
             for argv in argvs
             if argv[:3] == ["uv", "tool", "install"] or argv[1:4] == ["tool", "install"]
         ]
-        for tool in PYTHON_TOOLS:
+        for tool in INSTALLED_HERE:
             assert THIRD_PARTY_LICENSES[tool].distribution in specs, specs
         assert installs, "no `uv tool install` was recorded"
         for argv in installs:
-            # GuardDog's own default constraint is already an exact pin (the test
-            # above holds it to the license entry's version), so its argv is the one
-            # that may carry `==` without an override.
-            if any(arg.startswith("guarddog==") for arg in argv):
-                continue
             assert not any("==" in arg for arg in argv), argv
 
     def test_a_single_override_pins_only_its_tool(self, recorded_install):
