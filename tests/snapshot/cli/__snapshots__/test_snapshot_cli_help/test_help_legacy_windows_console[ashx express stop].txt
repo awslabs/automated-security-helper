@@ -1,8 +1,8 @@
 
- Usage: ash express stop [OPTIONS]
+ Usage: ashx express stop [OPTIONS]
 
  Stop the express daemon. A scan it is running is sent SIGTERM.
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --help          Show this message and exit.                                                     │
+│ --help  -h        Show this message and exit.                                                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
