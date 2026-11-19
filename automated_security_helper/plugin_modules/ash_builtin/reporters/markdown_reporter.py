@@ -4,9 +4,9 @@
 import html
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, Literal, TYPE_CHECKING
+from typing import Annotated, Any, Dict, Literal, TYPE_CHECKING
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -407,13 +407,48 @@ def _converter_refusals_markdown(model: "AshAggregatedResults") -> list[str]:
 class MarkdownReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Markdown reporter."""
 
-    include_summary: bool = True
-    include_findings_table: bool = False
-    include_detailed_findings: bool = True
-    max_detailed_findings: int = 20
-    top_hotspots_limit: int = 10
-    use_collapsible_details: bool = True
-    compact: bool = False
+    include_summary: Annotated[
+        bool,
+        Field(
+            description="When true, the report has a Summary section: the scanner results table and the top hotspots table. When false, both are left out; the notices about inputs that were not scanned, stale content databases, and refused converter inputs stay."
+        ),
+    ] = True
+    include_findings_table: Annotated[
+        bool,
+        Field(
+            description="When true, the report has a Findings overview table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long."
+        ),
+    ] = False
+    include_detailed_findings: Annotated[
+        bool,
+        Field(
+            description="When true, the report has a Detailed findings section that lists up to `max_detailed_findings` actionable findings, highest severity first. The Not gating (workspace policy) section of a workspace scan is part of it and is left out with it."
+        ),
+    ] = True
+    max_detailed_findings: Annotated[
+        int,
+        Field(
+            description="The most findings listed in the Detailed findings section, and in the Not gating (workspace policy) table of a workspace scan. When more actionable findings exist, a note under the list gives the count shown and the total. 0 lists none. A negative value is refused."
+        ),
+    ] = 20
+    top_hotspots_limit: Annotated[
+        int,
+        Field(
+            description="The most files listed in the top hotspots table, which ranks files by their number of actionable findings. Used only when `include_summary` is true. 0 leaves the table out. A negative value is refused."
+        ),
+    ] = 10
+    use_collapsible_details: Annotated[
+        bool,
+        Field(
+            description="When true, each detailed finding is wrapped in an HTML `details` element whose summary line shows its severity, rule ID, and location, so a long list stays short until a finding is opened. When false, every finding is written out in full."
+        ),
+    ] = True
+    compact: Annotated[
+        bool,
+        Field(
+            description="When true, the scanner results table leaves out scanners that were skipped and scanners that passed with no findings, and the how-to-read help, the Scan metadata section, and the generated-at line are dropped. The outcome line, the project and scan time line, the workspace section, and the coverage notices stay."
+        ),
+    ] = False
 
     @field_validator("max_detailed_findings", "top_hotspots_limit")
     @classmethod

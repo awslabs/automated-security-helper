@@ -66,6 +66,21 @@
   but `precommit` refuses it. It is planned to become the precommit default in ASH v4.
   Unlike `--changed-files-only`, which scans everything and filters only the reports,
   `--staged` saves the scan time.
+- **A Betterleaks community plugin, `ash_betterleaks_plugins`.** It runs
+  [Betterleaks](https://github.com/betterleaks/betterleaks) 1.10.1, the successor to
+  gitleaks written by its author, as `betterleaks dir` over the scan target when the
+  module is listed in `ash_plugin_modules` (or passed with `--ash-plugin-modules`), and
+  is on by default then. It runs beside the builtin gitleaks scanner, so a secret both
+  find is reported by each. Findings are CRITICAL with the secret redacted. Betterleaks
+  does not read a `.betterleaks.toml` or `.gitleaks.toml` from the scanned tree
+  (that needs `--unsafe-auto-load-config`, which ASH never passes), but it reads a
+  `.betterleaksignore` or `.gitleaksignore` at the scan root whatever ASH passes, and
+  drops what it lists before ASH sees it: a scan whose tree holds either file fails
+  before Betterleaks runs, unless the operator sets
+  `scanners.betterleaks.options.honor_tree_ignore_files`. The container image ships
+  Betterleaks, pinned and digest-verified; `ash dependencies install --tool betterleaks`,
+  with the module loaded, installs the same build locally. See
+  [Betterleaks Plugin](docs/content/docs/plugins/community/betterleaks-plugin.md).
 
 ## v3.8.0 (2026-11-12)
 

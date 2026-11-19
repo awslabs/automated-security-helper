@@ -1413,6 +1413,59 @@ def test_an_answer_too_deep_for_the_parser_ends_the_answers_without_raising(tmp_
 
 
 @pytest.mark.unit
+def test_a_line_nested_past_the_bound_never_reaches_the_json_parser(
+    tmp_path, monkeypatch
+):
+    """Whether ``json.loads`` survives a deep line depends on the Python version, the
+    platform and the recursion budget the process has left (on Windows with Python
+    3.10 a line at the boundary left an unraisable RecursionError that failed the
+    test). The bound is fixed in the worker: the parser is never asked."""
+    limit = cdk_nag_worker._MAX_ANSWER_NESTING
+    deep = "[" * (limit + 1) + "]" * (limit + 1)
+    response = tmp_path / "response.jsonl"
+    response.write_text(
+        json.dumps({"protocol": cdk_nag_worker.PROTOCOL_VERSION})
+        + "\n"
+        + json.dumps(NOT_CFN)
+        + "\n"
+        + deep
+        + "\n"
+        + json.dumps(NOT_CFN)
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed: list = []
+    real_loads = json.loads
+
+    def spy(text, *args, **kwargs):
+        parsed.append(text)
+        return real_loads(text, *args, **kwargs)
+
+    monkeypatch.setattr(cdk_nag_worker.json, "loads", spy)
+
+    started, answers, cut = cdk_nag_worker._read_response(response)
+
+    assert (started, answers, cut) == (True, [NOT_CFN], False)
+    assert deep not in parsed
+    assert len(parsed) == 2  # the header and the one answer before the deep line
+
+
+@pytest.mark.unit
+def test_the_nesting_bound_counts_depth_not_openers_or_brackets_in_strings():
+    limit = cdk_nag_worker._MAX_ANSWER_NESTING
+    exceeds = cdk_nag_worker._nests_deeper_than
+    assert exceeds("[" * limit + "]" * limit, limit) is False
+    assert exceeds("[" * (limit + 1) + "]" * (limit + 1), limit) is True
+    # Many openers, shallow: siblings are not nesting.
+    assert exceeds("[" + ",".join(["[]"] * (limit * 3)) + "]", limit) is False
+    # Brackets and escaped quotes inside a string value are text.
+    text = json.dumps({"logs": ["[" * (limit * 3) + '\\"' + "{" * (limit * 3)]})
+    assert exceeds(text, limit) is False
+    # Objects nest too.
+    assert exceeds('{"a":' * (limit + 1) + "1" + "}" * (limit + 1), limit) is True
+
+
+@pytest.mark.unit
 def test_a_read_that_raises_keeps_the_childs_outcome_and_its_could_not_stop_state(
     tmp_path, monkeypatch
 ):

@@ -70,6 +70,7 @@ from automated_security_helper.utils.redacted_model import (
 #: scanners. tests/unit/cli/mcp/test_list_scanners_import_order.py keeps this list
 #: equal to every in-tree community module.
 _VENDORED_SCANNER_PLUGIN_PACKAGES = (
+    "automated_security_helper.plugin_modules.ash_betterleaks_plugins",
     "automated_security_helper.plugin_modules.ash_ferret_plugins",
     "automated_security_helper.plugin_modules.ash_guarddog_plugins",
     "automated_security_helper.plugin_modules.ash_hadolint_plugins",

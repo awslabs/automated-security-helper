@@ -646,40 +646,6 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             severity_groups[severity].append(result)
         return severity_groups
 
-    def _group_results_by_rule(self, results: List[Result]) -> Dict[str, List[Result]]:
-        """Group results by their rule ID."""
-        rule_groups = {}
-        for result in results:
-            rule_id = result.ruleId or "UNKNOWN"
-            if rule_id not in rule_groups:
-                rule_groups[rule_id] = []
-            rule_groups[rule_id].append(result)
-        return rule_groups
-
-    def _format_severity_summary(self, findings_by_severity: dict) -> str:
-        """Format the severity summary section.
-
-        Suppressed findings are listed separately from active severities so
-        they don't distort the actionable count.
-        """
-        active = {k: v for k, v in findings_by_severity.items() if k != "SUPPRESSED"}
-        suppressed = findings_by_severity.get("SUPPRESSED", [])
-
-        summary = "<h3>Findings by Severity</h3>"
-        summary += (
-            "<p>Statistics are calculated from the final aggregated SARIF report:</p>"
-        )
-        summary += "<ul>"
-        for severity, findings in sorted(
-            active.items(), key=lambda item: _SEVERITY_ORDER.get(item[0], 99)
-        ):
-            severity_class = f"severity-{severity.lower()}"
-            summary += f'<li class="{severity_class}"><strong>{severity}</strong>: {len(findings)} finding(s)</li>'
-        if suppressed:
-            summary += f'<li style="color:#6c757d"><strong>SUPPRESSED</strong>: {len(suppressed)} finding(s)</li>'
-        summary += "</ul>"
-        return summary
-
     def _format_type_summary(self, findings_by_type: dict) -> str:
         """Format the type summary section."""
         summary = "<h3>Findings by Type</h3><ul>"

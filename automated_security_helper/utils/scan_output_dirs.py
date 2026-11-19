@@ -321,17 +321,6 @@ def _repository_root_of(directory: Path) -> Optional[Path]:
         candidate = parent
 
 
-def _index_entries_under(directory: str | Path) -> Optional[Tuple[Path, List[str]]]:
-    """*directory*, absolute, and the index entries below it, or None.
-
-    :func:`git_index_below` without the reason: None whenever git gave no list.
-    """
-    answer = git_index_below(directory)
-    if answer.names is None:
-        return None
-    return answer.base, answer.names
-
-
 def committed_file_under(base: Path, name: str) -> Optional[Path]:
     """*name*, an entry git lists below *base*, as a path, when it is a regular file.
 
