@@ -1,6 +1,7 @@
 """Module containing the PluginBase class."""
 
 from bisect import bisect_left
+import contextlib
 from contextvars import ContextVar
 from datetime import datetime
 import logging
@@ -896,6 +897,39 @@ class CustomCommand(BaseModel):
 _CONFIG_FROM_CONTEXT: ContextVar[bool] = ContextVar(
     "plugin_config_from_context", default=True
 )
+
+
+#: Whether a plugin is being built to DESCRIBE what it declares, not to run here.
+#: A plugin whose install commands depend on a probe of this machine (RubyGems, a
+#: C compiler, a writable bin directory) declares them as it would on a machine
+#: that passes the probe while this is set, so that a document generated from the
+#: declaration says the same thing wherever it is generated. Read through
+#: :func:`declaring_install_story`; never set it for a scan.
+_DECLARING_INSTALL_STORY: ContextVar[bool] = ContextVar(
+    "plugin_declaring_install_story", default=False
+)
+
+
+def install_story_is_declared() -> bool:
+    """True while :func:`declaring_install_story` is active in this context."""
+    return _DECLARING_INSTALL_STORY.get()
+
+
+@contextlib.contextmanager
+def declaring_install_story():
+    """Build plugins inside this block to read their declared install story.
+
+    The seam for the reference-docs generators: a plugin that gates its install
+    commands on what this machine has consults :func:`install_story_is_declared`
+    and, when it is true, declares the commands as if every prerequisite were
+    present. The declaration is then a function of the code, not of the machine
+    that generated the page.
+    """
+    token = _DECLARING_INSTALL_STORY.set(True)
+    try:
+        yield
+    finally:
+        _DECLARING_INSTALL_STORY.reset(token)
 
 
 def _declared_provenance(data: Dict[str, Any]) -> Optional[bool]:
