@@ -1023,6 +1023,16 @@ global_settings:
       reason: >-
         A deliberate eval, planted beside the B602 for the same e2e assertion. The
         fixture is the assertion.
+    - rule_id: CKV_AWS_26
+      path: deploy/kubernetes-operator/tests/e2e/fixtures/dirty/template.yaml
+      line_start: 7
+      line_end: 8
+      reason: >-
+        The fixture's one resource is an SNS topic with no KmsMasterKeyId. It exists
+        so cfn-nag has in-scope work in the e2e (the partial-scan case would otherwise
+        read SKIPPED instead of MISSING), and the topic is copied into the e2e
+        cluster as scan input only; nothing is deployed from it. Pinned to the
+        resource's two lines, so a second resource added to the file still reports.
     #
     # False positives, each read on its line before being listed.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
