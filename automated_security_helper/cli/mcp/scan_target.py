@@ -244,34 +244,6 @@ def _refusal(directory_path: object, resolved: Path) -> MCPResourceError:
     )
 
 
-def _session_workspace_root(session_id: str) -> Optional[Path]:
-    """Return this session's own workspace directory, or None if unavailable.
-
-    Scoped to the single session rather than to the shared workspace root, which
-    holds every other session's uploaded source.
-    """
-
-    from automated_security_helper.cli.mcp.source_delivery import (
-        _session_workspace,
-        resolve_workspace_root,
-    )
-
-    try:
-        root = resolve_workspace_root().expanduser().resolve()
-        return _session_workspace(root, session_id)
-    except (OSError, RuntimeError, ValueError) as exc:
-        # A workspace root that cannot be resolved (no home directory) or a
-        # session id carrying path separators must not take the configured roots
-        # down with it -- the allowlist still applies, this session just gets no
-        # extra allowance. ValueError is _session_workspace rejecting the id.
-        _logger.debug(
-            "MCP scan-target policy: no workspace allowance for session %r (%s)",
-            session_id,
-            exc,
-        )
-        return None
-
-
 @dataclass(frozen=True)
 class ScanTargetResolution:
     """The outcome of checking one scan target. Exactly one field is set.

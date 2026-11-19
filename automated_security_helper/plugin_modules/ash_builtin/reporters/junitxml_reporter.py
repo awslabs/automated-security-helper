@@ -1,7 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import re
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Annotated, Any, Literal, TYPE_CHECKING
+
+from pydantic import Field
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -253,8 +255,12 @@ _ERROR_TYPE_BY_LEVEL = {
 
 
 class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
-    # Consider findings as failures only if they're at or above the scanner's severity threshold
-    respect_severity_threshold: bool = True
+    respect_severity_threshold: Annotated[
+        bool,
+        Field(
+            description="When true, a finding below the severity threshold its scanner is judged against is written as a skipped test case (type `threshold`), and only findings at or above the threshold are errors, which matches the exit code. When false, no threshold is applied and findings are written as errors whatever their severity. Suppressed findings are skipped either way."
+        ),
+    ] = True
 
 
 class JUnitXMLReporterConfig(ReporterPluginConfigBase):

@@ -5,9 +5,9 @@
 
 import json
 import re
-from typing import Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
+from typing import Annotated, Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
 
-from pydantic import PrivateAttr, ValidationInfo, field_validator
+from pydantic import Field, PrivateAttr, ValidationInfo, field_validator
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -76,7 +76,12 @@ def _code_span(value: Any) -> str:
 class UnusedSuppressionsReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Unused Suppressions reporter."""
 
-    output_format: str = "both"  # "json", "markdown", or "both"
+    output_format: Annotated[
+        str,
+        Field(
+            description='The format of the report: "json", "markdown", or "both". "json" writes the JSON report only. "markdown" writes the report as markdown, under the file extension `unused-suppressions.md` unless the reporter\'s `extension` was changed. "both" writes the JSON report and a markdown copy beside it, `ash.unused-suppressions.md`. The name is read without regard to case, and any other value is refused.'
+        ),
+    ] = "both"
 
     @field_validator("output_format", mode="before")
     @classmethod

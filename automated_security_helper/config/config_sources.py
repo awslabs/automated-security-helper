@@ -2152,11 +2152,6 @@ def _refuse_env_nowhere(path: Path) -> bool:
     return False
 
 
-def _env_rule(refused: bool) -> RefuseEnv:
-    """The ``RefuseEnv`` for one file of a chain, once its refusal is decided."""
-    return refuse_env_everywhere if refused else _refuse_env_nowhere
-
-
 def _env_not_resolved(path: Path, where: str) -> ASHConfigEnvNotResolvedError:
     return ASHConfigEnvNotResolvedError(
         f"{describe_config_path(path)} uses !ENV ({where}). !ENV is not resolved "
