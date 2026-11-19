@@ -258,7 +258,7 @@ A key not listed here is an error when the configuration is loaded.
 
 ### <a id="section-precommit"></a>`precommit`
 
-Scanner selection for `ash scan --mode precommit`.
+Scanner selection for `ashx scan --mode precommit`.
 
 A key not listed here is an error when the configuration is loaded.
 

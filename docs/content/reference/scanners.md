@@ -12,7 +12,7 @@
 
 This page is generated from the scanner plugins in the ASH source code by `scripts/generate_scanner_reference.py`. Edits made to this file by hand are overwritten the next time it is generated.
 
-ASH ships 22 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
+ASH ships 21 scanners. The built-in ones are loaded on every scan. The others are community scanners, each in a plugin module that `ashx scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
 | Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
@@ -455,11 +455,11 @@ Options, under `scanners.zizmor.options`. An option not listed here refuses the 
 
 - Scanner page: [`betterleaks` scanner page](../docs/plugins/community/betterleaks-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner.BetterleaksScanner`
-- Provided by: community module `ash_betterleaks_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
+- Provided by: community module `ash_betterleaks_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
 - Command: `betterleaks`
-- Install: pinned, checksum-verified release of `betterleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+- Install: pinned, checksum-verified release of `betterleaks` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -528,7 +528,7 @@ GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, R
 
 - Scanner page: [`guarddog` scanner page](../docs/plugins/community/guarddog-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner`
-- Provided by: community module `ash_guarddog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
+- Provided by: community module `ash_guarddog_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
 - Enabled by default: yes
 - Tool type: SCA
 - Command: `guarddog`
@@ -563,11 +563,11 @@ Options, under `scanners.guarddog.options`. An option not listed here refuses th
 
 - Scanner page: [`hadolint` scanner page](../docs/plugins/community/hadolint-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner`
-- Provided by: community module `ash_hadolint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
+- Provided by: community module `ash_hadolint_plugins`, which `ashx scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `hadolint`
-- Install: pinned, checksum-verified release of `hadolint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
+- Install: pinned, checksum-verified release of `hadolint` by `ashx dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
