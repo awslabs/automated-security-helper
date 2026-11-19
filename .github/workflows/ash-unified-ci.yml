@@ -335,6 +335,13 @@ jobs:
       # a real gate once ty reaches a stable release; until then the value is the
       # signal in the log, not a verdict.
       #
+      # THE ONE REMAINING continue-on-error IN THIS WORKFLOW. The version is pinned
+      # exactly, so an upstream release cannot move the result; the reason it stays is
+      # that `ty check automated_security_helper/` exits 1 today (1304 diagnostics at
+      # ty 0.0.84) and `lint` is in required-checks' `needs`, so dropping the flag turns
+      # the required lint check red on every PR until those diagnostics are fixed in
+      # the source. The way to remove it is to clear the diagnostics, then delete it.
+      #
       # The step name says informational so nobody reads this job's green tick as ty
       # having passed -- it exits 1 today. It runs through the project environment,
       # not standalone, so ty resolves first- and third-party imports the way mypy
@@ -1365,8 +1372,8 @@ jobs:
   # here is read by a person rather than by the merge gate. It does not carry
   # continue-on-error, so a red leg turns the run red and stays visible instead of
   # reading green; promoting it into the required lists is a separate decision. It
-  # runs pytest directly
-  # instead of through run-unit-tests: that action publishes a `PyTest - ...` check
+  # runs pytest directly instead of through run-unit-tests: that action publishes a
+  # `PyTest - ...` check
   # run per leg and admits only the three tier markers, and this job is neither a
   # tier nor a check anything requires.
   e2e-express:
