@@ -1218,6 +1218,14 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B604", "tests/utils/home_rule.py"),
         ("B604", "tests/utils/tool_guard.py"),
         ("SECRET-SECRET-KEYWORD", "tests/utils/tool_guard.py"),
+        # The merge of origin/main at ae28f8411ce: whole-file entries main wrote for its
+        # express-mode tests after the merge at 617e17c3629, one per rule and file.
+        ("B103", "tests/unit/express/test_runtime_paths.py"),
+        ("B108", "tests/integration/express/test_client_daemon_socket.py"),
+        ("B108", "tests/integration/express/test_express_e2e.py"),
+        ("B108", "tests/unit/express/test_runtime_paths.py"),
+        ("SECRET-SECRET-KEYWORD", "tests/unit/express/test_client_delegation.py"),
+        ("generic-api-key", "tests/integration/express/test_express_e2e.py"),
     ),
     ".ash/.ash_community_plugins.yaml": (
         ("*:Apache-2.0", "**"),

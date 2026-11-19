@@ -392,6 +392,11 @@ class TestExitCode:
         # both. That is only sound while the two spell the same release.
         versions: dict[str, str] = {}
         for p in every:
+            # A bundled library is listed but never looked up, and the libraries one
+            # wheel bundles (libgit2, libssh2, OpenSSL, PCRE) share the wheel as their
+            # project at their own releases, so no stub answers for it.
+            if p.kind == checker.BUNDLED_LIBRARY:
+                continue
             seen = versions.setdefault(p.project, p.version)
             if seen == p.version:
                 continue

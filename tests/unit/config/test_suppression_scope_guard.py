@@ -79,7 +79,9 @@ ALLOWLIST: dict[tuple[str, str | None, str], str] = {}
 # (one per rule and file) that the guard had never seen. They were added to
 # MAIN_BASELINE and the "main" caps went from 199 and 119 to 420 and 227.
 FROZEN_SIZES = {
-    "main": {".ash/.ash.yaml": 420, ".ash/.ash_community_plugins.yaml": 227},
+    # 426: the merge of origin/main at ae28f8411ce added six whole-file entries main
+    # wrote for its express tests since 617e17c3629 (the baseline's last block).
+    "main": {".ash/.ash.yaml": 426, ".ash/.ash_community_plugins.yaml": 227},
     "pre_guard": {".ash/.ash.yaml": 27, ".ash/.ash_community_plugins.yaml": 8},
 }
 

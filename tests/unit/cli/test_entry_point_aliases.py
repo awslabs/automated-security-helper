@@ -189,7 +189,9 @@ class TestOtherEntryPointsDoNotWarn:
 
         result = CliRunner().invoke(cli_main.app, ["--help"])
         assert result.exit_code == 0
-        assert "deprecated" not in result.output
+        # The root help describes the deprecated --scanners spelling, so the notice
+        # for a deprecated COMMAND is what must be absent, not the word itself.
+        assert "command is deprecated" not in result.output
         assert "deprecated" not in capsys.readouterr().err
 
     def test_a_subcommand_emits_no_deprecation(self, capsys):

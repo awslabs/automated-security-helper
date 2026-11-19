@@ -363,14 +363,14 @@ class TestTheDockerfileInstallsEveryEntry:
         assert f'ARG PYGIT2_VERSION="{version}"' in core
         assert 'ENV UV_CONSTRAINT="/etc/ash/uv-constraints.txt"' in core
         assert core.index("ENV UV_CONSTRAINT=") < core.index(
-            'ash dependencies install --bin-path "${ASH_BIN_PATH}"'
+            'ashx dependencies install --bin-path "${ASH_BIN_PATH}"'
         ), "the constraint must be in place before GuardDog is installed"
 
     def test_every_uv_install_leaves_no_cache_in_its_layer(self):
         """uv's cache is only useful to a later install on the same machine.
 
         In an image layer it is dead weight, so every RUN that installs with uv
-        or runs `ash dependencies install` (which installs uv tools) sets
+        or runs `ashx dependencies install` (which installs uv tools) sets
         UV_NO_CACHE in that same RUN.
         """
         # One logical line per RUN: continuations joined, so a pinned install
@@ -381,7 +381,7 @@ class TestTheDockerfileInstallsEveryEntry:
             for line in dockerfile.splitlines()
             if line.startswith("RUN ")
             and (
-                "ash dependencies install" in line
+                "ashx dependencies install" in line
                 or "ashx dependencies install" in line
                 or "uv pip install" in line
             )
@@ -390,7 +390,7 @@ class TestTheDockerfileInstallsEveryEntry:
         for line in installs:
             if line.startswith('RUN pins="$(install-pinned-tool --uv-tool-pins)"'):
                 # uv keeps its no-cache cache in a temporary directory, which
-                # `ash dependencies install` left behind in /tmp (about 437 MB a
+                # `ashx dependencies install` left behind in /tmp (about 437 MB a
                 # stage), so these RUNs give it a TMPDIR they remove themselves.
                 assert 'uv_tmp="$(mktemp -d)"' in line, line
                 assert 'TMPDIR="${uv_tmp}" UV_NO_CACHE=1 ' in line, line

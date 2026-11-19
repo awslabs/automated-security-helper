@@ -93,7 +93,7 @@ def test_the_docs_examples_job_installs_exactly_what_the_integration_job_does() 
             str(step["run"])
             for step in jobs[job_id]["steps"]
             if str(step.get("run", "")).strip().startswith("uv sync")
-            or "ash dependencies install" in str(step.get("run", ""))
+            or re.search(r"\bashx? dependencies install", str(step.get("run", "")))
         ]
 
     integration = installs("integration-test")
