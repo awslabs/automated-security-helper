@@ -318,9 +318,9 @@ def test_a_version_probe_reads_the_pinned_version(monkeypatch, tmp_path_factory,
 @pytest.mark.skipif(sys.platform == "win32", reason="runs the POSIX stand-in")
 @pytest.mark.parametrize(
     "name,constraint",
-    # The locator's default ranges for these tools (TOOL_VERSION_CONSTRAINTS);
-    # snyk has none.
-    [("ferret-scan", ">=2.4.5,<2.6.0"), ("node", ">=18.0.0"), ("snyk", None)],
+    # The default ranges the locators apply for these tools (ferret-scan's is
+    # the ferret plugin's DEFAULT_VERSION_CONSTRAINT); snyk has none.
+    [("ferret-scan", ">=2.4.5,<2.7.0"), ("node", ">=18.0.0"), ("snyk", None)],
 )
 @pytest.mark.integration
 def test_a_version_probe_of_an_unpinned_tool_is_in_its_range(

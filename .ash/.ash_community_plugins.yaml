@@ -521,6 +521,74 @@ global_settings:
       reason: >-
         False positive. A module constant named for a fake MCP session, the same
         shape as the entries for the other MCP tests above.
+    # === ferret-scan API_KEY_OR_SECRET: new detections in ferret-scan 2.6.0 ===
+    # The supported window admits ferret-scan 2.6.0, whose detectors report these
+    # nine sites at 95-100% confidence. Each was read at the reported line and is
+    # pinned to it; none is a stored credential. The ferret-scan 2.5.x scans of
+    # the same files did not report them.
+    - path: tests/unit/utils/test_secret_masking_shapes_in_text.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 49
+      line_end: 49
+      reason: >-
+        False positive. A masking test's assertion over a made-up fixture value,
+        the same shape as the other secret-masking tests.
+    - path: tests/unit/utils/test_secret_masking_regression.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 51
+      line_end: 51
+      reason: >-
+        False positive. A masking test's input string holding a made-up password
+        literal, so the masker has something to mask.
+    - path: tests/unit/utils/test_secret_masking_regression.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 60
+      line_end: 60
+      reason: >-
+        False positive. A masking test's input string holding a made-up password
+        literal, so the masker has something to mask.
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret-config.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 325
+      line_end: 325
+      reason: >-
+        False positive. This is ferret-scan's own detector regular expression
+        for the trade_secret keywords, pattern text and not a value.
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret-config.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 670
+      line_end: 670
+      reason: >-
+        False positive. This is ferret-scan's own detector regular expression
+        for the trade_secret keywords, pattern text and not a value.
+    - path: .ash/.ash.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 1019
+      line_end: 1019
+      reason: >-
+        False positive. A suppression reason that quotes a placeholder fixture
+        literal; the text explains why another finding is a false positive.
+    - path: .ash/.ash.yaml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 1266
+      line_end: 1266
+      reason: >-
+        False positive. A suppression reason that quotes a placeholder fixture
+        literal; the text explains why another finding is a false positive.
+    - path: .github/workflows/ash-repo-docs.yml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 158
+      line_end: 158
+      reason: >-
+        False positive. A shell variable named for a token, filled at run time
+        from /dev/urandom as a per-run nonce. No value is stored in the file.
+    - path: .github/workflows/ash-repo-scan.yml
+      rule_id: API_KEY_OR_SECRET
+      line_start: 274
+      line_end: 274
+      reason: >-
+        False positive. A shell variable named for a token, filled at run time
+        from /dev/urandom as a per-run nonce. No value is stored in the file.
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
@@ -563,8 +631,8 @@ global_settings:
         fails when the block moves and this range does not.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
-      line_start: 626
-      line_end: 626
+      line_start: 650
+      line_end: 650
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B404
@@ -573,13 +641,13 @@ global_settings:
       reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B603
-      line_start: 1070
-      line_end: 1076
+      line_start: 1263
+      line_end: 1273
       reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B607
-      line_start: 1070
-      line_end: 1076
+      line_start: 1263
+      line_end: 1273
       reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
     - path: scripts/generate_test_docx.py
       rule_id: B311

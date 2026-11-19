@@ -151,7 +151,7 @@ The plugin validates ferret-scan version compatibility during dependency validat
 ```python
 # Version constants (update when ferret-scan releases breaking changes)
 MIN_SUPPORTED_VERSION = "2.4.5"
-MAX_SUPPORTED_VERSION = "2.6.0"
+MAX_SUPPORTED_VERSION = "2.7.0"
 DEFAULT_VERSION_CONSTRAINT = f">={MIN_SUPPORTED_VERSION},<{MAX_SUPPORTED_VERSION}"
 RECOMMENDED_VERSION = "2.5.3"
 ```
@@ -172,6 +172,30 @@ the same fixtures with the 2.4.5 and 2.5.2 binaries):
 - Detector changes only narrowed results on the fixtures: 2.5.2 drops 9 PHONE false
   positives on card numbers and IBANs and adds nothing. The flag surface ASH uses and
   the `--help checks` list are unchanged; every `confidence_levels` value is accepted.
+
+**What 2.6.0 changed, as it touches this plugin** (verified 2026-11-10 against the
+v2.5.3→v2.6.0 source diff and a live 2.6.0 run through the plugin's invocation
+path — `%SRCROOT%` SARIF shape, escaped-glob `ferret-scan --exclude`, exit 0
+with findings, exit 3 under `ferret-scan --fail-on-incomplete`):
+- Nothing on the plugin's surface broke. 2.6.0's breaking changes (redaction
+  audit log failures exit 1, `ferret-scan --stdin` validation,
+  native-suppression strict loader and hash v5) all sit on paths the plugin
+  never uses.
+- The list flags (`ferret-scan --checks`, `ferret-scan --confidence`,
+  `ferret-scan --exclude`, `ferret-scan --disable-ip-types`,
+  `ferret-scan --validator-budget`) became repeatable; one comma-joined
+  occurrence, which is what the plugin passes, is unchanged.
+- `ferret-scan --disable-ip-types` now outranks a profile's `disabled_types` in
+  file mode (ferret-scan #887). A config combining `profile` with
+  `disable_ip_types` can report differently than on 2.5.x — in the documented
+  direction.
+- New detector coverage (UK NHS/CHI under `MEDICAL_ID`, GB/Ontario/Quebec under
+  `DRIVERS_LICENSE`, ITINs under `SSN`, card track data at 100 HIGH under
+  `CREDIT_CARD`, lowercase passports, widened `PHONE` spans, labelled DOBs) adds
+  findings; `--help checks` names are unchanged. Expect previously clean scans
+  to surface new findings after the upgrade.
+- `RECOMMENDED_VERSION` stays 2.5.3 until 2.6.0 has the full fixture-matrix pass
+  the 2.5.x line had; record that pass here when it runs.
 
 Independently of version, ferret-scan enters pre-commit mode from environment
 variables alone (`PRE_COMMIT=1`, and before 2.5.2 also `PRE_COMMIT_HOME`), which makes a
@@ -261,7 +285,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `max_live_bytes` | Memory cap on extracted content via `ferret-scan --max-live-bytes` (e.g. `256MB`) | `null` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
-| `tool_version` | Version constraint for installation; unset uses `>=2.4.5,<2.6.0` | `null` |
+| `tool_version` | Version constraint for installation; unset uses `>=2.4.5,<2.7.0` | `null` |
 | `skip_version_check` | Bypass version validation | `false` |
 
 Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags. Use the `ferret_` prefixed versions instead.
@@ -748,7 +772,30 @@ suppressions above must be copied there too, or PR scans will go red with no cov
 Suppressions with `line_start`/`line_end` fields are the preferred approach for
 documentation examples that intentionally contain triggering patterns. For test
 fixtures and source code, eliminating the trigger from source is preferred when
-practical.
+practical. Never pin a line for a finding in a document or binary (PDF, DOCX,
+images): ferret-scan's line there indexes its extracted text, not the file's
+bytes, so the pin breaks on a re-save; use the exact file path + `rule_id`
+instead, optionally narrowed with the engine scope below.
+
+### Engine-Scoped Suppressions (`scope.engines.ferret-scan`)
+
+The plugin owns the `scope.engines.ferret-scan` block of an ASH suppression
+(`utils/suppression_scope_registry.py`; registered at module import, mirroring
+cdk-nag). `FerretScopeBlock` defines the keys:
+
+- `confidence_level`: `low` | `medium` | `high` or a list; matched
+  case-insensitively against the result's `confidenceLevel` property.
+- `validator`: the detector name from the result's `validator` property; exact,
+  case-insensitive, never a glob.
+
+Design rules, enforced by `validate_suppression_scope` /
+`suppression_scope_matches` and pinned by
+`tests/unit/plugin_modules/ash_ferret_plugins/test_ferret_suppression_scope.py`:
+an empty block, an empty value and an unknown band are refused at config time;
+everything fails closed at match time (unknown key, unparseable `properties`,
+missing property → no match); both keys must match when both are present.
+`split_rule_qualifier` keeps the inherited no-split default — ferret-scan rule
+ids carry no granular qualifier.
 
 ### Two-Pronged Approach
 

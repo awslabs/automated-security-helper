@@ -117,9 +117,9 @@ GUARDED_TOOLS = (
 #: What a stand-in prints for a version probe, ``<tool> <version>``. A pinned tool
 #: prints its pin (``tool_downloads.TOOL_VERSIONS``, read here so it moves with the
 #: pins; cfn-nag's gem version for cfn_nag_scan). A tool with no pin prints a version
-#: inside the tool locator's default range for it (``_default_constraint``, which
-#: reads ``tool_downloads.TOOL_VERSION_CONSTRAINTS``): ferret-scan ">=2.4.5,<2.6.0",
-#: node ">=18.0.0". The rest have no default range, so any version is used.
+#: inside the default range its locator applies: ferret-scan ">=2.4.5,<2.7.0"
+#: (the ferret plugin's ``DEFAULT_VERSION_CONSTRAINT``), node ">=18.0.0". The
+#: rest have no default range, so any version is used.
 STAND_IN_VERSIONS: dict[str, str] = {
     **{name: version.removeprefix("v") for name, version in TOOL_VERSIONS.items()},
     "uvx": TOOL_VERSIONS["uv"],

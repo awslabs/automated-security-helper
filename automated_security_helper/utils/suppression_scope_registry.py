@@ -18,9 +18,10 @@ plugins, so ``AshSuppression.matches`` can dispatch without importing any
 plugin and no import cycle forms.
 
 Everything fails closed. A scanner name with no registration -- the plugin is
-not installed, not enabled this run, or does not support engine-scoped
-suppressions -- matches nothing, and ``warn_once_unmatched_engine`` says so
-once per name so an entry that silently stopped suppressing is visible.
+not installed (its module is never imported this run), or does not support
+engine-scoped suppressions -- matches nothing, and
+``warn_once_unmatched_engine`` says so once per name so an entry that silently
+stopped suppressing is visible.
 """
 
 from __future__ import annotations

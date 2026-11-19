@@ -1111,8 +1111,8 @@ class TestFerretScanScannerVersionSupport:
         ran `pip install ferret-scan` and got whatever was newest. On
         2026-08-20 that was 2.3.3, whose new API_KEY_OR_SECRET detector failed
         the self-scan on two false positives. The plugin now pins to the lines it
-        has been run against (>=2.4.5,<2.6.0), so the CI-breaking 2.3.3 and any
-        future 2.6.x are excluded until explicitly tested.
+        has been run against (>=2.4.5,<2.7.0), so the CI-breaking 2.3.3 and any
+        future 2.7.x are excluded until explicitly tested.
         """
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             DEFAULT_VERSION_CONSTRAINT,
@@ -1135,7 +1135,8 @@ class TestFerretScanScannerVersionSupport:
         assert "2.4.5" in specifier
         assert "2.5.2" in specifier
         assert "2.5.3" in specifier
-        assert "2.6.0" not in specifier
+        assert "2.6.0" in specifier
+        assert "2.7.0" not in specifier
 
     def test_installation_command_honours_a_user_pin(self, mock_plugin_context):
         """An explicit tool_version must win over the plugin default."""
@@ -1356,8 +1357,10 @@ class TestFerretVersionWindowBoundaries:
     Three things apply the window and each could drift on its own: the runtime
     check on the installed binary (fed from the real ``--version`` line), the
     install constraint pip resolves, and the constants the docs restate. 2.4.4 and
-    2.6.0 sit just outside; 2.4.5 and 2.5.2 are the two binaries ASH was run
-    against end to end for this window.
+    2.7.0 sit just outside; 2.4.5 and 2.5.2 are the two binaries ASH was run
+    against end to end, and 2.6.0 was verified on the plugin's invocation
+    surface (SARIF shape, exclude semantics, 0/3 exit codes) when the window
+    admitted it.
     """
 
     CASES = [
@@ -1366,7 +1369,8 @@ class TestFerretVersionWindowBoundaries:
         ("2.5.0", True),
         ("2.5.2", True),
         ("2.5.3", True),
-        ("2.6.0", False),
+        ("2.6.0", True),
+        ("2.7.0", False),
     ]
 
     @pytest.mark.parametrize(("version", "supported"), CASES)

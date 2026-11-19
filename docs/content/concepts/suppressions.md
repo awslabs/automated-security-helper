@@ -51,7 +51,18 @@ A scope may also carry per-engine blocks, keyed by scanner name and owned by tha
             resource_path: "Stack/CollectorTaskRole/DefaultPolicy/Resource"
 ```
 
-Listing engines enumerates the engines the entry covers: a finding from a scanner not listed does not match the entry, and a listed scanner's finding matches only when its plugin accepts the block. A listed scanner whose plugin is not installed or enabled this run suppresses nothing, with a warning naming it. cdk-nag's block takes `applies_to` (compared exactly, as cdk-nag's own `appliesTo`, against the granular qualifier cdk-nag appends to rule ids, so `rule_id: AwsSolutions-IAM5` plus a scope also covers `AwsSolutions-IAM5[Action::logs:*]` findings; the value is never read as a glob, so a literal ported from a cdk-nag config covers only its own qualifier) and `resource_path` (a glob over the construct path).
+Listing engines enumerates the engines the entry covers: a finding from a scanner not listed does not match the entry, and a listed scanner's finding matches only when its plugin accepts the block. A listed scanner whose plugin is not installed (its module is never imported this run) suppresses nothing, with a warning naming it. A plugin that is imported but disabled for the run is still registered, so a scoped entry can still suppress that scanner's findings in stored results. cdk-nag's block takes `applies_to` (compared exactly, as cdk-nag's own `appliesTo`, against the granular qualifier cdk-nag appends to rule ids, so `rule_id: AwsSolutions-IAM5` plus a scope also covers `AwsSolutions-IAM5[Action::logs:*]` findings; the value is never read as a glob, so a literal ported from a cdk-nag config covers only its own qualifier) and `resource_path` (a glob over the construct path).
+
+ferret-scan's block takes `confidence_level` (one of `low`, `medium`, `high`, or a list of them, matched case-insensitively against the band ferret-scan reported) and `validator` (the detector that produced the finding, as the result's `validator` property names it; exact, case-insensitive, never a glob). Both must match when both are present, and a finding that does not carry the named property never matches:
+
+<!-- doctest: config kind=other reason="the scope key of one suppression entry, indented as it sits in the entry, not a whole ASH config" -->
+```yaml
+      scope:
+        engines:
+          ferret-scan:
+            confidence_level: [low, medium]
+            validator: aws_credentials
+```
 
 Everything about a scope fails closed. An empty `scope`, an empty `engines` map and an empty engine block are refused: match-all is the absence of the field, never an empty dict.
 

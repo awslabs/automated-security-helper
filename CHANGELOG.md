@@ -81,6 +81,18 @@
   Betterleaks, pinned and digest-verified; `ash dependencies install --tool betterleaks`,
   with the module loaded, installs the same build locally. See
   [Betterleaks Plugin](docs/content/docs/plugins/community/betterleaks-plugin.md).
+- **Engine-scoped suppressions for ferret-scan** (`scope.engines.ferret-scan`): a
+  suppression entry can now be narrowed to the confidence band ferret-scan reported
+  (`confidence_level: low|medium|high`, or a list) and/or the detector that produced
+  the finding (`validator`, exact and case-insensitive), so an operator can suppress
+  only the weak hits on a path while a HIGH-confidence finding there still reports.
+  Both keys fail closed: an empty block, an unknown key or band is refused at config
+  time, and a finding that does not carry the named property never matches. The
+  supported ferret-scan window also widens from `>=2.4.5,<2.6.0` to `>=2.4.5,<2.7.0`:
+  2.6.0 was verified against the plugin's invocation surface (SARIF shape, exclude
+  semantics, exit codes); note its new detectors (NHS/CHI numbers, GB/Ontario/Quebec
+  licenses, ITINs, card track data) can surface new findings in previously clean
+  scans. The recommended version stays 2.5.3 until the full fixture-matrix pass runs.
 
 ## v3.8.0 (2026-11-12)
 
