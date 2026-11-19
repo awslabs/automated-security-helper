@@ -22735,7 +22735,9 @@ def test_the_plugins_overview_names_every_community_scanner_and_no_other(
     """
     _builtin, community = _shipped_scanner_split(tmp_path, monkeypatch)
     assert community
-    text = _normalize(_page_text(_PLUGINS_INDEX))
+    # Raw text, whitespace-collapsed: _normalize would drop the link this row is
+    # matched by.
+    text = " ".join(_page_text(_PLUGINS_INDEX).split())
     row = re.search(
         r"\[community plugins\]\(\.\./docs/plugins/community/index\.md\) \(([^)]*)\)",
         text,
