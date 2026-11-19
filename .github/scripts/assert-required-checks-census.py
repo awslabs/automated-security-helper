@@ -54,8 +54,9 @@ JOBS THAT MAY DELIBERATELY GO UNGATED
 ``_UNGATED`` below is the named, reasoned exemption list; today it holds two
 entries, the image layer-cache warm-up and the advisory express-daemon cells.
 The mechanism exists rather than being omitted because there is a legitimate
-case for it -- an advisory job carrying ``continue-on-error``, whose failure is
-information rather than a verdict -- and the alternative when that case arrives
+case for it -- an advisory job whose failure is information rather than a
+verdict, and which still turns the run red when it fails, because an advisory
+job does not carry ``continue-on-error`` -- and the alternative when that case arrives
 is to weaken the census instead. An exemption is checked for staleness on every
 run: an entry naming a job the workflow no longer has, or one that has since
 been added to ``needs``, is a false statement in the tree and fails.
@@ -105,7 +106,8 @@ _UNGATED: dict[str, str] = {
         "cancelled by its concurrency group, and scan-validation itself is gated."
     ),
     "e2e-express": (
-        "the advisory express-daemon parity cells, carrying continue-on-error. "
+        "the advisory express-daemon parity cells; a red leg turns the run red but "
+        "is not part of the merge gate. "
         "Express mode's contract is the cold fallback at every point BEFORE the "
         "daemon accepts a scan: a scan is then never wrong because the daemon is "
         "broken, only slower. (A daemon lost AFTER accepting -- killed mid-scan -- "

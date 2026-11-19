@@ -1360,9 +1360,12 @@ jobs:
   # tiers above. Windows asserts the clean unix-only refusal inside the required e2e
   # tier instead (the one express e2e test that carries no ASH_E2E_EXPRESS gate).
   #
-  # Advisory on purpose: continue-on-error, and named in _UNGATED in
+  # Not a required check on purpose: named in _UNGATED in
   # assert-required-checks-census.py, so it is in no required-checks list and a red
-  # here is read by a person rather than by the merge gate. It runs pytest directly
+  # here is read by a person rather than by the merge gate. It does not carry
+  # continue-on-error, so a red leg turns the run red and stays visible instead of
+  # reading green; promoting it into the required lists is a separate decision. It
+  # runs pytest directly
   # instead of through run-unit-tests: that action publishes a `PyTest - ...` check
   # run per leg and admits only the three tier markers, and this job is neither a
   # tier nor a check anything requires.
@@ -1372,7 +1375,6 @@ jobs:
     # above the integration tier), and a restore tolerates a miss.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    continue-on-error: true
     permissions:
       contents: read
     strategy:
