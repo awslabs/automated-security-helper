@@ -235,6 +235,26 @@ jobs:
         run: |
           set -o pipefail
           export PATH="$KIND_BIN:$PATH"
+          # N-1 for the upgrade leg. On a pull_request run the checkout is the merge
+          # of the PR head into the base branch, so HEAD's first parent is the base.
+          # While the base has no operator yet, "the commit before the newest change"
+          # on that first-parent line is a tree with nothing to install, and the
+          # harness refuses it. Then the PR head is the line that carries the operator:
+          # N-1 is the first parent of its newest change to the shipped code. Derived
+          # from the checkout, so it follows the branch instead of a pinned sha. When
+          # the first parent has the operator (a push, or a base that ships one), the
+          # harness's own default applies.
+          if [ -z "${ASH_OPERATOR_E2E_PREV_REF:-}" ] \
+            && ! git cat-file -e "HEAD^1:${OPERATOR_DIR}/Dockerfile" 2>/dev/null \
+            && git rev-parse --verify --quiet "HEAD^2^{commit}" >/dev/null; then
+            newest="$(git log -1 --first-parent --format=%H HEAD^2 -- \
+              ":(top)${OPERATOR_DIR}/ash_operator" ":(top)${OPERATOR_DIR}/generated")"
+            if [ -n "$newest" ]; then
+              ASH_OPERATOR_E2E_PREV_REF="$(git rev-parse --verify "${newest}^1^{commit}")"
+              export ASH_OPERATOR_E2E_PREV_REF
+              echo "N-1 for the upgrade leg: ${ASH_OPERATOR_E2E_PREV_REF} (first parent of ${newest}, the newest change to the shipped operator on the PR head)"
+            fi
+          fi
           # The CRDs installed are the committed ones under generated/, which
           # crd-drift holds equal to what the generator emits, so this tests what an
           # adopter applies. -v rather than -q, for the count line the guard needs.
