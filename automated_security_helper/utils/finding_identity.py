@@ -148,7 +148,10 @@ def _is_absolute(text: str) -> bool:
 
 
 def relative_path(
-    file_path: Optional[str], source_dir: Optional[str | Path] = None
+    file_path: Optional[str],
+    source_dir: Optional[str | Path] = None,
+    *,
+    resolve_root: bool = True,
 ) -> Optional[str]:
     """*file_path* as an identity key writes it.
 
@@ -168,7 +171,9 @@ def relative_path(
     text = posixpath.normpath(sanitized_uri_text(str(file_path)))
     if not _is_absolute(text) or source_dir is None:
         return text
-    for root in (source_dir, Path(source_dir).resolve()):
+    for root in (
+        (source_dir, Path(source_dir).resolve()) if resolve_root else (source_dir,)
+    ):
         spelled = posixpath.normpath(root_text(root))
         if text == spelled:
             return "."
@@ -265,7 +270,10 @@ def finding_identity(
 
 
 def relative_to_scan_root(
-    identity: FindingIdentity, source_dir: Optional[str | Path]
+    identity: FindingIdentity,
+    source_dir: Optional[str | Path],
+    *,
+    resolve_root: bool = True,
 ) -> FindingIdentity:
     """*identity* with its file made relative to *source_dir* by :func:`relative_path`.
 
@@ -277,7 +285,9 @@ def relative_to_scan_root(
     """
     if source_dir is None:
         return identity
-    file = relative_path(identity.base.get("file"), source_dir)
+    file = relative_path(
+        identity.base.get("file"), source_dir, resolve_root=resolve_root
+    )
     if file == identity.base.get("file"):
         return identity
     return replace(identity, base={**identity.base, "file": file})

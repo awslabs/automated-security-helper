@@ -72,6 +72,18 @@ def test_report_command(
     route_rich_print(monkeypatch, stdout_console(100))
     pinned_clock.set(REPORT_RENDERED_AT)
 
+    options = (
+        [
+            "--config-overrides",
+            "reporters.asff.options.account_id=123456789012",
+            "--config-overrides",
+            "reporters.asff.options.aws_region=us-east-1",
+            "--config-overrides",
+            "reporters.asff.options.findings_scope=example",
+        ]
+        if report_format == "asff"
+        else []
+    )
     result = CliRunner().invoke(
         app,
         [
@@ -82,6 +94,7 @@ def test_report_command(
             results_dir.as_posix(),
             "--log-level",
             "ERROR",
+            *options,
         ],
     )
 

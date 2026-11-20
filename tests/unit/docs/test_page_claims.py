@@ -21993,7 +21993,7 @@ _OUTPUT_FORMATS_ACCEPTS = (
     "It accepts the name of every reporter ASH ships, including `github-ghas`, "
     "`gitlab-sast`, `gitlab-cyclonedx`, and `unused-suppressions`, and the names of the "
     "AWS reporters, which write a report only when an operator loads their plugin "
-    "module. It also accepts `aggregated`, `dict`, `asff`, and `custom`, which no "
+    "module. It also accepts `aggregated`, `dict`, and `custom`, which no "
     "reporter writes."
 )
 _OUTPUT_FORMATS_NARROW = (
@@ -22050,7 +22050,13 @@ _OUTPUT_FORMATS_NARROW = (
             id="gitlab-cyclonedx",
         ),
         pytest.param("dict", [], None, False, id="dict-no-reporter-writes"),
-        pytest.param("asff", [], None, False, id="asff-no-reporter-writes"),
+        pytest.param(
+            "asff",
+            [],
+            "its reporter is disabled in the configuration",
+            True,
+            id="asff-disabled-by-default",
+        ),
         pytest.param("custom", [], None, False, id="custom-no-reporter-writes"),
         pytest.param(
             "spdx",

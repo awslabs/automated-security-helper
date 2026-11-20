@@ -81,6 +81,10 @@ def test_builtin_reporter_output(
 ):
     model, context = fixture_variant(variant)
     reporter = build_reporter(reporter_classes()[reporter_name], context)
+    if reporter_name == "asff" and variant != "single":
+        with pytest.raises(ValueError, match="asff exports one project at a time"):
+            reporter.report(model)
+        return
 
     document = reporter.report(model)
 

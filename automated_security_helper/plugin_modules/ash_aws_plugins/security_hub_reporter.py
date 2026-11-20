@@ -341,6 +341,184 @@ class SecurityHubReporterConfig(ReporterPluginConfigBase):
     ]
 
 
+class AsffFormatter:
+    def __init__(
+        self,
+        target: str,
+        scope: str | None,
+        source_dir: str | Path | None,
+        *,
+        offline: bool = False,
+    ) -> None:
+        self.target = target
+        self.scope = scope
+        self.source_dir = source_dir
+        self.offline = offline
+
+    def build_asff_findings(
+        self, model: "AshAggregatedResults", *, account_id: str, region: str
+    ) -> list[dict[str, Any]]:
+        product_arn = _product_arn(region, account_id, offline=self.offline)
+        timestamp = _asff_timestamp(model.metadata.generated_at)
+        target = self.target
+        model_project = _model_project(model)
+        scope = self.scope
+        source_dir = self.source_dir
+
+        prepared: list[dict[str, Any]] = []
+        for run in (model.sarif.runs if model.sarif else None) or []:
+            tool_name = "unknown"
+            if run.tool and run.tool.driver and run.tool.driver.name:
+                tool_name = run.tool.driver.name
+            for result in run.results or []:
+                prepared.append(
+                    self._prepare(
+                        result,
+                        tool_name=tool_name,
+                        target=target,
+                        model_project=model_project,
+                        source_dir=source_dir,
+                    )
+                )
+
+        keys = identity_keys(
+            [entry["identity"] for entry in prepared], default_project=model_project
+        )
+        return [
+            self._to_asff(
+                entry,
+                key=key,
+                target=target,
+                scope=scope,
+                account_id=account_id,
+                product_arn=product_arn,
+                timestamp=timestamp,
+            )
+            for entry, key in zip(prepared, keys)
+        ]
+
+    def _prepare(
+        self,
+        result: "Result",
+        *,
+        tool_name: str,
+        target: str,
+        model_project: str | None,
+        source_dir: str | Path | None,
+    ) -> dict[str, Any]:
+        flat = FlatVulnerability.from_sarif_result(result, tool_name, "UNKNOWN")
+        identity = flat.identity
+        if identity is None:
+            raise SecurityHubImportError(
+                f"aws-security-hub: the {tool_name} result "
+                f"{flat.rule_id or 'unknown'} has no finding identity, so no "
+                "finding Id can be derived for it; nothing was sent"
+            )
+        project = flat.workspace_project or model_project
+        return {
+            "flat": flat,
+            "result": result,
+            "scanner": flat.scanner or tool_name,
+            "rule_id": flat.rule_id or "unknown",
+            "file_path": relative_path(
+                flat.file_path, source_dir, resolve_root=not self.offline
+            ),
+            "project": project,
+            "target_key": _target_key(target, project),
+            "identity": relative_to_scan_root(
+                identity, source_dir, resolve_root=not self.offline
+            ),
+            "message": _without_code_blocks(flat.description or ""),
+        }
+
+    @staticmethod
+    def _to_asff(
+        entry: dict[str, Any],
+        *,
+        key: dict[str, Any],
+        target: str,
+        scope: str | None,
+        account_id: str,
+        product_arn: str,
+        timestamp: str,
+    ) -> dict[str, Any]:
+        flat = entry["flat"]
+        ash_severity = _resolve_result_severity(entry["result"])
+        label = _ASFF_SEVERITY_LABELS.get(ash_severity, "INFORMATIONAL")
+        original = ash_severity.upper()
+
+        scanner = entry["scanner"]
+        rule_id = entry["rule_id"]
+        file_path = entry["file_path"]
+        project = entry["project"]
+        target_key = entry["target_key"]
+
+        message = entry["message"]
+        first_line = next(
+            (line.strip() for line in message.splitlines() if line.strip()), ""
+        )
+        location = file_path or target_key
+        if file_path and flat.line_start is not None:
+            location = f"{file_path}:{flat.line_start}"
+        title = f"{rule_id}: {first_line}" if first_line else rule_id
+        description = (
+            message if first_line else f"{scanner} reported {rule_id} at {location}"
+        )
+
+        types = [_TYPE_CVE if _CVE_PATTERN.search(rule_id) else _TYPE_VULNERABILITY]
+        severity = {"Label": label, "Original": original}
+        resource_id = f"{target_key}/{file_path}" if file_path else target_key
+
+        product_fields = {
+            "ash/target": target_key,
+            "ash/scope": scope,
+            "ash/scanner": scanner,
+            "ash/ruleId": rule_id,
+            "ash/severity": original,
+            "ash/suppressed": "true" if flat.is_suppressed else "false",
+            "ash/file": file_path,
+            "ash/startLine": _str_or_none(flat.line_start),
+            "ash/endLine": _str_or_none(flat.line_end),
+            "ash/workspaceProject": project,
+            "ash/suppressionJustification": (
+                flat.suppression_justification if flat.is_suppressed else None
+            ),
+            "ash/packageName": flat.package_name,
+            "ash/packageVersion": flat.package_version,
+        }
+
+        return {
+            "SchemaVersion": ASFF_SCHEMA_VERSION,
+            "Id": _finding_id(target, key),
+            "ProductArn": product_arn,
+            "GeneratorId": _truncate(
+                f"ash/{scanner}/{rule_id}", MAX_GENERATOR_ID_LENGTH
+            ),
+            "AwsAccountId": account_id,
+            "Types": types,
+            "CreatedAt": timestamp,
+            "UpdatedAt": timestamp,
+            "Severity": dict(severity),
+            "Title": _truncate(title, MAX_TITLE_LENGTH),
+            "Description": _truncate(description, MAX_DESCRIPTION_LENGTH),
+            "Resources": [
+                {
+                    "Type": _RESOURCE_TYPE,
+                    "Id": _truncate(resource_id, MAX_RESOURCE_ID_LENGTH),
+                }
+            ],
+            "FindingProviderFields": {"Severity": dict(severity), "Types": list(types)},
+            "ProductFields": {
+                key: _truncate(value, MAX_PRODUCT_FIELD_VALUE_LENGTH)
+                for key, value in product_fields.items()
+                if isinstance(value, str) and value.strip()
+            },
+            "ProductName": PRODUCT_NAME,
+            "CompanyName": COMPANY_NAME,
+            "RecordState": "ARCHIVED" if flat.is_suppressed else "ACTIVE",
+        }
+
+
 @ash_reporter_plugin
 class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     """Sends security findings to AWS Security Hub in ASFF format.
@@ -766,197 +944,14 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     def build_asff_findings(
         self, model: "AshAggregatedResults", *, account_id: str, region: str
     ) -> list[dict[str, Any]]:
-        """Convert every SARIF result in ``model`` to an ASFF finding.
-
-        One finding per result, in model order. Each finding's ``Id`` follows
-        identity contract v2: ``"ash/" + sha256(json.dumps([target, key],
-        sort_keys=True))``, where the target is ``findings_scope``
-        (``_scan_target``) and the key is the one ``utils/finding_identity``
-        defines for the flattened finding id: ``identity_keys`` over every
-        result's ``FlatVulnerability.identity``, with each file made relative to
-        this scan's source directory first. The rules (fingerprints that identify
-        a result instead of its lines, occurrences and ordinals for results that
-        share a location) are documented there.
-        """
-        product_arn = _product_arn(region, account_id)
-        timestamp = _asff_timestamp(model.metadata.generated_at)
-        target = self._scan_target()
-        model_project = _model_project(model)
-        scope = self._scan_scope(model)
-        source_dir = getattr(self.context, "source_dir", None)
-
-        prepared: list[dict[str, Any]] = []
-        for run in (model.sarif.runs if model.sarif else None) or []:
-            tool_name = "unknown"
-            if run.tool and run.tool.driver and run.tool.driver.name:
-                tool_name = run.tool.driver.name
-            for result in run.results or []:
-                prepared.append(
-                    self._prepare(
-                        result,
-                        tool_name=tool_name,
-                        target=target,
-                        model_project=model_project,
-                        source_dir=source_dir,
-                    )
-                )
-
-        # One call for the whole model: a fingerprint, an occurrence and an
-        # ordinal each depend on the other results.
-        keys = identity_keys(
-            [entry["identity"] for entry in prepared], default_project=model_project
+        formatter = AsffFormatter(
+            self._scan_target(),
+            self._scan_scope(model),
+            getattr(self.context, "source_dir", None),
         )
-        return [
-            self._to_asff(
-                entry,
-                key=key,
-                target=target,
-                scope=scope,
-                account_id=account_id,
-                product_arn=product_arn,
-                timestamp=timestamp,
-            )
-            for entry, key in zip(prepared, keys)
-        ]
-
-    def _prepare(
-        self,
-        result: "Result",
-        *,
-        tool_name: str,
-        target: str,
-        model_project: str | None,
-        source_dir: str | Path | None,
-    ) -> dict[str, Any]:
-        """Everything about one result that its ASFF finding is built from."""
-        # FlatVulnerability is the extraction every tabular reporter shares: the
-        # location, the scanner name, the suppression, the package identity, the
-        # message with secrets masked, and the finding's identity. Its severity is
-        # not used: it maps an error-level result with no issue_severity to HIGH,
-        # while ASH's severity counts and threshold gate map it to CRITICAL.
-        # Security Hub should show the severity the scan summary and exit code
-        # counted.
-        flat = FlatVulnerability.from_sarif_result(result, tool_name, "UNKNOWN")
-        # from_sarif_result always records the identity it took the id from; only
-        # an additional_reports entry that carries its plugin's id has none, and
-        # those are not SARIF results.
-        identity = flat.identity
-        if identity is None:
-            # The reporter's own error, so the report phase records this
-            # reporter's failure rather than a crash.
-            raise SecurityHubImportError(
-                f"aws-security-hub: the {tool_name} result "
-                f"{flat.rule_id or 'unknown'} has no finding identity, so no "
-                "finding Id can be derived for it; nothing was sent"
-            )
-        project = flat.workspace_project or model_project
-        return {
-            "flat": flat,
-            "result": result,
-            "scanner": flat.scanner or tool_name,
-            "rule_id": flat.rule_id or "unknown",
-            # Where the finding is, as the scan root sees it. A converted file's
-            # key names it relative to the converted root instead, which is not a
-            # path a reader can open.
-            "file_path": relative_path(flat.file_path, source_dir),
-            "project": project,
-            "target_key": _target_key(target, project),
-            "identity": relative_to_scan_root(identity, source_dir),
-            "message": _without_code_blocks(flat.description or ""),
-        }
-
-    def _to_asff(
-        self,
-        entry: dict[str, Any],
-        *,
-        key: dict[str, Any],
-        target: str,
-        scope: str | None,
-        account_id: str,
-        product_arn: str,
-        timestamp: str,
-    ) -> dict[str, Any]:
-        flat = entry["flat"]
-        ash_severity = _resolve_result_severity(entry["result"])
-        label = _ASFF_SEVERITY_LABELS.get(ash_severity, "INFORMATIONAL")
-        original = ash_severity.upper()
-
-        scanner = entry["scanner"]
-        rule_id = entry["rule_id"]
-        file_path = entry["file_path"]
-        project = entry["project"]
-        target_key = entry["target_key"]
-
-        message = entry["message"]
-        first_line = next(
-            (line.strip() for line in message.splitlines() if line.strip()), ""
+        return formatter.build_asff_findings(
+            model, account_id=account_id, region=region
         )
-        location = file_path or target_key
-        if file_path and flat.line_start is not None:
-            location = f"{file_path}:{flat.line_start}"
-        title = f"{rule_id}: {first_line}" if first_line else rule_id
-        description = (
-            message if first_line else f"{scanner} reported {rule_id} at {location}"
-        )
-
-        types = [_TYPE_CVE if _CVE_PATTERN.search(rule_id) else _TYPE_VULNERABILITY]
-        severity = {"Label": label, "Original": original}
-        resource_id = f"{target_key}/{file_path}" if file_path else target_key
-
-        product_fields = {
-            "ash/target": target_key,
-            "ash/scope": scope,
-            "ash/scanner": scanner,
-            "ash/ruleId": rule_id,
-            "ash/severity": original,
-            "ash/suppressed": "true" if flat.is_suppressed else "false",
-            "ash/file": file_path,
-            "ash/startLine": _str_or_none(flat.line_start),
-            "ash/endLine": _str_or_none(flat.line_end),
-            "ash/workspaceProject": project,
-            "ash/suppressionJustification": (
-                flat.suppression_justification if flat.is_suppressed else None
-            ),
-            "ash/packageName": flat.package_name,
-            "ash/packageVersion": flat.package_version,
-        }
-
-        return {
-            "SchemaVersion": ASFF_SCHEMA_VERSION,
-            "Id": _finding_id(target, key),
-            "ProductArn": product_arn,
-            "GeneratorId": _truncate(
-                f"ash/{scanner}/{rule_id}", MAX_GENERATOR_ID_LENGTH
-            ),
-            "AwsAccountId": account_id,
-            "Types": types,
-            "CreatedAt": timestamp,
-            "UpdatedAt": timestamp,
-            "Severity": dict(severity),
-            "Title": _truncate(title, MAX_TITLE_LENGTH),
-            "Description": _truncate(description, MAX_DESCRIPTION_LENGTH),
-            "Resources": [
-                {
-                    "Type": _RESOURCE_TYPE,
-                    "Id": _truncate(resource_id, MAX_RESOURCE_ID_LENGTH),
-                }
-            ],
-            # The fields a finding provider updates through FindingProviderFields;
-            # see https://docs.aws.amazon.com/securityhub/latest/userguide/finding-update-batchimportfindings.html.
-            # The top-level copies are kept because the ASFF required-attributes
-            # page lists Severity and Types as required; for an existing finding
-            # Security Hub updates them only if nobody changed them with
-            # BatchUpdateFindings.
-            "FindingProviderFields": {"Severity": dict(severity), "Types": list(types)},
-            "ProductFields": {
-                key: _truncate(value, MAX_PRODUCT_FIELD_VALUE_LENGTH)
-                for key, value in product_fields.items()
-                if isinstance(value, str) and value.strip()
-            },
-            "ProductName": PRODUCT_NAME,
-            "CompanyName": COMPANY_NAME,
-            "RecordState": "ARCHIVED" if flat.is_suppressed else "ACTIVE",
-        }
 
     def _scan_target(self) -> str:
         """The ``findings_scope`` option, which the Ids and the archive filter follow.
@@ -1179,15 +1174,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         scope longer than a ProductFields value is stored cut, which loses that
         distinction, so ``_archive_scope`` archives nothing for such a scan.
         """
-        source = getattr(model.metadata, "scan_source", None)
-        if not isinstance(source, str) or not source.strip():
-            return None
-        converted = any(
-            "converted" in report
-            for report in (getattr(model, "additional_reports", None) or {}).values()
-            if isinstance(report, dict)
-        )
-        return f"source={source};converted={'yes' if converted else 'no'}"
+        return _scan_scope(model)
 
     def _existing_findings(
         self, client, *, product_arn: str, target_keys: set[str]
@@ -1866,6 +1853,18 @@ def _finding_id(target: str, key: dict[str, Any]) -> str:
     return "ash/" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _scan_scope(model: "AshAggregatedResults") -> str | None:
+    source = getattr(model.metadata, "scan_source", None)
+    if not isinstance(source, str) or not source.strip():
+        return None
+    converted = any(
+        "converted" in report
+        for report in (getattr(model, "additional_reports", None) or {}).values()
+        if isinstance(report, dict)
+    )
+    return f"source={source};converted={'yes' if converted else 'no'}"
+
+
 @functools.lru_cache(maxsize=None)
 def _partition(region: str) -> str:
     """The AWS partition for ``region``, from botocore's bundled endpoint data."""
@@ -1875,7 +1874,21 @@ def _partition(region: str) -> str:
         return "aws"
 
 
-def _product_arn(region: str, account_id: str) -> str:
+@functools.lru_cache(maxsize=None)
+def _offline_partition(region: str) -> str:
+    from importlib.resources import files
+    from botocore.regions import EndpointResolver
+
+    data = json.loads(
+        files("botocore").joinpath("data/endpoints.json").read_text(encoding="utf-8")
+    )
+    try:
+        return EndpointResolver(data).get_partition_for_region(region)
+    except BotoCoreError:
+        return "aws"
+
+
+def _product_arn(region: str, account_id: str, *, offline: bool = False) -> str:
     """The account's default product ARN, for findings it imports itself.
 
     https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-custom-providers.html:
@@ -1883,7 +1896,7 @@ def _product_arn(region: str, account_id: str) -> str:
     arn:aws:securityhub:<region>:<account-id>:product/<account-id>/default".
     """
     return (
-        f"arn:{_partition(region)}:securityhub:{region}:{account_id}:"
+        f"arn:{_offline_partition(region) if offline else _partition(region)}:securityhub:{region}:{account_id}:"
         f"product/{account_id}/default"
     )
 

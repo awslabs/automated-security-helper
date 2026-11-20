@@ -348,8 +348,8 @@ class TestMergedReporters:
     def test_a_disabled_reporter_is_still_recorded_with_its_reason(self, workspace):
         """Found by running a real workspace scan and reading the manifest.
 
-        ``yaml`` and ``spdx`` ship disabled, and the four AWS reporters report
-        unsatisfied dependencies without credentials -- so six of the nineteen were
+        ``asff``, ``yaml`` and ``spdx`` ship disabled, and the four AWS reporters report
+        unsatisfied dependencies without credentials, so seven of the twenty were
         absent from the manifest with nothing to say why. An operator asking "where
         is my yaml report" got silence, which is the failure mode this manifest
         exists to prevent; only the reason differs from a withheld one.
@@ -799,7 +799,7 @@ class TestUnsupportedReportersAreRefusedBeforeAnythingIsScanned:
     def test_no_shipped_reporter_declares_itself_unsupported(self, workspace, tmp_path):
         """Recorded as a fact about the shipped set, not as an assumption.
 
-        Every one of the 19 has a defensible merged or per-project answer, so this
+        Every shipped reporter has a defensible merged or per-project answer, so this
         gate never fires in practice today. Asserting it means a future reporter
         that does declare ``UNSUPPORTED`` cannot slip in and start failing every
         workspace run without someone reading this test and deciding that is what
@@ -933,16 +933,16 @@ class TestTheManifestIsExhaustive:
             "fake-raising",
         }
 
-    def test_all_nineteen_shipped_reporters_are_accounted_for(self, workspace):
+    def test_all_shipped_reporters_are_accounted_for(self, workspace):
         """Acceptance criterion 23, over the whole shipped set rather than a sample.
 
-        The default plugin registry resolves 15 reporters: the four under
+        The default plugin registry resolves 16 reporters: the four under
         ``ash_aws_plugins`` are registered only when an operator names that module
-        in ``ash_plugin_modules``. So a default workspace run's manifest has 15
+        in ``ash_plugin_modules``. So a default workspace run's manifest has 16
         entries, and that is correct -- the manifest is exhaustive over what was
         registered, not over what exists on disk.
 
-        This asserts the other half: when all nineteen *are* registered, every one
+        This asserts the other half: when all shipped reporters *are* registered, every one
         gets an entry carrying the behaviour it declared. Without it, "every
         reporter has an asserted workspace behaviour" would hold for the
         declaration and be untested for the four an operator has to opt into --
@@ -1005,9 +1005,8 @@ class TestTheManifestIsExhaustive:
         not_considered = sorted(
             name for name, entry in entries.items() if not entry["considered"]
         )
-        # yaml, spdx and the four AWS reporters ship disabled; nothing else should
-        # be turned away once dependencies are satisfied.
         assert not_considered == [
+            "asff",
             "aws-security-hub",
             "bedrock-summary-reporter",
             "cloudwatch-logs",

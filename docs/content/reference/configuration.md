@@ -319,6 +319,7 @@ The reporters ASH declares a configuration for. Other reporter names are accepte
 | <a id="reporters.github-ghas"></a>`github-ghas` | yes | [`github-ghas` options](reporters.md#github-ghas) |
 | <a id="reporters.junitxml"></a>`junitxml` | yes | [`junitxml` options](reporters.md#junitxml) |
 | <a id="reporters.markdown"></a>`markdown` | yes | [`markdown` options](reporters.md#markdown) |
+| <a id="reporters.asff"></a>`asff` | no | [`asff` options](reporters.md#asff) |
 | <a id="reporters.ocsf"></a>`ocsf` | yes | [`ocsf` options](reporters.md#ocsf) |
 | <a id="reporters.sarif"></a>`sarif` | yes | [`sarif` options](reporters.md#sarif) |
 | <a id="reporters.spdx"></a>`spdx` | no | [`spdx` options](reporters.md#spdx) |

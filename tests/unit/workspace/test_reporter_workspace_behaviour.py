@@ -68,6 +68,7 @@ EXPECTED_BEHAVIOURS = {
     "cyclonedx": ReporterWorkspaceBehaviour.PER_PROJECT,
     "gitlab-cyclonedx": ReporterWorkspaceBehaviour.PER_PROJECT,
     "spdx": ReporterWorkspaceBehaviour.PER_PROJECT,
+    "asff": ReporterWorkspaceBehaviour.PER_PROJECT,
     "aws-security-hub": ReporterWorkspaceBehaviour.PER_PROJECT,
     "bedrock-summary-reporter": ReporterWorkspaceBehaviour.PER_PROJECT,
     "cloudwatch-logs": ReporterWorkspaceBehaviour.PER_PROJECT,
@@ -79,7 +80,7 @@ EXPECTED_BEHAVIOURS = {
 #: How many reporters ship. Pinned as a literal so that adding a reporter
 #: without ruling on its workspace behaviour fails this file rather than
 #: silently inheriting a default nobody chose.
-SHIPPED_REPORTER_COUNT = 19
+SHIPPED_REPORTER_COUNT = 20
 
 
 def _iter_reporter_classes():

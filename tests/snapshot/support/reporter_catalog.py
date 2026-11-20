@@ -17,6 +17,7 @@ from typing import Any
 
 #: Reporters in ``plugin_modules/ash_builtin/reporters`` (``ASH_REPORTERS``).
 BUILTIN_REPORTER_NAMES = (
+    "asff",
     "csv",
     "cyclonedx",
     "flat-json",
@@ -101,7 +102,14 @@ def build_reporter(reporter_class: type, context: Any) -> Any:
     """Instantiate a reporter the way ``ReportPhase._execute_phase`` does."""
     from automated_security_helper.base.plugin_config import plugin_config_key
 
+    name = plugin_config_key(reporter_class)
     plugin_config = context.config.get_plugin_config(
-        plugin_type="reporter", plugin_name=plugin_config_key(reporter_class)
+        plugin_type="reporter", plugin_name=name
     )
-    return reporter_class(context=context, config=plugin_config)
+    reporter = reporter_class(context=context, config=plugin_config)
+    if name == "asff":
+        reporter.config.options.account_id = "123456789012"
+        reporter.config.options.aws_region = "us-east-1"
+        reporter.config.options.findings_scope = "snapshot"
+        reporter.config.options.scan_root = context.source_dir.as_posix()
+    return reporter

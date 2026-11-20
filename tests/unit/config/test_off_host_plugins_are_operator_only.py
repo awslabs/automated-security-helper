@@ -151,6 +151,7 @@ LOCAL: Dict[Plugin, str] = {
         "reads the Dockerfiles in the scan set (hadolint_scanner.py:391-448); "
         "declares no network (:284)"
     ),
+    ("reporters", "asff"): "writes a file",
     ("reporters", "csv"): "writes a file",
     ("reporters", "cyclonedx"): "writes a file",
     ("reporters", "flat-json"): "writes a file",

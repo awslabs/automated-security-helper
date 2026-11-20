@@ -569,6 +569,17 @@
         },
         "extension": "summary.md"
       },
+      "asff": {
+        "name": "asff",
+        "enabled": false,
+        "options": {
+          "account_id": null,
+          "aws_region": null,
+          "findings_scope": null,
+          "scan_root": null
+        },
+        "extension": "asff.json"
+      },
       "ocsf": {
         "name": "ocsf",
         "enabled": true,
