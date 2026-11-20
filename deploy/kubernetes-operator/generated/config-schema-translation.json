@@ -1,17 +1,17 @@
 {
-  "additionalPropertiesDroppedAlongsideProperties": 93,
-  "collapsedOptionals": 58,
-  "constRewrittenToEnum": 32,
+  "additionalPropertiesDroppedAlongsideProperties": 95,
+  "collapsedOptionals": 61,
+  "constRewrittenToEnum": 33,
   "droppedKeywords": {
-    "default": 203,
+    "default": 208,
     "propertyNames": 1,
-    "title": 235
+    "title": 241
   },
   "exclusiveBoundsRewritten": 0,
   "referenceCycles": [
     "AshConfig"
   ],
-  "sourceSchemaSha256": "c587641b6c6ffc0e",
+  "sourceSchemaSha256": "620ac5a99163b3c2",
   "unexpressible": [
     {
       "path": "/properties/build/anyOf/0/properties/custom_scanners/items/properties/context/anyOf/0/properties/config",
@@ -547,6 +547,10 @@
     },
     {
       "path": "/properties/reporters/properties/markdown/properties/options/properties/compact",
+      "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
+    },
+    {
+      "path": "/properties/reporters/properties/asff/properties/enabled",
       "reason": "a union of 2 branches with types ['boolean', 'string'] -- a structural schema needs one type outside the junctor, so this subtree accepts any value and ASH validates it at scan time."
     },
     {
