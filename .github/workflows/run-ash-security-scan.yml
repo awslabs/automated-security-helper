@@ -1808,9 +1808,14 @@ jobs:
             output="${RUNNER_TEMP}/ash-install-tool.log"
             for tool in "${tools[@]}"; do
               args=(--tool "${tool}")
-              if [ "${tool}" = "betterleaks" ]; then args+=(--config-overrides "${betterleaks_module}"); fi
+              skip_unknown_tools=skip
+              if [ "${tool}" = "betterleaks" ]; then
+                args+=(--config-overrides "${betterleaks_module}")
+                skip_unknown_tools=""
+              fi
               status=0
-              install_tools "${args[@]}" > "${output}" 2>&1 || status=$?
+              ASH_DEPENDENCIES_UNKNOWN_TOOLS="${skip_unknown_tools}" \
+                install_tools "${args[@]}" > "${output}" 2>&1 || status=$?
               cat "${output}"
               if [ "${status}" -eq 2 ] && [ "${tool}" != "betterleaks" ] && grep -q -F 'Unknown tool(s)' "${output}"; then
                 echo "::notice::$(one_line "${tool}") is not a tool the installed ASH knows, so it is not installed and its scanner does not run (ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip)."

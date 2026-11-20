@@ -21,10 +21,9 @@ INSTALL = "Install actionlint, cfn-guard, gitleaks and trivy"
 MODULE = "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]"
 
 
-# The steps run here are bash steps of an ubuntu-latest job, with a /bin/sh stub for uvx.
 needs_bash = pytest.mark.skipif(
     os.name == "nt" or shutil.which("bash") is None,
-    reason="the steps under test are bash steps that run on ubuntu-latest",
+    reason="requires POSIX Bash",
 )
 
 NO_INSTALLS = {
@@ -53,12 +52,16 @@ def run_step(tmp_path, name, env):
     uvx.write_text(
         '#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGV_FILE"\n'
         '[ -z "${UVX_OUTPUT:-}" ] || printf "%s\\n" "$UVX_OUTPUT"\n'
+        'if [ "${UVX_RESPECTS_SKIP:-}" = 1 ] && '
+        '[ "${ASH_DEPENDENCIES_UNKNOWN_TOOLS:-}" = skip ]; then exit 0; fi\n'
         'exit "${UVX_STATUS:-0}"\n'
     )
     uvx.chmod(0o755)
     argv = tmp_path / "argv"
+    bash = shutil.which("bash")
+    assert bash is not None
     result = subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", step(name)["run"]],
+        [str(Path(bash).resolve()), "-e", "-o", "pipefail", "-c", step(name)["run"]],
         cwd=tmp_path,
         env={
             **os.environ,
@@ -139,11 +142,13 @@ def test_installer_propagates_failure_even_with_skip(tmp_path, status):
 
 
 @needs_bash
-def test_an_unknown_betterleaks_fails_even_with_skip(tmp_path):
+@pytest.mark.parametrize("respects_skip", ["", "1"], ids=["legacy", "current"])
+def test_an_unknown_betterleaks_fails_even_with_skip(tmp_path, respects_skip):
     result, _ = _install(
         tmp_path,
         {
             "ASH_DEPENDENCIES_UNKNOWN_TOOLS": "skip",
+            "UVX_RESPECTS_SKIP": respects_skip,
             "UVX_STATUS": "2",
             "UVX_OUTPUT": "Unknown tool(s): betterleaks",
         },
