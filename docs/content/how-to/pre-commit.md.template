@@ -211,14 +211,16 @@ Every later run's cost scales with the size of the repository unless `--staged` 
 the scan: without the flag, each commit scans the whole tree, however small the change.
 With `--staged`, which the hook passes, the scan covers the staged files and the time
 grows with the commit instead. checkov is the slowest scanner. Warm-run times, measured
-on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches:
+on x86_64 Linux with 8 or more vCPUs, Python 3.12, and warm caches. The 10-file column is
+the median of three runs on one machine; the ~900-file column comes from an earlier
+measurement on a different machine, so compare rows within a column rather than across:
 
 | Warm run | 10-file repository | ~900-file Python repository |
 |---|---|---|
-| `--mode precommit` on the whole repository (no `--staged`) | ~6.7 s | ~18 s |
-| `--mode precommit --staged`, one `.py` file staged | ~4.4 s | ~5.7 s |
+| `--mode precommit` on the whole repository (no `--staged`) | ~6.6 s | ~18 s |
+| `--mode precommit --staged`, one `.py` file staged | ~2.8 s | ~5.7 s |
 | The same, with `--only-scanners bandit,detect-secrets` | ~2.8 s | ~3.4 s |
-| `--staged` with the express daemon warm (`--express`) | ~3.0 s | not measured |
+| `--staged` with the express daemon warm (`--express`) | ~1.4 s | not measured |
 
 For scale, `ash --version` alone takes about 0.2 seconds on the same machine. What is
 left of the fastest runs above is the floor every scan pays: starting the interpreter,

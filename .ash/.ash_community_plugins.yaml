@@ -70,6 +70,19 @@ global_settings:
         False positive. The release notes carry the same Security Hub credentials-check
         sentence as the CHANGELOG entry above, quoted in prose beside option names. They
         hold words, not a credential.
+    - rule_id: API_KEY_OR_SECRET
+      path: Dockerfile
+      reason: >-
+        False positive. The adduser command in the non-root-user block passes the
+        --disabled-password flag, which the netrc_password detector in ferret-scan 2.6.1
+        reads as a password token. No secret is present. Per file, because the line
+        moves whenever the Dockerfile is edited.
+    - rule_id: API_KEY_OR_SECRET
+      path: automated_security_helper/assets/Dockerfile
+      reason: >-
+        False positive. This is the build-context copy of the Dockerfile entry above, with
+        the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
+        password token. No secret is present.
     - rule_id: SSN
       path: docs/content/reference/converters.md
       reason: >-
