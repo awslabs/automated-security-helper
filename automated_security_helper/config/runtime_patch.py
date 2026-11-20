@@ -392,6 +392,7 @@ _SHIPPED_PLUGIN_KEYS: Dict[str, FrozenSet[str]] = {
     ),
     "reporters": frozenset(
         {
+            "asff",
             "aws-security-hub",
             "bedrock-summary-reporter",
             "cloudwatch-logs",

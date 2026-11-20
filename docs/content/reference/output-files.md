@@ -448,6 +448,7 @@ skipped with a warning.
 | `ash.summary.md` | [`markdown`](reporters.md#markdown) | yes |
 | `ash.summary.txt` | [`text`](reporters.md#text) | yes |
 | `ash.unused-suppressions.json`, `ash.unused-suppressions.md` | [`unused-suppressions`](reporters.md#unused-suppressions) | yes |
+| `ash.asff.json` | [`asff`](reporters.md#asff) | no |
 | `ash.spdx.json` | [`spdx`](reporters.md#spdx) | no |
 | `ash.yaml` | [`yaml`](reporters.md#yaml) | no |
 

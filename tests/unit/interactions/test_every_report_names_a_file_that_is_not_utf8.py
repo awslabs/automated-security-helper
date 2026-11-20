@@ -60,11 +60,27 @@ def _reporter_names() -> List[str]:
     return sorted(reporter(context=probe).config.name for reporter in ASH_REPORTERS)
 
 
-def _config(tmp_path: Path, reporters: List[str]) -> Path:
-    config = tmp_path / "every-reporter.yaml"
+def _asff_options(source: Path) -> str:
+    """The options the offline ASFF export refuses to run without; it reads no AWS
+    state to fill them in, so a config that turns it on gives them."""
+    return (
+        "    options:\n"
+        "      account_id: '123456789012'\n"
+        "      aws_region: us-east-1\n"
+        "      findings_scope: odd-names\n"
+        f"      scan_root: '{source}'\n"
+    )
+
+
+def _config(tmp_path: Path, reporters: List[str], source: Path) -> Path:
+    config = tmp_path / f"every-reporter-{source.name}.yaml"
     config.write_text(
         "reporters:\n"
-        + "".join(f"  {name}:\n    enabled: true\n" for name in reporters),
+        + "".join(
+            f"  {name}:\n    enabled: true\n"
+            + (_asff_options(source) if name == "asff" else "")
+            for name in reporters
+        ),
         encoding="utf-8",
     )
     return config
@@ -79,7 +95,7 @@ def _scanned(tmp_path: Path, label: str, name: bytes) -> Tuple[Path, Dict[str, s
         source,
         output,
         "--config",
-        str(_config(tmp_path, reporters)),
+        str(_config(tmp_path, reporters, source)),
         "--output-formats",
         ",".join(reporters),
     )
@@ -172,7 +188,23 @@ def test_every_report_ash_report_renders_names_the_file(tmp_path):
     rendered: Dict[str, Dict[str, str]] = {"odd": {}, "plain": {}}
     for reporter, file_name in sorted(_extensions().items()):
         for label, output in (("odd", odd_out), ("plain", plain_out)):
-            ran = names.report_of(tmp_path, output, reporter)
+            if reporter == "asff":
+                # Its options come from the config the scan was given.
+                ran = names.ash(
+                    tmp_path,
+                    [
+                        "report",
+                        "--output-dir",
+                        str(output),
+                        "--format",
+                        reporter,
+                        "--no-color",
+                        "--config",
+                        str(tmp_path / f"every-reporter-{label}.yaml"),
+                    ],
+                )
+            else:
+                ran = names.report_of(tmp_path, output, reporter)
             assert ran.code == 0, (reporter, label, ran)
             rendered[label][file_name] = ran.stdout_bytes.decode("utf-8")
 

@@ -1064,6 +1064,14 @@ _LISTED_BEFORE_DEFINED: set = set()
 
 #: Options whose names look like a destination but are not one.
 _REVIEWED_NOT_DESTINATIONS = {
+    ("asff", "account_id"): (
+        "stamped into the findings the offline export writes to a local file; the "
+        "reporter reads no credentials and sends nothing"
+    ),
+    ("asff", "aws_region"): (
+        "stamped into the product ARN of the findings the offline export writes "
+        "to a local file; the reporter calls no AWS service"
+    ),
     ("s3", "file_format"): "picks JSON or YAML for the object's content",
     ("gitlab-cyclonedx", "input_file_path_override"): (
         "a value written into the report's content, not a file ASH reads or writes"
