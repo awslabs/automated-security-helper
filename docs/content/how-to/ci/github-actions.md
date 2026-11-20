@@ -74,6 +74,18 @@ such as the pull request's base commit, pass that commit as `config-ref` (see th
 below). [Who can change the gate](../set-the-gate.md#who) lists what a repository can still
 affect.
 
+To replace Gitleaks with Betterleaks, pin a workflow revision that declares
+`use-betterleaks` and set it to `true`. The effective ASH mode must be `local`,
+including any `--mode` in `ash-args`. Installation fails if the selected ASH version
+does not support Betterleaks. The workflow installs ASH's pinned Betterleaks binary,
+enables its scanner and disables Gitleaks, regardless of `install-gitleaks`.
+
+<!-- doctest: illustrative reason="input fragment for the calling workflow job" -->
+```yaml
+with:
+  use-betterleaks: true
+```
+
 ### Inputs of run-ash-security-scan.yml {#inputs}
 
 <!-- doctest: options of=github-inputs:.github/workflows/run-ash-security-scan.yml complete -->
@@ -103,7 +115,8 @@ affect.
 | `install-cfn-nag` | `true` | Set up Ruby and install cfn-nag from the `Gemfile` and `Gemfile.lock` of the ASH commit the workflow installs. |
 | `install-actionlint` | `true` | Install actionlint. |
 | `install-cfn-guard` | `true` | Install cfn-guard and the rule files it evaluates. |
-| `install-gitleaks` | `true` | Install gitleaks. |
+| `install-gitleaks` | `true` | Install gitleaks unless `use-betterleaks` is true. |
+| `use-betterleaks` | `false` | Replace Gitleaks with Betterleaks in local mode. |
 | `install-trivy` | `true` | Install trivy. trivy downloads its vulnerability database during each scan. |
 | `changed-files-only` | `false` | Passes `--changed-files-only` and `--base-ref`, and checks out the repository's whole history to compute the changed files; see [Scan only the files a pull request changes](#changed-files). Not supported with `ash-mode: container`: the workflow stops the job with its own error before the scan. |
 | `base-ref` | `origin/main` | The base for `changed-files-only` on events other than `pull_request` and `merge_group`, which use their own base commit. |

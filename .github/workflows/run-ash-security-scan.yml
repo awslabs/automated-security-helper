@@ -265,6 +265,11 @@ on:
         required: false
         default: true
         type: boolean
+      use-betterleaks:
+        description: "Replace Gitleaks with Betterleaks in local mode. Requires an ASH version with Betterleaks support."
+        required: false
+        default: false
+        type: boolean
       install-gitleaks:
         description: "Whether to install the gitleaks scanner (about 8.2 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.gitleaks.enabled: false."
         required: false
@@ -871,7 +876,7 @@ jobs:
       # so the diff would be the base branch's own changes.
       - name: Resolve the base for changed-files-only
         id: base-ref
-        if: inputs.changed-files-only
+        if: inputs.changed-files-only || inputs.use-betterleaks
         shell: bash
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -880,6 +885,8 @@ jobs:
           CONFIGURED_BASE_REF: ${{ steps.inputs.outputs.base_ref }}
           # pull_request synchronize payloads carry `before` too; push only.
           PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          CHECK_CHANGED_FILES_ONLY: ${{ inputs.changed-files-only && 'true' || '' }}
+          USE_BETTERLEAKS: ${{ inputs.use-betterleaks && 'true' || '' }}
           ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
           ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
         run: |
@@ -928,6 +935,13 @@ jobs:
                 ;;
             esac
           done
+          if [ -n "${USE_BETTERLEAKS}" ] && [ "${mode}" != "local" ]; then
+            echo "::error::use-betterleaks requires effective ASH mode local."
+            exit 1
+          fi
+          if [ -z "${CHECK_CHANGED_FILES_ONLY}" ]; then
+            exit 0
+          fi
           if [ "${mode}" = "container" ]; then
             echo "::error::changed-files-only: ASH does not support --changed-files-only in container mode and would report the findings in every file. Use ash-mode local (the default) with no --mode container in ash-args, or turn changed-files-only off."
             exit 1
@@ -1642,6 +1656,22 @@ jobs:
           else result=miss; fi
           echo "cache ${CACHE_NAME}: ${result}" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Install Betterleaks
+        if: inputs.use-betterleaks
+        shell: bash
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+        run: |
+          set -euo pipefail
+          . "${RUNNER_TEMP}/ash-one-line.sh"
+          mkdir -p "${RUNNER_TEMP}/ash-install-cwd"
+          with_commands_stopped env -C "${RUNNER_TEMP}/ash-install-cwd" -u ASH_CONFIG -u ASH_DEPENDENCIES_UNKNOWN_TOOLS \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+              --tool betterleaks \
+              --config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]' \
+              --bin-path "${ASH_TOOL_BIN}"
+          echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
+
       # `ash dependencies install`, not `curl https://get.anchore.io/... | sudo sh`.
       #
       # The piped form pinned nothing and gave the endpoint root on the runner at
@@ -1750,12 +1780,12 @@ jobs:
       # ${RUNNER_TEMP}/share/cfn-guard-rules; the Run ASH step points
       # ASH_CFN_GUARD_RULES_DIR there.
       - name: Install actionlint, cfn-guard, gitleaks and trivy
-        if: inputs.install-actionlint || inputs.install-cfn-guard || inputs.install-gitleaks || inputs.install-trivy
+        if: inputs.install-actionlint || inputs.install-cfn-guard || (inputs.install-gitleaks && !inputs.use-betterleaks) || inputs.install-trivy
         env:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
           INSTALL_ACTIONLINT: ${{ inputs.install-actionlint && 'actionlint' || '' }}
           INSTALL_CFN_GUARD: ${{ inputs.install-cfn-guard && 'cfn-guard' || '' }}
-          INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && 'gitleaks' || '' }}
+          INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && !inputs.use-betterleaks && 'gitleaks' || '' }}
           INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
         run: |
           set -euo pipefail
@@ -2083,6 +2113,7 @@ jobs:
           # every part of ASH that reads ASH_CONFIG sees the same file.
           ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
           ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
+          USE_BETTERLEAKS: ${{ inputs.use-betterleaks && 'true' || '' }}
           ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
           ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
           # Bare `inputs.fail-on-findings`, not `== 'true'`. GitHub casts
@@ -2205,8 +2236,14 @@ jobs:
                 ;;
             esac
           done
+          betterleaks_args=()
+          if [ -n "${USE_BETTERLEAKS:-}" ]; then
+            betterleaks_args+=(--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]')
+            betterleaks_args+=(--config-overrides 'scanners.betterleaks.enabled=true')
+            betterleaks_args+=(--config-overrides 'scanners.gitleaks.enabled=false')
+          fi
           uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
-            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}"
+            --source-dir . --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
 
       # Default branch only, after the scan, so what is saved is the database grype
       # actually scanned with. The save is refused unless that database is at most
