@@ -153,11 +153,70 @@ def test_the_pending_end_removes_the_workspace_once_the_other_server_lets_go(
     assert sandbox.is_dir(), "the end completed while the other server held the guard"
 
     another_servers_lock.close()
-    deadline = time.monotonic() + _SLACK_SECONDS * 2
-    while sandbox.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
+    _wait_for_the_pending_end_to_finish(STALE)
 
     assert not sandbox.exists(), (
         "the pending end never completed once the guard was free"
     )
+    assert STALE not in sessions._ended_while_scanning
+
+
+def _wait_for_the_pending_end_to_finish(session_id: str) -> None:
+    """Wait for the thread the sweep started to be done with ``session_id``.
+
+    The workspace leaving the disk is not the end of the end: ``end_session``
+    sets the tree aside, deletes it, and only then unmarks the id in
+    ``_ended_while_scanning``. The thread's own claim in
+    ``_completing_off_the_sweep`` is dropped after that, so its absence is the
+    completion signal.
+    """
+    deadline = time.monotonic() + _SLACK_SECONDS * 2
+    while time.monotonic() < deadline:
+        with sessions._ended_lock:
+            if session_id not in sessions._completing_off_the_sweep:
+                return
+        time.sleep(0.01)
+    raise AssertionError("the thread completing the pending end never finished")
+
+
+def test_the_pending_mark_outlives_the_workspace_until_the_end_is_done(
+    root: Path, another_servers_lock: Any, monkeypatch
+) -> None:
+    """The interleaving behind a rare failure of the test above, held open.
+
+    The end sets the workspace aside, which takes it off the disk, then deletes
+    the set-aside tree, and only after that unmarks the id. A reader that takes
+    the workspace being gone for the end being done can see the id still marked.
+    The delete is held here with events: the workspace is gone and the id is
+    still pending until the delete is released, and the completion signal is
+    the thread's, not the filesystem's.
+    """
+    sandbox = _stale_workspace(root, STALE)
+    sessions._ended_while_scanning.add(STALE)
+    at_the_delete = threading.Event()
+    let_the_delete_go = threading.Event()
+    real_delete = sessions._remove_set_aside_tree
+
+    def held_delete(doomed: Any) -> None:
+        at_the_delete.set()
+        assert let_the_delete_go.wait(_SLACK_SECONDS * 4)
+        real_delete(doomed)
+
+    monkeypatch.setattr(sessions, "_remove_set_aside_tree", held_delete)
+
+    with pytest.raises(sessions._PresenceLockHeld):
+        sessions._remove_if_still_stale(root, STALE, sandbox, time.time() - 1.0)
+    another_servers_lock.close()
+    try:
+        assert at_the_delete.wait(_SLACK_SECONDS * 2), (
+            "the end never reached its delete"
+        )
+        assert not sandbox.exists()
+        assert STALE in sessions._ended_while_scanning, (
+            "the id was unmarked before the end was done"
+        )
+    finally:
+        let_the_delete_go.set()
+
+    _wait_for_the_pending_end_to_finish(STALE)
     assert STALE not in sessions._ended_while_scanning

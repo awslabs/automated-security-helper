@@ -14,6 +14,7 @@ because a fake orchestrator could not prove anything about it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess  # nosec B404 -- builds throwaway git repositories for the changed-files gate
 import sys
@@ -1934,6 +1935,9 @@ class TestConcurrencyBound:
 # ---------------------------------------------------------------------------
 
 
+_FIXTURE_GIT_LOG = logging.getLogger(__name__)
+
+
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     """git for a fixture repository, reading none of the developer's own config.
 
@@ -1948,17 +1952,38 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     configs out, and ``core.excludesFile`` given on the command line takes the place
     of the default ignore file. The fixture repository's own config and
     ``.gitignore`` still apply.
+
+    A call that times out is run once more with the same bound, and logs one line
+    naming the retry; a second timeout raises as before. Every caller builds a fixture
+    and none asserts that git finishes in time, so the retry is plumbing only.
     """
     env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
-    return subprocess.run(  # nosec B603 B607 -- list args, no shell, fixture repo only
-        ["git", "-c", f"core.excludesFile={os.devnull}", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-        env=env,
-    )
+    argv = ["git", "-c", f"core.excludesFile={os.devnull}", *args]
+    for attempt in (1, 2):
+        try:
+            return subprocess.run(  # nosec B603 B607 -- list args, no shell, fixture repo only
+                argv,
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 2:
+                raise
+            # A loaded CI runner can stall one small ``git add`` past the bound. The
+            # killed child can leave its index lock behind, which would fail the retry.
+            lock = Path(cwd) / ".git" / "index.lock"
+            if lock.is_file():
+                lock.unlink()
+            _FIXTURE_GIT_LOG.warning(
+                "fixture git %s timed out after 30 s in %s; retrying once",
+                args[0] if args else "",
+                cwd,
+            )
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def _init_repo(path: Path, *, commit_extra: bool = False) -> None:
