@@ -2185,6 +2185,58 @@ def test_a_wrapped_step_without_its_resume_line_is_named():
     assert problems and all("Run ASH" in p for p in problems), problems
 
 
+def _after_marker(resume_token: str, *, resume_time: str = "2026-10-12T21:00:00Z"):
+    """A step whose resume line act logs after its result message, as act can."""
+    return [
+        _act("ash", "⭐ Run Main Run ASH"),
+        _act("ash", f"  ⚙  ::stop-commands::{TOKEN}", command="stop-commands"),
+        _act("ash", f"  | {VERDICT}", raw_output=True),
+        _act("ash", "  ❌  Failure - Main Run ASH [1m44s]", stepResult="failure"),
+        _act("ash", f"  ⚙  ::{resume_token}::\n", time=resume_time),
+        _act("ash", "exit status 2", level="error"),
+        _act("ash", "🏁  Job failed", jobResult="failure"),
+    ]
+
+
+def test_a_resume_line_logged_after_the_step_marker_in_the_same_second_counts():
+    check = _api("verdict", "resume_token_problems")
+    assert check("\n".join(_after_marker(TOKEN)), ["Run ASH"]) == []
+
+
+def test_a_resume_line_logged_before_the_step_marker_still_counts():
+    check = _api("verdict", "resume_token_problems")
+    log = "\n".join(_wrapped_step("ash", "Run ASH", resume=True))
+    assert check(log, ["Run ASH"]) == []
+
+
+def test_a_step_with_no_resume_line_is_still_named_after_the_marker_change():
+    check = _api("verdict", "resume_token_problems")
+    log = "\n".join(_wrapped_step("ash", "Run ASH", resume=False))
+    problems = check(log, ["Run ASH"])
+    assert problems and all(
+        "never printed its resume token on a line of its own" in p for p in problems
+    ), problems
+
+
+def test_a_resume_line_after_the_marker_for_another_token_is_not_the_steps():
+    check = _api("verdict", "resume_token_problems")
+    problems = check("\n".join(_after_marker("f" * 32)), ["Run ASH"])
+    assert problems and all("Run ASH" in p for p in problems), problems
+
+
+def test_a_resume_line_logged_seconds_after_the_step_marker_is_not_the_steps():
+    check = _api("verdict", "resume_token_problems")
+    log = "\n".join(_after_marker(TOKEN, resume_time="2026-10-12T21:00:03Z"))
+    assert check(log, ["Run ASH"])
+
+
+def test_a_resume_line_is_not_claimed_across_a_later_steps_start():
+    check = _api("verdict", "resume_token_problems")
+    lines = _after_marker(TOKEN)
+    lines[4:4] = [_act("ash", "⭐ Run Main Later step")]
+    assert check("\n".join(lines), ["Run ASH"])
+
+
 def test_a_resume_line_must_be_on_a_line_of_its_own():
     check = _api("verdict", "resume_token_problems")
     lines = _wrapped_step("ash", "Run ASH", resume=False)

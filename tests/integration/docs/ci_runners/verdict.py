@@ -396,14 +396,31 @@ def _act_step_runs(log: str) -> list[_StepRun]:
     """Each run of a main step in act's ``--json`` log, with the messages it printed.
 
     A step runs from act's ``Run Main <step>`` message to its ``Success - Main`` or
-    ``Failure - Main`` message, in one job and matrix run.
+    ``Failure - Main`` message, in one job and matrix run. Act's result message races
+    the step's output stream, so the step's resume token can be logged just after
+    that message: the entry right after it, in the same job and matrix run and the
+    same second, that is the resume line of a token the step stopped commands with
+    still belongs to the step. Nothing else after the message does.
     """
     runs: list[_StepRun] = []
     open_runs: dict[tuple[str, str], _StepRun] = {}
+    just_closed: dict[tuple[str, str], tuple[_StepRun, object]] = {}
     for entry in _entries(log):
         if entry is None or not isinstance(entry.get("msg"), str):
             continue
         key = _act_run(entry)
+        closed = just_closed.pop(key, None)
+        if closed is not None and entry.get("time") == closed[1]:
+            finished = closed[0]
+            resumes = {
+                f"::{_command_text(line)[len(_STOP_COMMANDS) :].strip()}::"
+                for line in finished.lines
+                if _command_text(line).startswith(_STOP_COMMANDS)
+            }
+            texts = list(_segments(entry["msg"]))
+            if len(texts) == 1 and _command_text(texts[0]) in resumes:
+                finished.lines.append(texts[0])
+                continue
         for text in _segments(entry["msg"]):
             message = text.strip()
             start = _STEP_START.match(message)
@@ -415,6 +432,7 @@ def _act_step_runs(log: str) -> list[_StepRun]:
             current = open_runs.get(key)
             if end and current is not None and end["step"] == current.step:
                 del open_runs[key]
+                just_closed[key] = (current, entry.get("time"))
                 continue
             if current is not None:
                 current.lines.append(text)
