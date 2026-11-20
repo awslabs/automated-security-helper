@@ -6,7 +6,7 @@ import re
 from pathlib import PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -33,7 +33,6 @@ class AsffReporterOptions(ReporterOptionsBase):
     # canonical and what the Security Hub reporter calls the same option.
     account_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("account_id", "aws_account_id"),
         description="Twelve-digit AWS account ID for the findings.",
     )
     aws_region: str | None = Field(
@@ -54,9 +53,10 @@ class AsffReporterOptions(ReporterOptionsBase):
     def _earlier_account_spelling(cls, data: Any) -> Any:
         """Read ``aws_account_id`` as ``account_id``, which wins when it is set.
 
-        Not left to the alias alone: a section built from the defaults carries
-        ``account_id: null``, and an override of ``aws_account_id`` is merged next
-        to it. The alias takes the first choice present, which would be the null.
+        Done here rather than with a ``validation_alias``: the type checker's
+        pydantic plugin rejects a required dynamic alias, and a section built from
+        the defaults carries ``account_id: null`` with an override of
+        ``aws_account_id`` merged next to it, where an alias would take the null.
         """
         if isinstance(data, dict) and "aws_account_id" in data:
             data = dict(data)
