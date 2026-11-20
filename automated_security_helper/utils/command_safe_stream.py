@@ -699,7 +699,12 @@ class CommandSafeBuffer(io.BufferedIOBase):
         # the target belongs to the wrapped stream, and can be gone while the
         # view is still reachable (a test's teardown, the finalizer's close of
         # a view dropped with its wrap, a reader of a retargeted wrap's view).
-        owner = self._owner
+        owner = self.__dict__.get("_owner")
+        if owner is None:
+            # A view whose __init__ never ran (copy.copy's half-made instance,
+            # or one whose construction failed) has nothing to flush; its
+            # finalizer's close() lands here.
+            return
         with owner._lock:
             try:
                 target = self._target_buffer()
@@ -727,6 +732,16 @@ class CommandSafeBuffer(io.BufferedIOBase):
         if self.closed:
             return
         super().close()
+
+    def __del__(self) -> None:
+        # The finalizer closes the view, which flushes. An error from that
+        # teardown (a target whose flush refuses, a view whose __init__ never
+        # ran) has nowhere to go but the unraisable hook, so it is dropped. An
+        # explicit close() or flush() still raises as before.
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def fileno(self) -> int:
         return self._target_buffer().fileno()

@@ -30,6 +30,7 @@ after a drain, which no re-entry can produce on demand, set the wrap's own state
 from __future__ import annotations
 
 import copy
+import gc
 import io
 
 import pytest
@@ -367,6 +368,48 @@ def test_an_attribute_read_on_an_uninitialized_instance_is_an_attribute_error(cl
     half_made = cls.__new__(cls)
     with pytest.raises(AttributeError):
         half_made.anything
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_finalizing_an_uninitialized_buffer_view_raises_nothing_unraisable():
+    """The view's finalizer closes it, and close() flushes. On an instance whose
+    __init__ never ran (what copy.copy makes before it fills the __dict__ in)
+    that flush read ``_owner`` and raised AttributeError inside the finalizer,
+    which the interpreter reports as an unraisable exception, attributed to
+    whichever test the collector happened to run in."""
+    half_made = css.CommandSafeBuffer.__new__(css.CommandSafeBuffer)
+    # The interpreter only reports an error from a finalizer's close() in dev
+    # mode, so the same close is also made here, where any mode sees it.
+    half_made.close()
+    half_made = css.CommandSafeBuffer.__new__(css.CommandSafeBuffer)
+    del half_made
+    gc.collect()
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_finalizing_a_view_whose_held_tail_is_refused_raises_nothing_unraisable():
+    """A view dropped while it holds an incomplete character, over a buffer that
+    refuses the write of that tail, hits the refusal in the finalizer's flush;
+    that teardown error is dropped, not handed to the unraisable hook."""
+    target = _TextWithBuffer()
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    view = wrap.buffer
+    view.write(b"caf\xc3")
+    target.buffer.refuse_next = True
+    del view, wrap
+    gc.collect()
+
+
+def test_an_explicit_close_of_a_live_view_still_raises_the_flush_error():
+    """Only the finalizer swallows teardown errors: close() on a live view whose
+    held tail the buffer refuses raises, as before."""
+    target = _TextWithBuffer()
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    view = wrap.buffer
+    view.write(b"caf\xc3")
+    target.buffer.refuse_next = True
+    with pytest.raises(OSError, match="tail refused"):
+        view.close()
 
 
 @pytest.mark.parametrize("at_line_start", [True, False])
