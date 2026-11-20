@@ -28,6 +28,9 @@ from typer.testing import CliRunner
 from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from automated_security_helper.cli.dependencies import dependencies_app
 from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
+from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
+    GUARDDOG_DEFAULT_VERSION_CONSTRAINT,
+)
 from automated_security_helper.utils.tool_downloads import THIRD_PARTY_LICENSES
 
 pytestmark = pytest.mark.unit
@@ -54,6 +57,43 @@ INSTALLED_HERE = [
     for tool in PYTHON_TOOLS
     if THIRD_PARTY_LICENSES[tool].distribution not in NOT_INSTALLABLE_HERE
 ]
+
+
+# Scanners whose own shipped default constraint is an exact pin.
+SHIPPED_EXACT_DEFAULTS = {
+    tool: default
+    for tool, default in {"guarddog": GUARDDOG_DEFAULT_VERSION_CONSTRAINT}.items()
+    if default.startswith("==")
+}
+
+
+def _exact_pins_without_a_shipped_default(argvs):
+    """The `uv tool install` argvs that carry an exact pin the license entries do not allow.
+
+    An exact `==` is allowed only for a scanner that ships an exact default constraint.
+    """
+    # Only a tool whose shipped default constraint is itself an exact pin is exempt,
+    # and only while that default equals its license entry's version.
+    allowed = {}
+    for tool, default in SHIPPED_EXACT_DEFAULTS.items():
+        entry = THIRD_PARTY_LICENSES[tool]
+        assert default == "==" + entry.version.lstrip("v"), (
+            f"{tool} ships {default!r} but its license entry records {entry.version}"
+        )
+        allowed[entry.distribution] = default
+    offenders = []
+    for argv in argvs:
+        for arg in argv:
+            bare = re.sub(r"\[[^\]]*\]", "", arg)
+            if "==" not in bare:
+                continue
+            distribution = bare.split("==", 1)[0]
+            if allowed.get(distribution) is None or not bare.endswith(
+                allowed[distribution]
+            ):
+                offenders.append(argv)
+                break
+    return offenders
 
 
 def _load_installer():
@@ -247,8 +287,45 @@ class TestTheOverridesReachTheInstallCommand:
         for tool in INSTALLED_HERE:
             assert THIRD_PARTY_LICENSES[tool].distribution in specs, specs
         assert installs, "no `uv tool install` was recorded"
-        for argv in installs:
-            assert not any("==" in arg for arg in argv), argv
+        # The universe is the tools WITHOUT a shipped exact default constraint. A
+        # tool that ships one (GuardDog's GUARDDOG_DEFAULT_VERSION_CONSTRAINT) is
+        # exempt only while that default equals its license entry's version, so the
+        # exemption cannot drift from the entry.
+        offenders = _exact_pins_without_a_shipped_default(installs)
+        assert not offenders, offenders
+
+    def test_the_exact_pin_check_still_trips_on_a_spurious_pin(self):
+        """Negative control: the exemption above must not swallow a real defect."""
+        entry = THIRD_PARTY_LICENSES["guarddog"]
+        matching = [
+            "uv",
+            "tool",
+            "install",
+            f"{entry.distribution}=={entry.version.lstrip('v')}",
+        ]
+        assert _exact_pins_without_a_shipped_default([matching]) == []
+        # A tool with no shipped default that gains an exact pin.
+        spurious = [
+            "uv",
+            "tool",
+            "install",
+            "--python",
+            ">=3.10,<3.14",
+            "somescanner==9.9.9",
+        ]
+        assert _exact_pins_without_a_shipped_default([spurious]) == [spurious]
+        # A ranged tool pinned exactly, even at its own license version.
+        bandit = THIRD_PARTY_LICENSES["bandit"]
+        ranged_pin = [
+            "uv",
+            "tool",
+            "install",
+            f"{bandit.distribution}=={bandit.version.lstrip('v')}",
+        ]
+        assert _exact_pins_without_a_shipped_default([ranged_pin]) == [ranged_pin]
+        # A tool with a shipped default pinned to some OTHER version.
+        drifted = ["uv", "tool", "install", f"{entry.distribution}==0.0.1"]
+        assert _exact_pins_without_a_shipped_default([drifted]) == [drifted]
 
     def test_a_single_override_pins_only_its_tool(self, recorded_install):
         specs = recorded_install(
