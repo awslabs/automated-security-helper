@@ -196,3 +196,69 @@ def test_mode_validation_runs_for_either_feature():
             },
             "success",
         ) is (changed or betterleaks)
+
+
+def _expr(value):
+    assert value.startswith("${{ ") and value.endswith(" }}")
+    return value[3:-3]
+
+
+def test_betterleaks_is_off_unless_the_input_is_set():
+    # Opt-in: with the input off (also its default, asserted above) the install
+    # step does not run, and the two steps that read the input see it falsy.
+    install = step("Install Betterleaks")
+    assert install["if"] == "inputs.use-betterleaks"
+    assert not evaluate(install["if"], {"inputs.use-betterleaks": False}, "success")
+    assert evaluate(install["if"], {"inputs.use-betterleaks": True}, "success")
+    for name in ("Resolve the base for changed-files-only", "Run ASH"):
+        expr = _expr(step(name)["env"]["USE_BETTERLEAKS"])
+        assert not evaluate(expr, {"inputs.use-betterleaks": False}, "success")
+        assert evaluate(expr, {"inputs.use-betterleaks": True}, "success")
+
+
+def test_install_gitleaks_still_installs_gitleaks_by_default():
+    install = step("Install actionlint, cfn-guard, gitleaks and trivy")
+    context = {
+        "inputs.install-actionlint": False,
+        "inputs.install-cfn-guard": False,
+        "inputs.install-trivy": False,
+        "inputs.install-gitleaks": True,
+        "inputs.use-betterleaks": False,
+    }
+    assert evaluate(install["if"], context, "success")
+    expr = _expr(install["env"]["INSTALL_GITLEAKS"])
+    assert evaluate(expr, context, "success")
+    context["inputs.install-gitleaks"] = False
+    assert not evaluate(expr, context, "success")
+    assert not evaluate(install["if"], context, "success")
+
+
+def test_scan_adds_nothing_when_the_input_is_off(tmp_path):
+    env = {
+        "ASH_ARGS": "--config-overrides scanners.gitleaks.enabled=true",
+        "ASH_MODE": "local",
+        "ASH_OUTPUT_DIR": "out",
+        "FAIL_ON_FINDINGS_PARAM": "--fail-on-findings",
+        "VERBOSE": "",
+        "CHANGED_FILES_ONLY": "",
+        "BASE_REF": "",
+    }
+    for extra in ({}, {"USE_BETTERLEAKS": ""}):
+        result, argv = run_step(tmp_path, "Run ASH", {**env, **extra})
+        assert result.returncode == 0, result.stderr
+        assert argv[-2:] == ["--config-overrides", "scanners.gitleaks.enabled=true"]
+        assert not any("betterleaks" in arg for arg in argv)
+
+
+def test_install_runs_after_the_mode_check_and_before_the_scan():
+    names = [s.get("name") for s in workflow()["jobs"]["ash"]["steps"]]
+    resolve = names.index("Resolve the base for changed-files-only")
+    install = names.index("Install Betterleaks")
+    assert resolve < install < names.index("Run ASH")
+
+
+def test_install_step_receives_no_secrets_and_no_new_action():
+    install = step("Install Betterleaks")
+    assert "uses" not in install
+    assert set(install["env"]) == {"ASH_TOOL_BIN"}
+    assert "secrets." not in yaml.safe_dump(install)
